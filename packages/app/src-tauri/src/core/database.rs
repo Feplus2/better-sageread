@@ -43,12 +43,32 @@ pub async fn initialize(app_handle: &AppHandle) -> Result<SqlitePool, Box<dyn st
         .await?;
     println!("Database schema initialized.");
 
+    run_migrations(&pool).await?;
+
     if is_new_db {
         initialize_default_skills(&pool).await?;
     }
 
     Ok(pool)
 }
+
+/// fork 专属迁移通道：上游同步 schema.sql 时的增量变更都放这里，避免改 schema.sql 冲突。
+/// 所有迁移必须幂等。
+async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
+    // books.trashed_at（回收站软删除时间戳，毫秒，可空）
+    let result = sqlx::query("ALTER TABLE books ADD COLUMN trashed_at INTEGER")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: books.trashed_at added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    Ok(())
+}
+
 
 async fn initialize_default_skills(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
     let default_skills_json = include_str!("./default-skills.json");
