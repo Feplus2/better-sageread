@@ -816,7 +816,14 @@ async fn pull_from_devices(
     state: &mut SyncState,
 ) -> Result<ApplyOutcome, String> {
     let mut outcome = ApplyOutcome::default();
-    let devices = read_devices_index(config).await.unwrap_or_default();
+    // 读取失败必须传播（不能 unwrap_or_default）：否则网络异常时静默返回"无新变更"，极难排查
+    let devices = match read_devices_index(config).await {
+        Ok(index) => index,
+        Err(e) => {
+            log::warn!("读取设备索引失败，本轮跳过拉取: {e}");
+            return Ok(outcome);
+        }
+    };
 
     // 新设备引导回填（协议 §11 2c）：发现他端设备（此前未为其引导过）且本地有存量书，
     // 则全量回填一次进 _sync_log，下一轮推送周期上云；bootstrap_peers 防重复
@@ -997,6 +1004,9 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
             log::warn!("本地日志修剪失败（忽略）: {e}");
         }
         prune_remote_changesets(config, &device_id).await;
+
+        // 立即持久化推送水位：后续拉取即使失败（如 503 限流），push 进度不回退、不重推
+        super::backup::write_sync_state(&config_dir, &state)?;
     }
 
     // ---- 书籍文件自动上传（静默，失败只 warn） ----
@@ -1033,7 +1043,14 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
     }
 
     // ---- 拉取：应用其他设备的 changesets ----
-    let pulled = pull_from_devices(app, pool, config, &device_id, &mut state).await?;
+    // 失败时先保存已有进度（水位/失败计数）再传播错误，防 record_l2_failure 回退
+    let pulled = match pull_from_devices(app, pool, config, &device_id, &mut state).await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            let _ = super::backup::write_sync_state(&config_dir, &state);
+            return Err(e);
+        }
+    };
 
     // ---- 资产（字体/背景图）下载（静默，失败只 warn） ----
     {
@@ -1096,7 +1113,13 @@ pub async fn run_pull_only(app: &AppHandle, pool: &SqlitePool, config: &WebdavCo
     webdav::ensure_remote_dirs(config, &[L2_ROOT.to_string(), format!("{L2_ROOT}/devices")]).await?;
     upsert_devices_index(config, &device_id, state.last_pushed_seq.unwrap_or(0)).await?;
 
-    let pulled = pull_from_devices(app, pool, config, &device_id, &mut state).await?;
+    let pulled = match pull_from_devices(app, pool, config, &device_id, &mut state).await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            let _ = super::backup::write_sync_state(&config_dir, &state);
+            return Err(e);
+        }
+    };
 
     state.last_l2_sync_at = Some(now_ms());
     let message = if pulled.count == 0 {

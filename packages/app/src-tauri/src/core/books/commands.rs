@@ -252,8 +252,11 @@ pub async fn delete_book(app_handle: AppHandle, id: String) -> Result<(), String
     let db_pool = get_db_pool(&app_handle).await?;
 
     // 软删除：仅标记 trashed_at，磁盘文件与关联数据（book_status/threads 等）全部保留，回收站可恢复
-    let result = sqlx::query("UPDATE books SET trashed_at = ? WHERE id = ? AND trashed_at IS NULL")
-        .bind(chrono::Utc::now().timestamp_millis())
+    // 必须同步推进 updated_at：L2 同步按 LWW 比较 updated_at，不推进则删除操作永远赢不了对端
+    let now = chrono::Utc::now().timestamp_millis();
+    let result = sqlx::query("UPDATE books SET trashed_at = ?, updated_at = ? WHERE id = ? AND trashed_at IS NULL")
+        .bind(now)
+        .bind(now)
         .bind(&id)
         .execute(&db_pool)
         .await

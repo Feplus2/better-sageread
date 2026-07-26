@@ -8,6 +8,10 @@ fn default_auto_backup() -> String {
     "off".to_string()
 }
 
+fn default_backup_keep() -> usize {
+    10
+}
+
 pub fn default_sync_frequency() -> String {
     "30s".to_string()
 }
@@ -23,6 +27,9 @@ pub struct WebdavConfig {
     /// 自动备份频率：off / hourly / daily（前端 setInterval 实现）
     #[serde(default = "default_auto_backup")]
     pub auto_backup: String,
+    /// 备份保留份数（轮转时只保留最新 N 份，默认 10）
+    #[serde(default = "default_backup_keep")]
+    pub backup_keep: usize,
     /// L2 增量同步开关
     #[serde(default)]
     pub l2_enabled: bool,

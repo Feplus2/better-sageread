@@ -9,8 +9,8 @@ use tauri::{AppHandle, Manager};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-/// 轮转保留的备份份数
-const MAX_KEEP: usize = 10;
+/// 轮转保留的备份份数（配置缺失时的回落值）
+const DEFAULT_MAX_KEEP: usize = 10;
 /// 纳入备份的 JSON 配置（model-provider.json 含 API 密钥，刻意排除）
 const JSON_FILES: [&str; 3] = ["app-settings.json", "layout-store.json", "llama-store.json"];
 
@@ -140,7 +140,8 @@ pub async fn run_backup(
     let backup_name = format!("backup-{}.zip", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     webdav::put_file(config, &backup_name, zip_bytes.clone()).await?;
 
-    // 5. 更新远端 index.json 并轮转（保留最新 MAX_KEEP 份，多余的连 zip 一起删）
+    // 5. 更新远端 index.json 并轮转（保留最新 N 份，多余的连 zip 一起删）
+    let max_keep = if config.backup_keep > 0 { config.backup_keep } else { DEFAULT_MAX_KEEP };
     let mut index = webdav::read_index(config).await.unwrap_or_default();
     index.push(BackupInfo {
         name: backup_name.clone(),
@@ -151,7 +152,7 @@ pub async fn run_backup(
         db_sha256,
     });
     index.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    while index.len() > MAX_KEEP {
+    while index.len() > max_keep {
         if let Some(oldest) = index.pop() {
             let _ = webdav::delete_file(config, &oldest.name).await;
         }

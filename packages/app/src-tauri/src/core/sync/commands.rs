@@ -71,6 +71,16 @@ pub async fn sync_list_backups(app: AppHandle) -> Result<Vec<BackupInfo>, String
     webdav::read_index(&config).await
 }
 
+/// 删除指定远端备份（zip 文件 + index.json 条目）
+#[tauri::command]
+pub async fn sync_delete_backup(app: AppHandle, backup_name: String) -> Result<(), String> {
+    let config = load_config(&app)?;
+    webdav::delete_file(&config, &backup_name).await?;
+    let mut index = webdav::read_index(&config).await.unwrap_or_default();
+    index.retain(|entry| entry.name != backup_name);
+    webdav::write_index(&config, &index).await
+}
+
 #[tauri::command]
 pub async fn sync_get_state(app: AppHandle) -> Result<SyncState, String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -118,6 +128,7 @@ pub async fn sync_get_l2_status(app: AppHandle) -> Result<L2Status, String> {
         password: String::new(),
         remote_dir: "sageread-backups".to_string(),
         auto_backup: "off".to_string(),
+        backup_keep: 10,
         l2_enabled: false,
         sync_frequency: super::models::default_sync_frequency(),
     });

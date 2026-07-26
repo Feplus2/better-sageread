@@ -11,6 +11,7 @@ import {
   type SyncState,
   type WebdavConfig,
   syncBackupNow,
+  syncDeleteBackup,
   syncGetCloudAssets,
   syncGetCloudBooks,
   syncGetConfig,
@@ -29,7 +30,7 @@ import {
 } from "@/services/sync-service";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
-import { CloudUpload, Database, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { CloudUpload, Database, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -39,6 +40,7 @@ const DEFAULT_CONFIG: WebdavConfig = {
   password: "",
   remote_dir: "sageread-backups",
   auto_backup: "off",
+  backup_keep: 10,
   l2_enabled: false,
   sync_frequency: "30s",
 };
@@ -48,6 +50,8 @@ const AUTO_BACKUP_OPTIONS = [
   { value: "hourly", label: "每小时一次" },
   { value: "daily", label: "每天一次" },
 ];
+
+const BACKUP_KEEP_OPTIONS = [3, 5, 10, 20, 50];
 
 const L2_FREQUENCY_OPTIONS = [
   { value: "off", label: "关闭" },
@@ -70,6 +74,7 @@ export default function SyncSettings() {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [restoringName, setRestoringName] = useState<string | null>(null);
+  const [deletingName, setDeletingName] = useState<string | null>(null);
   const [l2Status, setL2Status] = useState<L2Status | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [cloudBooks, setCloudBooks] = useState<CloudBookInfo[]>([]);
@@ -180,6 +185,26 @@ export default function SyncSettings() {
       toast.error("恢复失败", { description: String(error) });
     } finally {
       setRestoringName(null);
+    }
+  };
+
+  const handleDeleteBackup = async (backup: BackupInfo) => {
+    const confirmed = await ask(
+      `确定要删除 ${dayjs(backup.created_at).format("YYYY-MM-DD HH:mm:ss")} 的备份吗？\n\n此操作不可撤销。`,
+      { title: "确认删除备份", kind: "warning" },
+    );
+    if (!confirmed) return;
+
+    setDeletingName(backup.name);
+    try {
+      await syncDeleteBackup(backup.name);
+      setBackups((prev) => prev.filter((b) => b.name !== backup.name));
+      toast.success("备份已删除");
+    } catch (error) {
+      console.error("删除备份失败:", error);
+      toast.error("删除备份失败", { description: String(error) });
+    } finally {
+      setDeletingName(null);
     }
   };
 
@@ -404,6 +429,26 @@ export default function SyncSettings() {
               </Select>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <span className="text-neutral-600 text-xs dark:text-neutral-400">备份保留份数</span>
+              <Select
+                value={String(config.backup_keep)}
+                onValueChange={(value) => updateConfig({ backup_keep: Number(value) })}
+              >
+                <SelectTrigger className="mt-1 h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BACKUP_KEEP_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      保留最新 {n} 份
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="flex items-center gap-2 pt-1">
             <Button size="sm" onClick={handleSaveConfig} disabled={isSaving}>
               {isSaving ? "保存中..." : "保存配置"}
@@ -464,14 +509,29 @@ export default function SyncSettings() {
                     {backup.device} · v{backup.app_version} · {formatSize(backup.size)}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={restoringName !== null}
-                  onClick={() => handleRestore(backup)}
-                >
-                  {restoringName === backup.name ? "恢复中..." : "恢复"}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={restoringName !== null || deletingName !== null}
+                    onClick={() => handleRestore(backup)}
+                  >
+                    {restoringName === backup.name ? "恢复中..." : "恢复"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
+                    disabled={restoringName !== null || deletingName !== null}
+                    onClick={() => handleDeleteBackup(backup)}
+                  >
+                    {deletingName === backup.name ? (
+                      "删除中..."
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

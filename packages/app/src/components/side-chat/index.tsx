@@ -6,11 +6,8 @@ import { exportMessagesToHtml } from "@/lib/export-thread-html";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessagesToMarkdown } from "@/lib/export-thread-markdown";
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
-import { applySyncResult } from "@/services/apply-sync-result";
-import { syncRunNow } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useThemeStore } from "@/store/theme-store";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   CircleQuestionMark,
   History,
@@ -18,7 +15,6 @@ import {
   ListChecks,
   MessageCirclePlus,
   NotebookPen,
-  RefreshCw,
   ScrollText,
   Search,
   Settings,
@@ -46,24 +42,7 @@ function ChatContent({ bookId }: ChatContentProps) {
   // 多选导出：组件内状态，切换对话自动退出
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const queryClient = useQueryClient();
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // 头部"刷新"：触发一轮完整 L2 同步，完成后刷新对话列表（协议 §9 双保险之一）
-  const handleRefreshSync = async () => {
-    setIsRefreshing(true);
-    try {
-      const result = await syncRunNow();
-      toast.success("同步完成", { description: result.message });
-      // 进度落地/缓存刷新统一走共享函数（含 config.location 缓存更新与 60s 防跳动）
-      await applySyncResult(result, queryClient);
-    } catch (error) {
-      console.error("同步失败:", error);
-      toast.error("同步失败", { description: String(error) });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
   const setActiveContext = useReaderStore((state) => state.setActiveContext)!;
   const progress = useReaderStore((state) => state.progress);
   const activeContext = useReaderStore((state) => state.activeContext)!;
@@ -221,16 +200,6 @@ function ChatContent({ bookId }: ChatContentProps) {
             />
           </div>
           <div className="flex flex-shrink-0 items-center gap-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
-              title="同步刷新"
-              disabled={isRefreshing}
-              onClick={handleRefreshSync}
-            >
-              <RefreshCw className={`h-5 w-5 ${isRefreshing ? "animate-spin" : ""}`} />
-            </Button>
             {messages.length > 0 && !showThreads && (
               <Button
                 variant="ghost"

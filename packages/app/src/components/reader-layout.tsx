@@ -1,6 +1,7 @@
 import HomeLayout from "@/components/home-layout";
 import { NotepadContainer } from "@/components/notepad";
 import NotificationDropdown from "@/components/notification-dropdown";
+import SyncRefreshButton from "@/components/sync-refresh-button";
 import { PreviewPanel } from "@/components/preview/preview-panel";
 import SettingsDialog from "@/components/settings/settings-dialog";
 import SideChat from "@/components/side-chat";
@@ -249,6 +250,7 @@ export default function ReaderLayout() {
           className="flex h-8 shrink-0 select-none items-center justify-end gap-1 pr-1 dark:bg-tab-background"
           style={isWindows ? undefined : { paddingLeft: 70 }}
         >
+          <SyncRefreshButton />
           <NotificationDropdown />
           <WindowControls />
         </div>
@@ -279,6 +281,7 @@ export default function ReaderLayout() {
             }
             pinnedRight={
               <div className="flex items-center gap-1">
+                <SyncRefreshButton />
                 <NotificationDropdown />
                 <WindowControls />
               </div>

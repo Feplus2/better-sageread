@@ -7,6 +7,8 @@ export interface WebdavConfig {
   remote_dir: string;
   /** off / hourly / daily */
   auto_backup: string;
+  /** 备份保留份数（默认 10） */
+  backup_keep: number;
   /** L2 增量同步开关 */
   l2_enabled: boolean;
   /** off / 30s / 5min / 30min */
@@ -63,6 +65,10 @@ export async function syncBackupNow(): Promise<BackupOutcome> {
 
 export async function syncListBackups(): Promise<BackupInfo[]> {
   return invoke("sync_list_backups");
+}
+
+export async function syncDeleteBackup(backupName: string): Promise<void> {
+  return invoke("sync_delete_backup", { backupName });
 }
 
 export async function syncGetState(): Promise<SyncState> {
