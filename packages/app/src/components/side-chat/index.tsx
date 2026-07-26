@@ -77,6 +77,7 @@ function ChatContent({ bookId }: ChatContentProps) {
       activeBookId: bookId,
       activeContext,
       activeSectionLabel: progress?.sectionLabel,
+      agentScope: "reader",
     },
     setActiveBookId: () => {},
     setActiveContext: setActiveContext,

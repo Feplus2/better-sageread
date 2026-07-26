@@ -105,6 +105,33 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         .await?;
     println!("Migration applied: book_status.position_changed_at backfilled.");
 
+    // threads.scope（对话作用域：'global'=中央Agent, 'book'=阅读助手）
+    let result = sqlx::query("ALTER TABLE threads ADD COLUMN scope TEXT NOT NULL DEFAULT 'book'")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: threads.scope added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    // skills.scope（技能生效对象：'reader'/'central'/'both'）
+    let result = sqlx::query("ALTER TABLE skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'both'")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: skills.scope added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    // 将现有 isSystem 技能固定为 scope='reader'
+    sqlx::query("UPDATE skills SET scope = 'reader' WHERE is_system = 1")
+        .execute(pool)
+        .await?;
+
     // L2 增量同步：变更日志表 + 八张同步表的触发器（CREATE TRIGGER IF NOT EXISTS 幂等）
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS _sync_log (

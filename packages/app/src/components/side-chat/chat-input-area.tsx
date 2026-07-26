@@ -1,9 +1,11 @@
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import { Button } from "@/components/ui/button";
 import { useIsChatPage } from "@/hooks/use-is-chat-page";
+import { useQuickCommandStore } from "@/store/quick-command-store";
 import type { ChatReference } from "@/types/message";
-import { ArrowUp, BookOpen, Brain, Notebook, Paperclip, Quote, X } from "lucide-react";
+import { ArrowUp, Paperclip, Quote, X } from "lucide-react";
 import { useRef } from "react";
+import { getCommandIcon } from "./command-icons";
 import { ContextPopover } from "./context-popover";
 import { SearchEngineSelector } from "./search-engine-selector";
 
@@ -21,12 +23,6 @@ interface ChatInputAreaProps {
   setActiveBookId: (bookId: string | undefined) => void;
 }
 
-const quickActions = [
-  { label: "总结本章", icon: BookOpen, prompt: "请帮我总结本章的核心要点和结论。" },
-  { label: "分析观点", icon: Brain, prompt: "请分析作者的观点，指出论据与可能的偏见。" },
-  { label: "生成思维导图", icon: Notebook, prompt: "请基于当前内容生成思维导图。" },
-] as const;
-
 export function ChatInputArea({
   input,
   status,
@@ -42,6 +38,11 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isChatPage = useIsChatPage();
+  const commands = useQuickCommandStore((s) => s.commands);
+  const quickActions = commands
+    .filter((c) => c.visible && (c.scope === "reader" || c.scope === "both"))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
   const handleQuickPrompt = (prompt: string) => {
     setInput(prompt);
     if (status === "ready") {
@@ -54,19 +55,22 @@ export function ChatInputArea({
       {!isChatPage && (
         <div className="flex items-center justify-between gap-2 py-2">
           <div className="flex flex-wrap items-center gap-2">
-            {quickActions.map(({ label, icon: Icon, prompt }) => (
-              <PromptInputAction key={label} tooltip={label}>
-                <Button
-                  variant="soft"
-                  className="h-7 cursor-pointer"
-                  size="sm"
-                  onClick={() => handleQuickPrompt(prompt)}
-                >
-                  <Icon className="size-4" />
-                  {!showToolDetail && <span className="text-xs">{label}</span>}
-                </Button>
-              </PromptInputAction>
-            ))}
+            {quickActions.map(({ id, label, prompt, icon }) => {
+              const Icon = getCommandIcon(icon);
+              return (
+                <PromptInputAction key={id} tooltip={label}>
+                  <Button
+                    variant="soft"
+                    className="h-7 cursor-pointer"
+                    size="sm"
+                    onClick={() => handleQuickPrompt(prompt)}
+                  >
+                    <Icon className="size-4" />
+                    {!showToolDetail && <span className="text-xs">{label}</span>}
+                  </Button>
+                </PromptInputAction>
+              );
+            })}
           </div>
         </div>
       )}
@@ -84,19 +88,22 @@ export function ChatInputArea({
             <div className="flex items-center justify-between gap-2 py-2">
               <ContextPopover activeBookId={activeBookId} setActiveBookId={setActiveBookId} />
               <div className="flex flex-wrap items-center gap-2 ">
-                {quickActions.map(({ label, icon: Icon, prompt }) => (
-                  <PromptInputAction key={label} tooltip={label}>
-                    <Button
-                      variant="soft"
-                      className="h-7 cursor-pointer"
-                      size="sm"
-                      onClick={() => handleQuickPrompt(prompt)}
-                    >
-                      <Icon className="size-4" />
-                      {!showToolDetail && <span className="text-xs">{label}</span>}
-                    </Button>
-                  </PromptInputAction>
-                ))}
+                {quickActions.map(({ id, label, prompt, icon }) => {
+                  const Icon = getCommandIcon(icon);
+                  return (
+                    <PromptInputAction key={id} tooltip={label}>
+                      <Button
+                        variant="soft"
+                        className="h-7 cursor-pointer"
+                        size="sm"
+                        onClick={() => handleQuickPrompt(prompt)}
+                      >
+                        <Icon className="size-4" />
+                        {!showToolDetail && <span className="text-xs">{label}</span>}
+                      </Button>
+                    </PromptInputAction>
+                  );
+                })}
               </div>
             </div>
           )}

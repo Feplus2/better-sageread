@@ -1,16 +1,24 @@
-import { deleteThread, editThread, getAllThreads, getThreadById, getThreadsBybookId } from "@/services/thread-service";
+import {
+  deleteThread,
+  editThread,
+  getAllThreads,
+  getGlobalThreads,
+  getThreadById,
+  getThreadsBybookId,
+} from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { useThreadStore } from "@/store/thread-store";
-import type { ThreadSummary } from "@/types/thread";
+import type { ThreadScope, ThreadSummary } from "@/types/thread";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 
 interface UseThreadsProps {
   bookId?: string | null;
+  scope?: ThreadScope;
 }
 
-export const useThreads = ({ bookId }: UseThreadsProps = {}) => {
+export const useThreads = ({ bookId, scope }: UseThreadsProps = {}) => {
   const queryClient = useQueryClient();
 
   // 获取 threads 列表
@@ -20,8 +28,9 @@ export const useThreads = ({ bookId }: UseThreadsProps = {}) => {
     isLoading,
     status,
   } = useQuery({
-    queryKey: ["threads", bookId],
+    queryKey: ["threads", bookId, scope],
     queryFn: async () => {
+      if (scope === "global") return await getGlobalThreads();
       return bookId ? await getThreadsBybookId(bookId) : await getAllThreads();
     },
   });
@@ -34,14 +43,14 @@ export const useThreads = ({ bookId }: UseThreadsProps = {}) => {
         toast.success("对话删除成功");
 
         // 刷新 threads 列表
-        queryClient.invalidateQueries({ queryKey: ["threads", bookId] });
+        queryClient.invalidateQueries({ queryKey: ["threads", bookId, scope] });
       } catch (error) {
         console.error("删除对话失败:", error);
         toast.error("删除对话失败");
         throw error;
       }
     },
-    [queryClient, bookId],
+    [queryClient, bookId, scope],
   );
 
   // 重命名 thread

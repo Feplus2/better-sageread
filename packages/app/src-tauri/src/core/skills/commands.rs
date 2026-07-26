@@ -22,11 +22,12 @@ pub async fn create_skill(app_handle: AppHandle, data: SkillCreateData) -> Resul
     let now = chrono::Utc::now().timestamp_millis();
     let is_active = data.is_active.unwrap_or(true);
     let is_system = data.is_system.unwrap_or(false);
+    let scope = data.scope.unwrap_or_else(|| "both".to_string());
 
     sqlx::query(
         r#"
-        INSERT INTO skills (id, name, content, is_active, is_system, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO skills (id, name, content, is_active, is_system, scope, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&skill_id)
@@ -34,13 +35,14 @@ pub async fn create_skill(app_handle: AppHandle, data: SkillCreateData) -> Resul
     .bind(&data.content)
     .bind(if is_active { 1 } else { 0 })
     .bind(if is_system { 1 } else { 0 })
+    .bind(&scope)
     .bind(now)
     .bind(now)
     .execute(&db_pool)
     .await
     .map_err(|e| format!("创建技能失败: {}", e))?;
 
-    Ok(Skill::new(skill_id, data.name, data.content, is_active, is_system))
+    Ok(Skill::new(skill_id, data.name, data.content, is_active, is_system, scope))
 }
 
 #[tauri::command]
@@ -130,7 +132,17 @@ pub async fn update_skill(
             .map_err(|e| format!("更新技能状态失败: {}", e))?;
     }
 
-    if update_data.name.is_none() && update_data.content.is_none() && update_data.is_active.is_none() {
+    if let Some(scope) = &update_data.scope {
+        sqlx::query("UPDATE skills SET scope = ?, updated_at = ? WHERE id = ?")
+            .bind(scope)
+            .bind(now)
+            .bind(&id)
+            .execute(&db_pool)
+            .await
+            .map_err(|e| format!("更新技能 scope 失败: {}", e))?;
+    }
+
+    if update_data.name.is_none() && update_data.content.is_none() && update_data.is_active.is_none() && update_data.scope.is_none() {
         sqlx::query("UPDATE skills SET updated_at = ? WHERE id = ?")
             .bind(now)
             .bind(&id)

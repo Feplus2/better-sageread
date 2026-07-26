@@ -1,6 +1,6 @@
+import { getSkills } from "@/services/skill-service";
 import { tool } from "ai";
 import { z } from "zod";
-import { getSkills } from "@/services/skill-service";
 
 /**
  * 技能查询工具：从数据库中检索执行任务所需的标准操作流程（SOP）
@@ -37,7 +37,8 @@ export const getSkillsTool = tool({
       // 查找匹配的技能（通过任务名称）
       const matched = activeSkills.find(
         (skill) =>
-          skill.name.toLowerCase().includes(task.toLowerCase()) || task.toLowerCase().includes(skill.name.toLowerCase()),
+          skill.name.toLowerCase().includes(task.toLowerCase()) ||
+          task.toLowerCase().includes(skill.name.toLowerCase()),
       );
 
       if (!matched) {

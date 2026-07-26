@@ -52,8 +52,8 @@ use crate::core::{
         create_tag, delete_tag, get_tag_by_id, get_tag_by_name, get_tags, update_tag,
     },
     threads::commands::{
-        create_thread, delete_thread, edit_thread, get_all_threads, get_latest_thread_by_book_id,
-        get_thread_by_id, get_threads_by_book_id,
+        create_thread, delete_thread, edit_thread, get_all_threads, get_global_threads,
+        get_latest_thread_by_book_id, get_thread_by_id, get_threads_by_book_id,
     },
     web_search::web_search,
 };
@@ -147,6 +147,7 @@ pub fn run() {
             get_threads_by_book_id,
             get_thread_by_id,
             get_all_threads,
+            get_global_threads,
             save_book,
             get_books,
             get_book_by_id,

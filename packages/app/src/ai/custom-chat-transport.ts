@@ -1,6 +1,5 @@
-import { buildReadingPrompt } from "@/constants/prompt";
+import { buildPrompt } from "@/constants/prompt";
 import type { ChatContext } from "@/hooks/use-chat-state";
-import { useLlamaStore } from "@/store/llama-store";
 import type { UIMessage } from "@ai-sdk/react";
 import {
   type ChatRequestOptions,
@@ -12,17 +11,7 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import {
-  createRagContextTool,
-  createRagSearchTool,
-  createRagTocTool,
-  getBooksTool,
-  getReadingStatsTool,
-  getSkillsTool,
-  mindmapTool,
-  notesTool,
-  webSearchTool,
-} from "./tools";
+import { getToolsForScope } from "./tools/registry";
 import { processQuoteMessages, selectValidMessages } from "./utils";
 
 export class CustomChatTransport implements ChatTransport<UIMessage> {
@@ -73,26 +62,13 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     const chatContext = (requestBody as any)?.chatContext as ChatContext | undefined;
     const activeBookId = chatContext?.activeBookId;
+    const agentScope = chatContext?.agentScope ?? "reader";
 
     const processedMessages = processQuoteMessages(options.messages);
     const selectedMessages = selectValidMessages(processedMessages, 8);
 
-    const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
-
-    const tools: any = {
-      notes: notesTool,
-      getBooks: getBooksTool,
-      getReadingStats: getReadingStatsTool,
-      getSkills: getSkillsTool,
-      mindmap: mindmapTool,
-      webSearch: webSearchTool,
-    };
-
-    if (hasVectorCapability && activeBookId) {
-      tools.ragSearch = createRagSearchTool(activeBookId);
-      tools.ragToc = createRagTocTool(activeBookId);
-      tools.ragContext = createRagContextTool(activeBookId);
-    }
+    // 根据 Agent 角色动态组装工具集
+    const tools = getToolsForScope(agentScope, { bookId: activeBookId });
 
     const convertedMessages = convertToModelMessages(selectedMessages, {
       tools,
@@ -106,7 +82,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       toolChoice: "auto",
       stopWhen: stepCountIs(20),
       tools,
-      system: await buildReadingPrompt(chatContext),
+      system: await buildPrompt(chatContext),
     });
 
     return result.toUIMessageStream({

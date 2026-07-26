@@ -1,8 +1,22 @@
+import { buildCentralPrompt } from "@/constants/central-prompt";
 import type { ChatContext } from "@/hooks/use-chat-state";
 import { getSkills } from "@/services/skill-service";
 import { useLlamaStore } from "@/store/llama-store";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
+
+/**
+ * 根据 Agent 角色路由到对应的提示词构建器
+ */
+export async function buildPrompt(chatContext: ChatContext | undefined): Promise<string> {
+  const agentScope = chatContext?.agentScope ?? "reader";
+
+  if (agentScope === "central") {
+    return await buildCentralPrompt();
+  }
+
+  return await buildReadingPrompt(chatContext);
+}
 
 export async function buildReadingPrompt(chatContext: ChatContext | undefined): Promise<string> {
   const activeBookId = chatContext?.activeBookId;
@@ -15,7 +29,9 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     const allSkills = await getSkills();
     const systemPromptSkill = allSkills.find((skill) => skill.isSystem && skill.isActive);
     systemPromptBase = systemPromptSkill?.content || "";
-    activeSkillNames = allSkills.filter((skill) => skill.isActive && !skill.isSystem).map((skill) => skill.name);
+    activeSkillNames = allSkills
+      .filter((skill) => skill.isActive && !skill.isSystem && (skill.scope === "reader" || skill.scope === "both"))
+      .map((skill) => skill.name);
   } catch (error) {
     console.warn("获取技能列表失败:", error);
   }
@@ -88,7 +104,10 @@ function formatMetadataJson(raw: string): string | null {
     if (typeof meta.author === "string") {
       author = meta.author;
     } else if (Array.isArray(meta.author)) {
-      author = meta.author.map((a) => a?.name ?? "").filter(Boolean).join("、");
+      author = meta.author
+        .map((a) => a?.name ?? "")
+        .filter(Boolean)
+        .join("、");
     } else if (meta.author?.name) {
       author = meta.author.name;
     }

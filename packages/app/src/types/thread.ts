@@ -1,5 +1,7 @@
 import type { UIMessage } from "ai";
 
+export type ThreadScope = "global" | "book";
+
 export interface Thread {
   id: string;
   book_id: string | null;
@@ -7,6 +9,7 @@ export interface Thread {
   metadata: string;
   messages: UIMessage[];
   starred: boolean;
+  scope: ThreadScope;
   created_at: number;
   updated_at: number;
 }
@@ -18,6 +21,7 @@ export interface RawThread {
   metadata: string;
   messages: string;
   starred: boolean;
+  scope: ThreadScope;
   created_at: number;
   updated_at: number;
 }
@@ -28,6 +32,7 @@ export interface ThreadSummary {
   title: string;
   message_count: number;
   starred: boolean;
+  scope: ThreadScope;
   created_at: number;
   updated_at: number;
 }

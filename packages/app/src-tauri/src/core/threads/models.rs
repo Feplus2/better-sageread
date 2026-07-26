@@ -8,6 +8,7 @@ pub struct Thread {
     pub title: String,
     pub messages: String,
     pub starred: bool,
+    pub scope: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -20,6 +21,7 @@ pub struct ThreadSummary {
     pub title: String,
     pub message_count: i32,
     pub starred: bool,
+    pub scope: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -30,6 +32,7 @@ pub struct NewThreadPayload {
     pub title: String,
     pub metadata: String,
     pub messages_json: String,
+    pub scope: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

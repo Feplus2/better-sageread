@@ -4,4 +4,6 @@ export const tauriStorageKey = {
   llamaStore: "llama-store",
   layoutStore: "layout-store",
   converterStore: "converter-store",
+  quickCommands: "quick-commands",
+  mcpServers: "mcp-servers",
 } as const;

@@ -1,4 +1,4 @@
-import type { RawThread, Thread, ThreadSummary } from "@/types/thread";
+import type { RawThread, Thread, ThreadScope, ThreadSummary } from "@/types/thread";
 import { invoke } from "@tauri-apps/api/core";
 import type { UIMessage } from "ai";
 
@@ -11,6 +11,7 @@ export async function createThread(
   bookId: string | undefined,
   title: string,
   initialMessages: UIMessage[],
+  scope: ThreadScope = "book",
 ): Promise<Thread> {
   try {
     const payload = {
@@ -18,6 +19,7 @@ export async function createThread(
       title,
       metadata: JSON.stringify({}),
       messages_json: JSON.stringify(initialMessages),
+      scope,
     };
 
     const newThread: RawThread = await invoke("create_thread", { payload });
@@ -141,6 +143,16 @@ export async function getAllThreads(): Promise<ThreadSummary[]> {
   } catch (error) {
     console.error("Error getting all threads:", error);
     throw new Error("Failed to get all threads from the backend.");
+  }
+}
+
+export async function getGlobalThreads(): Promise<ThreadSummary[]> {
+  try {
+    const result: ThreadSummary[] = await invoke("get_global_threads");
+    return result;
+  } catch (error) {
+    console.error("Error getting global threads:", error);
+    throw new Error("Failed to get global threads from the backend.");
   }
 }
 

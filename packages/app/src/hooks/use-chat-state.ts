@@ -65,6 +65,7 @@ export interface ChatContext {
   activeBookId?: string;
   activeContext?: string;
   activeSectionLabel?: string;
+  agentScope?: "central" | "reader";
 }
 
 interface UseChatStateOptions {
@@ -77,7 +78,9 @@ interface UseChatStateOptions {
 
 export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   const { chatContext, setActiveBookId, setActiveContext } = options;
-  const { activeBookId } = chatContext;
+  const { activeBookId, agentScope } = chatContext;
+  // 根据 Agent 角色确定线程 scope
+  const threadScope = agentScope === "central" ? "global" : "book";
   const [input, setInput] = useState("");
   const [showThreads, setShowThreads] = useState(false);
   const [threadsKey, setThreadsKey] = useState(0);
@@ -210,7 +213,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
                 .find((m) => m.role === "user")
                 ?.parts?.map((p: any) => (p.type === "text" ? p.text : ""))
                 .join("") || "新对话";
-            createThread(activeBookId, firstUserText.slice(0, 50), normalizedMessages)
+            createThread(activeBookId, firstUserText.slice(0, 50), normalizedMessages, threadScope)
               .then((thread) => {
                 console.log("Created thread on finish:", thread.id);
                 setCurrentThread(thread);
@@ -413,7 +416,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       if (messages.length === 0 && !currentThread) {
         try {
           const titleSource = trimmedInput || referenceSnapshot[0]?.text || "新对话";
-          const thread = await createThread(activeBookId, titleSource.substring(0, 50), []);
+          const thread = await createThread(activeBookId, titleSource.substring(0, 50), [], threadScope);
           setCurrentThread(thread);
           console.log("Created new thread:", thread.id);
         } catch (error) {

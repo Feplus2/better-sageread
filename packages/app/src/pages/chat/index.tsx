@@ -4,31 +4,21 @@ import { ScrollButton } from "@/components/prompt-kit/scroll-button";
 import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages, TOOL_NAME_MAP } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
-import { ContextPopover } from "@/components/side-chat/context-popover";
 import ModelSelector from "@/components/side-chat/model-selector";
 import { MindmapViewer } from "@/components/tools/mindmap-viewer";
 import { RagResultViewer } from "@/components/tools/rag-result-viewer";
 import { Button } from "@/components/ui/button";
-import { useChatState } from "@/hooks/use-chat-state";
 import { useAutoPreview } from "@/hooks/use-auto-preview";
+import { useChatState } from "@/hooks/use-chat-state";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useChatReaderStore } from "@/store/chat-reader-store";
+import { useQuickCommandStore } from "@/store/quick-command-store";
 import { useThemeStore } from "@/store/theme-store";
-import {
-  Brain,
-  History,
-  Lightbulb,
-  MessageCirclePlus,
-  Paperclip,
-  ScrollText,
-  Search,
-  Settings,
-  UserSearch,
-  X,
-} from "lucide-react";
+import { Brain, History, MessageCirclePlus, Paperclip, Settings, X } from "lucide-react";
 import { ArrowUp } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { memo, useRef, useState } from "react";
+import { getCommandIcon } from "@/components/side-chat/command-icons";
 
 interface EmptyStateProps {
   input: string;
@@ -40,13 +30,10 @@ interface EmptyStateProps {
 
 const EmptyState = memo(({ input, setInput, handleSubmit, stop, status }: EmptyStateProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { activeBookId, setActiveBookId } = useChatReaderStore();
-  const promptSuggestions = [
-    { text: "总结我最近的阅读情况", icon: ScrollText, isNew: true },
-    { text: "分析我最近的问题", icon: Lightbulb, isNew: false },
-    { text: "总结我最近的学习笔记", icon: UserSearch, isNew: false },
-    { text: "总结我最近的标注", icon: Search, isNew: true },
-  ] as const;
+  const commands = useQuickCommandStore((s) => s.commands);
+  const promptSuggestions = (commands ?? [])
+    .filter((c) => c.visible && (c.scope === "central" || c.scope === "both"))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
     <div className="flex h-full w-full select-none flex-col items-center justify-center overflow-y-auto p-6">
@@ -66,11 +53,8 @@ const EmptyState = memo(({ input, setInput, handleSubmit, stop, status }: EmptyS
             onSubmit={handleSubmit}
             className="relative z-10 w-full rounded-2xl border bg-background shadow-around dark:bg-neutral-800"
           >
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <ContextPopover activeBookId={activeBookId} setActiveBookId={setActiveBookId} />
-            </div>
             <PromptInputTextarea
-              placeholder="Ask, search, or make anything..."
+              placeholder="问我任何问题，或让我帮你执行操作..."
               className="flex-1 py-2 pl-1 text-base leading-[1.5] placeholder:font-normal dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-400"
             />
             <div className="flex items-center justify-between gap-2 pb-1">
@@ -114,21 +98,24 @@ const EmptyState = memo(({ input, setInput, handleSubmit, stop, status }: EmptyS
         </div>
 
         <div>
-          <h2 className="font-medium text-neutral-600 text-sm dark:text-neutral-400">Get started</h2>
-          <div className="mt-2 flex gap-4">
-            {promptSuggestions.map(({ text, icon: Icon }) => (
-              <div
-                key={text}
-                onClick={() => {
-                  setInput(text);
-                  handleSubmit(text);
-                }}
-                className="flex w-full cursor-pointer flex-col items-start rounded-xl bg-muted p-4 transition-all dark:border-neutral-700 dark:bg-neutral-800"
-              >
-                <Icon className="size-5 flex-shrink-0 text-neutral-600 dark:text-neutral-300" />
-                <span className="mt-3 flex-1 text-neutral-600 text-sm dark:text-neutral-300">{text}</span>
-              </div>
-            ))}
+          <h2 className="font-medium text-muted-foreground text-sm">Get started</h2>
+          <div className="mt-2 flex flex-wrap gap-3">
+            {promptSuggestions.map(({ id, label, prompt, icon }) => {
+              const Icon = getCommandIcon(icon);
+              return (
+                <div
+                  key={id}
+                  onClick={() => {
+                    setInput(prompt);
+                    handleSubmit(prompt);
+                  }}
+                  className="flex cursor-pointer items-center gap-2 rounded-xl bg-muted px-4 py-3 transition-all hover:bg-muted/80"
+                >
+                  <Icon className="size-4 flex-shrink-0 text-muted-foreground" />
+                  <span className="text-foreground text-sm">{label}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -174,6 +161,7 @@ function ChatPage() {
     chatContext: {
       activeBookId,
       activeContext,
+      agentScope: "central",
     },
     setActiveBookId,
     setActiveContext,
@@ -233,11 +221,12 @@ function ChatPage() {
           onClick={showThreads ? handleBackFromThreads : undefined}
         />
         <div
-          className={`absolute top-0 left-0 h-full w-80 transform rounded-2xl border-neutral-200 border-r bg-white px-2 shadow-md transition-all duration-300 ease-out dark:border-neutral-700 dark:bg-neutral-900 ${showThreads ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"}`}
+          className={`absolute top-0 left-0 h-full w-80 transform rounded-2xl border-border border-r bg-background px-2 shadow-md transition-all duration-300 ease-out ${showThreads ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"}`}
         >
           <ChatThreads
             key={`threads-${threadsKey}`}
             bookId={undefined}
+            scope="global"
             onBack={handleBackFromThreads}
             onSelectThread={handleSelectThread}
           />

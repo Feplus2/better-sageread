@@ -13,7 +13,7 @@ import { exportThreadToHtml } from "@/lib/export-thread-html";
 import { exportThreadToImage } from "@/lib/export-thread-image";
 import { exportThreadToMarkdown } from "@/lib/export-thread-markdown";
 import { getThreadById } from "@/services/thread-service";
-import type { ThreadSummary } from "@/types/thread";
+import type { ThreadScope, ThreadSummary } from "@/types/thread";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
 import { ArrowLeft, Check, Download, ListChecks, MessageCircle, Star, Trash2 } from "lucide-react";
@@ -22,11 +22,12 @@ import { toast } from "sonner";
 
 interface ChatThreadsProps {
   bookId: string | undefined;
+  scope?: ThreadScope;
   onBack: () => void;
   onSelectThread: (threadSummary: ThreadSummary) => void;
 }
 
-export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps) {
+export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThreadsProps) {
   const {
     threads,
     error,
@@ -35,7 +36,7 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
     handleRenameThread: renameThreadFn,
     handleAiRenameThread: aiRenameThreadFn,
     handleToggleStar: toggleStarFn,
-  } = useThreads({ bookId });
+  } = useThreads({ bookId, scope });
 
   const [renameTarget, setRenameTarget] = useState<ThreadSummary | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
@@ -242,19 +243,19 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
   if (status === "pending") {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex h-8 items-center gap-2 border-neutral-300 pl-0.5 dark:border-neutral-700">
+        <div className="flex h-8 items-center gap-2 border-border pl-0.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="h-8 w-8 rounded-full hover:bg-muted"
             onClick={onBack}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h2 className="font-medium text-neutral-900 dark:text-neutral-100">历史对话</h2>
+          <h2 className="font-medium text-foreground">历史对话</h2>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <div className="text-neutral-600 dark:text-neutral-400">加载中...</div>
+          <div className="text-muted-foreground">加载中...</div>
         </div>
       </div>
     );
@@ -263,25 +264,25 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
   if (status === "error") {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex h-8 items-center gap-2 border-neutral-300 pl-0.5 dark:border-neutral-700">
+        <div className="flex h-8 items-center gap-2 border-border pl-0.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="h-8 w-8 rounded-full hover:bg-muted"
             onClick={onBack}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h2 className="font-medium text-neutral-900 dark:text-neutral-100">历史对话</h2>
+          <h2 className="font-medium text-foreground">历史对话</h2>
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <div className="mb-2 text-neutral-600 dark:text-neutral-400">{error?.message || "加载历史对话失败"}</div>
+            <div className="mb-2 text-muted-foreground">{error?.message || "加载历史对话失败"}</div>
             <Button
               variant="outline"
               size="sm"
               onClick={() => window.location.reload()}
-              className="border-neutral-200 dark:border-neutral-700"
+              className="border-border"
             >
               重试
             </Button>
@@ -293,18 +294,18 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-shrink-0 border-neutral-300 dark:border-neutral-700">
+      <div className="flex-shrink-0 border-border">
         <div className="flex h-10 items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
-            className="size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="size-7 rounded-full hover:bg-muted"
             onClick={onBack}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h2 className="font-medium text-neutral-900 text-sm dark:text-neutral-100">历史对话</h2>
-          <span className="text-neutral-500 text-xs dark:text-neutral-500">({threads.length})</span>
+          <h2 className="font-medium text-foreground text-sm">历史对话</h2>
+          <span className="text-muted-foreground text-xs">({threads.length})</span>
           <div className="ml-auto flex items-center gap-1 pr-1">
             {selectionMode && (
               <Button
@@ -320,8 +321,8 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
               variant="ghost"
               size="icon"
               title="多选管理"
-              className={`size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
+              className={`size-7 rounded-full hover:bg-muted ${
+                selectionMode ? "bg-muted" : ""
               }`}
               onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
             >
@@ -335,13 +336,13 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
         {threads.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <div className="mx-auto mb-3 w-fit rounded-full bg-neutral-100 p-3 dark:bg-neutral-800">
-                <MessageCircle size={24} className="text-neutral-500 dark:text-neutral-500" />
+              <div className="mx-auto mb-3 w-fit rounded-full bg-muted p-3">
+                <MessageCircle size={24} className="text-muted-foreground" />
               </div>
-              <p className="text-neutral-600 text-sm dark:text-neutral-400">
+              <p className="text-muted-foreground text-sm">
                 {bookId ? "还没有历史对话" : "暂无聊天记录"}
               </p>
-              <p className="mt-1 text-neutral-500 text-xs dark:text-neutral-500">
+              <p className="mt-1 text-muted-foreground text-xs">
                 {bookId ? "开始聊天来创建你的第一个对话" : "开始对话来创建聊天记录"}
               </p>
             </div>
@@ -361,13 +362,13 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
                           className={`mt-0.5 flex size-4 flex-shrink-0 items-center justify-center rounded border transition-colors ${
                             selectedIds.has(thread.id)
                               ? "border-primary bg-primary text-primary-foreground"
-                              : "border-neutral-400 dark:border-neutral-500"
+                              : "border-muted-foreground/50"
                           }`}
                         >
                           {selectedIds.has(thread.id) && <Check size={12} />}
                         </span>
                       )}
-                      <h3 className="line-clamp-1 flex-1 font-medium text-neutral-900 text-sm dark:text-neutral-100">
+                      <h3 className="line-clamp-1 flex-1 font-medium text-foreground text-sm">
                         {thread.title || "未命名对话"}
                       </h3>
                       <span
@@ -383,15 +384,15 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
                         }}
                       >
                         <Star
-                          className={`size-3.5 ${thread.starred ? "fill-amber-400 text-amber-400" : "text-neutral-400"}`}
+                          className={`size-3.5 ${thread.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`}
                         />
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-neutral-600 text-xs dark:text-neutral-400">
+                      <span className="text-muted-foreground text-xs">
                         {thread.message_count} 条消息
                       </span>
-                      <span className="flex-shrink-0 text-neutral-500 text-xs dark:text-neutral-500">
+                      <span className="flex-shrink-0 text-muted-foreground text-xs">
                         {dayjs(thread.updated_at).format("YYYY-MM-DD HH:mm:ss")}
                       </span>
                     </div>
@@ -418,8 +419,8 @@ export function ChatThreads({ bookId, onBack, onSelectThread }: ChatThreadsProps
       </div>
 
       {selectionMode && (
-        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-t px-3 py-2 dark:border-neutral-700">
-          <span className="text-nowrap text-neutral-600 text-xs dark:text-neutral-400">已选 {selectedIds.size} 个</span>
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-border border-t px-3 py-2">
+          <span className="text-muted-foreground text-nowrap text-xs">已选 {selectedIds.size} 个</span>
           <div className="flex flex-wrap items-center gap-1">
             <Button
               variant="outline"

@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useState } from "react";
@@ -17,6 +18,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [scope, setScope] = useState<"reader" | "central" | "both">("both");
 
   const createSkillMutation = useCreateSkill();
   const updateSkillMutation = useUpdateSkill();
@@ -31,10 +33,12 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
         setName(skill.name);
         setContent(skill.content);
         setIsActive(skill.isActive);
+        setScope(skill.scope ?? "both");
       } else {
         setName("");
         setContent("");
         setIsActive(true);
+        setScope("both");
       }
     }
   }, [isOpen, skill]);
@@ -50,6 +54,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
             name: isSystemSkill ? skill.name : name.trim(),
             content: content.trim(),
             isActive: isSystemSkill ? skill.isActive : isActive,
+            scope: isSystemSkill ? undefined : scope,
           },
         });
       } else {
@@ -57,6 +62,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
           name: name.trim(),
           content: content.trim(),
           isActive,
+          scope,
         });
       }
       onClose();
@@ -114,6 +120,22 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
               className="h-[400px] resize-none font-mono text-sm"
             />
           </div>
+
+          {!isSystemSkill && (
+            <div className="space-y-2">
+              <Label>生效范围</Label>
+              <Select value={scope} onValueChange={(v) => setScope(v as "reader" | "central" | "both")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reader">阅读助手</SelectItem>
+                  <SelectItem value="central">中央 Agent</SelectItem>
+                  <SelectItem value="both">两者共享</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2">

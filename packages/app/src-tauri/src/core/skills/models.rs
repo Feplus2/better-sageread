@@ -9,6 +9,7 @@ pub struct Skill {
     pub is_active: bool,
     #[serde(rename = "isSystem")]
     pub is_system: bool,
+    pub scope: String,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "updatedAt")]
@@ -23,6 +24,7 @@ pub struct SkillCreateData {
     pub is_active: Option<bool>,
     #[serde(rename = "isSystem")]
     pub is_system: Option<bool>,
+    pub scope: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -31,12 +33,13 @@ pub struct SkillUpdateData {
     pub content: Option<String>,
     #[serde(rename = "isActive")]
     pub is_active: Option<bool>,
+    pub scope: Option<String>,
     #[serde(rename = "updatedAt")]
     pub updated_at: Option<i64>,
 }
 
 impl Skill {
-    pub fn new(id: String, name: String, content: String, is_active: bool, is_system: bool) -> Self {
+    pub fn new(id: String, name: String, content: String, is_active: bool, is_system: bool, scope: String) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             id,
@@ -44,6 +47,7 @@ impl Skill {
             content,
             is_active,
             is_system,
+            scope,
             created_at: now,
             updated_at: now,
         }
@@ -58,6 +62,7 @@ impl Skill {
             content: row.try_get("content")?,
             is_active: row.try_get::<i32, _>("is_active")? != 0,
             is_system: row.try_get::<i32, _>("is_system")? != 0,
+            scope: row.try_get("scope").unwrap_or_else(|_| "both".to_string()),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

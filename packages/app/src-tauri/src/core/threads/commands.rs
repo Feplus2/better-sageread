@@ -12,18 +12,20 @@ pub async fn create_thread(
 ) -> Result<Thread, String> {
     let thread_id = Uuid::new_v4().to_string();
     let current_timestamp = chrono::Utc::now().timestamp_millis();
+    let scope = payload.scope.unwrap_or_else(|| "book".to_string());
 
     let db_pool_guard = state.db_pool.lock().await;
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     sqlx::query(
-        "INSERT INTO threads (id, book_id, metadata, title, messages, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO threads (id, book_id, metadata, title, messages, scope, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread_id)
     .bind(&payload.book_id)
     .bind(&payload.metadata)
     .bind(&payload.title)
     .bind(&payload.messages_json)
+    .bind(&scope)
     .bind(current_timestamp)
     .bind(current_timestamp)
     .execute(pool)
@@ -40,6 +42,7 @@ pub async fn create_thread(
         title: payload.title,
         messages: payload.messages_json,
         starred: false,
+        scope,
         created_at: current_timestamp,
         updated_at: current_timestamp,
     };
@@ -57,7 +60,7 @@ pub async fn edit_thread(
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     let row = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads WHERE id = ?"
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE id = ?"
     )
     .bind(&payload.id)
     .fetch_one(pool)
@@ -74,6 +77,7 @@ pub async fn edit_thread(
         title: row.get("title"),
         messages: row.get("messages"),
         starred: row.get::<i32, _>("starred") != 0,
+        scope: row.get("scope"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     };
@@ -106,6 +110,7 @@ pub async fn edit_thread(
         title: new_title,
         messages: new_messages,
         starred: new_starred,
+        scope: existing_thread.scope,
         created_at: existing_thread.created_at,
         updated_at: current_timestamp,
     };
@@ -122,7 +127,7 @@ pub async fn get_latest_thread_by_book_id(
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     let row_result = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads WHERE book_id IS ? ORDER BY updated_at DESC LIMIT 1"
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE book_id IS ? ORDER BY updated_at DESC LIMIT 1"
     )
     .bind(&book_id)
     .fetch_optional(pool)
@@ -140,6 +145,7 @@ pub async fn get_latest_thread_by_book_id(
             title: row.get("title"),
             messages: row.get("messages"),
             starred: row.get::<i32, _>("starred") != 0,
+            scope: row.get("scope"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         };
@@ -158,7 +164,7 @@ pub async fn get_threads_by_book_id(
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     let rows = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads WHERE book_id IS ? ORDER BY updated_at DESC"
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE book_id IS ? ORDER BY updated_at DESC"
     )
     .bind(&book_id)
     .fetch_all(pool)
@@ -190,6 +196,7 @@ pub async fn get_threads_by_book_id(
                 title: row.get("title"),
                 message_count,
                 starred: row.get::<i32, _>("starred") != 0,
+                scope: row.get("scope"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             }
@@ -205,7 +212,7 @@ pub async fn get_all_threads(state: State<'_, AppState>) -> Result<Vec<ThreadSum
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     let rows = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads ORDER BY updated_at DESC"
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads ORDER BY updated_at DESC"
     )
     .fetch_all(pool)
     .await
@@ -236,6 +243,54 @@ pub async fn get_all_threads(state: State<'_, AppState>) -> Result<Vec<ThreadSum
                 title: row.get("title"),
                 message_count,
                 starred: row.get::<i32, _>("starred") != 0,
+                scope: row.get("scope"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }
+        })
+        .collect();
+
+    Ok(thread_summaries)
+}
+
+#[tauri::command]
+pub async fn get_global_threads(state: State<'_, AppState>) -> Result<Vec<ThreadSummary>, String> {
+    let db_pool_guard = state.db_pool.lock().await;
+    let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
+
+    let rows = sqlx::query(
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE scope = 'global' ORDER BY updated_at DESC"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        eprintln!("Failed to fetch global threads: {}", e);
+        e.to_string()
+    })?;
+
+    let thread_summaries: Vec<ThreadSummary> = rows
+        .into_iter()
+        .map(|row| {
+            let messages_json: String = row.get("messages");
+            let message_count = match serde_json::from_str::<serde_json::Value>(&messages_json) {
+                Ok(messages_array) => {
+                    if let Some(array) = messages_array.as_array() {
+                        array.len() as i32
+                    } else {
+                        0
+                    }
+                }
+                Err(_) => 0,
+            };
+
+            ThreadSummary {
+                id: row.get("id"),
+                book_id: row.get("book_id"),
+                metadata: row.get("metadata"),
+                title: row.get("title"),
+                message_count,
+                starred: row.get::<i32, _>("starred") != 0,
+                scope: row.get("scope"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             }
@@ -254,7 +309,7 @@ pub async fn get_thread_by_id(
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
     let row = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads WHERE id = ?"
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE id = ?"
     )
     .bind(&thread_id)
     .fetch_one(pool)
@@ -271,6 +326,7 @@ pub async fn get_thread_by_id(
         title: row.get("title"),
         messages: row.get("messages"),
         starred: row.get::<i32, _>("starred") != 0,
+        scope: row.get("scope"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     };

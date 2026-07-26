@@ -137,7 +137,7 @@ export default function Sidebar() {
     },
     {
       path: "/skills",
-      label: "技能库",
+      label: "AI 中心",
       icon: Lightbulb,
     },
     {

@@ -6,6 +6,7 @@ export interface Skill {
   content: string;
   isActive: boolean;
   isSystem: boolean;
+  scope: "reader" | "central" | "both";
   createdAt: number;
   updatedAt: number;
 }
@@ -15,12 +16,14 @@ export interface SkillCreateData {
   content: string;
   isActive?: boolean;
   isSystem?: boolean;
+  scope?: "reader" | "central" | "both";
 }
 
 export interface SkillUpdateData {
   name?: string;
   content?: string;
   isActive?: boolean;
+  scope?: "reader" | "central" | "both";
   updatedAt?: number;
 }
 
