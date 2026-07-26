@@ -30,10 +30,16 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
       const metaPath = `${activeBookBaseDir}/metadata.md`;
       if (await exists(metaPath)) {
         metadataMd = await readTextFile(metaPath);
+      } else {
+        // 回落：metadata.md 仅在向量化索引时生成，未索引的书只有导入时写入的 metadata.json
+        const jsonPath = `${activeBookBaseDir}/metadata.json`;
+        if (await exists(jsonPath)) {
+          metadataMd = formatMetadataJson(await readTextFile(jsonPath));
+        }
       }
     }
   } catch (e) {
-    console.warn("加载 metadata.md 失败：", e);
+    console.warn("加载书籍元数据失败：", e);
   }
 
   let base = systemPromptBase;
@@ -65,4 +71,38 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   }
 
   return prompt;
+}
+
+/** 把 metadata.json 格式化为提示词可用的元信息块（无目录部分，仅书名/作者/出版信息） */
+function formatMetadataJson(raw: string): string | null {
+  try {
+    const meta = JSON.parse(raw) as {
+      title?: string;
+      author?: string | { name?: string } | Array<{ name?: string }>;
+      language?: string;
+      published?: string;
+      publisher?: string;
+    };
+
+    let author = "";
+    if (typeof meta.author === "string") {
+      author = meta.author;
+    } else if (Array.isArray(meta.author)) {
+      author = meta.author.map((a) => a?.name ?? "").filter(Boolean).join("、");
+    } else if (meta.author?.name) {
+      author = meta.author.name;
+    }
+
+    if (!meta.title && !author) return null;
+
+    const lines = ["书籍元信息", ""];
+    if (meta.title) lines.push(`- 标题: ${meta.title}`);
+    if (author) lines.push(`- 作者: ${author}`);
+    if (meta.publisher) lines.push(`- 出版社: ${meta.publisher}`);
+    if (meta.published) lines.push(`- 出版日期: ${meta.published}`);
+    if (meta.language) lines.push(`- 语言: ${meta.language}`);
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
 }
