@@ -7,6 +7,7 @@ import { throttle } from "@/utils/throttle";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import ApiConfigSection from "./api-config-section";
 import ModelsManagement from "./models-management";
 import { ProviderIcons } from "./settings-dialog";
@@ -256,10 +257,20 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Switch
-            checked={provider?.active ?? true}
-            onCheckedChange={(checked) => handleFieldChange("active", checked)}
-          />
+          <div
+            onClick={() => {
+              if (provider && !provider.active && !provider.apiKey?.trim()) {
+                toast.info("请先填写 API Key", { description: `在下方填写 API Key 后再启用「${provider.name}」` });
+              }
+            }}
+          >
+            <Switch
+              checked={provider?.active ?? true}
+              disabled={!provider?.active && !provider?.apiKey?.trim()}
+              className={!provider?.active && !provider?.apiKey?.trim() ? "pointer-events-none" : undefined}
+              onCheckedChange={(checked) => handleFieldChange("active", checked)}
+            />
+          </div>
           {isCustomProvider && (
             <Button
               variant="ghost"

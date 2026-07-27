@@ -1,4 +1,4 @@
-import { Anthropic, DeepSeek, Gemini, Grok, OpenAI, OpenRouter } from "@/components/icons";
+import { Anthropic, ChatGLM, DeepSeek, Doubao, Gemini, Grok, Moonshot, OpenAI, OpenRouter, Qwen, XiaomiMiMo } from "@/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,11 @@ const providerIcons: Record<string, React.ComponentType<SVGProps<SVGSVGElement>>
   grok: Grok,
   gemini: Gemini,
   deepseek: DeepSeek,
+  zhipu: ChatGLM,
+  kimi: Moonshot,
+  xiaomi: XiaomiMiMo,
+  qwen: Qwen,
+  doubao: Doubao,
 };
 
 interface ModelSelectorProps {

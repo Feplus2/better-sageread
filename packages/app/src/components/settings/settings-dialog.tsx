@@ -1,4 +1,4 @@
-import { Anthropic, DeepSeek, Gemini, Grok, OpenAI, OpenRouter } from "@/components/icons";
+import { Anthropic, ChatGLM, DeepSeek, Doubao, Gemini, Grok, Moonshot, OpenAI, OpenRouter, Qwen, XiaomiMiMo } from "@/components/icons";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -59,6 +59,16 @@ export function ProviderIcons({ providerId }: { providerId: string }): React.Rea
       return <Grok className="h-4 w-4" />;
     case "deepseek":
       return <DeepSeek className="h-4 w-4" />;
+    case "zhipu":
+      return <ChatGLM className="h-4 w-4" />;
+    case "kimi":
+      return <Moonshot className="h-4 w-4" />;
+    case "xiaomi":
+      return <XiaomiMiMo className="h-4 w-4" />;
+    case "qwen":
+      return <Qwen className="h-4 w-4" />;
+    case "doubao":
+      return <Doubao className="h-4 w-4" />;
     default:
       return <Server className="h-4 w-4" />;
   }

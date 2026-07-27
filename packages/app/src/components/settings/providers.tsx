@@ -4,6 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useProviderStore } from "@/store/provider-store";
 import { Plus, Settings } from "lucide-react";
+import { toast } from "sonner";
 import { ProviderIcons } from "./settings-dialog";
 
 interface ProvidersSettingsProps {
@@ -14,8 +15,16 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
   const { modelProviders, utilityModel, setModelProviders, setUtilityModel, addProvider } = useProviderStore();
 
   const toggleProviderEnabled = (providerId: string) => {
-    const updatedProviders = modelProviders.map((provider) =>
-      provider.provider === providerId ? { ...provider, active: !provider.active } : provider,
+    const provider = modelProviders.find((p) => p.provider === providerId);
+    if (!provider) return;
+    // 无 API key 时禁止开启
+    if (!provider.active && !provider.apiKey?.trim()) {
+      toast.info("请先填写 API Key", { description: `进入「${provider.name}」设置页配置 API Key 后再启用` });
+      onProviderSelect?.(providerId);
+      return;
+    }
+    const updatedProviders = modelProviders.map((p) =>
+      p.provider === providerId ? { ...p, active: !p.active } : p,
     );
     setModelProviders(updatedProviders);
   };
@@ -84,10 +93,21 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
                     >
                       <Settings className="size-4" />
                     </Button>
-                    <Switch
-                      checked={provider.active}
-                      onCheckedChange={() => toggleProviderEnabled(provider.provider)}
-                    />
+                    <div
+                      onClick={() => {
+                        if (!provider.active && !provider.apiKey?.trim()) {
+                          toast.info("请先填写 API Key", { description: `进入「${provider.name}」设置页配置 API Key 后再启用` });
+                          onProviderSelect?.(provider.provider);
+                        }
+                      }}
+                    >
+                      <Switch
+                        checked={provider.active}
+                        disabled={!provider.active && !provider.apiKey?.trim()}
+                        className={!provider.active && !provider.apiKey?.trim() ? "pointer-events-none" : undefined}
+                        onCheckedChange={() => toggleProviderEnabled(provider.provider)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>

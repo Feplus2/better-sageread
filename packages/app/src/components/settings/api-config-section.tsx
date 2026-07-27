@@ -23,16 +23,16 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           </Label>
           {provider.apiKeyHelpUrl && (
             <p className="mt-2 text-xs dark:text-neutral-400">
-              The {providerName} API uses API keys for authentication. Visit your{" "}
+              {providerName} 使用 API Key 进行身份验证。前往{" "}
               <a
                 href={provider.apiKeyHelpUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-500 underline dark:text-blue-400"
               >
-                API Keys
+                API Key 管理页
               </a>{" "}
-              page to retrieve the API key you'll use in your requests.
+              获取你的密钥。
             </p>
           )}
         </div>
@@ -42,7 +42,7 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
             type={showApiKey ? "text" : "password"}
             value={provider?.apiKey ?? ""}
             onChange={(e) => onFieldChange("apiKey", e.target.value)}
-            placeholder="Enter your API key..."
+            placeholder="输入 API Key..."
             className="h-8 pr-10"
           />
           <Button
@@ -63,16 +63,16 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           </Label>
           {provider.baseUrlHelpUrl && (
             <p className="mt-2 text-xs dark:text-neutral-400">
-              The base endpoint to use. See the{" "}
+              接口基础地址。详见{" "}
               <a
                 href={provider.baseUrlHelpUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-500 underline dark:text-blue-400"
               >
-                {providerName} API documentation
+                {providerName} API 文档
               </a>{" "}
-              for more information.
+              。
             </p>
           )}
         </div>

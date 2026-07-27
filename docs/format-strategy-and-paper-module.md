@@ -35,18 +35,16 @@
 
 ## 二、三阶段路线图
 
-### 短期：格式清理 + PDF 体验修复（~2天）
+### 短期：格式清理 + PDF 体验修复（~2天）——✅ 已完成 2026-07-28
 
 **目标**：让现有格式支持诚实、PDF 导入不再半残。
 
-- [ ] `SUPPORTED_FILE_EXTS` 收窄为 `["epub", "pdf"]`（md 在中期加入）
-- [ ] upload.tsx 的 `accept` 属性对齐
-- [ ] PDF 导入后的阅读体验修复（当前 foliate-js PDF 分支被注释，需确认实际渲染路径）
-- [ ] 非 EPUB 格式打开时，AI 侧边栏降级处理：
-  - 显示提示："当前格式不支持 AI 问答"
-  - 提供操作引导："转换为 EPUB 以获得完整体验"（调用 Books_Converter）
-- [ ] 向量化入口（vectorizeBook 工具）对非 EPUB 格式返回明确错误提示
-- [ ] 验证 Books_Converter PDF→EPUB 端到端流程可用性
+- [x] `SUPPORTED_FILE_EXTS` 收窄为 `["epub", "pdf"]`（其他格式保留导入能力为有意兼容）
+- [x] upload.tsx 的 `accept` 属性对齐（已统一为 `.epub,.pdf`）
+- [x] PDF 导入后的阅读体验修复（已验证）
+- [x] 非 EPUB 格式打开时，AI 侧边栏降级处理（已做）
+- [x] 向量化入口（vectorizeBook 工具）对非 EPUB 格式返回明确错误提示（已做）
+- [x] 验证 Books_Converter PDF→EPUB 端到端流程可用性（已验证）
 
 ### 中期：Markdown 格式原生支持 + 文献库模块 MVP（~1-2周）
 

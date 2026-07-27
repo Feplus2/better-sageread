@@ -72,7 +72,7 @@ export default function McpTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-sm">MCP 协议集成即将推出，当前可预先配置服务器</p>
+        <p className="text-muted-foreground text-sm">MCP 协议集成 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-400">BETA</span> — 当前可预先配置服务器，运行时集成即将推出</p>
         <Button size="sm" variant="outline" onClick={openCreate}>
           <Plus className="size-4" />
           添加服务器

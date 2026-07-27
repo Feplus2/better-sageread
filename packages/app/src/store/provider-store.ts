@@ -68,6 +68,26 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
+      version: 2,
+      migrate: (persistedState: any, version: number) => {
+        if (version < 1) {
+          // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
+          const existing: ModelProvider[] = persistedState.modelProviders ?? [];
+          const existingIds = new Set(existing.map((p) => p.provider));
+          const missing = predefinedProviders.filter((p) => !existingIds.has(p.provider));
+          if (missing.length > 0) {
+            persistedState.modelProviders = [...existing, ...missing];
+          }
+        }
+        if (version < 2) {
+          // v1→v2: 无 API Key 的提供商强制 active=false
+          const domesticIds = new Set(["zhipu", "kimi", "xiaomi", "qwen", "doubao"]);
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) =>
+            domesticIds.has(p.provider) && !p.apiKey?.trim() ? { ...p, active: false } : p,
+          );
+        }
+        return persistedState;
+      },
       partialize: (state) => ({
         modelProviders: state.modelProviders,
         selectedModel: state.selectedModel,
