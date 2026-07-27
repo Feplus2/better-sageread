@@ -4,6 +4,7 @@ import { ScrollButton } from "@/components/prompt-kit/scroll-button";
 import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages, TOOL_NAME_MAP } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
+import { getCommandIcon } from "@/components/side-chat/command-icons";
 import ModelSelector from "@/components/side-chat/model-selector";
 import { MindmapViewer } from "@/components/tools/mindmap-viewer";
 import { RagResultViewer } from "@/components/tools/rag-result-viewer";
@@ -18,7 +19,6 @@ import { Brain, History, MessageCirclePlus, Paperclip, Settings, X } from "lucid
 import { ArrowUp } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { memo, useRef, useState } from "react";
-import { getCommandIcon } from "@/components/side-chat/command-icons";
 
 interface EmptyStateProps {
   input: string;
@@ -254,6 +254,8 @@ function ChatPage() {
           handleComponent={{
             right: <div className="custom-resize-handle custom-resize-handle-left" />,
           }}
+          // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+          handleStyles={{ right: { right: "0px" } }}
           className="flex h-full flex-col pr-2"
         >
           <div className="relative flex h-10 flex-shrink-0 items-center justify-between px-2 pt-2">

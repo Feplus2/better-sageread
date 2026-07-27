@@ -539,6 +539,9 @@ export class Paginator extends HTMLElement {
             grid-column: 1 / -1;
             grid-row: 1 / -1;
             overflow: auto;
+            /* 为滚动条预留独立空间：覆盖式滚动条悬浮在满宽 iframe 之上时，
+               滑块区域的指针事件会被 iframe 捕获，导致原生滚动条"看得见拖不动" */
+            scrollbar-gutter: stable;
         }
         /* header/footer removed; spacing handled by host app */
         </style>
@@ -594,6 +597,49 @@ export class Paginator extends HTMLElement {
       let isPointerSelecting = false;
       doc.addEventListener("pointerdown", () => (isPointerSelecting = true));
       doc.addEventListener("pointerup", () => (isPointerSelecting = false));
+
+      // 滚动条拖动兜底：覆盖式滚动条悬浮在满宽 iframe 上时，滑块区域的指针事件
+      // 全被 iframe 文档捕获，原生滚动条拖不动——在 iframe 文档内监听右缘按下，
+      // 区分"点轨道翻一屏"与"拖滑块按比例滚动"，行为对齐原生滚动条。
+      // 经典（占位式）滚动条环境下 iframe 不覆盖滑块区，此逻辑自然休眠，不会与原生拖动叠加。
+      const STRIP_WIDTH = 14;
+      let stripDrag = null;
+      const stripMetrics = () => {
+        const c = this.#container;
+        const track = c.clientHeight;
+        const maxScroll = c.scrollHeight - c.clientHeight;
+        const thumbLen = Math.max(24, (c.clientHeight / c.scrollHeight) * track);
+        const thumbTop = maxScroll <= 0 ? 0 : (c.scrollTop / maxScroll) * (track - thumbLen);
+        return { track, thumbLen, thumbTop, maxScroll };
+      };
+      doc.addEventListener("mousedown", (e) => {
+        if (!this.scrolled) return;
+        const win = doc.defaultView;
+        if (!win || e.clientX < win.innerWidth - STRIP_WIDTH) return;
+        const { thumbLen, thumbTop, maxScroll } = stripMetrics();
+        if (maxScroll <= 0) return;
+        if (e.clientY >= thumbTop && e.clientY <= thumbTop + thumbLen) {
+          // 按住滑块：进入拖动
+          stripDrag = { startY: e.clientY, startScrollTop: this.#container.scrollTop };
+        } else {
+          // 点轨道：向上/向下翻一屏（原生行为）
+          const dir = e.clientY < thumbTop ? -1 : 1;
+          this.#container.scrollTop += dir * this.#container.clientHeight;
+        }
+        e.preventDefault(); // 防止变成文本选择
+      });
+      doc.addEventListener("mousemove", (e) => {
+        if (!stripDrag) return;
+        const { track, thumbLen, maxScroll } = stripMetrics();
+        if (maxScroll <= 0) return;
+        // 原生映射：滑块可走 (track - thumbLen) px ↔ scrollTop 可走 maxScroll px
+        const ratio = maxScroll / (track - thumbLen);
+        this.#container.scrollTop = stripDrag.startScrollTop + (e.clientY - stripDrag.startY) * ratio;
+      });
+      const endStripDrag = () => (stripDrag = null);
+      doc.addEventListener("mouseup", endStripDrag);
+      doc.addEventListener("mouseleave", endStripDrag);
+
       let isKeyboardSelecting = false;
       doc.addEventListener("keydown", () => (isKeyboardSelecting = true));
       doc.addEventListener("keyup", () => (isKeyboardSelecting = false));

@@ -53,6 +53,8 @@ export function PreviewPanel() {
       handleComponent={{
         left: <div className="custom-resize-handle" />,
       }}
+      // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+      handleStyles={{ left: { left: "0px" } }}
       className="h-full"
     >
       <div className="flex h-full flex-col rounded-md border border-neutral-200 bg-background shadow-around dark:border-neutral-700">

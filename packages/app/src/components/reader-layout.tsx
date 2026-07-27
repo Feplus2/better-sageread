@@ -1,10 +1,10 @@
 import HomeLayout from "@/components/home-layout";
 import { NotepadContainer } from "@/components/notepad";
 import NotificationDropdown from "@/components/notification-dropdown";
-import SyncRefreshButton from "@/components/sync-refresh-button";
 import { PreviewPanel } from "@/components/preview/preview-panel";
 import SettingsDialog from "@/components/settings/settings-dialog";
 import SideChat from "@/components/side-chat";
+import SyncRefreshButton from "@/components/sync-refresh-button";
 import VerticalTabBar from "@/components/vertical-tab-bar";
 import WindowControls from "@/components/window-controls";
 import { useFontEvents } from "@/hooks/use-font-events";
@@ -331,6 +331,8 @@ export default function ReaderLayout() {
                     ? { left: <div className="custom-resize-handle" /> }
                     : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
                 }
+                // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+                handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
                 className="h-full"
                 onResize={() => {
                   if (!showOverlay) {
@@ -378,6 +380,8 @@ export default function ReaderLayout() {
                     ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
                     : { left: <div className="custom-resize-handle" /> }
                 }
+                // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+                handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
                 className="h-full"
                 onResize={() => {
                   if (!showOverlay) {
