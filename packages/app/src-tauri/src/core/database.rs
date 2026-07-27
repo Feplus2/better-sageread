@@ -105,7 +105,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         .await?;
     println!("Migration applied: book_status.position_changed_at backfilled.");
 
-    // threads.scope（对话作用域：'global'=中央Agent, 'book'=阅读助手）
+    // threads.scope（对话作用域：'global'=全局助手, 'book'=阅读助手）
     let result = sqlx::query("ALTER TABLE threads ADD COLUMN scope TEXT NOT NULL DEFAULT 'book'")
         .execute(pool)
         .await;
@@ -172,6 +172,29 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         }
     }
     println!("Migration applied: _sync_log + sync triggers.");
+
+    // 阅读助手系统提示词 v2（2026-07-27）：Agent 一分为二后聚焦"读懂这本书"，
+    // 新增全局事务引导、webSearch、只读声明。仅升级未被用户修改过的 v1
+    // （v1 以固定开场白开头且不含"全局助手"字样），用户自定义过的不动。
+    if let Ok(default_skills) = serde_json::from_str::<Vec<DefaultSkill>>(include_str!("./default-skills.json")) {
+        if let Some(system_skill) = default_skills.iter().find(|s| s.is_system) {
+            let result = sqlx::query(
+                "UPDATE skills SET content = ?, updated_at = ?
+                 WHERE is_system = 1
+                   AND content LIKE '你是一位**亲切、耐心的阅读向导**%'
+                   AND content NOT LIKE '%全局助手%'",
+            )
+            .bind(&system_skill.content)
+            .bind(chrono::Utc::now().timestamp_millis())
+            .execute(pool)
+            .await;
+            if let Ok(done) = result {
+                if done.rows_affected() > 0 {
+                    println!("Migration applied: reader system prompt upgraded to v2 ({} row(s)).", done.rows_affected());
+                }
+            }
+        }
+    }
 
     Ok(())
 }
