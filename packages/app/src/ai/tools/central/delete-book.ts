@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：删除书籍（移入回收站）
+ * 全局助手工具：删除书籍（移入回收站）
  */
 import { deleteBook } from "@/services/book-service";
 import type { BookQueryOptions, BookWithStatus, SimpleBook } from "@/types/simple-book";

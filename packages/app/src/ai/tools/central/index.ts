@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 专属工具导出
+ * 全局助手专属工具导出
  */
 export { setThemeTool } from "./set-theme";
 export { deleteBookTool } from "./delete-book";
@@ -14,3 +14,13 @@ export { syncNowTool } from "./sync-now";
 export { vectorizeBookTool } from "./vectorize-book";
 export { manageTagsTool } from "./manage-tags";
 export { trashManagerTool } from "./trash-manager";
+export { exportNotesTool } from "./export-notes";
+export { readerPreferencesTool } from "./reader-preferences";
+export { switchModelTool } from "./switch-model";
+export { manageThreadsTool } from "./manage-threads";
+export { syncPreferencesTool } from "./sync-preferences";
+export { backupRestoreTool } from "./backup-restore";
+export { uiPreferencesTool } from "./ui-preferences";
+export { toggleSkillTool } from "./toggle-skill";
+export { importFontTool } from "./import-font";
+export { askAppHelpTool } from "./ask-app-help";

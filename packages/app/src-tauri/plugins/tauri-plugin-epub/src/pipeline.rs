@@ -578,3 +578,120 @@ fn write_metadata_markdown(book_dir: &Path, epub_content: &EpubContent, flat_toc
 
     Ok(())
 }
+
+/* ---------------- 内置使用手册语料库 ---------------- */
+
+/// 手册索引管线：mdbook/*.md（ensure_manual_files 已落盘）→ 分片 → 向量化 → vectors.sqlite
+/// 与 process_epub_to_db 的区别：无 EPUB 解析/TOC，章节标题直接取手册文件名对应的章节名
+pub async fn process_manual_to_db<P: AsRef<Path>>(
+    book_dir: P,
+    opts: ProcessOptions,
+) -> Result<ProcessReport> {
+    let book_dir = book_dir.as_ref();
+    let db_path = book_dir.join("vectors.sqlite");
+    let mdbook_dir = book_dir.join("mdbook");
+
+    let reader = EpubReader::new().context("初始化分片器失败")?;
+
+    log::info!(
+        "初始化手册向量化器：embeddings_url={}, model_name={}",
+        opts.vectorizer.embeddings_url,
+        opts.vectorizer.model_name
+    );
+    let mut vectorizer = TextVectorizer::new(opts.vectorizer.clone())
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to initialize text vectorizer with embeddings_url: {}, model: {}",
+                opts.vectorizer.embeddings_url, opts.vectorizer.model_name
+            )
+        })?;
+
+    let actual_dimension = vectorizer
+        .detect_embedding_dimension()
+        .await
+        .context("Failed to detect embedding dimension")?;
+    log::info!("检测到实际向量维度: {}", actual_dimension);
+
+    if db_path.exists() {
+        std::fs::remove_file(&db_path)
+            .with_context(|| format!("Failed to remove database file: {:?}", db_path))?;
+    }
+    let mut db = VectorDatabase::new(&db_path, actual_dimension)
+        .with_context(|| format!("Failed to open/create database at {:?} with dimension {}", db_path, actual_dimension))?;
+    if let Err(e) = db.initialize_vec_table() {
+        log::warn!("sqlite-vec unavailable, fallback to standard storage: {}", e);
+    }
+
+    let batch_size = opts.batch_size.unwrap_or(10);
+    let mut global_chunk_index = 0;
+    let mut total_processed_chunks = 0;
+    let mut batch: Vec<DocumentChunk> = Vec::new();
+
+    for file in crate::manual::MANUAL_FILES {
+        let md_file_path = mdbook_dir.join(file.filename);
+        if !md_file_path.exists() {
+            log::warn!("手册文件缺失（跳过）: {:?}", md_file_path);
+            continue;
+        }
+
+        let chunks = reader.chunk_md_file(file.content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
+        let total_chunks_in_file = chunks.len();
+        if total_chunks_in_file == 0 {
+            continue;
+        }
+        let absolute_md_path = md_file_path.to_string_lossy().to_string();
+
+        for (chunk_index, chunk_content) in chunks.into_iter().enumerate() {
+            if chunk_content.trim().is_empty() {
+                continue;
+            }
+
+            let embedding = match vectorizer.vectorize_text(&chunk_content).await {
+                Ok(emb) => emb,
+                Err(e) => {
+                    log::error!("手册分片向量化失败 ({}: {}): {}", file.filename, chunk_index, e);
+                    continue;
+                }
+            };
+
+            batch.push(DocumentChunk {
+                id: None,
+                book_title: crate::manual::MANUAL_TITLE.to_string(),
+                book_author: crate::manual::MANUAL_AUTHOR.to_string(),
+                md_file_path: absolute_md_path.clone(),
+                file_order_in_book: 0,
+                related_chapter_titles: file.title.to_string(),
+                chunk_text: chunk_content,
+                chunk_order_in_file: chunk_index,
+                total_chunks_in_file,
+                embedding,
+                global_chunk_index,
+            });
+            global_chunk_index += 1;
+
+            if batch.len() >= batch_size {
+                db.insert_chunks_batch(&batch)
+                    .map_err(|e| anyhow::anyhow!("手册分片入库失败: {}", e))?;
+                total_processed_chunks += batch.len();
+                batch.clear();
+            }
+        }
+    }
+
+    if !batch.is_empty() {
+        db.insert_chunks_batch(&batch)
+            .map_err(|e| anyhow::anyhow!("手册分片入库失败: {}", e))?;
+        total_processed_chunks += batch.len();
+    }
+
+    log::info!("手册索引完成：{} 个分片", total_processed_chunks);
+
+    Ok(ProcessReport {
+        db_path,
+        book_title: crate::manual::MANUAL_TITLE.to_string(),
+        book_author: crate::manual::MANUAL_AUTHOR.to_string(),
+        total_chunks: total_processed_chunks,
+        vector_dimension: actual_dimension,
+    })
+}

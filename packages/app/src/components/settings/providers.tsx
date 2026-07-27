@@ -31,7 +31,7 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
         <h2 className="text mb-4 dark:text-neutral-200">辅助模型</h2>
         <div className="flex items-start justify-between gap-4">
           <p className="mt-1 text-neutral-600 text-xs dark:text-neutral-400">
-            用于生成对话标题、语义上下文、AI 标签等轻量任务，推荐选择便宜快速的模型；留空则跟随当前聊天模型
+            用于生成对话标题、语义上下文、AI 标签、PDF 转换等轻量任务，推荐选择便宜快速的模型；留空则跟随当前聊天模型
           </p>
           <div className="flex flex-shrink-0 items-center gap-2">
             <ModelSelector

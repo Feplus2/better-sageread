@@ -7,6 +7,8 @@ const COMMANDS: &[&str] = &[
     "get_chunk_with_context",
     "get_toc_chunks",
     "get_chunks_by_range",
+    "prepare_manual_files",
+    "index_manual",
 ];
 
 fn main() {

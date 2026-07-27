@@ -9,4 +9,6 @@ permissions = [
     "allow-get-chunk-with-context",
     "allow-get-toc-chunks",
     "allow-get-chunks-by-range",
+    "allow-prepare-manual-files",
+    "allow-index-manual",
 ]

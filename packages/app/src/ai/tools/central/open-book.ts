@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：在阅读器中打开书籍
+ * 全局助手工具：在阅读器中打开书籍
  */
 import { useLayoutStore } from "@/store/layout-store";
 import type { BookQueryOptions, BookWithStatus } from "@/types/simple-book";

@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：PDF 转 EPUB 并入库
+ * 全局助手工具：PDF 转 EPUB 并入库
  */
 import {
   type ConvertProgress,

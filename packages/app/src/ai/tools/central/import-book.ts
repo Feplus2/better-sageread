@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：从本地路径导入书籍
+ * 全局助手工具：从本地路径导入书籍
  */
 import { uploadBook } from "@/services/book-service";
 import { readFile } from "@tauri-apps/plugin-fs";

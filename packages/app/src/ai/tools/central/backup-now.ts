@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：立即备份到云端
+ * 全局助手工具：立即备份到云端
  */
 import { syncBackupNow } from "@/services/sync-service";
 import { tool } from "ai";

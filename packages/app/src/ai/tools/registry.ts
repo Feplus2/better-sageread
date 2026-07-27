@@ -1,25 +1,35 @@
 /**
  * 工具注册框架：按 Agent 角色（central / reader）动态组装工具集。
  *
- * - central（中央 Agent）：shared + central 工具，拥有全局操作权限
+ * - central（全局助手）：shared + central 工具，拥有全局操作权限
  * - reader（阅读助手）：shared + reader 工具，聚焦内容理解
  * - mcp：预留，后续迭代接入外部 MCP Server
  */
 import { useLlamaStore } from "@/store/llama-store";
 import type { CoreTool } from "ai";
 import {
+  askAppHelpTool,
   backupNowTool,
+  backupRestoreTool,
   convertPdfTool,
   deleteBookTool,
+  exportNotesTool,
   exportThreadsTool,
   getThreadsTool,
   importBookTool,
+  importFontTool,
   manageTagsTool,
+  manageThreadsTool,
   openBookTool,
+  readerPreferencesTool,
   resetProgressTool,
   setThemeTool,
+  switchModelTool,
   syncNowTool,
+  syncPreferencesTool,
+  toggleSkillTool,
   trashManagerTool,
+  uiPreferencesTool,
   vectorizeBookTool,
 } from "./central";
 import {
@@ -111,7 +121,7 @@ registerTools([
   },
 ]);
 
-// ==================== 中央 Agent 专属工具 ====================
+// ==================== 全局助手专属工具 ====================
 
 registerTools([
   {
@@ -191,6 +201,66 @@ registerTools([
     scope: "central",
     tool: trashManagerTool as CoreTool,
     description: "恢复或彻底删除回收站书籍",
+  },
+  {
+    name: "exportNotes",
+    scope: "central",
+    tool: exportNotesTool as CoreTool,
+    description: "导出书籍划线与笔记为 Markdown",
+  },
+  {
+    name: "readerPreferences",
+    scope: "central",
+    tool: readerPreferencesTool as CoreTool,
+    description: "调整阅读偏好（字号/字体/行高/背景）",
+  },
+  {
+    name: "switchModel",
+    scope: "central",
+    tool: switchModelTool as CoreTool,
+    description: "查看与切换聊天/辅助模型",
+  },
+  {
+    name: "manageThreads",
+    scope: "central",
+    tool: manageThreadsTool as CoreTool,
+    description: "对话管理（标星/改名/删除）",
+  },
+  {
+    name: "syncPreferences",
+    scope: "central",
+    tool: syncPreferencesTool as CoreTool,
+    description: "同步与备份偏好设置",
+  },
+  {
+    name: "backupRestore",
+    scope: "central",
+    tool: backupRestoreTool as CoreTool,
+    description: "查看/恢复云端备份",
+  },
+  {
+    name: "uiPreferences",
+    scope: "central",
+    tool: uiPreferencesTool as CoreTool,
+    description: "界面偏好（竖排标签/自动滚动/侧栏互换）",
+  },
+  {
+    name: "toggleSkill",
+    scope: "central",
+    tool: toggleSkillTool as CoreTool,
+    description: "启用/停用 AI 技能",
+  },
+  {
+    name: "importFont",
+    scope: "central",
+    tool: importFontTool as CoreTool,
+    description: "从本地路径导入阅读字体",
+  },
+  {
+    name: "askAppHelp",
+    scope: "central",
+    tool: askAppHelpTool as CoreTool,
+    description: "SageRead 使用帮助问答（检索内置使用手册）",
   },
 ]);
 

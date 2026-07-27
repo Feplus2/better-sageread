@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：回收站管理（恢复/彻底删除书籍）
+ * 全局助手工具：回收站管理（恢复/彻底删除书籍）
  */
 import { getTrashedBooks, purgeBook, restoreBook } from "@/services/book-service";
 import { tool } from "ai";

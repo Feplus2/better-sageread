@@ -1,6 +1,6 @@
 import { updateBook } from "@/services/book-service";
 /**
- * 中央 Agent 工具：标签管理
+ * 全局助手工具：标签管理
  */
 import { createTag, getTags, updateTag } from "@/services/tag-service";
 import type { SimpleBook } from "@/types/simple-book";

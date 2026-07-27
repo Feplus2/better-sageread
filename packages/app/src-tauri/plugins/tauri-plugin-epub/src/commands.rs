@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::database::VectorDatabase;
 use crate::epub::EpubReader;
-use crate::pipeline::process_epub_to_db;
+use crate::pipeline::{process_epub_to_db, process_manual_to_db};
 use crate::models::ProgressUpdate;
 use crate::state::EpubState;
 use crate::epub::{parse_toc_file, find_toc_ncx_in_mdbook, flatten_toc};
@@ -351,4 +351,70 @@ impl From<DocumentChunk> for DocumentChunkDto {
             global_chunk_index: chunk.global_chunk_index,
         }
     }
+}
+
+/* ---------------- 内置使用手册语料库 ---------------- */
+
+/// 把手册原文落盘到 {app_data}/books/__app_manual__/mdbook/（幂等），返回目录路径。
+/// 关键词降级检索（无向量能力时）只需文件落盘，不需要 Embedding 配置。
+#[tauri::command]
+pub async fn prepare_manual_files<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+) -> Result<String, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::manual::ensure_manual_files(&app_data_dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 构建/更新手册向量索引（手册内容哈希不变且非 force 时跳过，返回 up-to-date）
+#[tauri::command]
+pub async fn index_manual<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    embeddings_url: String,
+    model: String,
+    api_key: Option<String>,
+    force: Option<bool>,
+) -> Result<IndexResult, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
+    // 原文始终先落盘（索引与降级检索共用），再按内容哈希判断是否需要重建索引
+    crate::manual::ensure_manual_files(&app_data_dir).map_err(|e| e.to_string())?;
+
+    let current_hash = crate::manual::manual_content_hash();
+    let db_exists = crate::manual::manual_book_dir(&app_data_dir)
+        .join("vectors.sqlite")
+        .exists();
+    let up_to_date = db_exists && crate::manual::read_indexed_hash(&app_data_dir).as_deref() == Some(&current_hash);
+
+    if up_to_date && !force.unwrap_or(false) {
+        return Ok(IndexResult {
+            success: true,
+            message: "up-to-date".into(),
+            report: None,
+        });
+    }
+
+    let report = process_manual_to_db(
+        crate::manual::manual_book_dir(&app_data_dir),
+        ProcessOptions {
+            batch_size: None,
+            vectorizer: VectorizerConfig {
+                embeddings_url,
+                model_name: model,
+                api_key,
+            },
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    crate::manual::write_indexed_hash(&app_data_dir, &current_hash).map_err(|e| e.to_string())?;
+
+    Ok(IndexResult {
+        success: true,
+        message: "indexed".into(),
+        report: Some(report.into()),
+    })
 }

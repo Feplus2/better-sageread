@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：重置阅读进度
+ * 全局助手工具：重置阅读进度
  */
 import { updateBookStatus } from "@/services/book-service";
 import type { BookQueryOptions, BookWithStatus, SimpleBook } from "@/types/simple-book";

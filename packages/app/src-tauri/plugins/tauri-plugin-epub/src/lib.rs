@@ -20,6 +20,9 @@ mod database;
 // Core modules
 mod pipeline;
 
+// 内置使用手册（编译期嵌入的 Markdown 资源与索引元信息）
+mod manual;
+
 pub use state::EpubState;
 
 /// Initializes the EPUB plugin.
@@ -34,6 +37,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_chunk_with_context,
             commands::get_toc_chunks,
             commands::get_chunks_by_range,
+            commands::prepare_manual_files,
+            commands::index_manual,
         ])
         .setup(|app, _api| {
             // Initialize and manage plugin state

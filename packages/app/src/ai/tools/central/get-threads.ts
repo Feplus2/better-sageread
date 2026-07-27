@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：查询/搜索对话记录
+ * 全局助手工具：查询/搜索对话记录
  */
 import { getAllThreads, getThreadsBybookId } from "@/services/thread-service";
 import { tool } from "ai";

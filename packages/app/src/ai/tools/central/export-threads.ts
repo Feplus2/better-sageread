@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：导出对话记录
+ * 全局助手工具：导出对话记录
  *
  * 默认行为：每个对话独立导出为一个文件（用户选择输出目录）
  * 合并模式：仅当 merge=true 时，所有对话合并写入单个文件
@@ -261,7 +261,7 @@ export const exportThreadsTool = tool({
         meta: { reasoning, bookId, starredOnly, format, merge },
       };
     } catch (error) {
-      throw new Error(`导出对话失败: ${error instanceof Error ? error.message : "未知错误"}`);
+      throw new Error(`导出对话失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   },
 });
