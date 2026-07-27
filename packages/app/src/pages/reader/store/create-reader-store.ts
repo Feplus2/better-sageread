@@ -17,6 +17,8 @@ export interface BookDataState {
   file: File | null;
   config: BookConfig | null;
   bookDoc: BookDoc | null;
+  /** PDF 等原生格式的文件访问 URL（供 iframe/embed 渲染） */
+  nativeFileUrl?: string;
 }
 
 export type OpenDropdown = "toc" | "search" | "settings" | null;
@@ -106,7 +108,16 @@ export const createReaderStore = (bookId: string) => {
         };
 
         const config = await loadBookConfig(bookId, settings);
-        const { book: bookDoc } = await new DocumentLoader(file).open();
+
+        // PDF 不走 foliate-js 渲染管线，由前端 PdfViewer 组件独立处理
+        let bookDoc: BookDoc | null = null;
+        let nativeFileUrl: string | undefined;
+        if (simpleBook.format === "PDF") {
+          nativeFileUrl = fileUrl;
+        } else {
+          const result = await new DocumentLoader(file).open();
+          bookDoc = result.book;
+        }
 
         const bookData: BookDataState = {
           id: bookId,
@@ -114,6 +125,7 @@ export const createReaderStore = (bookId: string) => {
           file,
           config,
           bookDoc,
+          nativeFileUrl,
         };
 
         set({

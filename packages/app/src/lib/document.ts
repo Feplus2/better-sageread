@@ -208,6 +208,9 @@ export class DocumentLoader {
         book = await new EPUB(loader).init();
         format = "EPUB";
       }
+    } else if (await this.isPDF()) {
+      // PDF 不走 foliate-js 渲染，由前端 PdfViewer 组件独立处理
+      format = "PDF";
     } else if (await (await import("foliate-js/mobi.js")).isMOBI(this.file)) {
       const fflate = await import("foliate-js/vendor/fflate.js");
       const { MOBI } = await import("foliate-js/mobi.js");

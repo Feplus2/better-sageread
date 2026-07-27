@@ -134,6 +134,32 @@ export default function ReaderViewer() {
     return null;
   }
 
+  // PDF 格式：使用原生渲染（iframe）+ 转换建议横幅
+  if (bookData.book?.format === "PDF" && bookData.nativeFileUrl) {
+    return (
+      <div id={`gridcell-${bookId}`} className="relative flex h-full w-full flex-col rounded-md bg-background">
+        <div className="flex items-center gap-2 border-b bg-orange-50 px-4 py-2 text-sm dark:border-neutral-700 dark:bg-orange-950/30">
+          <svg className="h-4 w-4 flex-shrink-0 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+            />
+          </svg>
+          <span className="text-orange-700 dark:text-orange-300">
+            PDF 阅读模式：转换为 EPUB 可解锁 AI 问答、划线笔记、进度同步等完整体验（设置 → PDF 转换）
+          </span>
+        </div>
+        <iframe
+          src={bookData.nativeFileUrl}
+          className="flex-1 border-0"
+          title={`PDF: ${bookData.book?.title || ""}`}
+        />
+      </div>
+    );
+  }
+
   return (
     <div id={`gridcell-${bookId}`} className="relative flex h-full w-full flex-col rounded-md bg-background">
       <HeaderBar />

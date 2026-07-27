@@ -9,6 +9,16 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useDownloadImage } from "@/hooks/use-download-image";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { BookTag } from "@/pages/library/hooks/use-tags-management";
@@ -536,13 +546,66 @@ export default function BookItem({
                 <div className="flex-1">{renderProgress()}</div>
                 <div className="flex items-center gap-2">
                   {renderVectorizationStatus()}
-                  <MoreHorizontal
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpen(true);
-                    }}
-                    className="h-4 w-4 text-neutral-500 dark:text-neutral-400"
-                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        className="rounded p-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-600"
+                      >
+                        <MoreHorizontal className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem onClick={() => handleClick()}>打开</DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>{isVectorized ? "✓ 向量化" : "向量化"}</DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          {isVectorized && (
+                            <>
+                              <DropdownMenuItem disabled>✓ 已向量化</DropdownMenuItem>
+                              <DropdownMenuItem disabled>模型: {vectorMeta?.model || "未知"}</DropdownMenuItem>
+                              <DropdownMenuItem disabled>维度: {vectorMeta?.dimension || 0}</DropdownMenuItem>
+                              <DropdownMenuItem disabled>分块: {vectorMeta?.chunkCount || 0}</DropdownMenuItem>
+                            </>
+                          )}
+                          <DropdownMenuItem onClick={() => void handleVectorizeBook()}>
+                            {isVectorized ? "重新向量化" : "开始向量化"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setShowEmbeddingDialog(true)}>向量化测试</DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setShowEditDialog(true)}>编辑信息</DropdownMenuItem>
+                      {book.coverUrl && <DropdownMenuItem onClick={() => handleDownloadImage()}>下载图片</DropdownMenuItem>}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>管理标签</DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          <DropdownMenuItem onClick={() => handleAIGenerateTags()}>AI 生成</DropdownMenuItem>
+                          {tagOptions.length > 0 && <DropdownMenuSeparator />}
+                          {tagOptions.map((tag) => {
+                            const tagName = tag.id.startsWith("tag-") ? tag.id.replace("tag-", "") : tag.name;
+                            const dbTag = databaseTags.find((t) => t.name === tagName);
+                            const realTagId = dbTag?.id;
+                            const hasTag = realTagId ? currentTags.includes(realTagId) : false;
+                            return (
+                              <DropdownMenuItem key={tag.id} onClick={() => realTagId && handleTagToggle(realTagId)}>
+                                {hasTag ? `✓ ${tagName}` : tagName}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => console.log(isUnread ? "Mark as Read clicked" : "Mark as Unread clicked")}>
+                        {isUnread ? "标记为已读" : "标记为未读"}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive" onClick={() => handleNativeDelete()}>
+                        删除
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </div>

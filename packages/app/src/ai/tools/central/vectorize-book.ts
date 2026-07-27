@@ -154,6 +154,16 @@ export const vectorizeBookTool = tool({
           };
         }
 
+        if (book.format !== "EPUB") {
+          return {
+            results: {
+              success: false,
+              message: `《${book.title}》为 ${book.format} 格式，向量化仅支持 EPUB。请先将 PDF 转换为 EPUB（设置 → PDF 转换）`,
+            },
+            meta: { reasoning, bookId, format: book.format },
+          };
+        }
+
         if (isVectorized(book)) {
           return {
             results: {
@@ -179,15 +189,21 @@ export const vectorizeBookTool = tool({
 
       // ==================== 批量模式 ====================
       const allBooks = await getBooksWithStatus({ limit: 500 });
-      const unvectorizedBooks = allBooks.filter((b) => !isVectorized(b));
+      // 只对 EPUB 格式执行向量化，PDF 等非 EPUB 格式跳过
+      const unvectorizedBooks = allBooks.filter((b) => !isVectorized(b) && b.format === "EPUB");
+      const skippedNonEpub = allBooks.filter((b) => !isVectorized(b) && b.format !== "EPUB");
 
       if (unvectorizedBooks.length === 0) {
+        const msg = skippedNonEpub.length > 0
+          ? `所有 EPUB 书籍均已完成向量化。另有 ${skippedNonEpub.length} 本非 EPUB 格式书籍不支持向量化`
+          : `所有 ${allBooks.length} 本书均已完成向量化，无需操作`;
         return {
           results: {
             success: true,
-            message: `所有 ${allBooks.length} 本书均已完成向量化，无需操作`,
+            message: msg,
             totalBooks: allBooks.length,
             alreadyVectorized: true,
+            skippedNonEpub: skippedNonEpub.length,
           },
           meta: { reasoning },
         };
@@ -208,13 +224,15 @@ export const vectorizeBookTool = tool({
         details.push({ title: book.title, success: result.success, message: result.message });
       }
 
+      const skippedNote = skippedNonEpub.length > 0 ? `（跳过 ${skippedNonEpub.length} 本非 EPUB 格式）` : "";
       return {
         results: {
           success: successCount > 0,
-          message: `批量向量化完成：共 ${unvectorizedBooks.length} 本，成功 ${successCount} 本${failCount > 0 ? `，失败 ${failCount} 本` : ""}`,
+          message: `批量向量化完成：共 ${unvectorizedBooks.length} 本 EPUB，成功 ${successCount} 本${failCount > 0 ? `，失败 ${failCount} 本` : ""}${skippedNote}`,
           total: unvectorizedBooks.length,
           successCount,
           failCount,
+          skippedNonEpub: skippedNonEpub.length,
           details,
         },
         meta: { reasoning, model: config.model, source: config.source },

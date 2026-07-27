@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileDown,
+  GraduationCap,
   Library,
   Lightbulb,
   Settings,
@@ -129,6 +130,11 @@ export default function Sidebar() {
       path: "/",
       label: "图书馆",
       icon: Library,
+    },
+    {
+      path: "/papers",
+      label: "文献库",
+      icon: GraduationCap,
     },
     {
       path: "/chat",

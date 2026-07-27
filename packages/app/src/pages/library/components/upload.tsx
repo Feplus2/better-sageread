@@ -27,7 +27,7 @@ export default function Upload() {
         <input
           type="file"
           multiple
-          accept=".epub"
+          accept=".epub,.pdf"
           className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
           onChange={handleFileSelect}
           disabled={isUploading}
@@ -47,7 +47,7 @@ export default function Upload() {
               <h2 className="font-medium text-neutral-900 text-xl dark:text-neutral-100">
                 {isUploading ? "上传中..." : "拖拽书籍到此处上传"}
               </h2>
-              <p className="text-neutral-600 text-sm dark:text-neutral-400">支持的格式：.epub</p>
+              <p className="text-neutral-600 text-sm dark:text-neutral-400">支持的格式：.epub、.pdf（PDF 需转换后阅读）</p>
             </div>
 
             <div className="relative">

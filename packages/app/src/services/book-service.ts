@@ -28,8 +28,8 @@ import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 export async function uploadBook(file: File): Promise<SimpleBook> {
   try {
     const format = getBookFormat(file.name);
-    if (!["EPUB", "PDF", "MOBI", "CBZ", "FB2", "FBZ"].includes(format)) {
-      throw new Error(`不支持的文件格式: ${format}`);
+    if (!["EPUB", "PDF"].includes(format)) {
+      throw new Error(`不支持的文件格式: ${format}。目前支持 EPUB 和 PDF`);
     }
 
     const bookHash = await partialMD5(file);
