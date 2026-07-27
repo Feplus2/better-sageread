@@ -1,5 +1,5 @@
 //! L2 资产通道：字体与自定义背景图的内容寻址同步
-//! 云端布局：sageread-sync/assets/<sha256前2位>/<sha256> + assets-index.json
+//! 云端布局：sageread/sync/assets/<sha256前2位>/<sha256> + assets-index.json
 //! 索引 key = "{kind}/{filename}"，kind ∈ {font, background}
 
 use super::files::compute_sha256;
@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// L2 云端根目录（与 engine.rs 保持一致）
-const L2_ROOT: &str = "sageread-sync";
+/// L2 云端根目录（与 engine.rs 保持一致：按配置动态解析，见 models::l2_root）
+use super::models::l2_root;
 
 /// 背景图支持的扩展名（与前端 reader-background-service 保持一致）
 const BACKGROUND_EXTS: [&str; 4] = [".png", ".jpg", ".jpeg", ".webp"];
@@ -52,10 +52,10 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// 资产 blob 的云端路径：sageread-sync/assets/<sha256前2位>/<sha256>
-fn asset_blob_path(sha256: &str) -> String {
+/// 资产 blob 的云端路径：sageread/sync/assets/<sha256前2位>/<sha256>
+fn asset_blob_path(config: &WebdavConfig, sha256: &str) -> String {
     let prefix = &sha256[..2];
-    format!("{L2_ROOT}/assets/{prefix}/{sha256}")
+    format!("{}/assets/{prefix}/{sha256}", l2_root(config))
 }
 
 /// 资产在本地的存放目录：字体在 app_data_dir/fonts，背景在 config_dir/reader-backgrounds
@@ -71,7 +71,7 @@ fn asset_local_dir(kind: &str, app_data_dir: &Path, config_dir: &Path) -> PathBu
 
 /// 拉取云端 assets-index.json（不存在返回空 map）
 pub async fn read_assets_index(config: &WebdavConfig) -> Result<HashMap<String, AssetEntry>, String> {
-    let path = format!("{L2_ROOT}/assets-index.json");
+    let path = format!("{}/assets-index.json", l2_root(config));
     match webdav::get_path(config, &path).await? {
         Some(bytes) => {
             let index: HashMap<String, AssetEntry> =
@@ -84,7 +84,7 @@ pub async fn read_assets_index(config: &WebdavConfig) -> Result<HashMap<String, 
 
 async fn write_assets_index(config: &WebdavConfig, index: &HashMap<String, AssetEntry>) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(index).map_err(|e| format!("序列化 assets-index.json 失败: {e}"))?;
-    let path = format!("{L2_ROOT}/assets-index.json");
+    let path = format!("{}/assets-index.json", l2_root(config));
     webdav::put_path(config, &path, bytes).await
 }
 
@@ -170,12 +170,12 @@ pub async fn upload_missing_assets(
             .len();
 
         // 内容寻址去重：blob 已存在则跳过传输
-        let blob_path = asset_blob_path(&sha256);
+        let blob_path = asset_blob_path(config, &sha256);
         if webdav::get_path(config, &blob_path).await?.is_none() {
             let prefix = &sha256[..2];
             webdav::ensure_remote_dirs(
                 config,
-                &[format!("{L2_ROOT}/assets"), format!("{L2_ROOT}/assets/{prefix}")],
+                &[format!("{}/assets", l2_root(config)), format!("{}/assets/{prefix}", l2_root(config))],
             )
             .await?;
 
@@ -224,7 +224,7 @@ pub async fn download_missing_assets(
             continue;
         }
 
-        let blob_path = asset_blob_path(&entry.sha256);
+        let blob_path = asset_blob_path(config, &entry.sha256);
         let Some(bytes) = webdav::get_path(config, &blob_path).await? else {
             log::warn!("资产 blob 缺失（跳过）: {key} -> {}", entry.sha256);
             continue;

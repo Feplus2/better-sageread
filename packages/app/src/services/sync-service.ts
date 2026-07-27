@@ -13,6 +13,8 @@ export interface WebdavConfig {
   l2_enabled: boolean;
   /** off / 30s / 5min / 30min */
   sync_frequency: string;
+  /** 内部字段：L2 云端根目录覆盖（服务器拒绝目录搬家时回退旧目录），设置页不展示 */
+  l2_root?: string | null;
 }
 
 export interface BackupInfo {
@@ -218,6 +220,33 @@ export async function syncGetCloudAssets(): Promise<AssetsStatus> {
 }
 
 /* ---------------- L2 UI 配置同步（背景选择/辅助模型） ---------------- */
+
+/** 同步偏好补丁（非敏感字段，agent 工具走此通道，密钥不出后端） */
+export interface SyncPrefsPatch {
+  /** off / hourly / daily */
+  autoBackup?: string;
+  backupKeep?: number;
+  /** off / 30s / 5min / 30min */
+  syncFrequency?: string;
+  l2Enabled?: boolean;
+}
+
+export interface SyncPrefsView {
+  auto_backup: string;
+  backup_keep: number;
+  sync_frequency: string;
+  l2_enabled: boolean;
+}
+
+/** 补丁式更新同步偏好（自动备份频率/保留份数/拉取频率/增量同步开关） */
+export async function syncUpdatePrefs(patch: SyncPrefsPatch): Promise<SyncPrefsView> {
+  const rustPatch: Record<string, unknown> = {};
+  if (patch.autoBackup !== undefined) rustPatch.auto_backup = patch.autoBackup;
+  if (patch.backupKeep !== undefined) rustPatch.backup_keep = patch.backupKeep;
+  if (patch.syncFrequency !== undefined) rustPatch.sync_frequency = patch.syncFrequency;
+  if (patch.l2Enabled !== undefined) rustPatch.l2_enabled = patch.l2Enabled;
+  return invoke("sync_update_prefs", { patch: rustPatch });
+}
 
 /** 上传 UI 配置 JSON（不透明搬运） */
 export async function syncPutUiConfig(json: string): Promise<void> {

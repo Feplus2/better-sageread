@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 fn default_remote_dir() -> String {
-    "sageread-backups".to_string()
+    "sageread/backups".to_string()
 }
 
 fn default_auto_backup() -> String {
@@ -36,6 +36,15 @@ pub struct WebdavConfig {
     /// L2 同步频率：off / 30s / 5min / 30min
     #[serde(default = "default_sync_frequency")]
     pub sync_frequency: String,
+    /// L2 云端根目录覆盖：None=默认 sageread/sync；
+    /// 服务器拒绝 MOVE（如坚果云 403）时落为旧目录 sageread-sync，保证同步不断
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l2_root: Option<String>,
+}
+
+/// L2 云端根目录解析：覆盖值优先，缺省用统一新布局
+pub fn l2_root(config: &WebdavConfig) -> &str {
+    config.l2_root.as_deref().unwrap_or("sageread/sync")
 }
 
 /// 备份包内的清单文件（manifest.json）
@@ -92,6 +101,9 @@ pub struct SyncState {
     /// 每包应用失败次数（key = device_id/seq_end）：失败不推水位下轮重试，满 3 次跳过
     #[serde(default)]
     pub failed_packs: std::collections::HashMap<String, u8>,
+    /// 云端目录布局（sageread/{sync,backups}）已完成迁移的 endpoint（防重复 PROPFIND）
+    #[serde(default)]
+    pub cloud_layout_migrated_for: Option<String>,
 }
 
 /// 备份执行结果（uploaded=已上传，skipped=无变化跳过）

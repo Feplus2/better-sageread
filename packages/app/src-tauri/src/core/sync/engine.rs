@@ -2,7 +2,7 @@ use super::assets;
 use super::changelog::{self, ChangeRow};
 use super::files;
 use super::merge::{self, ThreadRowData};
-use super::models::{SyncState, WebdavConfig};
+use super::models::{l2_root, SyncState, WebdavConfig};
 use super::tables::{self, ColType};
 use super::webdav;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-/// L2 云端根目录（协议版本化：不兼容演进时整体升级 sageread-sync-v2）
-const L2_ROOT: &str = "sageread-sync";
+/// L2 云端根目录由 models::l2_root 按配置解析（协议版本化：不兼容演进时整体升级 sageread/sync-v2）
 /// 应用前安全快照保留份数
 const SAFETY_SNAPSHOTS_KEEP: usize = 3;
 
@@ -147,12 +146,12 @@ fn note_pack_failure(state: &mut SyncState, device_id: &str, seq_end: i64) -> bo
 
 /* ---------------- 云端指针与索引 ---------------- */
 
-fn pointer_path(device_id: &str) -> String {
-    format!("{L2_ROOT}/devices/{device_id}.json")
+fn pointer_path(config: &WebdavConfig, device_id: &str) -> String {
+    format!("{}/devices/{device_id}.json", l2_root(config))
 }
 
 async fn read_pointer(config: &WebdavConfig, device_id: &str) -> Result<DevicePointer, String> {
-    match webdav::get_path(config, &pointer_path(device_id)).await? {
+    match webdav::get_path(config, &pointer_path(config, device_id)).await? {
         Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("解析设备指针失败: {e}")),
         None => Ok(DevicePointer {
             device_id: device_id.to_string(),
@@ -169,11 +168,11 @@ async fn put_path_atomic(config: &WebdavConfig, path: &str, bytes: Vec<u8>) -> R
 
 async fn write_pointer(config: &WebdavConfig, pointer: &DevicePointer) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(pointer).map_err(|e| e.to_string())?;
-    put_path_atomic(config, &pointer_path(&pointer.device_id), bytes).await
+    put_path_atomic(config, &pointer_path(config, &pointer.device_id), bytes).await
 }
 
 async fn read_devices_index(config: &WebdavConfig) -> Result<HashMap<String, DeviceIndexEntry>, String> {
-    match webdav::get_path(config, &format!("{L2_ROOT}/devices.json")).await? {
+    match webdav::get_path(config, &format!("{}/devices.json", l2_root(config))).await? {
         Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("解析设备索引失败: {e}")),
         None => Ok(HashMap::new()),
     }
@@ -196,7 +195,7 @@ async fn upsert_devices_index(config: &WebdavConfig, device_id: &str, latest_seq
     let mut index = read_devices_index(config).await?;
     register_in_index(&mut index, device_id, latest_seq);
     let bytes = serde_json::to_vec_pretty(&index).map_err(|e| e.to_string())?;
-    put_path_atomic(config, &format!("{L2_ROOT}/devices.json"), bytes).await
+    put_path_atomic(config, &format!("{}/devices.json", l2_root(config)), bytes).await
 }
 
 /// 发现需要全量引导的新 peer：devices.json 里非自身且未引导过的设备（排序输出，日志/测试稳定）
@@ -789,7 +788,7 @@ async fn prune_remote_changesets(config: &WebdavConfig, device_id: &str) {
         let candidates = compute_prune_candidates(&seq_ends, min_pulled);
 
         for seq_end in &candidates {
-            webdav::delete_path(config, &format!("{L2_ROOT}/changesets/{device_id}/{:010}.jsonl", seq_end)).await?;
+            webdav::delete_path(config, &format!("{}/changesets/{device_id}/{:010}.jsonl", l2_root(config), seq_end)).await?;
         }
         if !candidates.is_empty() {
             own.changesets.retain(|cs| !candidates.contains(&cs.seq_end));
@@ -874,7 +873,7 @@ async fn pull_from_devices(
             if cs.seq_end <= last_pulled {
                 continue;
             }
-            let path = format!("{L2_ROOT}/changesets/{remote_id}/{:010}.jsonl", cs.seq_end);
+            let path = format!("{}/changesets/{remote_id}/{:010}.jsonl", l2_root(config), cs.seq_end);
             let Some(bytes) = webdav::get_path(config, &path).await? else {
                 log::warn!("changeset 缺失（跳过）: {path}");
                 state.set_last_pulled(remote_id, cs.seq_end);
@@ -953,10 +952,10 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
     webdav::ensure_remote_dirs(
         config,
         &[
-            L2_ROOT.to_string(),
-            format!("{L2_ROOT}/changesets"),
-            format!("{L2_ROOT}/changesets/{device_id}"),
-            format!("{L2_ROOT}/devices"),
+            l2_root(config).to_string(),
+            format!("{}/changesets", l2_root(config)),
+            format!("{}/changesets/{device_id}", l2_root(config)),
+            format!("{}/devices", l2_root(config)),
         ],
     )
     .await?;
@@ -980,7 +979,7 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
         let name = format!("{:010}.jsonl", packed.seq_to);
         put_path_atomic(
             config,
-            &format!("{L2_ROOT}/changesets/{device_id}/{name}"),
+            &format!("{}/changesets/{device_id}/{name}", l2_root(config)),
             packed.jsonl.into_bytes(),
         )
         .await?;
@@ -1110,7 +1109,7 @@ pub async fn run_pull_only(app: &AppHandle, pool: &SqlitePool, config: &WebdavCo
 
     // 设备登记（协议 §3）：纯拉取轮同样每轮写 devices.json（latest_seq 可为 0），
     // 否则新设备对老设备的"发现新 peer 就全量引导"不可见；先确保云端目录存在
-    webdav::ensure_remote_dirs(config, &[L2_ROOT.to_string(), format!("{L2_ROOT}/devices")]).await?;
+    webdav::ensure_remote_dirs(config, &[l2_root(config).to_string(), format!("{}/devices", l2_root(config))]).await?;
     upsert_devices_index(config, &device_id, state.last_pushed_seq.unwrap_or(0)).await?;
 
     let pulled = match pull_from_devices(app, pool, config, &device_id, &mut state).await {

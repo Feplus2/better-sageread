@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// L2 云端根目录（与 engine.rs 保持一致）
-const L2_ROOT: &str = "sageread-sync";
+/// L2 云端根目录（与 engine.rs 保持一致：按配置动态解析，见 models::l2_root）
+use super::models::l2_root;
 
 /* ---------------- 数据结构 ---------------- */
 
@@ -70,17 +70,17 @@ pub fn compute_sha256(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// 云端文件路径：sageread-sync/files/<sha256前2位>/<sha256>
-fn cloud_file_path(sha256: &str) -> String {
+/// 云端文件路径：sageread/sync/files/<sha256前2位>/<sha256>
+fn cloud_file_path(config: &WebdavConfig, sha256: &str) -> String {
     let prefix = &sha256[..2];
-    format!("{L2_ROOT}/files/{prefix}/{sha256}")
+    format!("{}/files/{prefix}/{sha256}", l2_root(config))
 }
 
 /* ---------------- files-index.json 读写 ---------------- */
 
 /// 拉取云端 files-index.json（不存在返回空 map）
 pub async fn read_files_index(config: &WebdavConfig) -> Result<HashMap<String, FileEntry>, String> {
-    let path = format!("{L2_ROOT}/files-index.json");
+    let path = format!("{}/files-index.json", l2_root(config));
     match webdav::get_path(config, &path).await? {
         Some(bytes) => {
             let index: HashMap<String, FileEntry> =
@@ -98,7 +98,7 @@ pub async fn read_files_index(config: &WebdavConfig) -> Result<HashMap<String, F
 /// 写入 files-index.json（直接 PUT 覆盖）
 async fn write_files_index(config: &WebdavConfig, index: &HashMap<String, FileEntry>) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(index).map_err(|e| format!("序列化 files-index.json 失败: {e}"))?;
-    let path = format!("{L2_ROOT}/files-index.json");
+    let path = format!("{}/files-index.json", l2_root(config));
     webdav::put_path(config, &path, bytes).await
 }
 
@@ -157,14 +157,14 @@ pub async fn upload_book(
     };
 
     // 检查云端是否已有该 sha256 的文件（内容寻址去重）
-    let cloud_path = cloud_file_path(&sha256);
+    let cloud_path = cloud_file_path(config, &sha256);
     let exists = webdav::get_path(config, &cloud_path).await?.is_some();
     if !exists {
         // 确保目录存在（MKCOL 要求父目录已存在，须先建 files 再建 files/<prefix>）
         let prefix = &sha256[..2];
         webdav::ensure_remote_dirs(
             config,
-            &[format!("{L2_ROOT}/files"), format!("{L2_ROOT}/files/{prefix}")],
+            &[format!("{}/files", l2_root(config)), format!("{}/files/{prefix}", l2_root(config))],
         )
         .await?;
 
@@ -254,7 +254,7 @@ pub async fn download_book(
     book_src: &str,
     sha256: &str,
 ) -> Result<PathBuf, String> {
-    let cloud_path = cloud_file_path(sha256);
+    let cloud_path = cloud_file_path(config, sha256);
     let bytes = webdav::get_path(config, &cloud_path)
         .await?
         .ok_or_else(|| format!("云端文件不存在: {sha256}"))?;

@@ -19,7 +19,7 @@
 云端目录结构（WebDAV 根下）：
 
 ```
-sageread-sync/
+sageread/sync/
   sync.json                      # 全局信息：protocol 版本、创建时间
   devices/<device_id>.json       # 每台设备的指针：最新 changeset 序号、最后在线时间
   changesets/<device_id>/<seq>.jsonl   # 各设备的变更包（只增不改）
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS _sync_log (
 ## 10. 安全措施
 
 - **每次应用远端变更前**，自动 `VACUUM INTO` 本地快照（复用 L1 机制，保留最近 3 份）——同步出错可一键回滚
-- `protocol` 版本号：不兼容演进时整体升级目录（`sageread-sync-v2/`），老客户端不受冲击
+- `protocol` 版本号：不兼容演进时整体升级目录（`sageread/sync-v2/`），老客户端不受冲击
 - 校验：changeset 逐行 JSON 解析失败即整包跳过并告警；文件 sha256 不符即重下
 - 云端文件写入：直接 PUT 最终文件名（注：原设计为 .tmp + MOVE 原子改名，坚果云对 MOVE 返回 409，实测不兼容；半截文件由拉取侧解析校验兜底）
 - **日志修剪（2026-07-22 新增）**：本地推送成功后删 `seq < last_pushed_seq - 100`；云端 changesets 按"所有设备已消费水位（各设备 last_pulled 最小值）+ 至少留最近 5 个 + 最多留 50 个"修剪——日志是用完即弃的传输载体，不无限堆积

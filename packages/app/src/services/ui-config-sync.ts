@@ -1,6 +1,6 @@
 /**
  * L2 UI 配置同步：背景选择状态 + 辅助模型选择 + 全局主题选择
- * 云端文件 sageread-sync/ui-config.json，整文件 LWW（按 updated_at 大者采纳）
+ * 云端文件 sageread/sync/ui-config.json，整文件 LWW（按 updated_at 大者采纳）
  * 安全红线：只含 utilityModel（仅 id/名称）与 readerBackground（剔除 fileUrl），
  * 绝不同步 modelProviders（含 apiKey）。
  *

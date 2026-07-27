@@ -38,7 +38,7 @@ const DEFAULT_CONFIG: WebdavConfig = {
   endpoint: "",
   username: "",
   password: "",
-  remote_dir: "sageread-backups",
+  remote_dir: "sageread/backups",
   auto_backup: "off",
   backup_keep: 10,
   l2_enabled: false,
@@ -409,7 +409,7 @@ export default function SyncSettings() {
               <Input
                 value={config.remote_dir}
                 onChange={(e) => updateConfig({ remote_dir: e.target.value })}
-                placeholder="sageread-backups"
+                placeholder="sageread/backups"
                 className="mt-1"
               />
             </div>
@@ -525,11 +525,7 @@ export default function SyncSettings() {
                     disabled={restoringName !== null || deletingName !== null}
                     onClick={() => handleDeleteBackup(backup)}
                   >
-                    {deletingName === backup.name ? (
-                      "删除中..."
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
+                    {deletingName === backup.name ? "删除中..." : <Trash2 className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
@@ -621,8 +617,8 @@ export default function SyncSettings() {
             {assetsStatus?.cloud_backgrounds ?? 0} 张（本地 {assetsStatus?.local_backgrounds ?? 0} 张）
           </p>
           <p className="mt-1 text-neutral-600 text-xs dark:text-neutral-400">
-            字体、自定义背景图自动双向同步；当前背景选择与辅助模型选择随 L2
-            同步。辅助模型需两端配置同一服务商才生效；API 密钥永不同步。
+            字体、自定义背景图自动双向同步；当前背景选择与辅助模型选择随增量同步
+            一并同步。辅助模型需两端配置同一服务商才生效；API 密钥永不同步。
           </p>
         </div>
       )}

@@ -46,7 +46,7 @@ use crate::core::{
         sync_get_ui_config, sync_has_unpushed, sync_list_backups, sync_list_l2_snapshots,
         sync_pull_now, sync_put_ui_config, sync_restore, sync_restart_app, sync_rollback,
         sync_rollback_l2, sync_run_now, sync_save_config, sync_test_connection,
-        sync_upload_all_books, sync_upload_book,
+        sync_update_prefs, sync_upload_all_books, sync_upload_book,
     },
     tags::commands::{
         create_tag, delete_tag, get_tag_by_id, get_tag_by_name, get_tags, update_tag,
@@ -135,6 +135,13 @@ pub fn run() {
                 drop(db_pool_guard);
                 if let Err(e) = core::books::commands::purge_expired_trash(&app_handle).await {
                     log::error!("回收站自动清理失败: {}", e);
+                }
+
+                // 云端目录布局迁移（sageread-{sync,backups} → sageread/{sync,backups}），
+                // 尽力而为：失败仅告警，后续同步/备份命令入口会重试；
+                // 启动走 force 复查——用户可能在 WebDAV 后台手动搬了家
+                if let Err(e) = core::sync::commands::migrate_cloud_layout_at_startup(&app_handle).await {
+                    log::warn!("云端目录布局迁移未完成（下轮同步时重试）: {e}");
                 }
             });
             Ok(())
@@ -228,6 +235,7 @@ pub fn run() {
             sync_get_cloud_assets,
             sync_put_ui_config,
             sync_get_ui_config,
+            sync_update_prefs,
             web_search,
             // converter (PDF → EPUB)
             convert_pdf_to_epub,

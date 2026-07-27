@@ -1,5 +1,5 @@
 /**
- * 中央 Agent 工具：立即同步（L2 增量同步）
+ * 全局助手工具：立即同步（增量同步）
  */
 import { syncPullNow, syncRunNow } from "@/services/sync-service";
 import { tool } from "ai";
@@ -12,7 +12,7 @@ export const syncNowTool = tool({
 • 双向同步（默认）：推送本地变更 + 拉取远端变更
 • 仅拉取：只从远端拉取最新数据
 
-⚠️ **前提条件**：需要已在 设置 → 同步 中开启 L2 增量同步
+⚠️ **前提条件**：需要已在 设置 → 同步 中开启增量同步
 
 📊 **返回内容**：
 同步结果（推送/拉取的行数、变更的书籍和对话）`,
@@ -54,7 +54,7 @@ export const syncNowTool = tool({
         errorMessage.includes("未配置") ||
         errorMessage.includes("disabled")
       ) {
-        throw new Error("尚未开启 L2 增量同步，请先在 设置 → 同步 中配置并开启");
+        throw new Error("尚未开启增量同步，请先在 设置 → 同步 中配置并开启");
       }
       throw new Error(`同步失败: ${errorMessage}`);
     }

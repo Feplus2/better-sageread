@@ -66,13 +66,21 @@ pub async fn test_connection(config: &WebdavConfig) -> Result<String, String> {
     Ok("连接成功".to_string())
 }
 
-/// 按需确保多个远端目录存在（逐级 MKCOL，201/405 均视为成功）
+/// 按需确保多个远端目录存在（每个目录逐级 MKCOL，201/405 均视为成功；
+/// 逐级是为了兼容嵌套路径——坚果云等不允许在缺失的父目录下直接建子目录）
 pub async fn ensure_remote_dirs(config: &WebdavConfig, dirs: &[String]) -> Result<(), String> {
     for dir in dirs {
-        let resp = send(config, Method::from_bytes(b"MKCOL").unwrap(), dir, None).await?;
-        let status = resp.status().as_u16();
-        if !(200..300).contains(&status) && status != 405 {
-            return Err(format!("创建同步目录失败 (HTTP {status}): {dir}"));
+        let mut current = String::new();
+        for segment in dir.split('/').filter(|s| !s.is_empty()) {
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(segment);
+            let resp = send(config, Method::from_bytes(b"MKCOL").unwrap(), &current, None).await?;
+            let status = resp.status().as_u16();
+            if !(200..300).contains(&status) && status != 405 {
+                return Err(format!("创建同步目录失败 (HTTP {status}): {current}"));
+            }
         }
     }
     Ok(())
@@ -163,6 +171,48 @@ pub async fn delete_path(config: &WebdavConfig, path: &str) -> Result<(), String
     let status = resp.status().as_u16();
     if !(200..300).contains(&status) && status != 404 {
         return Err(format!("删除远端文件失败 (HTTP {status}): {path}"));
+    }
+    Ok(())
+}
+
+/// 远端路径（文件或目录）是否存在：PROPFIND Depth:0，2xx/207=存在，404=不存在
+pub async fn path_exists(config: &WebdavConfig, path: &str) -> Result<bool, String> {
+    let url = remote_url(config, path)?;
+    let resp = client()?
+        .request(Method::from_bytes(b"PROPFIND").unwrap(), url)
+        .basic_auth(&config.username, Some(&config.password))
+        .header("Depth", "0")
+        .header("Content-Type", "application/xml")
+        .body(r#"<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>"#)
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {e}"))?;
+    let status = resp.status().as_u16();
+    if status == 404 {
+        return Ok(false);
+    }
+    if (200..300).contains(&status) {
+        return Ok(true);
+    }
+    Err(format!("PROPFIND 失败 (HTTP {status}): {path}"))
+}
+
+/// WebDAV MOVE（文件/集合通用），用于云端目录整体搬家
+/// Overwrite: F——目标已存在直接报错，调用方须先用 path_exists 判空，避免互相覆盖
+pub async fn move_path(config: &WebdavConfig, src: &str, dst: &str) -> Result<(), String> {
+    let src_url = remote_url(config, src)?;
+    let dst_url = remote_url(config, dst)?;
+    let resp = client()?
+        .request(Method::from_bytes(b"MOVE").unwrap(), src_url)
+        .basic_auth(&config.username, Some(&config.password))
+        .header("Destination", dst_url.to_string())
+        .header("Overwrite", "F")
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {e}"))?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(format!("远端目录迁移失败 (HTTP {status}): {src} → {dst}"));
     }
     Ok(())
 }
