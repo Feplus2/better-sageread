@@ -130,7 +130,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="reader">阅读助手</SelectItem>
-                  <SelectItem value="central">中央 Agent</SelectItem>
+                  <SelectItem value="central">全局助手</SelectItem>
                   <SelectItem value="both">两者共享</SelectItem>
                 </SelectContent>
               </Select>

@@ -1,4 +1,4 @@
-import { getCommandIcon, ICON_NAMES } from "@/components/side-chat/command-icons";
+import { ICON_NAMES, getCommandIcon } from "@/components/side-chat/command-icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { useState } from "react";
 
 const SCOPE_LABELS: Record<AgentScope, string> = {
   reader: "阅读助手",
-  central: "中央 Agent",
+  central: "全局助手",
   both: "两者共享",
 };
 
@@ -72,28 +72,30 @@ export default function QuickCommandsTab() {
             return (
               <div key={cmd.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
                 <CmdIcon className="size-3.5 flex-shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <span className="text-foreground text-sm">{cmd.label}</span>
-                <p className="truncate text-muted-foreground text-xs">{cmd.prompt}</p>
+                <div className="min-w-0 flex-1">
+                  <span className="text-foreground text-sm">{cmd.label}</span>
+                  <p className="truncate text-muted-foreground text-xs">{cmd.prompt}</p>
+                </div>
+                {cmd.scope === "both" && (
+                  <span className="flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+                    共享
+                  </span>
+                )}
+                <Button variant="ghost" size="icon" className="size-7" onClick={() => toggleVisible(cmd.id)}>
+                  {cmd.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5 text-muted-foreground" />}
+                </Button>
+                <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(cmd)}>
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-destructive"
+                  onClick={() => deleteCommand(cmd.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
               </div>
-              {cmd.scope === "both" && (
-                <span className="flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">共享</span>
-              )}
-              <Button variant="ghost" size="icon" className="size-7" onClick={() => toggleVisible(cmd.id)}>
-                {cmd.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5 text-muted-foreground" />}
-              </Button>
-              <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(cmd)}>
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 text-destructive"
-                onClick={() => deleteCommand(cmd.id)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
             );
           })}
         </div>
@@ -112,7 +114,7 @@ export default function QuickCommandsTab() {
       </div>
 
       {renderCommandGroup("阅读助手（侧边栏）", readerCommands)}
-      {renderCommandGroup("中央 Agent（主页）", centralCommands)}
+      {renderCommandGroup("全局助手（主页）", centralCommands)}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
@@ -141,14 +143,14 @@ export default function QuickCommandsTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="reader">阅读助手</SelectItem>
-                  <SelectItem value="central">中央 Agent</SelectItem>
+                  <SelectItem value="central">全局助手</SelectItem>
                   <SelectItem value="both">两者共享</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>图标</Label>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex max-h-44 flex-wrap gap-1 overflow-y-auto pr-1">
                 {ICON_NAMES.map((name) => {
                   const IconComp = getCommandIcon(name);
                   return (

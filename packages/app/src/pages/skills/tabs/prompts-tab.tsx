@@ -80,10 +80,10 @@ export default function PromptsTab() {
         />
       </section>
 
-      {/* 中央 Agent 提示词 */}
+      {/* 全局助手提示词 */}
       <section className="space-y-3">
         <div>
-          <h3 className="font-medium text-foreground">中央 Agent 系统提示词</h3>
+          <h3 className="font-medium text-foreground">全局助手系统提示词</h3>
           <p className="text-muted-foreground text-xs">
             主页全能助手的行为定义（只读，如需修改请编辑 central-prompt.ts）
           </p>

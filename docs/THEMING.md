@@ -68,13 +68,13 @@ SageRead 有两套互不影响的配色系统：
 | 钩子 | 对应区域 |
 | --- | --- |
 | `app-sidebar` | 应用左侧导航栏（搜索、标签、入口） |
-| `app-main` | 主内容区容器（书架/统计/聊天页路由出口） |
+| `app-main` | 主内容区容器（书架/统计/全局助手页路由出口） |
 | `bookshelf` | 书架滚动区（网格与列表两种视图共用） |
 | `book-card` | 单本书籍卡片 |
 | `book-cover` | 书籍封面容器（内部为 `img` 或占位块） |
 | `reader-tabs` | 阅读页顶部书籍标签条 |
 | `notepad-panel` | 阅读页笔记侧边栏容器 |
-| `chat-panel` | AI 问答面板整体（阅读页右侧 / 聊天页） |
+| `chat-panel` | AI 问答面板整体（阅读页右侧 / 全局助手页） |
 | `chat-message-user` | 单条用户消息（气泡本体为内部 `.prose` 元素） |
 | `chat-message-assistant` | 单条 AI 消息（同上） |
 | `dialog` | 所有对话框弹层（shadcn Dialog 共用挂载点） |

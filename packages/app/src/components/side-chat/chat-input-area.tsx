@@ -39,8 +39,10 @@ export function ChatInputArea({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isChatPage = useIsChatPage();
   const commands = useQuickCommandStore((s) => s.commands);
+  // 聊天页 = 全局助手（central），阅读侧边栏 = 阅读助手（reader）；both 两边都显示
+  const agentScope = isChatPage ? "central" : "reader";
   const quickActions = commands
-    .filter((c) => c.visible && (c.scope === "reader" || c.scope === "both"))
+    .filter((c) => c.visible && (c.scope === agentScope || c.scope === "both"))
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const handleQuickPrompt = (prompt: string) => {

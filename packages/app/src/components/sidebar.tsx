@@ -132,7 +132,7 @@ export default function Sidebar() {
     },
     {
       path: "/chat",
-      label: "聊天",
+      label: "全局助手",
       icon: Brain,
     },
     {

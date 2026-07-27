@@ -59,7 +59,7 @@ export default function SkillsTab() {
             <SelectContent>
               <SelectItem value="all">全部</SelectItem>
               <SelectItem value="reader">阅读助手</SelectItem>
-              <SelectItem value="central">中央 Agent</SelectItem>
+              <SelectItem value="central">全局助手</SelectItem>
               <SelectItem value="both">共享</SelectItem>
             </SelectContent>
           </Select>

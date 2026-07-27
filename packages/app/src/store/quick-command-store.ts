@@ -25,6 +25,17 @@ interface QuickCommandState {
   getCommandsForScope: (scope: "reader" | "central") => QuickCommand[];
 }
 
+/** 默认指令的功能图标（迁移持久化数据时也按此表修正） */
+const DEFAULT_ICON_BY_ID: Record<string, string> = {
+  "qc-reader-1": "BookOpen",
+  "qc-reader-2": "Brain",
+  "qc-reader-3": "Waypoints",
+  "qc-central-1": "Moon",
+  "qc-central-2": "NotebookText",
+  "qc-central-3": "Download",
+  "qc-central-4": "Database",
+};
+
 const DEFAULT_COMMANDS: QuickCommand[] = [
   // 阅读助手
   {
@@ -49,12 +60,12 @@ const DEFAULT_COMMANDS: QuickCommand[] = [
     id: "qc-reader-3",
     label: "生成思维导图",
     prompt: "请基于当前内容生成思维导图。",
-    icon: "ListChecks",
+    icon: "Waypoints",
     scope: "reader",
     visible: true,
     sortOrder: 2,
   },
-  // 中央 Agent
+  // 全局助手
   {
     id: "qc-central-1",
     label: "切换到深色模式",
@@ -68,7 +79,7 @@ const DEFAULT_COMMANDS: QuickCommand[] = [
     id: "qc-central-2",
     label: "总结最近阅读情况",
     prompt: "总结我最近的阅读情况",
-    icon: "Search",
+    icon: "NotebookText",
     scope: "central",
     visible: true,
     sortOrder: 1,
@@ -159,6 +170,20 @@ export const useQuickCommandStore = create<QuickCommandState>()(
       name: tauriStorageKey.quickCommands,
       storage: createJSONStorage(() => tauriStorage),
       partialize: (state) => ({ commands: state.commands }),
+      // v1：默认指令补上功能图标（旧数据全是 Zap 或缺 icon）
+      version: 1,
+      migrate: (persistedState: unknown, version: number) => {
+        const state = persistedState as { commands?: QuickCommand[] } | undefined;
+        if (!state || !Array.isArray(state.commands)) {
+          return { commands: DEFAULT_COMMANDS };
+        }
+        if (version < 1) {
+          state.commands = state.commands.map((c) =>
+            c.id in DEFAULT_ICON_BY_ID ? { ...c, icon: DEFAULT_ICON_BY_ID[c.id] } : c,
+          );
+        }
+        return state as { commands: QuickCommand[] };
+      },
     },
   ),
 );
