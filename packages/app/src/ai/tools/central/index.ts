@@ -24,3 +24,8 @@ export { uiPreferencesTool } from "./ui-preferences";
 export { toggleSkillTool } from "./toggle-skill";
 export { importFontTool } from "./import-font";
 export { askAppHelpTool } from "./ask-app-help";
+export { httpRequestTool } from "./http-request";
+export { downloadFileTool } from "./download-file";
+export { extractZipTool } from "./extract-zip";
+export { readLocalFileTool } from "./read-local-file";
+export { manageSkillTool } from "./manage-skill";

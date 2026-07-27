@@ -27,7 +27,7 @@
 **后续执行顺序**（按批，估算为 AI 结对工作日）：
 
 1. **第三批·支线中项（已完成）**：会话列表多选管理、对话右键菜单换 HTML、AI 对话网络搜索（Bing+百度+DDG）、批量与智能标签（一书多标签已支持，无需 schema 变更）
-2. **第四批·大件（各 2-3 天）**：~~Books_Converter 整合~~（✅ 已验证）、~~标签栏纵横切换~~（✅）、~~APP 帮助助手~~（✅）、~~**全局助手动作工具**~~（✅ 25 个工具已注册，含整理划线导出）、~~整理划线导出 Markdown~~（✅ exportNotes 工具）
+2. **第四批·大件（各 2-3 天）**：~~Books_Converter 整合~~（✅ 已验证）、~~标签栏纵横切换~~（✅）、~~APP 帮助助手~~（✅）、~~**全局助手动作工具**~~（✅ 30 个工具已注册，含整理划线导出）、~~整理划线导出 Markdown~~（✅ exportNotes 工具）、~~**开放集成基础设施**~~（✅ httpRequest + downloadFile + extractZip + readLocalFile + manageSkill）
 3. **等作者**：PR 4（L1 备份）未建分支；PR 5（L2 同步）须 PR 1/3/4 合并后 rebase 再提；作者 3 个月无响应则 fork 转活跃维护版（README 顶部声明 + 发 release + 考虑改名）
 4. **远期不承诺**：P2 路线 B（内嵌 MCP over HTTP）、移动端
 
@@ -83,7 +83,16 @@
 - “立即备份 / 立即同步” → 包装 L1 备份 / L2 同步命令
 - 可能需要：调高 20 步上限、为长任务加规划能力。
 
-**远期**：“完全了解软件所有文档和代码细节的专属助手”需对 docs/代码库做 RAG 索引（更大工程，路径清晰）。
+**远期**："完全了解软件所有文档和代码细节的专属助手"需对 docs/代码库做 RAG 索引（更大工程，路径清晰）。
+
+**开放集成基础设施（✅ 2026-07-28 已完成）**：
+- `httpRequest`：通用 HTTP 请求，对接任意第三方 REST API
+- `downloadFile`：从 URL 下载二进制文件到本地
+- `extractZip`：解压 ZIP 到目录
+- `readLocalFile`：读取本地文件/目录
+- `manageSkill`：创建/更新技能（SOP）
+- 用户流程：发 skill 包 URL + API Key → Agent 自动下载、解压、读取、注册技能 → 按 SOP 执行 httpRequest 调用目标服务
+- 支持：IMA 知识库、Notion、Obsidian、微信读书、任何有 API 的服务
 
 ## 背景
 
