@@ -10,7 +10,7 @@ interface WebSearchResult {
 }
 
 export const webSearchTool = tool({
-  description: `联网搜索实时网络信息（基于 DuckDuckGo，免 API key）。
+  description: `联网搜索实时网络信息。
 
 🎯 **适用场景**：
 • 用户询问书籍内容之外的实时信息、新闻、资料
@@ -36,11 +36,14 @@ export const webSearchTool = tool({
     maxResults?: number;
   }) => {
     try {
-      const engine = useWebSearchStore.getState().engine;
+      const state = useWebSearchStore.getState();
       const results = await invoke<WebSearchResult[]>("web_search", {
         query: question.trim(),
         maxResults: maxResults || 6,
-        engine,
+        engine: state.engine,
+        provider: state.activeProvider,
+        apiKey: state.getActiveApiKey() || undefined,
+        searxngUrl: state.searxngUrl || undefined,
       });
 
       return {

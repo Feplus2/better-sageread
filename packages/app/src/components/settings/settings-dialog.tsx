@@ -14,6 +14,7 @@ import ProvidersSettings from "./providers";
 import ShortcutsSettings from "./shortcuts";
 import SyncSettings from "./sync";
 import TTSSettings from "./tts-settings";
+import WebSearchSettings from "./web-search-settings";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -27,6 +28,7 @@ type SettingsKey =
   | "tts"
   | "sync"
   | "converter"
+  | "web-search"
   | "model-providers"
   | "shortcuts"
   | "provider-openai"
@@ -72,6 +74,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     { key: "font-manager", label: "字体管理" },
     { key: "llama", label: "向量模型" },
     { key: "tts", label: "语音模型" },
+    { key: "web-search", label: "网络搜索" },
     { key: "sync", label: "数据同步" },
     { key: "converter", label: "PDF 转换" },
     {
@@ -112,6 +115,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         return <SyncSettings />;
       case "converter":
         return <ConverterSettings />;
+      case "web-search":
+        return <WebSearchSettings />;
       case "model-providers":
         return (
           <ProvidersSettings onProviderSelect={(providerId) => setActiveKey(`provider-${providerId}` as SettingsKey)} />

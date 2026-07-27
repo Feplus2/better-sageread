@@ -1,7 +1,8 @@
-//! AI 对话网络搜索：免 API key，在 Rust 端发起请求以避开 WebView 的 CORS 限制。
-//! 引擎优先级：Bing（国内可直连，免代理）→ DuckDuckGo（备选，需代理）。
+//! AI 对话网络搜索：支持多种搜索 Provider。
+//! - 内置引擎（免配置）：Bing → 百度 → DuckDuckGo（HTML 爬取，不稳定但零门槛）
+//! - API Provider（用户配置 Key）：Tavily / Serper / SearXNG（稳定、高质量）
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 单条搜索结果
 #[derive(Serialize, Debug, Clone)]
@@ -353,17 +354,390 @@ async fn search_ddg(query: &str, max: usize) -> Result<Vec<WebSearchResult>, Str
     Ok(parse_ddg_html(&html, max))
 }
 
+// ─── API Provider 响应结构 ───────────────────────────────────────────────────
+
+/// Tavily API 响应
+#[derive(Deserialize)]
+struct TavilyResponse {
+    results: Vec<TavilyResult>,
+}
+
+#[derive(Deserialize)]
+struct TavilyResult {
+    title: String,
+    url: String,
+    content: String,
+}
+
+/// Serper API 响应
+#[derive(Deserialize)]
+struct SerperResponse {
+    organic: Option<Vec<SerperResult>>,
+}
+
+#[derive(Deserialize)]
+struct SerperResult {
+    title: String,
+    link: String,
+    snippet: Option<String>,
+}
+
+/// SearXNG JSON API 响应
+#[derive(Deserialize)]
+struct SearxngResponse {
+    results: Vec<SearxngResult>,
+}
+
+#[derive(Deserialize)]
+struct SearxngResult {
+    title: String,
+    url: String,
+    content: Option<String>,
+}
+
+/// 博查 Web Search API 响应
+#[derive(Deserialize)]
+struct BochaResponse {
+    data: Option<BochaData>,
+}
+
+#[derive(Deserialize)]
+struct BochaData {
+    #[serde(rename = "webPages")]
+    web_pages: Option<BochaWebPages>,
+}
+
+#[derive(Deserialize)]
+struct BochaWebPages {
+    value: Vec<BochaResult>,
+}
+
+#[derive(Deserialize)]
+struct BochaResult {
+    name: String,
+    url: String,
+    snippet: Option<String>,
+}
+
+/// 智谱 Web Search API 响应
+#[derive(Deserialize)]
+struct ZhipuSearchResponse {
+    choices: Option<Vec<ZhipuChoice>>,
+}
+
+#[derive(Deserialize)]
+struct ZhipuChoice {
+    message: Option<ZhipuMessage>,
+}
+
+#[derive(Deserialize)]
+struct ZhipuMessage {
+    tool_calls: Option<Vec<ZhipuToolCall>>,
+}
+
+#[derive(Deserialize)]
+struct ZhipuToolCall {
+    #[serde(rename = "type")]
+    call_type: Option<String>,
+    search_result: Option<Vec<ZhipuSearchResult>>,
+}
+
+#[derive(Deserialize)]
+struct ZhipuSearchResult {
+    title: String,
+    link: String,
+    content: Option<String>,
+}
+
+// ─── API Provider 搜索实现 ───────────────────────────────────────────────────
+
+/// Tavily 搜索（专为 AI Agent 优化的搜索 API）
+async fn search_tavily(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let body = serde_json::json!({
+        "api_key": api_key,
+        "query": query,
+        "max_results": max,
+        "search_depth": "basic",
+    });
+
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Tavily 请求失败: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Tavily 搜索失败 (HTTP {status}): {text}"));
+    }
+
+    let data: TavilyResponse = resp.json().await.map_err(|e| format!("解析 Tavily 响应失败: {e}"))?;
+    Ok(data
+        .results
+        .into_iter()
+        .map(|r| WebSearchResult {
+            title: r.title,
+            url: r.url,
+            snippet: r.content,
+        })
+        .collect())
+}
+
+/// Serper 搜索（Google 搜索结果 API）
+async fn search_serper(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let body = serde_json::json!({
+        "q": query,
+        "num": max,
+    });
+
+    let resp = client
+        .post("https://google.serper.dev/search")
+        .header("X-API-KEY", api_key)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Serper 请求失败: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Serper 搜索失败 (HTTP {status}): {text}"));
+    }
+
+    let data: SerperResponse = resp.json().await.map_err(|e| format!("解析 Serper 响应失败: {e}"))?;
+    Ok(data
+        .organic
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| WebSearchResult {
+            title: r.title,
+            url: r.link,
+            snippet: r.snippet.unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// SearXNG 搜索（自托管元搜索引擎，JSON API）
+async fn search_searxng(query: &str, max: usize, base_url: &str) -> Result<Vec<WebSearchResult>, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!(
+        "{base}/search?q={}&format=json&categories=general",
+        urlencode(query)
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("SearXNG 请求失败（请确认服务已启动）: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(format!("SearXNG 搜索失败 (HTTP {status})"));
+    }
+
+    let data: SearxngResponse = resp.json().await.map_err(|e| format!("解析 SearXNG 响应失败: {e}"))?;
+    Ok(data
+        .results
+        .into_iter()
+        .take(max)
+        .map(|r| WebSearchResult {
+            title: r.title,
+            url: r.url,
+            snippet: r.content.unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// 博查搜索（国内 AI 搜索 API，DeepSeek 等 60%+ 国内 AI 应用采用）
+async fn search_bocha(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let body = serde_json::json!({
+        "query": query,
+        "count": max,
+        "summary": true,
+    });
+
+    let resp = client
+        .post("https://api.bochaai.com/v1/web-search")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("博查请求失败: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("博查搜索失败 (HTTP {status}): {text}"));
+    }
+
+    let data: BochaResponse = resp.json().await.map_err(|e| format!("解析博查响应失败: {e}"))?;
+    let pages = data
+        .data
+        .and_then(|d| d.web_pages)
+        .map(|p| p.value)
+        .unwrap_or_default();
+    Ok(pages
+        .into_iter()
+        .map(|r| WebSearchResult {
+            title: r.name,
+            url: r.url,
+            snippet: r.snippet.unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// 智谱 Web Search Pro（国内可靠，支持多引擎）
+async fn search_zhipu(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let body = serde_json::json!({
+        "tool": "web-search-pro",
+        "stream": false,
+        "message": [{"role": "user", "content": query}],
+    });
+
+    let resp = client
+        .post("https://open.bigmodel.cn/api/paas/v4/tools")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("智谱搜索请求失败: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("智谱搜索失败 (HTTP {status}): {text}"));
+    }
+
+    let data: ZhipuSearchResponse = resp.json().await.map_err(|e| format!("解析智谱响应失败: {e}"))?;
+
+    // 从嵌套结构中提取搜索结果
+    let results: Vec<WebSearchResult> = data
+        .choices
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|c| c.message)
+        .filter_map(|m| m.tool_calls)
+        .flatten()
+        .filter(|tc| tc.call_type.as_deref() == Some("search_result"))
+        .filter_map(|tc| tc.search_result)
+        .flatten()
+        .take(max)
+        .map(|r| WebSearchResult {
+            title: r.title,
+            url: r.link,
+            snippet: r.content.unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(results)
+}
+
+// ─── Tauri Command ───────────────────────────────────────────────────────────
+
 /// 网络搜索 Tauri command
-/// engine："auto"（默认，按 必应→百度→DuckDuckGo 轮询）| "bing" | "baidu" | "duckduckgo"
+///
+/// provider："builtin" | "bocha" | "zhipu" | "tavily" | "serper" | "searxng"
+/// engine：仅 builtin 模式下有效，"auto" | "bing" | "baidu" | "duckduckgo"
 #[tauri::command]
 pub async fn web_search(
     query: String,
     max_results: Option<usize>,
     engine: Option<String>,
+    provider: Option<String>,
+    api_key: Option<String>,
+    searxng_url: Option<String>,
 ) -> Result<Vec<WebSearchResult>, String> {
     let max = max_results.unwrap_or(6).clamp(1, 20);
-    let engine = engine.unwrap_or_else(|| "auto".to_string());
+    let provider = provider.unwrap_or_else(|| "builtin".to_string());
 
+    // ── API Provider 路径 ──
+    match provider.as_str() {
+        "bocha" => {
+            let key = api_key.filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| "博查需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
+            let results = search_bocha(&query, max, key.trim()).await?;
+            if results.is_empty() {
+                return Err("博查未返回搜索结果".to_string());
+            }
+            log::info!("[网络搜索] 博查返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        "zhipu" => {
+            let key = api_key.filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| "智谱需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
+            let results = search_zhipu(&query, max, key.trim()).await?;
+            if results.is_empty() {
+                return Err("智谱未返回搜索结果".to_string());
+            }
+            log::info!("[网络搜索] 智谱返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        "tavily" => {
+            let key = api_key.filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| "Tavily 需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
+            let results = search_tavily(&query, max, key.trim()).await?;
+            if results.is_empty() {
+                return Err("Tavily 未返回搜索结果".to_string());
+            }
+            log::info!("[网络搜索] Tavily 返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        "serper" => {
+            let key = api_key.filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| "Serper 需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
+            let results = search_serper(&query, max, key.trim()).await?;
+            if results.is_empty() {
+                return Err("Serper 未返回搜索结果".to_string());
+            }
+            log::info!("[网络搜索] Serper 返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        "searxng" => {
+            let url = searxng_url.filter(|u| !u.trim().is_empty())
+                .ok_or_else(|| "SearXNG 需要填写服务地址，请在设置 → 网络搜索中配置".to_string())?;
+            let results = search_searxng(&query, max, url.trim()).await?;
+            if results.is_empty() {
+                return Err("SearXNG 未返回搜索结果".to_string());
+            }
+            log::info!("[网络搜索] SearXNG 返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        _ => {} // fallback to builtin
+    }
+
+    // ── 内置引擎路径（HTML 爬取） ──
+    let engine = engine.unwrap_or_else(|| "auto".to_string());
     let engines: Vec<&str> = match engine.as_str() {
         "bing" => vec!["bing"],
         "baidu" => vec!["baidu"],
@@ -396,7 +770,7 @@ pub async fn web_search(
     }
 
     Err(format!(
-        "网络搜索失败（{last_err}）。若查询内容较敏感，国内引擎可能受限，可在输入框旁切换到 DuckDuckGo 并配置代理。"
+        "网络搜索失败（{last_err}）。建议在设置 → 网络搜索中配置博查/智谱 API Key 以获得稳定体验。"
     ))
 }
 
