@@ -65,7 +65,9 @@ export interface ChatContext {
   activeBookId?: string;
   activeContext?: string;
   activeSectionLabel?: string;
-  agentScope?: "central" | "reader";
+  agentScope?: "central" | "reader" | "paper";
+  /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合；仅 agentScope="paper" 时有效） */
+  paperScopeIds?: string[] | null;
 }
 
 interface UseChatStateOptions {
@@ -277,6 +279,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             setActiveContext(getThreadContext(latestThread) || undefined);
           }
           isInit.current = true;
+          forceUpdate();
         } catch (error) {
           console.error("Failed to load existing thread:", error);
         }
@@ -297,11 +300,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       setReferences([]);
     };
   }, []);
-
-  useTextEventHandler({
-    sendMessage,
-    activeBookId,
-  });
 
   const createReferenceId = useCallback(() => {
     const cryptoObj = typeof globalThis !== "undefined" ? (globalThis as any).crypto : undefined;
@@ -325,16 +323,24 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         return [...prev, { id: createReferenceId(), text: trimmed }];
       });
 
+      // 论文面板的输入区在 #paper-chat-panel 下，书籍/全局在 #chat-sidebar 下
+      const panelSelector = agentScope === "paper" ? "#paper-chat-panel" : "#chat-sidebar";
       setTimeout(() => {
-        const textarea = document.querySelector("#chat-sidebar textarea") as HTMLTextAreaElement;
-        console.log("textarea", textarea);
+        const textarea = document.querySelector(`${panelSelector} textarea`) as HTMLTextAreaElement;
         if (textarea) {
           textarea.focus();
         }
       }, 200);
     },
-    [createReferenceId],
+    [createReferenceId, agentScope],
   );
+
+  useTextEventHandler({
+    sendMessage,
+    activeBookId,
+    // "Ask AI"（引用）事件 → 注入输入框引用区（与划词引用同一链路）
+    onQuoteReference: handleAskSelection,
+  });
 
   const handleRemoveReference = useCallback((id: string) => {
     setReferences((prev) => prev.filter((reference) => reference.id !== id));
@@ -366,6 +372,11 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
    */
   const generateSemanticContextAsync = useCallback(
     async (userQuestion: string) => {
+      // 论文助手的语义上下文 = 当前阅读小节正文，由页面在提交前直接注入 chatContext，
+      // 不走辅助模型生成（书专用的上下文跟踪逻辑）
+      if (agentScope === "paper") {
+        return;
+      }
       try {
         const thread = currentThreadRef.current;
         if (!thread) {
@@ -397,7 +408,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         console.error("Failed to generate semantic context:", error);
       }
     },
-    [selectedModel, setActiveContext],
+    [selectedModel, setActiveContext, agentScope],
   );
 
   const handleSubmit = useCallback(
@@ -468,6 +479,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       messages,
       activeBookId,
       currentThread,
+      threadScope,
       buildMessageParts,
       sendMessage,
       setMessages,

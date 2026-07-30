@@ -1,8 +1,10 @@
 import Popup from "@/components/popup";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import type { HighlightColor, HighlightStyle } from "@/types/book";
 import type { Position } from "@/utils/sel";
 import clsx from "clsx";
+import { Check } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import HighlightOptions from "./highlight-options";
 import PopupButton from "./popup-button";
@@ -19,6 +21,12 @@ interface AnnotationPopupProps {
   popupWidth: number;
   popupHeight: number;
   onHighlight: (update?: boolean) => void;
+  /** 评论（标注-笔记二合一，落 book_notes.note）：展开状态、草稿与保存 */
+  commentOpen: boolean;
+  commentDraft: string;
+  onCommentDraftChange: (value: string) => void;
+  onSaveComment: () => void;
+  onToggleComment: () => void;
 }
 
 const OPTIONS_PADDING_PIX = 16;
@@ -36,6 +44,11 @@ const AnnotationPopup: React.FC<AnnotationPopupProps> = ({
   popupWidth,
   popupHeight,
   onHighlight,
+  commentOpen,
+  commentDraft,
+  onCommentDraftChange,
+  onSaveComment,
+  onToggleComment,
 }) => {
   const [windowSize, setWindowSize] = useState({
     width: window.innerWidth,
@@ -154,27 +167,60 @@ const AnnotationPopup: React.FC<AnnotationPopupProps> = ({
     <div dir={dir}>
       <Popup
         width={isVertical ? popupHeight : popupWidth}
-        height={isVertical ? popupWidth : popupHeight}
+        height={commentOpen ? undefined : isVertical ? popupWidth : popupHeight}
+        minHeight={commentOpen ? (isVertical ? popupWidth : popupHeight) : undefined}
         position={position}
         className="selection-popup border border-neutral-200 bg-white text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
       >
-        <div
-          className={clsx(
-            "selection-buttons flex h-full items-center",
-            isVertical ? "flex-col gap-1 px-1 py-2" : "flex-row gap-1 px-2 py-1",
+        <div className="flex h-full flex-col">
+          <div
+            className={clsx(
+              "selection-buttons flex flex-1 items-center",
+              isVertical ? "flex-col gap-1 px-1 py-2" : "flex-row gap-1 px-2 py-1",
+            )}
+          >
+            {buttons.map((button, index) => (
+              <React.Fragment key={index}>
+                <PopupButton label={button.label} Icon={button.Icon} onClick={button.onClick} isVertical={isVertical} />
+                {index === 1 && (
+                  <Separator
+                    orientation={isVertical ? "horizontal" : "vertical"}
+                    className={isVertical ? "my-1" : "mx-1"}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+          {/* 评论输入区（标注-笔记二合一，保存落 book_notes.note；仅"已有标注"回显态可展开） */}
+          {commentOpen && !isVertical && (
+            <div className="border-neutral-200 border-t p-2 dark:border-neutral-700">
+              <Textarea
+                value={commentDraft}
+                onChange={(event) => onCommentDraftChange(event.target.value)}
+                placeholder="写下你的想法…（保存到这条标注）"
+                rows={2}
+                autoFocus
+                className="mb-2 resize-none text-sm"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onToggleComment}
+                  className="rounded-md px-2.5 py-1 text-neutral-500 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={onSaveComment}
+                  className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-white text-xs hover:bg-blue-500"
+                >
+                  <Check className="size-3.5" />
+                  保存
+                </button>
+              </div>
+            </div>
           )}
-        >
-          {buttons.map((button, index) => (
-            <React.Fragment key={index}>
-              <PopupButton label={button.label} Icon={button.Icon} onClick={button.onClick} isVertical={isVertical} />
-              {index === 2 && (
-                <Separator
-                  orientation={isVertical ? "horizontal" : "vertical"}
-                  className={isVertical ? "my-1" : "mx-1"}
-                />
-              )}
-            </React.Fragment>
-          ))}
         </div>
       </Popup>
       {highlightOptionsVisible && (

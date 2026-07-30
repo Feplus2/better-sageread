@@ -1,9 +1,8 @@
-import { useNotepad } from "@/components/notepad/hooks";
 import { createBookNote, deleteBookNote, updateBookNote } from "@/services/book-note-service";
 import { iframeService } from "@/services/iframe-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
+import { useLayoutStore } from "@/store/layout-store";
 import type { HighlightColor, HighlightStyle } from "@/types/book";
-import type { BookMeta } from "@/types/note";
 import { type Position, type TextSelection, getPopupPosition, getPosition } from "@/utils/sel";
 import { useQueryClient } from "@tanstack/react-query";
 import * as CFI from "foliate-js/epubcfi.js";
@@ -42,20 +41,19 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
   const config = useReaderStore((state) => state.config)!;
   const progress = useReaderStore((state) => state.progress)!;
   const view = useReaderStore((state) => state.view);
-  const bookData = useReaderStore((state) => state.bookData);
   const store = useReaderStoreApi();
-  const { handleCreateNote } = useNotepad();
   const queryClient = useQueryClient();
   const globalViewSettings = settings.globalViewSettings;
 
   // 状态管理
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [showAnnotPopup, setShowAnnotPopup] = useState(false);
-  const [showAskAIPopup, setShowAskAIPopup] = useState(false);
   const [trianglePosition, setTrianglePosition] = useState<Position>();
   const [annotPopupPosition, setAnnotPopupPosition] = useState<Position>();
-  const [askAIPopupPosition, setAskAIPopupPosition] = useState<Position>();
   const [highlightOptionsVisible, setHighlightOptionsVisible] = useState(false);
+  // 评论（标注-笔记二合一，落 book_notes.note；仅"已有标注"回显态可写，与独立 notes 系统无关）
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
 
   const [selectedStyle, setSelectedStyle] = useState<HighlightStyle>(settings.globalReadSettings.highlightStyle);
   const [selectedColor, setSelectedColor] = useState<HighlightColor>(
@@ -63,14 +61,16 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
   );
 
   const popupPadding = 10;
-  const annotPopupWidth = Math.min(globalViewSettings?.vertical ? 320 : 280, window.innerWidth - 2 * popupPadding);
+  // 横向弹窗容纳"复制 / Ask AI / 高亮(/删除/评论)"，竖排为窄列；宽度需同时容纳笔触/颜色选项面板（约 236px）
+  const annotPopupWidth = Math.min(globalViewSettings?.vertical ? 250 : 240, window.innerWidth - 2 * popupPadding);
   const annotPopupHeight = 36;
 
   // Popup 相关函数
   const handleDismissPopup = useCallback(() => {
     setSelection(null);
     setShowAnnotPopup(false);
-    setShowAskAIPopup(false);
+    setCommentOpen(false);
+    setCommentDraft("");
   }, []);
 
   const handleDismissPopupAndSelection = useCallback(() => {
@@ -173,91 +173,68 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
     [selection, config, view, settings, bookId, store, queryClient],
   );
 
-  const addNote = useCallback(async () => {
+  // Ask AI：选中文本作为 quote 注入当前书籍 AI 会话输入框（不自动发送）
+  const handleQuoteToChat = useCallback(() => {
     if (!selection || !selection.text) return;
+    // AI 面板折叠时先展开（等 SideChat 挂载后再派发，否则同一 tick 内事件无人接收）
+    if (!useLayoutStore.getState().isChatVisible) {
+      useLayoutStore.getState().toggleChatSidebar();
+    }
+    const text = selection.text;
+    setTimeout(() => iframeService.sendQuoteReferenceRequest(text, bookId), 50);
+    handleDismissPopupAndSelection();
+  }, [selection, bookId, handleDismissPopupAndSelection]);
+
+  // 评论按钮：展开/收起内嵌评论输入框（展开时预填已有评论）
+  const handleToggleComment = useCallback(() => {
+    if (!selection || !selection.text) return;
+    if (!commentOpen) {
+      const { booknotes: annotations = [] } = config;
+      const cfi = view?.getCFI(selection.index, selection.range);
+      const existingAnnotation = cfi
+        ? annotations.find(
+            (annotation) => annotation.cfi === cfi && annotation.type === "annotation" && !annotation.deletedAt,
+          )
+        : undefined;
+      setCommentDraft(existingAnnotation?.note ?? "");
+    }
+    setCommentOpen((open) => !open);
+  }, [selection, commentOpen, config, view]);
+
+  // 保存评论：仅在"已有标注"回显态开放，更新 book_notes.note
+  const handleSaveComment = useCallback(async () => {
+    if (!selection || !selection.text) return;
+    const note = commentDraft.trim();
+    const { booknotes: annotations = [] } = config;
+    const cfi = view?.getCFI(selection.index, selection.range);
+    if (!cfi) return;
+
+    const existingAnnotation = annotations.find(
+      (annotation) => annotation.cfi === cfi && annotation.type === "annotation" && !annotation.deletedAt,
+    );
+    if (!existingAnnotation) return;
 
     try {
-      const content = selection.text.trim();
-      const title = content.length > 50 ? `${content.substring(0, 50)}...` : content;
-
-      if (!bookData?.book) {
-        toast.error("无法获取书籍信息");
-        return;
+      const updatedAnnotation = await updateBookNote(existingAnnotation.id, { note });
+      const updatedAnnotations = annotations.map((ann) => (ann.id === existingAnnotation.id ? updatedAnnotation : ann));
+      const updatedConfig = store.getState().updateBooknotes(updatedAnnotations);
+      if (updatedConfig) {
+        await store.getState().saveConfig(updatedConfig);
       }
-
-      const bookMeta: BookMeta = {
-        title: bookData.book.title,
-        author: bookData.book.author,
-      };
-
-      await handleCreateNote({
-        bookId,
-        bookMeta,
-        title,
-        content,
-      });
-      toast.success("笔记已创建");
-    } catch (error) {
-      toast.error("创建笔记失败");
-    }
-  }, [selection, bookData, bookId, handleCreateNote]);
-
-  const handleExplain = useCallback(() => {
-    if (!selection || !selection.text) return;
-    setShowAnnotPopup(false);
-    iframeService.sendExplainTextRequest(selection.text, "explain", bookId);
-  }, [selection, bookId]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
-  const handleAskAI = useCallback(() => {
-    if (!selection || !selection.text) return;
-
-    setShowAnnotPopup(false);
-    setShowAskAIPopup(false);
-
-    // Calculate position for AskAI popup
-    const gridFrame = document.querySelector(`#gridcell-${bookId}`);
-    if (!gridFrame) return;
-    const rect = gridFrame.getBoundingClientRect();
-    const triangPos = getPosition(selection.range, rect, popupPadding, globalViewSettings?.vertical);
-
-    // Calculate AskAI popup position
-    const askAIPopupWidth = 320;
-    const askAIPopupHeight = 120;
-    const askAIPopupPos = getPopupPosition(
-      triangPos,
-      rect,
-      globalViewSettings?.vertical ? askAIPopupHeight : askAIPopupWidth,
-      globalViewSettings?.vertical ? askAIPopupWidth : askAIPopupHeight,
-      popupPadding,
-    );
-
-    if (triangPos.point.x === 0 || triangPos.point.y === 0) return;
-    setAskAIPopupPosition(askAIPopupPos);
-
-    setTimeout(() => {
-      setShowAskAIPopup(true);
-    }, 0);
-  }, [selection, bookId, globalViewSettings, popupPadding]);
-
-  const handleCloseAskAI = useCallback(() => {
-    setShowAskAIPopup(false);
-    view?.deselect();
-  }, [view]);
-
-  const handleSendAIQuery = useCallback(
-    (query: string, selectedText: string) => {
-      iframeService.sendAskAIRequest(selectedText, query, bookId);
+      queryClient.invalidateQueries({ queryKey: ["annotations", bookId] });
+      toast.success("评论已保存");
       handleDismissPopupAndSelection();
-    },
-    [handleDismissPopupAndSelection, bookId],
-  );
+    } catch (error) {
+      console.error("Failed to save comment:", error);
+      toast.error("保存评论失败");
+    }
+  }, [selection, commentDraft, config, view, bookId, store, queryClient, handleDismissPopupAndSelection]);
 
   // Popup 位置计算
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
   useEffect(() => {
     setHighlightOptionsVisible(!!selection?.annotated);
-    if (selection && selection.text.trim().length > 0 && !showAskAIPopup) {
+    if (selection && selection.text.trim().length > 0) {
       const gridFrame = document.querySelector(`#gridcell-${bookId}`);
 
       if (!gridFrame) {
@@ -283,7 +260,7 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
       setShowAnnotPopup(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, bookId, showAskAIPopup]);
+  }, [selection, bookId]);
 
   // 加载当前页面的标注
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
@@ -314,10 +291,8 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
     selection,
     setSelection,
     showAnnotPopup,
-    showAskAIPopup,
     trianglePosition,
     annotPopupPosition,
-    askAIPopupPosition,
     highlightOptionsVisible,
     selectedStyle,
     setSelectedStyle,
@@ -325,16 +300,17 @@ export const useAnnotator = ({ bookId }: UseAnnotatorProps) => {
     setSelectedColor,
     annotPopupWidth,
     annotPopupHeight,
+    commentOpen,
+    commentDraft,
+    setCommentDraft,
 
     // 函数
     handleDismissPopup,
     handleDismissPopupAndSelection,
     handleCopy,
     handleHighlight,
-    addNote,
-    handleExplain,
-    handleAskAI,
-    handleCloseAskAI,
-    handleSendAIQuery,
+    handleQuoteToChat,
+    handleToggleComment,
+    handleSaveComment,
   };
 };

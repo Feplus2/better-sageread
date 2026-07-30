@@ -2,11 +2,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { SKILL_SCOPES, type SkillScope, parseSkillScopes, serializeSkillScopes } from "@/services/skill-service";
 import { useEffect, useState } from "react";
 import { type Skill, useCreateSkill, useUpdateSkill } from "../hooks/use-skills";
+import { ScopeCheckboxes } from "./scope-checkboxes";
 
 interface SkillEditorDialogProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [isActive, setIsActive] = useState(true);
-  const [scope, setScope] = useState<"reader" | "central" | "both">("both");
+  const [scopes, setScopes] = useState<SkillScope[]>([...SKILL_SCOPES]);
 
   const createSkillMutation = useCreateSkill();
   const updateSkillMutation = useUpdateSkill();
@@ -33,12 +34,13 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
         setName(skill.name);
         setContent(skill.content);
         setIsActive(skill.isActive);
-        setScope(skill.scope ?? "both");
+        setScopes(parseSkillScopes(skill.scope));
       } else {
         setName("");
         setContent("");
         setIsActive(true);
-        setScope("both");
+        // 新建默认全勾（沿用旧默认值 "both" 的"全部生效"意图）
+        setScopes([...SKILL_SCOPES]);
       }
     }
   }, [isOpen, skill]);
@@ -54,7 +56,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
             name: isSystemSkill ? skill.name : name.trim(),
             content: content.trim(),
             isActive: isSystemSkill ? skill.isActive : isActive,
-            scope: isSystemSkill ? undefined : scope,
+            scope: isSystemSkill ? undefined : serializeSkillScopes(scopes),
           },
         });
       } else {
@@ -62,7 +64,7 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
           name: name.trim(),
           content: content.trim(),
           isActive,
-          scope,
+          scope: serializeSkillScopes(scopes),
         });
       }
       onClose();
@@ -124,16 +126,8 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
           {!isSystemSkill && (
             <div className="space-y-2">
               <Label>生效范围</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as "reader" | "central" | "both")}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="reader">阅读助手</SelectItem>
-                  <SelectItem value="central">全局助手</SelectItem>
-                  <SelectItem value="both">两者共享</SelectItem>
-                </SelectContent>
-              </Select>
+              <ScopeCheckboxes value={scopes} onChange={setScopes} disabled={isLoading} />
+              {scopes.length === 0 && <p className="text-destructive text-xs">至少勾选一个生效范围</p>}
             </div>
           )}
         </div>
@@ -142,7 +136,11 @@ export default function SkillEditorDialog({ isOpen, onClose, skill }: SkillEdito
           <Button size="sm" variant="outline" onClick={handleCancel} disabled={isLoading}>
             取消
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={!name.trim() || !content.trim() || isLoading}>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={!name.trim() || !content.trim() || (!isSystemSkill && scopes.length === 0) || isLoading}
+          >
             {isLoading ? "保存中..." : "保存"}
           </Button>
         </DialogFooter>

@@ -1,6 +1,8 @@
 import { buildCentralPrompt } from "@/constants/central-prompt";
+import { buildPaperPrompt } from "@/constants/paper-prompt";
 import type { ChatContext } from "@/hooks/use-chat-state";
-import { getSkills } from "@/services/skill-service";
+import { getActivePresetContent } from "@/services/prompt-preset-service";
+import { getSkills, skillAppliesTo } from "@/services/skill-service";
 import { useLlamaStore } from "@/store/llama-store";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
@@ -13,6 +15,10 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
 
   if (agentScope === "central") {
     return await buildCentralPrompt();
+  }
+
+  if (agentScope === "paper") {
+    return await buildPaperPrompt(chatContext);
   }
 
   return await buildReadingPrompt(chatContext);
@@ -30,10 +36,17 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     const systemPromptSkill = allSkills.find((skill) => skill.isSystem && skill.isActive);
     systemPromptBase = systemPromptSkill?.content || "";
     activeSkillNames = allSkills
-      .filter((skill) => skill.isActive && !skill.isSystem && (skill.scope === "reader" || skill.scope === "both"))
+      .filter((skill) => skill.isActive && !skill.isSystem && skillAppliesTo(skill.scope, "reader"))
       .map((skill) => skill.name);
   } catch (error) {
     console.warn("获取技能列表失败:", error);
+  }
+
+  // 提示词预设（B 批）：有激活预设时替换内置默认基词（即 DB 系统技能的内容，不改库），
+  // 其余组装照旧——下方 RAG 裁剪只匹配内置基词的固定小节标记，对自定义预设自然不生效（no-op）。
+  const presetContent = await getActivePresetContent("reader");
+  if (presetContent && presetContent.trim().length > 0) {
+    systemPromptBase = presetContent;
   }
 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();

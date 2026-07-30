@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAutoHideControls } from "../hooks/use-auto-hide-controls";
@@ -55,29 +56,37 @@ const FooterBar = () => {
       onMouseLeave={handleMouseLeave}
     >
       <div className="flex w-full items-center justify-between">
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`size-7 rounded-full transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
-          onClick={handleGoPrevPage}
-          title={isScrolledMode ? "上一章" : "上一页"}
-        >
-          <ChevronLeft className="size-5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`size-7 rounded-full transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
+              onClick={handleGoPrevPage}
+            >
+              <ChevronLeft className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{isScrolledMode ? "上一章" : "上一页"}</TooltipContent>
+        </Tooltip>
 
         <div className="z-50 flex justify-center">
           <span className="text-center text-sm">{pageInfo}</span>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`size-7 rounded-full transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
-          onClick={handleGoNextPage}
-          title={isScrolledMode ? "下一章" : "下一页"}
-        >
-          <ChevronRight className="size-5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`size-7 rounded-full transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
+              onClick={handleGoNextPage}
+            >
+              <ChevronRight className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{isScrolledMode ? "下一章" : "下一页"}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

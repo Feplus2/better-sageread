@@ -2,10 +2,10 @@ import { HIGHLIGHT_COLOR_HEX } from "@/services/constants";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { BookNote } from "@/types/book";
 import { Overlayer } from "foliate-js/overlayer.js";
-import { NotebookPen } from "lucide-react";
+import { MessageSquarePlus, Quote } from "lucide-react";
 import type React from "react";
 import { useEffect } from "react";
-import { FiCopy, FiHelpCircle, FiMessageCircle } from "react-icons/fi";
+import { FiCopy } from "react-icons/fi";
 import { PiHighlighterFill } from "react-icons/pi";
 import { RiDeleteBinLine } from "react-icons/ri";
 import { useAnnotator } from "../../hooks/use-annotator";
@@ -13,7 +13,6 @@ import { useFoliateEvents } from "../../hooks/use-foliate-events";
 import { useTextSelector } from "../../hooks/use-text-selector";
 import { useReaderStore, useReaderStoreApi } from "../reader-provider";
 import AnnotationPopup from "./annotation-popup";
-import AskAIPopup from "./ask-ai-popup";
 
 const Annotator: React.FC = () => {
   const { settings } = useAppSettingsStore();
@@ -28,10 +27,8 @@ const Annotator: React.FC = () => {
     selection,
     setSelection,
     showAnnotPopup,
-    showAskAIPopup,
     trianglePosition,
     annotPopupPosition,
-    askAIPopupPosition,
     highlightOptionsVisible,
     selectedStyle,
     setSelectedStyle,
@@ -39,14 +36,15 @@ const Annotator: React.FC = () => {
     setSelectedColor,
     annotPopupWidth,
     annotPopupHeight,
+    commentOpen,
+    commentDraft,
+    setCommentDraft,
     handleDismissPopup,
     handleCopy,
     handleHighlight,
-    addNote,
-    handleExplain,
-    handleAskAI,
-    handleCloseAskAI,
-    handleSendAIQuery,
+    handleQuoteToChat,
+    handleToggleComment,
+    handleSaveComment,
   } = useAnnotator({ bookId });
 
   const { handleScroll, handleMouseUp, handleShowPopup } = useTextSelector(bookId, setSelection, handleDismissPopup);
@@ -108,25 +106,28 @@ const Annotator: React.FC = () => {
   // 同步 popup 显示状态到 text selector
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
   useEffect(() => {
-    handleShowPopup(showAnnotPopup || showAskAIPopup);
-  }, [showAnnotPopup, showAskAIPopup]);
+    handleShowPopup(showAnnotPopup);
+  }, [showAnnotPopup]);
 
   const selectionAnnotated = selection?.annotated;
   const buttons = [
     { label: "复制", Icon: FiCopy, onClick: handleCopy },
-    { label: "解释", Icon: FiHelpCircle, onClick: handleExplain },
-    { label: "询问AI", Icon: FiMessageCircle, onClick: handleAskAI },
+    { label: "Ask AI", Icon: Quote, onClick: handleQuoteToChat },
     {
       label: undefined,
       Icon: selectionAnnotated ? RiDeleteBinLine : PiHighlighterFill,
       onClick: handleHighlight,
     },
-    { label: undefined, Icon: NotebookPen, onClick: addNote },
+    // 评论（标注-笔记二合一，落 book_notes.note）：仅"已有标注"回显态开放，新建选区不设独立评论按钮；
+    // 竖排模式下弹窗为窄列，不开放内嵌输入
+    ...(selectionAnnotated && !globalViewSettings?.vertical
+      ? [{ label: undefined as string | undefined, Icon: MessageSquarePlus, onClick: handleToggleComment }]
+      : []),
   ];
 
   return (
     <div>
-      {showAnnotPopup && !showAskAIPopup && trianglePosition && annotPopupPosition && (
+      {showAnnotPopup && trianglePosition && annotPopupPosition && (
         <AnnotationPopup
           dir={globalViewSettings?.rtl ? "rtl" : "ltr"}
           isVertical={globalViewSettings?.vertical ?? false}
@@ -139,18 +140,11 @@ const Annotator: React.FC = () => {
           popupWidth={annotPopupWidth}
           popupHeight={annotPopupHeight}
           onHighlight={handleHighlight}
-        />
-      )}
-      {showAskAIPopup && askAIPopupPosition && selection && (
-        <AskAIPopup
-          style={{
-            left: `${askAIPopupPosition.point.x}px`,
-            top: `${askAIPopupPosition.point.y + 15}px`,
-            width: "320px",
-          }}
-          selectedText={selection.text}
-          onClose={handleCloseAskAI}
-          onSendQuery={handleSendAIQuery}
+          commentOpen={commentOpen}
+          commentDraft={commentDraft}
+          onCommentDraftChange={setCommentDraft}
+          onSaveComment={handleSaveComment}
+          onToggleComment={handleToggleComment}
         />
       )}
     </div>

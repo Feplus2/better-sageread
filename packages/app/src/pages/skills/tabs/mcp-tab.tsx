@@ -4,16 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { SKILL_SCOPE_LABELS } from "@/services/skill-service";
 import { type McpServer, useMcpStore } from "@/store/mcp-store";
 import type { AgentScope } from "@/store/quick-command-store";
 import { Pencil, Plug, Plus, Server, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { ScopeCheckboxes } from "../components/scope-checkboxes";
 
-const SCOPE_LABELS: Record<AgentScope, string> = {
-  reader: "阅读助手",
-  central: "全局助手",
-  both: "共享",
-};
+const ALL_SCOPES: AgentScope[] = ["central", "reader", "paper"];
 
 export default function McpTab() {
   const { servers, addServer, updateServer, removeServer, toggleEnabled } = useMcpStore();
@@ -25,7 +23,7 @@ export default function McpTab() {
   const [command, setCommand] = useState("");
   const [argsStr, setArgsStr] = useState("");
   const [url, setUrl] = useState("");
-  const [scope, setScope] = useState<AgentScope>("both");
+  const [scope, setScope] = useState<AgentScope[]>(ALL_SCOPES);
 
   const openCreate = () => {
     setEditingServer(null);
@@ -34,7 +32,7 @@ export default function McpTab() {
     setCommand("");
     setArgsStr("");
     setUrl("");
-    setScope("both");
+    setScope(ALL_SCOPES);
     setIsDialogOpen(true);
   };
 
@@ -50,7 +48,7 @@ export default function McpTab() {
   };
 
   const handleSave = () => {
-    if (!name.trim()) return;
+    if (!name.trim() || scope.length === 0) return;
     const data = {
       name: name.trim(),
       transport,
@@ -72,7 +70,13 @@ export default function McpTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-sm">MCP 协议集成 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-400">BETA</span> — 当前可预先配置服务器，运行时集成即将推出</p>
+        <p className="text-muted-foreground text-sm">
+          MCP 协议集成{" "}
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-400">
+            BETA
+          </span>{" "}
+          — 当前可预先配置服务器，运行时集成即将推出
+        </p>
         <Button size="sm" variant="outline" onClick={openCreate}>
           <Plus className="size-4" />
           添加服务器
@@ -95,9 +99,11 @@ export default function McpTab() {
                   <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
                     {server.transport.toUpperCase()}
                   </span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
-                    {SCOPE_LABELS[server.scope]}
-                  </span>
+                  {server.scope.map((s) => (
+                    <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+                      {SKILL_SCOPE_LABELS[s]}
+                    </span>
+                  ))}
                 </div>
                 <p className="truncate text-muted-foreground text-xs">
                   {server.transport === "stdio" ? server.command : server.url}
@@ -130,32 +136,21 @@ export default function McpTab() {
               <Label>名称</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：ima-knowledge-base" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>传输方式</Label>
-                <Select value={transport} onValueChange={(v) => setTransport(v as "stdio" | "sse")}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stdio">stdio（本地命令）</SelectItem>
-                    <SelectItem value="sse">SSE（远程 URL）</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>生效范围</Label>
-                <Select value={scope} onValueChange={(v) => setScope(v as AgentScope)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="reader">阅读助手</SelectItem>
-                    <SelectItem value="central">全局助手</SelectItem>
-                    <SelectItem value="both">两者共享</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>传输方式</Label>
+              <Select value={transport} onValueChange={(v) => setTransport(v as "stdio" | "sse")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stdio">stdio（本地命令）</SelectItem>
+                  <SelectItem value="sse">SSE（远程 URL）</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>生效范围</Label>
+              <ScopeCheckboxes value={scope} onChange={setScope} />
             </div>
             {transport === "stdio" ? (
               <>
@@ -187,7 +182,7 @@ export default function McpTab() {
             <Button variant="outline" size="sm" onClick={() => setIsDialogOpen(false)}>
               取消
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={!name.trim()}>
+            <Button size="sm" onClick={handleSave} disabled={!name.trim() || scope.length === 0}>
               保存
             </Button>
           </DialogFooter>

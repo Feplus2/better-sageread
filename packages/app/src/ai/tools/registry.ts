@@ -1,8 +1,9 @@
 /**
- * 工具注册框架：按 Agent 角色（central / reader）动态组装工具集。
+ * 工具注册框架：按 Agent 角色（central / reader / paper）动态组装工具集。
  *
  * - central（全局助手）：shared + central 工具，拥有全局操作权限
  * - reader（阅读助手）：shared + reader 工具，聚焦内容理解
+ * - paper（论文助手）：shared + 论文工具，基础层直接读 paper.md，增强层按向量能力门控
  * - mcp：预留，后续迭代接入外部 MCP Server
  */
 import { useLlamaStore } from "@/store/llama-store";
@@ -38,6 +39,12 @@ import {
   vectorizeBookTool,
 } from "./central";
 import {
+  createPaperContextTool,
+  createPaperFullTool,
+  createPaperInfoTool,
+  createPaperSearchTool,
+  createPaperSectionTool,
+  createPaperTocTool,
   createRagContextTool,
   createRagSearchTool,
   createRagTocTool,
@@ -60,10 +67,14 @@ export interface ToolRegistration {
   description: string;
 }
 
-export type AgentScope = "central" | "reader";
+export type AgentScope = "central" | "reader" | "paper";
 
 export interface ToolContext {
   bookId?: string;
+  /** 论文助手：当前论文 id（books 表中 format='MARKDOWN' 的行） */
+  paperId?: string;
+  /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合） */
+  paperScopeIds?: string[] | null;
 }
 
 // ==================== 注册表 ====================
@@ -331,7 +342,21 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     }
   }
 
-  // 4. 预留 MCP 工具注入点（后续迭代）
+  // 4. 论文助手专属：基础层结构工具（始终可用，直接读 paper.md）+ 增强层语义检索（向量能力门控）
+  if (agentScope === "paper" && context?.paperId) {
+    tools.getPaperToc = createPaperTocTool(context.paperId) as CoreTool;
+    tools.readPaperSection = createPaperSectionTool(context.paperId) as CoreTool;
+    tools.readPaperFull = createPaperFullTool(context.paperId) as CoreTool;
+    tools.getPaperInfo = createPaperInfoTool(context.paperId) as CoreTool;
+
+    const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
+    if (hasVectorCapability) {
+      tools.paperSearch = createPaperSearchTool(context.paperScopeIds ?? null) as CoreTool;
+      tools.paperContext = createPaperContextTool() as CoreTool;
+    }
+  }
+
+  // 5. 预留 MCP 工具注入点（后续迭代）
   // for (const reg of registry) {
   //   if (reg.scope === "mcp") {
   //     tools[reg.name] = reg.tool;
@@ -350,6 +375,20 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
   for (const reg of registry) {
     if (reg.scope === "shared" || reg.scope === agentScope) {
       descriptions.push(`- ${reg.name}: ${reg.description}`);
+    }
+  }
+
+  // 论文助手工具为上下文工厂创建（不在静态注册表），描述在此手动同步
+  if (agentScope === "paper") {
+    descriptions.push(
+      "- getPaperToc: 获取当前论文的目录结构",
+      "- readPaperSection: 按标题读取当前论文小节正文",
+      "- readPaperFull: 通读当前论文全文",
+      "- getPaperInfo: 获取当前论文元数据",
+    );
+    if (useLlamaStore.getState().hasVectorCapability()) {
+      descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");
+      descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
     }
   }
 

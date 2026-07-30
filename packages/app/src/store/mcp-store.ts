@@ -1,6 +1,6 @@
 import { tauriStorageKey } from "@/constants/tauri-storage";
 import { tauriStorage } from "@/lib/tauri-storage";
-import type { AgentScope } from "@/store/quick-command-store";
+import { type AgentScope, parseCommandScopes } from "@/store/quick-command-store";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -12,7 +12,8 @@ export interface McpServer {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
-  scope: AgentScope;
+  /** 生效的 Agent 集合（子集即可多选）；旧数据单值模型在迁移时转换 */
+  scope: AgentScope[];
   enabled: boolean;
 }
 
@@ -58,6 +59,18 @@ export const useMcpStore = create<McpState>()(
       name: tauriStorageKey.mcpServers,
       storage: createJSONStorage(() => tauriStorage),
       partialize: (state) => ({ servers: state.servers }),
+      // v1：scope 单值模型 → 集合模型（"both"→["reader","central"]）
+      version: 1,
+      migrate: (persistedState: unknown, version: number) => {
+        const state = persistedState as { servers?: Array<Omit<McpServer, "scope"> & { scope: unknown }> } | undefined;
+        if (!state || !Array.isArray(state.servers)) {
+          return { servers: [] };
+        }
+        if (version < 1) {
+          return { servers: state.servers.map((s) => ({ ...s, scope: parseCommandScopes(s.scope) })) };
+        }
+        return state as { servers: McpServer[] };
+      },
     },
   ),
 );

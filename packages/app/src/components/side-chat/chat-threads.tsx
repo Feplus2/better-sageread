@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useThreads } from "@/hooks/use-threads";
 import { exportThreadToHtml } from "@/lib/export-thread-html";
 import { exportThreadToImage } from "@/lib/export-thread-image";
@@ -244,14 +245,14 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-8 items-center gap-2 border-border pl-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-full hover:bg-muted"
-            onClick={onBack}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" onClick={onBack}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">返回</TooltipContent>
+          </Tooltip>
           <h2 className="font-medium text-foreground">历史对话</h2>
         </div>
         <div className="flex flex-1 items-center justify-center">
@@ -265,25 +266,20 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-8 items-center gap-2 border-border pl-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-full hover:bg-muted"
-            onClick={onBack}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" onClick={onBack}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">返回</TooltipContent>
+          </Tooltip>
           <h2 className="font-medium text-foreground">历史对话</h2>
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <div className="mb-2 text-muted-foreground">{error?.message || "加载历史对话失败"}</div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.location.reload()}
-              className="border-border"
-            >
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()} className="border-border">
               重试
             </Button>
           </div>
@@ -296,38 +292,35 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
     <div className="flex h-full flex-col">
       <div className="flex-shrink-0 border-border">
         <div className="flex h-10 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 rounded-full hover:bg-muted"
-            onClick={onBack}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-7 rounded-full hover:bg-muted" onClick={onBack}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">返回</TooltipContent>
+          </Tooltip>
           <h2 className="font-medium text-foreground text-sm">历史对话</h2>
           <span className="text-muted-foreground text-xs">({threads.length})</span>
           <div className="ml-auto flex items-center gap-1 pr-1">
             {selectionMode && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={handleSelectAll}
-              >
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleSelectAll}>
                 {allSelected ? "取消全选" : "全选"}
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              title="多选管理"
-              className={`size-7 rounded-full hover:bg-muted ${
-                selectionMode ? "bg-muted" : ""
-              }`}
-              onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
-            >
-              <ListChecks className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`size-7 rounded-full hover:bg-muted ${selectionMode ? "bg-muted" : ""}`}
+                  onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                >
+                  <ListChecks className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">多选管理</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -339,9 +332,7 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
               <div className="mx-auto mb-3 w-fit rounded-full bg-muted p-3">
                 <MessageCircle size={24} className="text-muted-foreground" />
               </div>
-              <p className="text-muted-foreground text-sm">
-                {bookId ? "还没有历史对话" : "暂无聊天记录"}
-              </p>
+              <p className="text-muted-foreground text-sm">{bookId ? "还没有历史对话" : "暂无聊天记录"}</p>
               <p className="mt-1 text-muted-foreground text-xs">
                 {bookId ? "开始聊天来创建你的第一个对话" : "开始对话来创建聊天记录"}
               </p>
@@ -371,27 +362,29 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
                       <h3 className="line-clamp-1 flex-1 font-medium text-foreground text-sm">
                         {thread.title || "未命名对话"}
                       </h3>
-                      <span
-                        role="button"
-                        tabIndex={-1}
-                        title={thread.starred ? "取消星标" : "星标"}
-                        className={`flex-shrink-0 cursor-pointer opacity-40 transition-opacity hover:opacity-100 group-hover:opacity-70 ${
-                          thread.starred ? "opacity-100" : ""
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void toggleStarFn(thread);
-                        }}
-                      >
-                        <Star
-                          className={`size-3.5 ${thread.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`}
-                        />
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            role="button"
+                            tabIndex={-1}
+                            className={`flex-shrink-0 cursor-pointer opacity-40 transition-opacity hover:opacity-100 group-hover:opacity-70 ${
+                              thread.starred ? "opacity-100" : ""
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void toggleStarFn(thread);
+                            }}
+                          >
+                            <Star
+                              className={`size-3.5 ${thread.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`}
+                            />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{thread.starred ? "取消星标" : "星标"}</TooltipContent>
+                      </Tooltip>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground text-xs">
-                        {thread.message_count} 条消息
-                      </span>
+                      <span className="text-muted-foreground text-xs">{thread.message_count} 条消息</span>
                       <span className="flex-shrink-0 text-muted-foreground text-xs">
                         {dayjs(thread.updated_at).format("YYYY-MM-DD HH:mm:ss")}
                       </span>
@@ -420,7 +413,7 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
 
       {selectionMode && (
         <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-border border-t px-3 py-2">
-          <span className="text-muted-foreground text-nowrap text-xs">已选 {selectedIds.size} 个</span>
+          <span className="text-nowrap text-muted-foreground text-xs">已选 {selectedIds.size} 个</span>
           <div className="flex flex-wrap items-center gap-1">
             <Button
               variant="outline"

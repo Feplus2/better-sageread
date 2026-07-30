@@ -3,18 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { SKILL_SCOPE_LABELS } from "@/services/skill-service";
 import { type AgentScope, type QuickCommand, useQuickCommandStore } from "@/store/quick-command-store";
 import { Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-
-const SCOPE_LABELS: Record<AgentScope, string> = {
-  reader: "阅读助手",
-  central: "全局助手",
-  both: "两者共享",
-};
+import { ScopeCheckboxes } from "../components/scope-checkboxes";
 
 export default function QuickCommandsTab() {
   const { commands, addCommand, updateCommand, deleteCommand, toggleVisible } = useQuickCommandStore();
@@ -22,21 +17,17 @@ export default function QuickCommandsTab() {
   const [editingCmd, setEditingCmd] = useState<QuickCommand | null>(null);
   const [label, setLabel] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [scope, setScope] = useState<AgentScope>("reader");
+  const [scope, setScope] = useState<AgentScope[]>(["reader"]);
   const [icon, setIcon] = useState<string>("Zap");
 
-  const readerCommands = commands
-    .filter((c) => c.scope === "reader" || c.scope === "both")
-    .sort((a, b) => a.sortOrder - b.sortOrder);
-  const centralCommands = commands
-    .filter((c) => c.scope === "central" || c.scope === "both")
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const commandsForScope = (scope: AgentScope) =>
+    commands.filter((c) => c.scope.includes(scope)).sort((a, b) => a.sortOrder - b.sortOrder);
 
   const openCreate = () => {
     setEditingCmd(null);
     setLabel("");
     setPrompt("");
-    setScope("reader");
+    setScope(["reader"]);
     setIcon("Zap");
     setIsDialogOpen(true);
   };
@@ -51,7 +42,7 @@ export default function QuickCommandsTab() {
   };
 
   const handleSave = () => {
-    if (!label.trim() || !prompt.trim()) return;
+    if (!label.trim() || !prompt.trim() || scope.length === 0) return;
     if (editingCmd) {
       updateCommand(editingCmd.id, { label: label.trim(), prompt: prompt.trim(), scope, icon });
     } else {
@@ -76,7 +67,7 @@ export default function QuickCommandsTab() {
                   <span className="text-foreground text-sm">{cmd.label}</span>
                   <p className="truncate text-muted-foreground text-xs">{cmd.prompt}</p>
                 </div>
-                {cmd.scope === "both" && (
+                {cmd.scope.length > 1 && (
                   <span className="flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
                     共享
                   </span>
@@ -113,8 +104,9 @@ export default function QuickCommandsTab() {
         </Button>
       </div>
 
-      {renderCommandGroup("阅读助手（侧边栏）", readerCommands)}
-      {renderCommandGroup("全局助手（主页）", centralCommands)}
+      {renderCommandGroup(`${SKILL_SCOPE_LABELS.reader}（侧边栏）`, commandsForScope("reader"))}
+      {renderCommandGroup(`${SKILL_SCOPE_LABELS.central}（主页）`, commandsForScope("central"))}
+      {renderCommandGroup(`${SKILL_SCOPE_LABELS.paper}（文献库）`, commandsForScope("paper"))}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
@@ -137,16 +129,7 @@ export default function QuickCommandsTab() {
             </div>
             <div className="space-y-2">
               <Label>生效范围</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as AgentScope)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="reader">阅读助手</SelectItem>
-                  <SelectItem value="central">全局助手</SelectItem>
-                  <SelectItem value="both">两者共享</SelectItem>
-                </SelectContent>
-              </Select>
+              <ScopeCheckboxes value={scope} onChange={setScope} />
             </div>
             <div className="space-y-2">
               <Label>图标</Label>
@@ -176,7 +159,7 @@ export default function QuickCommandsTab() {
             <Button variant="outline" size="sm" onClick={() => setIsDialogOpen(false)}>
               取消
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={!label.trim() || !prompt.trim()}>
+            <Button size="sm" onClick={handleSave} disabled={!label.trim() || !prompt.trim() || scope.length === 0}>
               保存
             </Button>
           </DialogFooter>

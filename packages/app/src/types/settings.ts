@@ -4,6 +4,8 @@ import type { HighlightColor, HighlightStyle, ViewSettings } from "./book";
 export type LibraryViewModeType = "grid" | "list";
 export type LibrarySortByType = "title" | "author" | "updated" | "created" | "size" | "format";
 export type LibraryCoverFitType = "crop" | "fit";
+/** 论文阅读显示模式：原文 / 译文 / 逐段对照 */
+export type PaperViewModeType = "original" | "translated" | "bilingual";
 
 export interface ReadSettings {
   sideBarWidth: string;
@@ -38,6 +40,7 @@ export interface SystemSettings {
   librarySortBy: LibrarySortByType;
   librarySortAscending: boolean;
   libraryCoverFit: LibraryCoverFitType;
+  paperViewMode: PaperViewModeType;
 
   lastSyncedAtBooks: number;
   lastSyncedAtConfigs: number;

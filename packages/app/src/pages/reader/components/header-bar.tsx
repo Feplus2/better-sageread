@@ -1,4 +1,5 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import { SessionState } from "@/types/reading-session";
@@ -116,20 +117,33 @@ const HeaderBar = () => {
             showControls ? "opacity-100" : "opacity-0"
           }`}
         >
-          <div className="cursor-pointer" onClick={swapSidebars ? toggleChatSidebar : toggleNotepadSidebar}>
-            {(swapSidebars ? isChatVisible : isNotepadVisible) ? (
-              <TbLayoutSidebarLeftCollapseFilled className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-            ) : (
-              <TbLayoutSidebarLeftCollapse className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-            )}
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="cursor-pointer" onClick={swapSidebars ? toggleChatSidebar : toggleNotepadSidebar}>
+                {(swapSidebars ? isChatVisible : isNotepadVisible) ? (
+                  <TbLayoutSidebarLeftCollapseFilled className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                ) : (
+                  <TbLayoutSidebarLeftCollapse className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {(swapSidebars ? isChatVisible : isNotepadVisible) ? "收起" : "展开"}
+              {swapSidebars ? "AI 面板" : "笔记面板"}
+            </TooltipContent>
+          </Tooltip>
 
           <DropdownMenu open={isTocDropdownOpen} onOpenChange={handleToggleTocDropdown}>
-            <DropdownMenuTrigger asChild>
-              <button className="btn btn-ghost flex h-6 w-6 items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0">
-                <TableOfContents size={18} className="text-base-content" />
-              </button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button className="btn btn-ghost flex h-6 w-6 items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0">
+                    <TableOfContents size={18} className="text-base-content" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">目录</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent
               className="max-h-[calc(100vh-8rem)] w-80 overflow-y-auto p-0"
               align="start"
@@ -154,14 +168,18 @@ const HeaderBar = () => {
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-center gap-x-4 px-4">
-          <span
-            title={section}
-            className={`max-w-100 flex-shrink-0 overflow-hidden truncate whitespace-nowrap font-medium text-sm transition-colors duration-300 ${
-              showControls ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-600"
-            }`}
-          >
-            {section}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={`max-w-100 flex-shrink-0 overflow-hidden truncate whitespace-nowrap font-medium text-sm transition-colors duration-300 ${
+                  showControls ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-600"
+                }`}
+              >
+                {section}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{section}</TooltipContent>
+          </Tooltip>
 
           {/* {isSessionInitialized && (
             <div
@@ -183,13 +201,21 @@ const HeaderBar = () => {
         >
           <SearchDropdown />
           <SettingsDropdown />
-          <div className="cursor-pointer" onClick={swapSidebars ? toggleNotepadSidebar : toggleChatSidebar}>
-            {(swapSidebars ? isNotepadVisible : isChatVisible) ? (
-              <TbLayoutSidebarRightCollapseFilled className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-            ) : (
-              <TbLayoutSidebarRightCollapse className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-            )}
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="cursor-pointer" onClick={swapSidebars ? toggleNotepadSidebar : toggleChatSidebar}>
+                {(swapSidebars ? isNotepadVisible : isChatVisible) ? (
+                  <TbLayoutSidebarRightCollapseFilled className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                ) : (
+                  <TbLayoutSidebarRightCollapse className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {(swapSidebars ? isNotepadVisible : isChatVisible) ? "收起" : "展开"}
+              {swapSidebars ? "笔记面板" : "AI 面板"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

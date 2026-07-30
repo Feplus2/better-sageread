@@ -43,6 +43,12 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   mindmap: "思维导图",
   getSkills: "技能查询",
   webSearch: "网络搜索",
+  getPaperToc: "论文目录",
+  readPaperSection: "阅读小节",
+  readPaperFull: "阅读全文",
+  getPaperInfo: "论文信息",
+  paperSearch: "文献检索",
+  paperContext: "上下文扩展",
 };
 
 interface ChatMessagesProps {

@@ -5,6 +5,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type SearchEngine, type SearchProvider, useWebSearchStore } from "@/store/web-search-store";
 import { Check, Globe } from "lucide-react";
 
@@ -35,16 +36,20 @@ export function SearchEngineSelector() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          title="选择网络搜索引擎"
-          className="flex h-8 cursor-pointer items-center gap-1 rounded-full border border-neutral-200 px-2 text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700"
-        >
-          <Globe className="size-4" />
-          <span className="text-xs">{displayLabel}</span>
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-8 cursor-pointer items-center gap-1 rounded-full border border-neutral-200 px-2 text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            >
+              <Globe className="size-4" />
+              <span className="text-xs">{displayLabel}</span>
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">选择网络搜索引擎</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" className="min-w-32">
         {/* 内置引擎（始终可用） */}
         <DropdownMenuItem onClick={() => setActiveProvider("builtin")}>

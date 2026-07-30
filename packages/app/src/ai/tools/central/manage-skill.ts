@@ -3,9 +3,17 @@
  *
  * 使 Agent 能够自主安装技能（如从下载的 skill 包中读取内容并注册）。
  */
-import { createSkill, getSkills, updateSkill } from "@/services/skill-service";
+import { createSkill, getSkills, parseSkillScopes, serializeSkillScopes, updateSkill } from "@/services/skill-service";
 import { tool } from "ai";
 import { z } from "zod";
+
+const skillScopeEnum = z.enum(["reader", "central", "paper"]);
+
+/** 落库统一为逗号分隔串；接受数组或逗号串输入，兼容旧值 "both"，非法/空输入回退 reader,central */
+function normalizeScope(input: string[] | string | undefined): string {
+  const parsed = parseSkillScopes(Array.isArray(input) ? input.join(",") : input);
+  return parsed.length > 0 ? serializeSkillScopes(parsed) : "reader,central";
+}
 
 export const manageSkillTool = tool({
   description: `创建或更新 AI 技能（Skill）。
@@ -27,7 +35,12 @@ export const manageSkillTool = tool({
     action: z.enum(["create", "update"]).describe("create=新建技能, update=更新已有技能"),
     name: z.string().min(1).describe("技能名称"),
     content: z.string().min(1).describe("技能内容（Markdown 格式的 SOP）"),
-    scope: z.enum(["reader", "central", "both"]).default("both").describe("生效范围"),
+    scope: z
+      .union([z.array(skillScopeEnum), z.string()])
+      .optional()
+      .describe(
+        '生效范围：数组（如 ["reader","paper"]）或逗号分隔串；可选值 reader/central/paper，缺省 reader,central',
+      ),
     skillId: z.string().optional().describe("update 时必填：要更新的技能 ID"),
   }),
 
@@ -43,9 +56,10 @@ export const manageSkillTool = tool({
     action: "create" | "update";
     name: string;
     content: string;
-    scope: "reader" | "central" | "both";
+    scope?: ("reader" | "central" | "paper")[] | string;
     skillId?: string;
   }) => {
+    const scopeStr = normalizeScope(scope);
     try {
       if (action === "create") {
         // 检查同名技能是否已存在
@@ -53,7 +67,7 @@ export const manageSkillTool = tool({
         const duplicate = existing.find((s) => s.name === name);
         if (duplicate) {
           // 同名已存在 → 自动转为更新
-          const updated = await updateSkill(duplicate.id, { name, content, scope, updatedAt: Date.now() });
+          const updated = await updateSkill(duplicate.id, { name, content, scope: scopeStr, updatedAt: Date.now() });
           return {
             results: {
               success: true,
@@ -65,11 +79,11 @@ export const manageSkillTool = tool({
           };
         }
 
-        const created = await createSkill({ name, content, isActive: true, isSystem: false, scope });
+        const created = await createSkill({ name, content, isActive: true, isSystem: false, scope: scopeStr });
         return {
           results: {
             success: true,
-            message: `技能「${name}」创建成功（ID: ${created.id}，scope: ${scope}）`,
+            message: `技能「${name}」创建成功（ID: ${created.id}，scope: ${scopeStr}）`,
             skillId: created.id,
             action: "created",
           },
@@ -91,7 +105,7 @@ export const manageSkillTool = tool({
         skillId = found.id;
       }
 
-      const updated = await updateSkill(skillId, { name, content, scope, updatedAt: Date.now() });
+      const updated = await updateSkill(skillId, { name, content, scope: scopeStr, updatedAt: Date.now() });
       return {
         results: {
           success: true,

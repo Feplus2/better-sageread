@@ -1,4 +1,5 @@
-import { deleteBookNote, getBookNotes } from "@/services/book-note-service";
+import { deleteBookNote, getBookNotes, updateBookNote } from "@/services/book-note-service";
+import type { BookNote } from "@/types/book";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
@@ -47,11 +48,26 @@ export const useAnnotations = ({ bookId }: UseAnnotationsProps = {}) => {
     [queryClient, bookId],
   );
 
+  // 切换星标：写反 starred 并刷新列表
+  const handleToggleStar = useCallback(
+    async (annotation: BookNote) => {
+      try {
+        await updateBookNote(annotation.id, { starred: !annotation.starred });
+        queryClient.invalidateQueries({ queryKey: ["annotations", bookId] });
+      } catch (error) {
+        console.error("更新星标失败:", error);
+        toast.error("更新星标失败");
+      }
+    },
+    [queryClient, bookId],
+  );
+
   return {
     annotations: annotations ?? [],
     error,
     isLoading,
     status,
     handleDeleteAnnotation,
+    handleToggleStar,
   };
 };

@@ -1,7 +1,7 @@
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import { Button } from "@/components/ui/button";
 import { useIsChatPage } from "@/hooks/use-is-chat-page";
-import { useQuickCommandStore } from "@/store/quick-command-store";
+import { type AgentScope, useQuickCommandStore } from "@/store/quick-command-store";
 import type { ChatReference } from "@/types/message";
 import { ArrowUp, Paperclip, Quote, X } from "lucide-react";
 import { useRef } from "react";
@@ -15,6 +15,8 @@ interface ChatInputAreaProps {
   status: string;
   activeBookId: string | undefined;
   showToolDetail?: boolean;
+  /** 快捷指令过滤用的 Agent 作用域；缺省按页面启发式（聊天页=central，其余=reader） */
+  agentScope?: AgentScope;
 
   setInput: (value: string) => void;
   onRemoveReference: (id: string) => void;
@@ -29,6 +31,7 @@ export function ChatInputArea({
   references,
   activeBookId,
   showToolDetail = false,
+  agentScope: agentScopeProp,
 
   setActiveBookId,
   onRemoveReference,
@@ -39,10 +42,10 @@ export function ChatInputArea({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isChatPage = useIsChatPage();
   const commands = useQuickCommandStore((s) => s.commands);
-  // 聊天页 = 全局助手（central），阅读侧边栏 = 阅读助手（reader）；both 两边都显示
-  const agentScope = isChatPage ? "central" : "reader";
+  // 聊天页 = 全局助手（central），阅读侧边栏 = 阅读助手（reader）；宿主可用 agentScope prop 覆盖（如论文面板传 paper）
+  const agentScope = agentScopeProp ?? (isChatPage ? "central" : "reader");
   const quickActions = commands
-    .filter((c) => c.visible && (c.scope === agentScope || c.scope === "both"))
+    .filter((c) => c.visible && c.scope.includes(agentScope))
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const handleQuickPrompt = (prompt: string) => {
@@ -157,25 +160,27 @@ export function ChatInputArea({
               <SearchEngineSelector />
             </div>
 
-            <Button
-              type="submit"
-              size="icon"
-              disabled={status === "ready" ? !input.trim() : status !== "submitted" && status !== "streaming"}
-              onClick={() => {
-                if (status === "ready") {
-                  void onSubmit();
-                } else {
-                  onStop();
-                }
-              }}
-              className="size-8 rounded-full"
-            >
-              {status === "ready" ? (
-                <ArrowUp size={18} />
-              ) : (
-                <span className="size-2 rounded-xs bg-white dark:bg-neutral-900" />
-              )}
-            </Button>
+            <PromptInputAction tooltip={status === "ready" ? "发送" : "停止"} side="top">
+              <Button
+                type="submit"
+                size="icon"
+                disabled={status === "ready" ? !input.trim() : status !== "submitted" && status !== "streaming"}
+                onClick={() => {
+                  if (status === "ready") {
+                    void onSubmit();
+                  } else {
+                    onStop();
+                  }
+                }}
+                className="size-8 rounded-full"
+              >
+                {status === "ready" ? (
+                  <ArrowUp size={18} />
+                ) : (
+                  <span className="size-2 rounded-xs bg-white dark:bg-neutral-900" />
+                )}
+              </Button>
+            </PromptInputAction>
           </div>
         </PromptInput>
       </div>

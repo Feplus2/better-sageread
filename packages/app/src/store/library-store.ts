@@ -36,7 +36,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       set({ isLoading: true });
       const libraryBooks = await getBooksWithStatus();
-      const booksWithUrls = await Promise.all(libraryBooks.map(convertBookWithStatusUrls));
+      // 论文（MARKDOWN）不上图书馆书架，统一走文献库页面（pages/papers）
+      const nonPaperBooks = libraryBooks.filter((book) => book.format !== "MARKDOWN");
+      const booksWithUrls = await Promise.all(nonPaperBooks.map(convertBookWithStatusUrls));
       set({ booksWithStatus: booksWithUrls });
     } catch (error) {
       console.error("Error refreshing books:", error);

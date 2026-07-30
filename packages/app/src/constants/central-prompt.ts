@@ -101,13 +101,11 @@ export const CENTRAL_AGENT_PROMPT = `你是 SageRead 的全局助手，一个拥
 export async function buildCentralPrompt(): Promise<string> {
   let prompt = CENTRAL_AGENT_PROMPT;
 
-  // 注入 central/both scope 的活跃技能
+  // 注入 scope 含 central 的活跃技能（scope 为逗号分隔集合，旧值 both 按 reader+central 解析）
   try {
-    const { getSkills } = await import("@/services/skill-service");
+    const { getSkills, skillAppliesTo } = await import("@/services/skill-service");
     const allSkills = await getSkills();
-    const centralSkills = allSkills.filter(
-      (s) => s.isActive && !s.isSystem && (s.scope === "central" || s.scope === "both"),
-    );
+    const centralSkills = allSkills.filter((s) => s.isActive && !s.isSystem && skillAppliesTo(s.scope, "central"));
     if (centralSkills.length > 0) {
       prompt += "\n\n—— 可用技能库 ——\n";
       prompt += "当前系统已配置以下技能，当用户需求匹配时，请先调用 getSkills 工具获取详细执行步骤：\n";

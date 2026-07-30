@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import CreateTagDialog from "@/pages/library/components/create-tag-dialog";
 import EditTagDialog from "@/pages/library/components/edit-tag-dialog";
 import SearchToggle from "@/pages/library/components/search-toggle";
@@ -7,7 +8,6 @@ import { useLibraryUI } from "@/pages/library/hooks/use-library-ui";
 import { useTagsManagement } from "@/pages/library/hooks/use-tags-management";
 import { useTagsOperations } from "@/pages/library/hooks/use-tags-operations";
 import { getTrashedBooks } from "@/services/book-service";
-import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useLibraryStore } from "@/store/library-store";
 import clsx from "clsx";
 import {
@@ -19,7 +19,6 @@ import {
   GraduationCap,
   Library,
   Lightbulb,
-  Settings,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,18 +30,11 @@ interface NavigationItem {
   icon: React.ComponentType<{ size?: number; className?: string }>;
 }
 
-interface ActionButtonItem {
-  label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  onClick: () => void;
-}
-
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { searchQuery, booksWithStatus, refreshBooks, setSearchQuery } = useLibraryStore();
-  const { toggleSettingsDialog } = useAppSettingsStore();
   const selectedTagFromUrl = searchParams.get("tag") || "all";
   const { tags, filteredBooksByTag } = useTagsManagement(booksWithStatus, selectedTagFromUrl);
   const { isLibraryExpanded, toggleLibraryExpanded, handleNewTagClick, showNewTagDialog, handleCloseNewTagDialog } =
@@ -158,14 +150,6 @@ export default function Sidebar() {
     },
   ];
 
-  const actionButtons: ActionButtonItem[] = [
-    {
-      label: "设置",
-      icon: Settings,
-      onClick: toggleSettingsDialog,
-    },
-  ];
-
   return (
     <>
       <aside
@@ -204,16 +188,23 @@ export default function Sidebar() {
                         <Icon size={16} className="flex-shrink-0" />
                         <span className="font-medium text-sm">{item.label}</span>
                       </div>
-                      <button
-                        onClick={toggleLibraryExpanded}
-                        className="flex size-5 items-center justify-center rounded-full text-neutral-700 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700"
-                      >
-                        {isLibraryExpanded ? (
-                          <ChevronDown size={16} className="flex-shrink-0" />
-                        ) : (
-                          <ChevronRight size={16} className="flex-shrink-0" />
-                        )}
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={toggleLibraryExpanded}
+                            className="flex size-5 items-center justify-center rounded-full text-neutral-700 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                          >
+                            {isLibraryExpanded ? (
+                              <ChevronDown size={16} className="flex-shrink-0" />
+                            ) : (
+                              <ChevronRight size={16} className="flex-shrink-0" />
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          {isLibraryExpanded ? "收起标签列表" : "展开标签列表"}
+                        </TooltipContent>
+                      </Tooltip>
                     </Link>
                   </div>
                 ) : (
@@ -266,20 +257,6 @@ export default function Sidebar() {
               </span>
             )}
           </Link>
-          {actionButtons.map((button, index) => {
-            const Icon = button.icon;
-
-            return (
-              <button
-                key={index}
-                onClick={button.onClick}
-                className="flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-neutral-600 text-sm hover:bg-border dark:text-neutral-300"
-              >
-                <Icon size={16} className="flex-shrink-0" />
-                <span className="text-sm">{button.label}</span>
-              </button>
-            );
-          })}
         </div>
       </aside>
 

@@ -1,4 +1,16 @@
-import { Anthropic, ChatGLM, DeepSeek, Doubao, Gemini, Grok, Moonshot, OpenAI, OpenRouter, Qwen, XiaomiMiMo } from "@/components/icons";
+import {
+  Anthropic,
+  ChatGLM,
+  DeepSeek,
+  Doubao,
+  Gemini,
+  Grok,
+  Moonshot,
+  OpenAI,
+  OpenRouter,
+  Qwen,
+  XiaomiMiMo,
+} from "@/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { Check, ChevronDown, Search } from "lucide-react";
@@ -125,9 +138,12 @@ export default function ModelSelector({
                   const IconComponent = getProviderIcon(selectedModel.providerId);
                   return IconComponent ? <IconComponent className="h-4 w-4 flex-shrink-0" /> : null;
                 })()}
-                <span className="truncate text-xs" title={selectedModel.modelName}>
-                  {selectedModel.modelName}
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="truncate text-xs">{selectedModel.modelName}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{selectedModel.modelName}</TooltipContent>
+                </Tooltip>
               </>
             ) : (
               <span className="text-muted-foreground text-xs dark:text-neutral-400">{placeholder}</span>
@@ -178,14 +194,19 @@ export default function ModelSelector({
                       className="cursor-pointer p-2 dark:hover:bg-neutral-700"
                       onClick={() => handleModelSelect(model)}
                     >
-                      <div className="flex flex-1 flex-col gap-1 truncate" title={model.modelName}>
-                        <div className="truncate font-medium text-xs dark:text-neutral-200">{model.modelName}</div>
-                        {model.modelName !== model.modelId && (
-                          <div className="truncate text-[10px] text-muted-foreground dark:text-neutral-400">
-                            {model.modelId}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex flex-1 flex-col gap-1 truncate">
+                            <div className="truncate font-medium text-xs dark:text-neutral-200">{model.modelName}</div>
+                            {model.modelName !== model.modelId && (
+                              <div className="truncate text-[10px] text-muted-foreground dark:text-neutral-400">
+                                {model.modelId}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">{model.modelName}</TooltipContent>
+                      </Tooltip>
                       {isSelected && <Check className="h-4 w-4 flex-shrink-0 dark:text-neutral-200" />}
                     </DropdownMenuItem>
                   );

@@ -1,7 +1,9 @@
-export type BookFormat = "EPUB" | "PDF" | "MOBI" | "CBZ" | "FB2" | "FBZ";
+export type BookFormat = "EPUB" | "PDF" | "MOBI" | "CBZ" | "FB2" | "FBZ" | "MARKDOWN";
 export type BookNoteType = "bookmark" | "annotation" | "excerpt";
 export type HighlightStyle = "highlight" | "underline" | "squiggly";
 export type HighlightColor = "red" | "yellow" | "green" | "blue" | "violet";
+/** 标注来源：user=人工（默认）/ ai=AI 生成（C2 论文 AI 重点） */
+export type BookNoteSource = "user" | "ai";
 
 export interface Book {
   id: string;
@@ -54,6 +56,12 @@ export interface BookNote {
     before: string;
     after: string;
   };
+  /** AI 重点标注的类别 id（goal/methods/...）；人工标注为 null/缺省 */
+  category?: string | null;
+  /** 标注来源；老数据缺省按 "user" 处理 */
+  source?: BookNoteSource;
+  /** 星标 */
+  starred?: boolean;
 
   createdAt: number;
   updatedAt: number;

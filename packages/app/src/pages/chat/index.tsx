@@ -6,6 +6,7 @@ import { ChatMessages, TOOL_NAME_MAP } from "@/components/side-chat/chat-message
 import { ChatThreads } from "@/components/side-chat/chat-threads";
 import { getCommandIcon } from "@/components/side-chat/command-icons";
 import ModelSelector from "@/components/side-chat/model-selector";
+import { SearchEngineSelector } from "@/components/side-chat/search-engine-selector";
 import { MindmapViewer } from "@/components/tools/mindmap-viewer";
 import { RagResultViewer } from "@/components/tools/rag-result-viewer";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ const EmptyState = memo(({ input, setInput, handleSubmit, stop, status }: EmptyS
   const fileInputRef = useRef<HTMLInputElement>(null);
   const commands = useQuickCommandStore((s) => s.commands);
   const promptSuggestions = (commands ?? [])
-    .filter((c) => c.visible && (c.scope === "central" || c.scope === "both"))
+    .filter((c) => c.visible && c.scope.includes("central"))
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
@@ -58,20 +59,23 @@ const EmptyState = memo(({ input, setInput, handleSubmit, stop, status }: EmptyS
               className="flex-1 py-2 pl-1 text-base leading-[1.5] placeholder:font-normal dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-400"
             />
             <div className="flex items-center justify-between gap-2 pb-1">
-              <input ref={fileInputRef} type="file" multiple className="hidden" />
-              <PromptInputAction tooltip="上传文件">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    fileInputRef.current?.click();
-                  }}
-                  className="size-8 rounded-full dark:border-neutral-600 dark:hover:bg-neutral-700"
-                >
-                  <Paperclip className="size-4" />
-                </Button>
-              </PromptInputAction>
+              <div className="flex items-center gap-1.5">
+                <input ref={fileInputRef} type="file" multiple className="hidden" />
+                <PromptInputAction tooltip="上传文件">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    className="size-8 rounded-full dark:border-neutral-600 dark:hover:bg-neutral-700"
+                  >
+                    <Paperclip className="size-4" />
+                  </Button>
+                </PromptInputAction>
+                <SearchEngineSelector />
+              </div>
 
               <Button
                 type="button"

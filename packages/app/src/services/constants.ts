@@ -44,6 +44,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   librarySortBy: "updated",
   librarySortAscending: false,
   libraryCoverFit: "crop",
+  paperViewMode: "original",
 
   lastSyncedAtBooks: 0,
   lastSyncedAtConfigs: 0,

@@ -8,3 +8,11 @@ export { getReadingStatsTool } from "./reading-stats";
 export { notesTool } from "./notes";
 export { mindmapTool } from "./mindmap";
 export { webSearchTool } from "./web-search";
+export {
+  createPaperContextTool,
+  createPaperFullTool,
+  createPaperInfoTool,
+  createPaperSearchTool,
+  createPaperSectionTool,
+  createPaperTocTool,
+} from "./paper";

@@ -1,4 +1,4 @@
-import type { BookNote } from "@/types/book";
+import type { BookNote, BookNoteSource } from "@/types/book";
 import { invoke } from "@tauri-apps/api/core";
 
 // BookNote 创建数据类型
@@ -14,6 +14,10 @@ export interface BookNoteCreateData {
     before: string;
     after: string;
   };
+  /** AI 重点标注类别（仅 source="ai" 时落库；人工路径不传） */
+  category?: string;
+  /** 标注来源；缺省按 "user" 处理（人工路径不传，行为不变） */
+  source?: BookNoteSource;
 }
 
 // BookNote 更新数据类型
@@ -28,6 +32,12 @@ export interface BookNoteUpdateData {
     before: string;
     after: string;
   };
+  /** AI 重点标注类别（COALESCE 语义：不传保留原值） */
+  category?: string;
+  /** 标注来源（COALESCE 语义：不传保留原值） */
+  source?: BookNoteSource;
+  /** 星标（COALESCE 语义：不传保留原值） */
+  starred?: boolean;
 }
 
 /**
@@ -59,4 +69,13 @@ export async function updateBookNote(id: string, updateData: BookNoteUpdateData)
  */
 export async function deleteBookNote(id: string): Promise<void> {
   await invoke("delete_book_note", { id });
+}
+
+/**
+ * 清空指定书籍的全部 AI 标注（C2"重新生成"前置步骤）。
+ * 删除条件在 Rust 侧显式带 source='ai'，人工标注不受影响。返回删除条数。
+ */
+export async function deleteAiBookNotes(bookId: string): Promise<number> {
+  const result = await invoke<number>("delete_ai_book_notes", { bookId });
+  return result;
 }

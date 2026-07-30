@@ -95,7 +95,7 @@ export interface BookWithStatusAndUrls extends BookWithStatus {
   coverUrl?: string;
 }
 
-export type BookFormat = "EPUB" | "PDF" | "MOBI" | "CBZ" | "FB2" | "FBZ";
+export type BookFormat = "EPUB" | "PDF" | "MOBI" | "CBZ" | "FB2" | "FBZ" | "MARKDOWN";
 
 // ---- Vectorization metadata (stored under book_status.metadata.vectorization) ----
 export type VectorizationStatus = "idle" | "processing" | "success" | "failed";

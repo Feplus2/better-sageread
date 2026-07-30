@@ -1,14 +1,16 @@
-import type { ExplainTextEventDetail } from "@/services/iframe-service";
+import type { ExplainTextEventDetail, QuoteToChatEventDetail } from "@/services/iframe-service";
 import { useCallback, useEffect } from "react";
 
 interface UseTextEventHandlerOptions {
   sendMessage: any;
   onTextReceived?: (text: string) => void;
+  /** "Ask AI"：把选中文本注入输入框引用区（不自动发送） */
+  onQuoteReference?: (text: string) => void;
   activeBookId?: string;
 }
 
 export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
-  const { sendMessage, onTextReceived, activeBookId } = options;
+  const { sendMessage, onTextReceived, onQuoteReference, activeBookId } = options;
 
   const handleTextEvent = useCallback(
     (event: CustomEvent<ExplainTextEventDetail>) => {
@@ -39,6 +41,21 @@ export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
     [sendMessage, onTextReceived, activeBookId],
   );
 
+  const handleQuoteToChatEvent = useCallback(
+    (event: CustomEvent<QuoteToChatEventDetail>) => {
+      const { selectedText, bookId } = event.detail;
+
+      if (bookId && bookId !== activeBookId) {
+        return;
+      }
+
+      if (selectedText) {
+        onQuoteReference?.(selectedText);
+      }
+    },
+    [onQuoteReference, activeBookId],
+  );
+
   useEffect(() => {
     window.addEventListener("explainText", handleTextEvent as EventListener);
 
@@ -46,4 +63,12 @@ export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
       window.removeEventListener("explainText", handleTextEvent as EventListener);
     };
   }, [handleTextEvent]);
+
+  useEffect(() => {
+    window.addEventListener("quoteToChat", handleQuoteToChatEvent as EventListener);
+
+    return () => {
+      window.removeEventListener("quoteToChat", handleQuoteToChatEvent as EventListener);
+    };
+  }, [handleQuoteToChatEvent]);
 };

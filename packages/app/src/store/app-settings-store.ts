@@ -22,6 +22,11 @@ interface AppSettingsState {
   setSettings: (settings: SystemSettings) => void;
 }
 
+/** 论文正文字体栈：CJK 环境中文优先，否则西文优先（与 globalViewSettings 默认字体同源） */
+export function buildPaperFontFamily(serif: string, cjk: string): string {
+  return isCJKEnv() ? `${cjk}, ${serif}, serif` : `${serif}, ${cjk}, serif`;
+}
+
 export const useAppSettingsStore = create<AppSettingsState>()(
   subscribeWithSelector(
     persist(

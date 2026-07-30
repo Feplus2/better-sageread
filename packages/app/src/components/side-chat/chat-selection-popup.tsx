@@ -1,9 +1,5 @@
-import { useIsChatPage } from "@/hooks/use-is-chat-page";
-import { useReaderStore } from "@/pages/reader/components/reader-provider";
-import { type BookDataState, useChatReaderStore } from "@/store/chat-reader-store";
-import { Check, Copy, NotebookPen, Quote } from "lucide-react";
+import { Check, Copy, Quote } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useNotepad } from "../notepad/hooks";
 
 interface ChatSelectionPopupProps {
   selectedText: string;
@@ -14,14 +10,6 @@ interface ChatSelectionPopupProps {
 }
 
 export const ChatSelectionPopup = ({ selectedText, position, onClose, onAskAi, popupRef }: ChatSelectionPopupProps) => {
-  let bookData: BookDataState | null;
-  const isChatPage = useIsChatPage();
-  if (isChatPage) {
-    bookData = useChatReaderStore((state) => state.bookData);
-  } else {
-    bookData = useReaderStore((state) => state.bookData);
-  }
-  const { handleCreateNote } = useNotepad();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(
@@ -42,39 +30,6 @@ export const ChatSelectionPopup = ({ selectedText, position, onClose, onAskAi, p
       }
     },
     [selectedText],
-  );
-
-  const addNote = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (!selectedText.trim()) return;
-
-      try {
-        const content = selectedText.trim();
-        const title = content.length > 50 ? `${content.substring(0, 50)}...` : content;
-
-        let bookMeta = undefined;
-        if (bookData?.book) {
-          bookMeta = {
-            title: bookData.book.title,
-            author: bookData.book.author,
-          };
-        }
-
-        await handleCreateNote({
-          bookId: bookData?.id || undefined,
-          bookMeta,
-          title,
-          content,
-        });
-        onClose();
-      } catch (error) {
-        console.error("创建笔记失败:", error);
-      }
-    },
-    [selectedText, bookData, handleCreateNote, onClose],
   );
 
   const handleAskAi = useCallback(() => {
@@ -101,14 +56,6 @@ export const ChatSelectionPopup = ({ selectedText, position, onClose, onAskAi, p
             onClick={handleCopy}
           >
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          </div>
-
-          <div
-            className="flex cursor-pointer items-center gap-1 border-r px-2 hover:text-neutral-900 dark:hover:text-neutral-100"
-            onClick={addNote}
-          >
-            <NotebookPen className="size-4" />
-            <span className="whitespace-nowrap text-sm">添加笔记</span>
           </div>
 
           <div

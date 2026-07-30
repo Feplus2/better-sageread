@@ -1,5 +1,6 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CURATED_FONTS, DEFAULT_BOOK_FONT } from "@/services/constants";
 import {
   analyzeReaderBackground,
@@ -18,8 +19,7 @@ import { isCJKEnv } from "@/utils/misc";
 import { getStyles } from "@/utils/style";
 import { FolderOpen, RefreshCw, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MdCheck, MdOutlineDarkMode, MdOutlineLightMode } from "react-icons/md";
-import { TbSunMoon } from "react-icons/tb";
+import { MdCheck } from "react-icons/md";
 import { toast } from "sonner";
 import { FontSizeSlider } from "./font-size-slider";
 import { useReaderStore, useReaderStoreApi } from "./reader-provider";
@@ -36,16 +36,8 @@ const solidPresetLabels: Record<string, string> = {
 
 const SettingsDropdown = () => {
   const store = useReaderStoreApi();
-  const {
-    themeMode,
-    setThemeMode,
-    themeColor,
-    setThemeColor,
-    themeCode,
-    readerBackground,
-    setReaderBackground,
-    isDarkMode,
-  } = useThemeStore();
+  const { themeMode, themeColor, setThemeColor, themeCode, readerBackground, setReaderBackground, isDarkMode } =
+    useThemeStore();
   const [customBackgrounds, setCustomBackgrounds] = useState<string[]>([]);
   const [customBackgroundUrls, setCustomBackgroundUrls] = useState<Record<string, string>>({});
 
@@ -309,14 +301,16 @@ const SettingsDropdown = () => {
 
   return (
     <DropdownMenu open={isSettingsDropdownOpen} onOpenChange={handleToggleSettingsDropdown}>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="btn btn-ghost flex h-8 min-h-8 w-8 items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0"
-          title="字体大小设置"
-        >
-          <Settings2 size={18} />
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button className="btn btn-ghost flex h-8 min-h-8 w-8 items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0">
+              <Settings2 size={18} />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">字体大小设置</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent className="w-80 p-3" align="end" side="bottom" sideOffset={4}>
         <div className="space-y-4">
           <div>
@@ -356,14 +350,18 @@ const SettingsDropdown = () => {
           <div>
             <div className="mb-3 font-medium text-sm">字体大小</div>
             <div className="flex items-center justify-center gap-4">
-              <button
-                className="btn btn-sm size-8 cursor-pointer rounded-md border bg-muted hover:bg-muted/70 disabled:bg-muted disabled:opacity-50"
-                onClick={handleDecrease}
-                disabled={globalViewSettings.defaultFontSize <= FONT_SIZE_MIN}
-                title="减小字体大小"
-              >
-                <span className="flex items-center justify-center text-xs">A</span>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="btn btn-sm size-8 cursor-pointer rounded-md border bg-muted hover:bg-muted/70 disabled:bg-muted disabled:opacity-50"
+                    onClick={handleDecrease}
+                    disabled={globalViewSettings.defaultFontSize <= FONT_SIZE_MIN}
+                  >
+                    <span className="flex items-center justify-center text-xs">A</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">减小字体大小</TooltipContent>
+              </Tooltip>
 
               <FontSizeSlider
                 value={[globalViewSettings.defaultFontSize]}
@@ -374,14 +372,18 @@ const SettingsDropdown = () => {
                 showTooltip={true}
                 tooltipContent={(value) => `${value}px`}
               />
-              <button
-                className="btn btn-sm size-8 cursor-pointer rounded-md border bg-muted hover:bg-muted/70 disabled:bg-muted disabled:opacity-50"
-                onClick={handleIncrease}
-                disabled={globalViewSettings.defaultFontSize >= FONT_SIZE_MAX}
-                title="增大字体大小"
-              >
-                <span className="flex items-center justify-center text-lg">A</span>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="btn btn-sm size-8 cursor-pointer rounded-md border bg-muted hover:bg-muted/70 disabled:bg-muted disabled:opacity-50"
+                    onClick={handleIncrease}
+                    disabled={globalViewSettings.defaultFontSize >= FONT_SIZE_MAX}
+                  >
+                    <span className="flex items-center justify-center text-lg">A</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">增大字体大小</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
@@ -389,70 +391,39 @@ const SettingsDropdown = () => {
             <div className="mb-3 font-medium text-sm">阅读模式</div>
             <div className="space-y-3">
               <div className="flex items-center gap-4">
-                <button
-                  className={`btn btn-sm flex h-8 flex-1 items-center justify-between rounded-md px-3 ${
-                    globalViewSettings.scrolled
-                      ? "border-none bg-primary text-primary-foreground hover:bg-primary/90"
-                      : "border bg-muted text-primary hover:bg-muted/70"
-                  }`}
-                  onClick={() => applyScrolledMode(true)}
-                  title="滚动模式"
-                >
-                  <span className="text-sm">滚动</span>
-                  {globalViewSettings.scrolled && <MdCheck size={16} />}
-                </button>
-                <button
-                  className={`btn btn-sm flex h-8 flex-1 items-center justify-between rounded-md px-3 ${
-                    !globalViewSettings.scrolled
-                      ? "border-none bg-primary text-primary-foreground hover:bg-primary/90"
-                      : "border bg-muted text-primary hover:bg-muted/70"
-                  }`}
-                  onClick={() => applyScrolledMode(false)}
-                  title="分页模式"
-                >
-                  <span className="text-sm">分页</span>
-                  {!globalViewSettings.scrolled && <MdCheck size={16} />}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={`btn btn-sm flex h-8 flex-1 items-center justify-between rounded-md px-3 ${
+                        globalViewSettings.scrolled
+                          ? "border-none bg-primary text-primary-foreground hover:bg-primary/90"
+                          : "border bg-muted text-primary hover:bg-muted/70"
+                      }`}
+                      onClick={() => applyScrolledMode(true)}
+                    >
+                      <span className="text-sm">滚动</span>
+                      {globalViewSettings.scrolled && <MdCheck size={16} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">滚动模式</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={`btn btn-sm flex h-8 flex-1 items-center justify-between rounded-md px-3 ${
+                        !globalViewSettings.scrolled
+                          ? "border-none bg-primary text-primary-foreground hover:bg-primary/90"
+                          : "border bg-muted text-primary hover:bg-muted/70"
+                      }`}
+                      onClick={() => applyScrolledMode(false)}
+                    >
+                      <span className="text-sm">分页</span>
+                      {!globalViewSettings.scrolled && <MdCheck size={16} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">分页模式</TooltipContent>
+                </Tooltip>
               </div>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-3 font-medium text-sm">主题模式</div>
-            <div className="flex items-center gap-4">
-              <button
-                className={`btn btn-sm flex size-8 items-center justify-center rounded-md ${
-                  themeMode === "auto"
-                    ? "border-none bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "border bg-muted text-primary hover:bg-muted/70"
-                }`}
-                onClick={() => setThemeMode("auto")}
-                title="自动模式"
-              >
-                <TbSunMoon size={16} />
-              </button>
-              <button
-                className={`btn btn-sm flex size-8 items-center justify-center rounded-md border ${
-                  themeMode === "light"
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-primary hover:bg-muted/70"
-                }`}
-                onClick={() => setThemeMode("light")}
-                title="浅色模式"
-              >
-                <MdOutlineLightMode size={16} />
-              </button>
-              <button
-                className={`btn btn-sm flex size-8 items-center justify-center rounded-md border ${
-                  themeMode === "dark"
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-primary hover:bg-muted/70"
-                }`}
-                onClick={() => setThemeMode("dark")}
-                title="深色模式"
-              >
-                <MdOutlineDarkMode size={16} />
-              </button>
             </div>
           </div>
 
@@ -462,20 +433,28 @@ const SettingsDropdown = () => {
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground text-xs">文字颜色</span>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={fgDraft ?? themeCode.fg}
-                    onChange={(e) => handleFgChange(e.target.value)}
-                    className="h-7 w-10 cursor-pointer rounded-md border bg-transparent p-0.5"
-                    title="自定义文字颜色"
-                  />
-                  <button
-                    className="btn btn-sm rounded-md border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
-                    onClick={handleResetFg}
-                    title="恢复为配色预设的文字颜色"
-                  >
-                    跟随主题
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <input
+                        type="color"
+                        value={fgDraft ?? themeCode.fg}
+                        onChange={(e) => handleFgChange(e.target.value)}
+                        className="h-7 w-10 cursor-pointer rounded-md border bg-transparent p-0.5"
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">自定义文字颜色</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="btn btn-sm rounded-md border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                        onClick={handleResetFg}
+                      >
+                        跟随主题
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">恢复为配色预设的文字颜色</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -487,36 +466,42 @@ const SettingsDropdown = () => {
                     const isSelected =
                       (!readerBackground || readerBackground.kind === "solid") && themeColor === theme.name;
                     return (
-                      <button
-                        key={theme.name}
-                        title={solidPresetLabels[theme.name] ?? theme.label}
-                        onClick={() => handleSelectSolid(theme.name)}
-                        className={`btn btn-sm flex h-10 items-center justify-center rounded-md border ${
-                          isSelected
-                            ? "border-primary ring-2 ring-primary"
-                            : "border-neutral-300 dark:border-neutral-600"
-                        }`}
-                        style={{ backgroundColor: palette["base-100"], color: palette["base-content"] }}
-                      >
-                        <span className="text-xs">A</span>
-                      </button>
+                      <Tooltip key={theme.name}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => handleSelectSolid(theme.name)}
+                            className={`btn btn-sm flex h-10 items-center justify-center rounded-md border ${
+                              isSelected
+                                ? "border-primary ring-2 ring-primary"
+                                : "border-neutral-300 dark:border-neutral-600"
+                            }`}
+                            style={{ backgroundColor: palette["base-100"], color: palette["base-content"] }}
+                          >
+                            <span className="text-xs">A</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{solidPresetLabels[theme.name] ?? theme.label}</TooltipContent>
+                      </Tooltip>
                     );
                   })}
                   {readerScenes.map((scene) => {
                     const isSelected = readerBackground?.kind === "scene" && readerBackground.sceneId === scene.id;
                     return (
-                      <button
-                        key={scene.id}
-                        title={`${scene.label}${scene.mode === "dark" ? "（深色场景）" : ""}`}
-                        onClick={() => handleSelectScene(scene.id)}
-                        className={`btn btn-sm h-10 overflow-hidden rounded-md border p-0 ${
-                          isSelected
-                            ? "border-primary ring-2 ring-primary"
-                            : "border-neutral-300 dark:border-neutral-600"
-                        }`}
-                      >
-                        <img src={scene.uri} alt={scene.label} className="h-full w-full object-cover" />
-                      </button>
+                      <Tooltip key={scene.id}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => handleSelectScene(scene.id)}
+                            className={`btn btn-sm h-10 overflow-hidden rounded-md border p-0 ${
+                              isSelected
+                                ? "border-primary ring-2 ring-primary"
+                                : "border-neutral-300 dark:border-neutral-600"
+                            }`}
+                          >
+                            <img src={scene.uri} alt={scene.label} className="h-full w-full object-cover" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{`${scene.label}${scene.mode === "dark" ? "（深色场景）" : ""}`}</TooltipContent>
+                      </Tooltip>
                     );
                   })}
                 </div>
@@ -526,20 +511,28 @@ const SettingsDropdown = () => {
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="text-muted-foreground text-xs">自定义</span>
                   <div className="flex items-center gap-1">
-                    <button
-                      className="btn btn-sm flex size-6 items-center justify-center rounded-md border bg-muted hover:bg-muted/70"
-                      title="打开背景文件夹"
-                      onClick={handleOpenBackgroundsFolder}
-                    >
-                      <FolderOpen size={12} />
-                    </button>
-                    <button
-                      className="btn btn-sm flex size-6 items-center justify-center rounded-md border bg-muted hover:bg-muted/70"
-                      title="刷新"
-                      onClick={refreshCustomBackgrounds}
-                    >
-                      <RefreshCw size={12} />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="btn btn-sm flex size-6 items-center justify-center rounded-md border bg-muted hover:bg-muted/70"
+                          onClick={handleOpenBackgroundsFolder}
+                        >
+                          <FolderOpen size={12} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">打开背景文件夹</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="btn btn-sm flex size-6 items-center justify-center rounded-md border bg-muted hover:bg-muted/70"
+                          onClick={refreshCustomBackgrounds}
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">刷新</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
                 {customBackgrounds.length > 0 ? (
@@ -547,22 +540,25 @@ const SettingsDropdown = () => {
                     {customBackgrounds.map((fileName) => {
                       const isSelected = readerBackground?.kind === "custom" && readerBackground.fileName === fileName;
                       return (
-                        <button
-                          key={fileName}
-                          title={fileName}
-                          onClick={() => handleSelectCustom(fileName)}
-                          className={`btn btn-sm h-10 overflow-hidden rounded-md border p-0 ${
-                            isSelected
-                              ? "border-primary ring-2 ring-primary"
-                              : "border-neutral-300 dark:border-neutral-600"
-                          }`}
-                        >
-                          <img
-                            src={customBackgroundUrls[fileName]}
-                            alt={fileName}
-                            className="h-full w-full object-cover"
-                          />
-                        </button>
+                        <Tooltip key={fileName}>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => handleSelectCustom(fileName)}
+                              className={`btn btn-sm h-10 overflow-hidden rounded-md border p-0 ${
+                                isSelected
+                                  ? "border-primary ring-2 ring-primary"
+                                  : "border-neutral-300 dark:border-neutral-600"
+                              }`}
+                            >
+                              <img
+                                src={customBackgroundUrls[fileName]}
+                                alt={fileName}
+                                className="h-full w-full object-cover"
+                              />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{fileName}</TooltipContent>
+                        </Tooltip>
                       );
                     })}
                   </div>

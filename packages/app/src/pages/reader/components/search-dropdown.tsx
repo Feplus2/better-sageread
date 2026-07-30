@@ -1,4 +1,5 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BookSearchResult } from "@/types/book";
 import { Search } from "lucide-react";
 import type React from "react";
@@ -85,14 +86,16 @@ const SearchDropdown: React.FC<SearchDropdownProps> = ({ onNavigate }) => {
 
   return (
     <DropdownMenu open={isSearchDropdownOpen} onOpenChange={handleToggleSearchDropdown}>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="btn btn-ghost flex items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0"
-          title="搜索"
-        >
-          <Search size={18} />
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button className="btn btn-ghost flex items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0">
+              <Search size={18} />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">搜索</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent className="w-80 p-0" align="end" side="bottom" sideOffset={4}>
         <div className="flex max-h-[calc(100vh-8rem)] flex-col">
           <div className="sticky top-0 z-10 flex-shrink-0">

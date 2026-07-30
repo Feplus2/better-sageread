@@ -15,6 +15,16 @@ export interface ExplainTextEvent extends CustomEvent<ExplainTextEventDetail> {
   type: "explainText";
 }
 
+export interface QuoteToChatEventDetail {
+  selectedText: string; // 选中的文本（注入输入框引用区）
+  timestamp: number;
+  bookId?: string; // 关联的书籍/论文ID（路由到对应的 AI 面板）
+}
+
+export interface QuoteToChatEvent extends CustomEvent<QuoteToChatEventDetail> {
+  type: "quoteToChat";
+}
+
 class IframeService {
   private static instance: IframeService;
 
@@ -88,6 +98,33 @@ class IframeService {
 
     // 派发自定义事件
     const event = new CustomEvent<ExplainTextEventDetail>("explainText", {
+      detail: eventDetail,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    window.dispatchEvent(event);
+  }
+
+  /**
+   * 发送 "Ask AI"（引用）请求：把选中文本注入当前 AI 会话输入框的引用区（不自动发送）
+   * @param selectedText 选中的文本
+   * @param bookId 关联的书籍/论文ID
+   */
+  public sendQuoteReferenceRequest(selectedText: string, bookId?: string): void {
+    if (!selectedText || selectedText.trim().length === 0) {
+      console.warn("⚠️ 尝试发送空的选中文本");
+      return;
+    }
+
+    const eventDetail: QuoteToChatEventDetail = {
+      selectedText: selectedText.trim(),
+      timestamp: Date.now(),
+      bookId,
+    };
+
+    // 派发自定义事件（useTextEventHandler 按 bookId 路由到匹配的聊天面板）
+    const event = new CustomEvent<QuoteToChatEventDetail>("quoteToChat", {
       detail: eventDetail,
       bubbles: true,
       cancelable: true,

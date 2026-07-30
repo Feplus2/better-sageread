@@ -67,8 +67,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const processedMessages = processQuoteMessages(options.messages);
     const selectedMessages = selectValidMessages(processedMessages, 8);
 
-    // 根据 Agent 角色动态组装工具集
-    const tools = getToolsForScope(agentScope, { bookId: activeBookId });
+    // 根据 Agent 角色动态组装工具集（paper scope 时 activeBookId 即论文 id，paperScopeIds 为检索范围）
+    const tools = getToolsForScope(agentScope, {
+      bookId: activeBookId,
+      paperId: activeBookId,
+      paperScopeIds: chatContext?.paperScopeIds,
+    });
 
     const convertedMessages = convertToModelMessages(selectedMessages, {
       tools,

@@ -1,12 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoPreview } from "@/hooks/use-auto-preview";
 import { useChatState } from "@/hooks/use-chat-state";
 import { exportMessagesToHtml } from "@/lib/export-thread-html";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessagesToMarkdown } from "@/lib/export-thread-markdown";
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
-import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useThemeStore } from "@/store/theme-store";
 import {
   CircleQuestionMark,
@@ -17,11 +17,9 @@ import {
   NotebookPen,
   ScrollText,
   Search,
-  Settings,
   UserSearch,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
@@ -29,25 +27,27 @@ import { ChatInputArea } from "./chat-input-area";
 import { ChatMessages } from "./chat-messages";
 import { ChatThreads } from "./chat-threads";
 import ModelSelector from "./model-selector";
+import { SelectionExportBar } from "./selection-export-bar";
+import { useMessageSelection } from "./use-message-selection";
 
 interface ChatContentProps {
   bookId?: string;
 }
 
 function ChatContent({ bookId }: ChatContentProps) {
-  const { toggleSettingsDialog } = useAppSettingsStore();
   const { autoScroll } = useThemeStore();
   const [toolDetail, setToolDetail] = useState<any>(null);
   const [showMindmapDialog, setShowMindmapDialog] = useState(false);
-  // 多选导出：组件内状态，切换对话自动退出
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const setActiveContext = useReaderStore((state) => state.setActiveContext)!;
   const progress = useReaderStore((state) => state.progress);
   const activeContext = useReaderStore((state) => state.activeContext)!;
   const currentThread = useReaderStore((state) => state.currentThread);
   const setCurrentThread = useReaderStore((state) => state.setCurrentThread)!;
+
+  // 多选导出：切换对话自动退出
+  const { selectionMode, selectedIds, toggleSelectionMode, exitSelectionMode, handleToggleSelect } =
+    useMessageSelection(currentThread?.id);
 
   const {
     input,
@@ -94,48 +94,12 @@ function ChatContent({ bookId }: ChatContentProps) {
   };
 
   // 多选导出
-  const exitSelectionMode = () => {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-  };
-
-  const handleToggleSelect = (messageId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else {
-        next.add(messageId);
-      }
-      return next;
-    });
-  };
-
   const getSelectedMessages = () => messages.filter((m) => selectedIds.has(m.id));
 
   const buildSelectionMeta = () => ({
     title: `${currentThread?.title || "未命名对话"}-节选`,
     bookId: currentThread?.book_id ?? bookId ?? null,
   });
-
-  // 切换对话时退出选择模式
-  // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
-  useEffect(() => {
-    exitSelectionMode();
-  }, [currentThread?.id]);
-
-  // Esc 退出选择模式
-  useEffect(() => {
-    if (!selectionMode) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setSelectionMode(false);
-        setSelectedIds(new Set());
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectionMode]);
 
   const promptSuggestions = [
     { text: "总结这一页的内容", icon: ScrollText, isNew: true },
@@ -148,7 +112,7 @@ function ChatContent({ bookId }: ChatContentProps) {
 
   const EmptyState = () => (
     <div className="flex h-full w-full flex-col overflow-y-auto p-2 pb-8">
-      <div className="flex flex-1 flex-col justify-end gap-3">
+      <div className="flex flex-1 flex-col justify-center gap-3">
         <div className="flex flex-col items-start gap-4 pl-2">
           <div className="rounded-full bg-muted/70 p-3 shadow-md dark:bg-neutral-800/90">
             <img className="size-8" src="https://www.notion.so/_assets/9ade71d75a1c0e93.png" alt="" />
@@ -202,42 +166,48 @@ function ChatContent({ bookId }: ChatContentProps) {
           </div>
           <div className="flex flex-shrink-0 items-center gap-0">
             {messages.length > 0 && !showThreads && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={`z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                  selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
-                }`}
-                title="选择导出"
-                onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
-              >
-                <ListChecks className="h-5 w-5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
+                      selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
+                    }`}
+                    onClick={toggleSelectionMode}
+                  >
+                    <ListChecks className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">选择导出</TooltipContent>
+              </Tooltip>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
-              onClick={handleNewThread}
-            >
-              <MessageCirclePlus className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
-              onClick={handleShowThreads}
-            >
-              <History className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
-              onClick={toggleSettingsDialog}
-            >
-              <Settings className="h-5 w-5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  onClick={handleNewThread}
+                >
+                  <MessageCirclePlus className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">新对话</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  onClick={handleShowThreads}
+                >
+                  <History className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">历史对话</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -278,36 +248,13 @@ function ChatContent({ bookId }: ChatContentProps) {
       )}
 
       {selectionMode && !showThreads && (
-        <div className="-translate-x-1/2 absolute bottom-20 left-1/2 z-40 flex items-center gap-2 rounded-xl border bg-background px-3 py-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-800">
-          <span className="flex-shrink-0 text-nowrap text-neutral-600 text-xs dark:text-neutral-400">已选 {selectedIds.size} 条</span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectedIds.size === 0}
-            onClick={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
-          >
-            Markdown
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectedIds.size === 0}
-            onClick={() => void exportMessagesToHtml(getSelectedMessages(), buildSelectionMeta())}
-          >
-            HTML
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectedIds.size === 0}
-            onClick={() => void exportMessagesToImage(getSelectedMessages(), buildSelectionMeta())}
-          >
-            图片
-          </Button>
-          <Button variant="ghost" size="sm" onClick={exitSelectionMode}>
-            取消
-          </Button>
-        </div>
+        <SelectionExportBar
+          selectedCount={selectedIds.size}
+          onExportMarkdown={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
+          onExportHtml={() => void exportMessagesToHtml(getSelectedMessages(), buildSelectionMeta())}
+          onExportImage={() => void exportMessagesToImage(getSelectedMessages(), buildSelectionMeta())}
+          onCancel={exitSelectionMode}
+        />
       )}
 
       {!showThreads && bookId && (

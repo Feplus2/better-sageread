@@ -1,7 +1,8 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, Maximize2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getOSPlatform } from "@/utils/misc";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Maximize2, Minus, Square, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const win = getCurrentWindow();
 
@@ -24,7 +25,7 @@ export default function WindowControls() {
       });
 
       return () => {
-        unlisten.then(fn => fn());
+        unlisten.then((fn) => fn());
       };
     }
   }, []);
@@ -53,33 +54,41 @@ export default function WindowControls() {
 
   return (
     <div className="flex h-7 items-center">
-      <button
-        onClick={handleMinimize}
-        className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
-        title="最小化"
-      >
-        <Minus className="size-4" />
-      </button>
-      
-      <button
-        onClick={handleToggleMaximize}
-        className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
-        title={isMaximized ? "还原" : "最大化"}
-      >
-        {isMaximized ? (
-          <Square className="size-3.5" />
-        ) : (
-          <Maximize2 className="size-3.5" />
-        )}
-      </button>
-      
-      <button
-        onClick={handleClose}
-        className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-red-500 hover:text-white dark:text-neutral-400 dark:hover:bg-red-500 dark:hover:text-white"
-        title="关闭"
-      >
-        <X className="size-4" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleMinimize}
+            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+          >
+            <Minus className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">最小化</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleToggleMaximize}
+            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+          >
+            {isMaximized ? <Square className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{isMaximized ? "还原" : "最大化"}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleClose}
+            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-red-500 hover:text-white dark:text-neutral-400 dark:hover:bg-red-500 dark:hover:text-white"
+          >
+            <X className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">关闭</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

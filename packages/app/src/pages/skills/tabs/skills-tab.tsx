@@ -1,17 +1,22 @@
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SKILL_SCOPES, SKILL_SCOPE_LABELS, type SkillScope, parseSkillScopes } from "@/services/skill-service";
+import { ListFilter, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import SkillEditorDialog from "../components/skill-editor-dialog";
 import SkillItem from "../components/skill-item";
 import { type Skill, useSkills } from "../hooks/use-skills";
 
-type ScopeFilter = "all" | "reader" | "central" | "both";
-
 export default function SkillsTab() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
+  // 作用域筛选（集合包含匹配；空集合 = 全部）
+  const [scopeFilter, setScopeFilter] = useState<Set<SkillScope>>(new Set());
   const { data: skills, isLoading, error } = useSkills();
 
   const handleCreate = () => {
@@ -22,6 +27,18 @@ export default function SkillsTab() {
   const handleEdit = (skill: Skill) => {
     setEditingSkill(skill);
     setIsEditorOpen(true);
+  };
+
+  const toggleScopeFilter = (scope: SkillScope, checked: boolean) => {
+    setScopeFilter((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(scope);
+      } else {
+        next.delete(scope);
+      }
+      return next;
+    });
   };
 
   if (isLoading) {
@@ -45,24 +62,42 @@ export default function SkillsTab() {
 
   const nonSystemSkills = (skills ?? []).filter((s) => !s.isSystem);
   const filteredSkills =
-    scopeFilter === "all" ? nonSystemSkills : nonSystemSkills.filter((s) => s.scope === scopeFilter);
+    scopeFilter.size === 0
+      ? nonSystemSkills
+      : nonSystemSkills.filter((s) => parseSkillScopes(s.scope).some((scope) => scopeFilter.has(scope)));
+
+  const filterLabel =
+    scopeFilter.size === 0
+      ? "全部范围"
+      : SKILL_SCOPES.filter((s) => scopeFilter.has(s))
+          .map((s) => SKILL_SCOPE_LABELS[s])
+          .join("、");
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground text-sm">技能为标准操作流程（SOP），AI 在匹配场景时自动调用</p>
         <div className="flex items-center gap-2">
-          <Select value={scopeFilter} onValueChange={(v) => setScopeFilter(v as ScopeFilter)}>
-            <SelectTrigger className="h-8 w-28 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部</SelectItem>
-              <SelectItem value="reader">阅读助手</SelectItem>
-              <SelectItem value="central">全局助手</SelectItem>
-              <SelectItem value="both">共享</SelectItem>
-            </SelectContent>
-          </Select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 max-w-56 gap-1.5 text-xs">
+                <ListFilter className="size-3.5 shrink-0" />
+                <span className="truncate">{filterLabel}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-32">
+              {SKILL_SCOPES.map((scope) => (
+                <DropdownMenuCheckboxItem
+                  key={scope}
+                  checked={scopeFilter.has(scope)}
+                  onCheckedChange={(checked) => toggleScopeFilter(scope, checked === true)}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  {SKILL_SCOPE_LABELS[scope]}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={handleCreate}>
             <Plus className="size-4" />
             新建技能

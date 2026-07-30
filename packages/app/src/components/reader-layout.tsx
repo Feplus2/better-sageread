@@ -5,9 +5,11 @@ import { PreviewPanel } from "@/components/preview/preview-panel";
 import SettingsDialog from "@/components/settings/settings-dialog";
 import SideChat from "@/components/side-chat";
 import SyncRefreshButton from "@/components/sync-refresh-button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import VerticalTabBar from "@/components/vertical-tab-bar";
 import WindowControls from "@/components/window-controls";
 import { useFontEvents } from "@/hooks/use-font-events";
+import PaperReaderView from "@/pages/paper-reader/paper-reader-view";
 import ReaderViewer from "@/pages/reader";
 import { ReaderProvider } from "@/pages/reader/components/reader-provider";
 import { applySyncResult } from "@/services/apply-sync-result";
@@ -26,9 +28,28 @@ import { useThemeStore } from "@/store/theme-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
-import { HomeIcon, PanelLeft } from "lucide-react";
+import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { useEffect, useRef, useState } from "react";
+import appIconUrl from "../../src-tauri/icons/32x32.png";
+
+/** 全局设置入口（窗口顶栏右侧，横向/纵向两种顶栏模式共用，全页面可点） */
+function TopbarSettingsButton() {
+  const { toggleSettingsDialog } = useAppSettingsStore();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={toggleSettingsDialog}
+          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-neutral-200 focus:outline-none focus-visible:ring-0 dark:hover:bg-neutral-700"
+        >
+          <Settings size={18} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">设置</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export default function ReaderLayout() {
   useFontEvents();
@@ -247,12 +268,44 @@ export default function ReaderLayout() {
       {isVertical ? (
         <div
           data-tauri-drag-region
-          className="flex h-8 shrink-0 select-none items-center justify-end gap-1 pr-1 dark:bg-tab-background"
+          data-region="reader-tabs"
+          className="relative flex h-8 shrink-0 select-none items-center pr-1 dark:bg-tab-background"
           style={isWindows ? undefined : { paddingLeft: 70 }}
         >
-          <SyncRefreshButton />
-          <NotificationDropdown />
-          <WindowControls />
+          {/* 左侧顶格：主页 / 切换横向标签。
+              控件尺寸与颜色与横向 pinnedLeft 完全一致；容器带 drag region，按钮本身不触发拖动 */}
+          <div data-tauri-drag-region className="mx-2 flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="cursor-pointer" onClick={navigateToHome}>
+                  <HomeIcon className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">主页</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="cursor-pointer" onClick={toggleTabOrientation}>
+                  <PanelTop className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">切换到横向标签</TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* 居中：应用图标 + 名称（垂直模式顶栏无 tab 条，品牌居中；横向模式在 tab 栏 pinnedLeft，不重复）。
+              pointer-events-none：鼠标落到下层 drag region，品牌区也能拖窗 */}
+          <div className="-translate-x-1/2 pointer-events-none absolute left-1/2 flex items-center gap-1.5">
+            <img src={appIconUrl} alt="" className="size-4" />
+            <span className="font-medium text-neutral-600 text-xs dark:text-neutral-400">SageRead</span>
+          </div>
+
+          <div data-tauri-drag-region className="flex flex-1 items-center justify-end gap-1">
+            <SyncRefreshButton />
+            <NotificationDropdown />
+            <TopbarSettingsButton />
+            <WindowControls />
+          </div>
         </div>
       ) : (
         <div
@@ -271,18 +324,29 @@ export default function ReaderLayout() {
             marginLeft={isWindows ? 0 : 60}
             pinnedLeft={
               <div className="mx-2 flex items-center gap-2">
-                <div className="cursor-pointer" onClick={navigateToHome}>
-                  <HomeIcon className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-                </div>
-                <div className="cursor-pointer" onClick={toggleTabOrientation} title="切换到垂直标签">
-                  <PanelLeft className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="cursor-pointer" onClick={navigateToHome}>
+                      <HomeIcon className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">主页</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="cursor-pointer" onClick={toggleTabOrientation}>
+                      <PanelLeft className="size-5 text-neutral-700 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">切换到垂直标签</TooltipContent>
+                </Tooltip>
               </div>
             }
             pinnedRight={
               <div className="flex items-center gap-1">
                 <SyncRefreshButton />
                 <NotificationDropdown />
+                <TopbarSettingsButton />
                 <WindowControls />
               </div>
             }
@@ -305,6 +369,22 @@ export default function ReaderLayout() {
           </div>
 
           {tabs.map((tab) => {
+            // 论文 tab：三段式阅读视图（左笔记占位 | 中 PaperHeaderBar+PaperReader | 右论文助手），无 foliate reader store
+            if ((tab.type ?? "book") === "paper") {
+              return (
+                <div
+                  key={tab.id}
+                  className="absolute inset-0 flex bg-background p-1"
+                  style={{
+                    visibility: tab.id === activeTabId ? "visible" : "hidden",
+                    zIndex: tab.id === activeTabId ? 1 : 0,
+                  }}
+                >
+                  <PaperReaderView paperId={tab.bookId} title={tab.title} />
+                </div>
+              );
+            }
+
             const store = getReaderStore(tab.id);
             if (!store) return null;
 
