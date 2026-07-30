@@ -72,9 +72,10 @@ SageRead 有两套互不影响的配色系统：
 | `bookshelf` | 书架滚动区（网格与列表两种视图共用） |
 | `book-card` | 单本书籍卡片 |
 | `book-cover` | 书籍封面容器（内部为 `img` 或占位块） |
-| `reader-tabs` | 阅读页顶部书籍标签条 |
-| `notepad-panel` | 阅读页笔记侧边栏容器 |
-| `chat-panel` | AI 问答面板整体（阅读页右侧 / 全局助手页） |
+| `reader-tabs` | 阅读页顶部标签条（横向标签栏 / 垂直模式顶条） |
+| `vertical-tabs` | 垂直标签栏（48px 窄条 + 悬停浮现的详情浮层） |
+| `notepad-panel` | 阅读页笔记侧边栏容器（书籍/论文左侧） |
+| `chat-panel` | AI 问答面板整体（书籍/论文阅读页右侧 AI 侧边栏） |
 | `chat-message-user` | 单条用户消息（气泡本体为内部 `.prose` 元素） |
 | `chat-message-assistant` | 单条 AI 消息（同上） |
 | `dialog` | 所有对话框弹层（shadcn Dialog 共用挂载点） |
