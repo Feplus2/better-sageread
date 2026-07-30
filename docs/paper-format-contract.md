@@ -71,3 +71,13 @@ lang: "en"                    # pandoc 标准
   - 图片相对路径可显示；
   - `chunk_md_file` 分片结果合理（heading 边界切分），向量化零改造可用。
 - **生态兼容检查**：`pandoc paper.md -s -o out.docx`（或 Quarto 渲染）直接成功，无语法错误——证明产物活在 Pandoc 生态内，而非 SageRead 私有方言。
+
+## 六、v1 现实偏差（2026-07-30 实录，渲染器可依赖但勿惊讶）
+
+契约是目标态；以下是当前 converter 产物的**已知偏差与放宽**，均不改变语法层面约定：
+
+- **表格**：跨页续表已合并为单个 HTML `<table>`（重复表头行去重）；表注为表前独立段落。无 HTML 表体的表格页退化为普通 markdown 图片（`![表注](images/tableN.jpg)`），不是 `<table>`。
+- **图注与图版**：游离的 `Figure N.` 图注会绑回最近未编号图组；碎组图（MinerU 多图版切碎）图版归属是尽力而为，个别图注只能以编号段落留在正文流中。无编号图组命名 `figX{seq}`。
+- **作者 bio 照**（RSC 版式）可能作为 Figure 1 子图出现。
+- **公式**：MinerU 输出的 legacy TeX 命令（`\bf/\cal/\sf/\tt/\textcircled`）KaTeX/pandoc 可能告警，待 converter 侧扫荡。
+- **元数据**：author/container-title/date/citekey 以 Zotero/CSL-JSON 为准，LLM 仅补 abstract；个别 Zotero 条目自身缺字段时以规则/CrossRef 兜底，仍可能缺 container-title/date（数据缺口，非解析失败）。
