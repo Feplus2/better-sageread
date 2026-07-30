@@ -91,7 +91,35 @@ impl DatabaseConnection {
         db.initialize_bm25_tables()
             .with_context(|| "Failed to initialize BM25 tables for search")?;
 
+        // 老库幂等迁移：补充 paper_id 列与索引（全局论文库按 paper_id 过滤检索需要）
+        db.migrate_paper_id_column()
+            .with_context(|| "Failed to migrate paper_id column for search")?;
+
         Ok(db)
+    }
+
+    /// 幂等迁移：document_chunks 增加 paper_id 列与 idx_paper_id 索引（已存在则跳过）
+    fn migrate_paper_id_column(&self) -> Result<()> {
+        let has_paper_id = self
+            .conn
+            .prepare("PRAGMA table_info(document_chunks)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|name| name.map(|n| n == "paper_id").unwrap_or(false));
+
+        if !has_paper_id {
+            log::info!("Migrating document_chunks: adding paper_id column");
+            self.conn.execute(
+                "ALTER TABLE document_chunks ADD COLUMN paper_id TEXT NOT NULL DEFAULT ''",
+                [],
+            ).with_context(|| "Failed to add paper_id column to document_chunks")?;
+        }
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_paper_id ON document_chunks(paper_id)",
+            [],
+        ).with_context(|| "Failed to create idx_paper_id index")?;
+
+        Ok(())
     }
 
     /// 初始化数据库模式
@@ -111,6 +139,7 @@ impl DatabaseConnection {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 book_title TEXT NOT NULL,
                 book_author TEXT NOT NULL,
+                paper_id TEXT NOT NULL DEFAULT '',
                 md_file_path TEXT NOT NULL,
                 file_order_in_book INTEGER NOT NULL,
                 related_chapter_titles TEXT NOT NULL,
@@ -126,6 +155,10 @@ impl DatabaseConnection {
             "#,
             [],
         ).with_context(|| "Failed to create document_chunks table")?;
+
+        // 老库幂等迁移：补充 paper_id 列与索引（打开 per-book 旧库时同样生效）
+        self.migrate_paper_id_column()
+            .with_context(|| "Failed to migrate paper_id column")?;
 
         // 创建索引
         self.conn.execute(

@@ -300,6 +300,7 @@ where
                 id: None,
                 book_title: epub_content.title.clone(),
                 book_author: epub_content.author.clone(),
+                paper_id: String::new(), // per-book 库不使用 paper_id
                 md_file_path: absolute_md_path,
                 file_order_in_book: min_play_order,
                 related_chapter_titles: related_chapter_titles.clone(),
@@ -659,6 +660,7 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
                 id: None,
                 book_title: crate::manual::MANUAL_TITLE.to_string(),
                 book_author: crate::manual::MANUAL_AUTHOR.to_string(),
+                paper_id: String::new(), // per-book 库不使用 paper_id
                 md_file_path: absolute_md_path.clone(),
                 file_order_in_book: 0,
                 related_chapter_titles: file.title.to_string(),
@@ -694,4 +696,212 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
         total_chunks: total_processed_chunks,
         vector_dimension: actual_dimension,
     })
+}
+
+
+/* ---------------- 全局论文向量库 ---------------- */
+
+/// 论文索引管线：{paper_dir}/paper.md → 分片 → 向量化 → 全局库 {db_path}
+/// 与 process_manual_to_db 的区别：多论文共库，绝不删库文件，重索引先按 paper_id 删后插
+pub async fn process_paper_to_db<P1: AsRef<Path>, P2: AsRef<Path>, F>(
+    paper_id: &str,
+    paper_dir: P1,
+    db_path: P2,
+    title: &str,
+    author: &str,
+    opts: ProcessOptions,
+    mut on_progress: Option<F>,
+) -> Result<ProcessReport>
+where
+    F: FnMut(ProgressUpdate) + Send,
+{
+    let paper_dir = paper_dir.as_ref();
+    let db_path = db_path.as_ref();
+    let md_file_path = paper_dir.join("paper.md");
+
+    if !md_file_path.exists() {
+        anyhow::bail!("paper.md not found: {:?}", md_file_path);
+    }
+
+    let md_content = fs::read_to_string(&md_file_path)
+        .with_context(|| format!("Failed to read paper.md: {:?}", md_file_path))?;
+    if md_content.trim().is_empty() {
+        anyhow::bail!("paper.md is empty: {:?}", md_file_path);
+    }
+
+    let reader = EpubReader::new().context("初始化分片器失败")?;
+    let chunks = reader.chunk_md_file(&md_content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
+    let total_chunks_in_file = chunks.len();
+    if total_chunks_in_file == 0 {
+        anyhow::bail!("paper.md 无有效分片: {:?}", md_file_path);
+    }
+
+    log::info!(
+        "初始化论文向量化器：embeddings_url={}, model_name={}",
+        opts.vectorizer.embeddings_url,
+        opts.vectorizer.model_name
+    );
+    let mut vectorizer = TextVectorizer::new(opts.vectorizer.clone())
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to initialize text vectorizer with embeddings_url: {}, model: {}",
+                opts.vectorizer.embeddings_url, opts.vectorizer.model_name
+            )
+        })?;
+
+    let actual_dimension = vectorizer
+        .detect_embedding_dimension()
+        .await
+        .context("Failed to detect embedding dimension")?;
+    log::info!("检测到实际向量维度: {}", actual_dimension);
+
+    // 全局库多论文共存：只在不存在时创建，绝不删除库文件
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create papers directory: {:?}", parent))?;
+    }
+    let mut db = VectorDatabase::new(db_path, actual_dimension)
+        .with_context(|| format!("Failed to open/create database at {:?} with dimension {}", db_path, actual_dimension))?;
+    if let Err(e) = db.initialize_vec_table() {
+        log::warn!("sqlite-vec unavailable, fallback to standard storage: {}", e);
+    }
+
+    // 重索引幂等：先清空该论文的旧分片（连带向量与 BM25 缓存）
+    let removed = db.delete_chunks_by_paper_id(paper_id)
+        .with_context(|| format!("Failed to delete existing chunks for paper_id={}", paper_id))?;
+    if removed > 0 {
+        log::info!("已清除论文 {} 的旧分片 {} 个（重索引）", paper_id, removed);
+    }
+
+    let batch_size = opts.batch_size.unwrap_or(10);
+    let absolute_md_path = md_file_path.to_string_lossy().to_string();
+    let mut batch: Vec<DocumentChunk> = Vec::new();
+    let mut total_processed_chunks = 0;
+    let mut error_stats = ErrorStats::new();
+
+    for (chunk_index, chunk_content) in chunks.into_iter().enumerate() {
+        if chunk_content.trim().is_empty() {
+            continue;
+        }
+
+        let embedding = match vectorizer.vectorize_text(&chunk_content).await {
+            Ok(emb) => emb,
+            Err(e) => {
+                log::error!("论文分片向量化失败 (paper_id: {}, 分片: {}): {}", paper_id, chunk_index, e);
+                error_stats.add_chunk_error();
+                continue;
+            }
+        };
+
+        batch.push(DocumentChunk {
+            id: None,
+            book_title: title.to_string(),
+            book_author: author.to_string(),
+            paper_id: paper_id.to_string(),
+            md_file_path: absolute_md_path.clone(),
+            file_order_in_book: 0,
+            related_chapter_titles: title.to_string(),
+            chunk_text: chunk_content,
+            chunk_order_in_file: chunk_index,
+            total_chunks_in_file,
+            embedding,
+            global_chunk_index: chunk_index,
+        });
+
+        if batch.len() >= batch_size {
+            db.insert_chunks_batch(&batch)
+                .map_err(|e| anyhow::anyhow!("论文分片入库失败: {}", e))?;
+            total_processed_chunks += batch.len();
+            batch.clear();
+        }
+
+        if let Some(cb) = on_progress.as_mut() {
+            cb(ProgressUpdate {
+                current: chunk_index + 1,
+                total: total_chunks_in_file,
+                percent: ((chunk_index + 1) as f32 / total_chunks_in_file as f32) * 100.0,
+                md_file_path: absolute_md_path.clone(),
+                chunk_index,
+                related_chapter_titles: title.to_string(),
+            });
+        }
+    }
+
+    if !batch.is_empty() {
+        db.insert_chunks_batch(&batch)
+            .map_err(|e| anyhow::anyhow!("论文分片入库失败: {}", e))?;
+        total_processed_chunks += batch.len();
+    }
+
+    if error_stats.failed_chunks > 0 {
+        log::warn!("论文 {} 有 {} 个分片向量化失败", paper_id, error_stats.failed_chunks);
+    }
+
+    log::info!("论文索引完成：paper_id={}，{} 个分片", paper_id, total_processed_chunks);
+
+    Ok(ProcessReport {
+        db_path: db_path.to_path_buf(),
+        book_title: title.to_string(),
+        book_author: author.to_string(),
+        total_chunks: total_processed_chunks,
+        vector_dimension: actual_dimension,
+    })
+}
+
+/// 全局论文库检索：hybrid（提供嵌入配置时）或 BM25 降级，两侧都支持 paper_id 集合过滤
+/// 库不存在或 paper_ids 为 Some(空集) 时返回空结果，不报错
+pub async fn search_papers_global<P: AsRef<Path>>(
+    db_path: P,
+    query: &str,
+    paper_ids: Option<Vec<String>>,
+    limit: usize,
+    vectorizer: Option<VectorizerConfig>,
+    vector_weight: Option<f32>,
+    bm25_weight: Option<f32>,
+) -> Result<Vec<crate::models::SearchResult>> {
+    let db_path = db_path.as_ref();
+
+    if !db_path.exists() {
+        log::info!("全局论文库不存在，返回空结果: {:?}", db_path);
+        return Ok(Vec::new());
+    }
+
+    // 显式空集合语义：过滤到零篇论文，结果必为空
+    if let Some(ids) = &paper_ids {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+    }
+
+    let config = crate::config::create_custom_hybrid_config(
+        Some(crate::models::SearchMode::Hybrid),
+        vector_weight,
+        bm25_weight,
+    );
+
+    match vectorizer {
+        // 有嵌入配置：向量化查询，走 hybrid 融合检索
+        Some(vectorizer_config) => {
+            let mut v = TextVectorizer::new(vectorizer_config).await?;
+            let actual_dimension = v.detect_embedding_dimension().await
+                .context("Failed to detect embedding dimension")?;
+            log::info!("检测到向量维度: {}", actual_dimension);
+
+            let db = VectorDatabase::open_for_search(db_path, actual_dimension)
+                .context("Open database failed")?;
+
+            let embedding = v.vectorize_text(query).await?;
+
+            db.search_with_mode_filtered(query, Some(&embedding), limit, &config, paper_ids.as_deref())
+        }
+        // 无嵌入配置：BM25 降级检索（不需要向量维度）
+        None => {
+            log::info!("未提供嵌入配置，全局论文库降级为 BM25 检索");
+            let db = VectorDatabase::open_for_search(db_path, 1024)
+                .context("Open database failed")?;
+
+            db.search_with_mode_filtered(query, None, limit, &config, paper_ids.as_deref())
+        }
+    }
 }

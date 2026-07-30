@@ -39,6 +39,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_chunks_by_range,
             commands::prepare_manual_files,
             commands::index_manual,
+            commands::index_paper,
+            commands::search_papers_db,
+            commands::get_paper_chunk_context,
         ])
         .setup(|app, _api| {
             // Initialize and manage plugin state

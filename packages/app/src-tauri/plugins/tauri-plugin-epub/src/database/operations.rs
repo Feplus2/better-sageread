@@ -21,15 +21,16 @@ impl<'a> DatabaseOperations<'a> {
         let chunk_id = self.db.connection_mut().query_row(
             r#"
             INSERT INTO document_chunks (
-                book_title, book_author, md_file_path, file_order_in_book,
+                book_title, book_author, paper_id, md_file_path, file_order_in_book,
                 related_chapter_titles, chunk_text, chunk_order_in_file,
                 total_chunks_in_file, global_chunk_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             RETURNING id
             "#,
             params![
                 chunk.book_title,
                 chunk.book_author,
+                chunk.paper_id,
                 chunk.md_file_path,
                 chunk.file_order_in_book,
                 chunk.related_chapter_titles,
@@ -45,6 +46,49 @@ impl<'a> DatabaseOperations<'a> {
         self.insert_embedding(chunk_id, &chunk.embedding)?;
 
         Ok(chunk_id)
+    }
+
+    /// 按 paper_id 删除文档块及其向量（全局论文库重索引/论文彻底删除时的清理）
+    /// 返回删除的分片数；同时使 BM25 统计缓存失效
+    pub fn delete_chunks_by_paper_id(&mut self, paper_id: &str) -> Result<usize> {
+        fn table_exists(db: &DatabaseConnection, name: &str) -> Result<bool> {
+            let count: i64 = db.connection().query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+                params![name],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        }
+
+        let has_vec_table = table_exists(self.db, "chunk_embeddings")?;
+        let has_fallback_table = table_exists(self.db, "chunk_embeddings_fallback")?;
+        let has_bm25_stats = table_exists(self.db, "bm25_stats")?;
+
+        // vec0 虚拟表与普通表都不支持外键级联，需手工清理
+        if has_vec_table {
+            self.db.connection_mut().execute(
+                "DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT id FROM document_chunks WHERE paper_id = ?1)",
+                params![paper_id],
+            )?;
+        }
+        if has_fallback_table {
+            self.db.connection_mut().execute(
+                "DELETE FROM chunk_embeddings_fallback WHERE chunk_id IN (SELECT id FROM document_chunks WHERE paper_id = ?1)",
+                params![paper_id],
+            )?;
+        }
+
+        let deleted = self.db.connection_mut().execute(
+            "DELETE FROM document_chunks WHERE paper_id = ?1",
+            params![paper_id],
+        )?;
+
+        // BM25 统计基于全库文档，内容变化后缓存即失效
+        if deleted > 0 && has_bm25_stats {
+            self.db.connection_mut().execute("DELETE FROM bm25_stats", [])?;
+        }
+
+        Ok(deleted)
     }
 
     /// 插入向量数据到相应的表中
@@ -126,6 +170,7 @@ mod tests {
             id: None,
             book_title: "Test Book".to_string(),
             book_author: "Test Author".to_string(),
+            paper_id: String::new(),
             md_file_path: "test.md".to_string(),
             file_order_in_book: 1,
             related_chapter_titles: "Chapter 1".to_string(),

@@ -17,10 +17,20 @@ impl<'a> DatabaseSearch<'a> {
 
     /// 执行向量相似性搜索
     pub fn vector_search(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
+        self.vector_search_filtered(query_embedding, limit, None)
+    }
+
+    /// 执行向量相似性搜索（可选按 paper_id 集合过滤，供全局论文库使用）
+    pub fn vector_search_filtered(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         if self.db.supports_vector_search() {
-            self.vector_search_with_sqlite_vec(query_embedding, limit)
+            self.vector_search_with_sqlite_vec(query_embedding, limit, paper_ids)
         } else {
-            self.vector_search_fallback(query_embedding, limit)
+            self.vector_search_fallback(query_embedding, limit, paper_ids)
         }
     }
 
@@ -29,19 +39,28 @@ impl<'a> DatabaseSearch<'a> {
     // 移除了未使用的bm25_search, smart_search, search_with_config方法
 
     /// 使用 sqlite-vec 执行向量搜索
-    fn vector_search_with_sqlite_vec(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
+    fn vector_search_with_sqlite_vec(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         // 将查询向量转换为字节格式，按照示例代码的方式
         let query_bytes: Vec<u8> = query_embedding
             .iter()
             .flat_map(|f| f.to_le_bytes())
             .collect();
 
-        let mut stmt = self.db.connection().prepare(
+        // MATCH k 先取全局最近邻再 JOIN 过滤；有 paper_id 过滤时放大 k，保证过滤后仍有足够候选
+        let k = if paper_ids.is_some() { (limit * 10).max(100) } else { limit };
+
+        let mut sql = String::from(
             r#"
             SELECT
                 dc.id,
                 dc.book_title,
                 dc.book_author,
+                dc.paper_id,
                 dc.md_file_path,
                 dc.file_order_in_book,
                 dc.related_chapter_titles,
@@ -54,39 +73,61 @@ impl<'a> DatabaseSearch<'a> {
             FROM document_chunks dc
             JOIN chunk_embeddings ce ON dc.id = ce.chunk_id
             WHERE ce.embedding MATCH ?1 AND k = ?2
-            ORDER BY distance ASC
-            "#
-        )?;
+            "#,
+        );
 
-        let rows = stmt.query_map(params![query_bytes, limit], |row| {
+        let mut param_values: Vec<rusqlite::types::Value> = vec![
+            rusqlite::types::Value::Blob(query_bytes),
+            rusqlite::types::Value::Integer(k as i64),
+        ];
+        if let Some(ids) = paper_ids {
+            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 3)).collect();
+            sql.push_str(&format!(" AND dc.paper_id IN ({})", placeholders.join(",")));
+            param_values.extend(ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())));
+        }
+        sql.push_str(" ORDER BY distance ASC");
+
+        let mut stmt = self.db.connection().prepare(&sql)?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
             Ok(SearchResult {
                 chunk_id: row.get(0)?,
                 book_title: row.get(1)?,
                 book_author: row.get(2)?,
-                md_file_path: row.get(3)?,
-                file_order_in_book: row.get(4)?,
-                related_chapter_titles: row.get(5)?,
-                chunk_text: row.get(6)?,
-                chunk_order_in_file: row.get(7)?,
-                total_chunks_in_file: row.get(8)?,
-                global_chunk_index: row.get(9)?,
-                similarity_score: (1.0 - row.get::<_, f64>(11)?) as f32, // 转换距离为相似度
+                paper_id: row.get(3)?,
+                md_file_path: row.get(4)?,
+                file_order_in_book: row.get(5)?,
+                related_chapter_titles: row.get(6)?,
+                chunk_text: row.get(7)?,
+                chunk_order_in_file: row.get(8)?,
+                total_chunks_in_file: row.get(9)?,
+                global_chunk_index: row.get(10)?,
+                similarity_score: (1.0 - row.get::<_, f64>(12)?) as f32, // 转换距离为相似度
             })
         })?;
 
-        let results: Result<Vec<_>, _> = rows.collect();
-        results.context("Failed to collect search results")
+        let mut results: Vec<SearchResult> = rows.collect::<Result<Vec<_>, _>>()
+            .context("Failed to collect search results")?;
+        // 放大 k 后按相似度截断到实际需要的数量
+        results.truncate(limit);
+        Ok(results)
     }
 
     /// 后备向量搜索实现（使用余弦相似度计算）
-    fn vector_search_fallback(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
+    fn vector_search_fallback(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         // 获取所有嵌入向量
-        let mut stmt = self.db.connection().prepare(
+        let mut sql = String::from(
             r#"
             SELECT 
                 dc.id,
                 dc.book_title,
                 dc.book_author,
+                dc.paper_id,
                 dc.md_file_path,
                 dc.file_order_in_book,
                 dc.related_chapter_titles,
@@ -98,26 +139,38 @@ impl<'a> DatabaseSearch<'a> {
                 cef.embedding
             FROM document_chunks dc
             JOIN chunk_embeddings_fallback cef ON dc.id = cef.chunk_id
-            "#
-        )?;
+            "#,
+        );
 
-        let rows = stmt.query_map([], |row| {
-            let embedding_bytes: Vec<u8> = row.get(11)?;
+        let param_values: Vec<rusqlite::types::Value>;
+        if let Some(ids) = paper_ids {
+            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 1)).collect();
+            sql.push_str(&format!(" WHERE dc.paper_id IN ({})", placeholders.join(",")));
+            param_values = ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())).collect();
+        } else {
+            param_values = Vec::new();
+        }
+
+        let mut stmt = self.db.connection().prepare(&sql)?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+            let embedding_bytes: Vec<u8> = row.get(12)?;
             let embedding = self.bytes_to_f32_vec(&embedding_bytes)?;
-            
+
             let similarity = self.cosine_similarity(query_embedding, &embedding);
-            
+
             Ok(SearchResult {
                 chunk_id: row.get(0)?,
                 book_title: row.get(1)?,
                 book_author: row.get(2)?,
-                md_file_path: row.get(3)?,
-                file_order_in_book: row.get(4)?,
-                related_chapter_titles: row.get(5)?,
-                chunk_text: row.get(6)?,
-                chunk_order_in_file: row.get(7)?,
-                total_chunks_in_file: row.get(8)?,
-                global_chunk_index: row.get(9)?,
+                paper_id: row.get(3)?,
+                md_file_path: row.get(4)?,
+                file_order_in_book: row.get(5)?,
+                related_chapter_titles: row.get(6)?,
+                chunk_text: row.get(7)?,
+                chunk_order_in_file: row.get(8)?,
+                total_chunks_in_file: row.get(9)?,
+                global_chunk_index: row.get(10)?,
                 similarity_score: similarity as f32,
             })
         })?;
@@ -138,7 +191,7 @@ impl<'a> DatabaseSearch<'a> {
         let mut stmt = self.db.connection().prepare(
             r#"
             SELECT 
-                id, book_title, book_author, md_file_path, file_order_in_book,
+                id, book_title, book_author, paper_id, md_file_path, file_order_in_book,
                 related_chapter_titles, chunk_text, chunk_order_in_file,
                 total_chunks_in_file, global_chunk_index, created_at
             FROM document_chunks 
@@ -162,13 +215,14 @@ impl<'a> DatabaseSearch<'a> {
                 chunk_id: row.get(0)?,
                 book_title: row.get(1)?,
                 book_author: row.get(2)?,
-                md_file_path: row.get(3)?,
-                file_order_in_book: row.get(4)?,
-                related_chapter_titles: row.get(5)?,
-                chunk_text: row.get(6)?,
-                chunk_order_in_file: row.get(7)?,
-                total_chunks_in_file: row.get(8)?,
-                global_chunk_index: row.get(9)?,
+                paper_id: row.get(3)?,
+                md_file_path: row.get(4)?,
+                file_order_in_book: row.get(5)?,
+                related_chapter_titles: row.get(6)?,
+                chunk_text: row.get(7)?,
+                chunk_order_in_file: row.get(8)?,
+                total_chunks_in_file: row.get(9)?,
+                global_chunk_index: row.get(10)?,
                 similarity_score: 1.0, // 文本搜索不计算相似度分数
             })
         })?;
@@ -228,6 +282,7 @@ mod tests {
             id: None,
             book_title: "Test Book".to_string(),
             book_author: "Test Author".to_string(),
+            paper_id: String::new(),
             md_file_path: "test.md".to_string(),
             file_order_in_book: 1,
             related_chapter_titles: "Chapter 1".to_string(),

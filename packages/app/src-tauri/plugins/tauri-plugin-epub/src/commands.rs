@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::database::VectorDatabase;
 use crate::epub::EpubReader;
-use crate::pipeline::{process_epub_to_db, process_manual_to_db};
+use crate::pipeline::{process_epub_to_db, process_manual_to_db, process_paper_to_db};
 use crate::models::ProgressUpdate;
 use crate::state::EpubState;
 use crate::epub::{parse_toc_file, find_toc_ncx_in_mdbook, flatten_toc};
@@ -417,4 +417,181 @@ pub async fn index_manual<R: Runtime>(
         message: "indexed".into(),
         report: Some(report.into()),
     })
+}
+
+
+/* ---------------- 全局论文向量库 ---------------- */
+
+/// 向量化一篇论文：读 {app_data}/books/{paper_id}/paper.md，写入全局库
+/// {app_data}/papers/vectors.sqlite（先按 paper_id 删后插，重索引幂等）
+#[tauri::command]
+pub async fn index_paper<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    paper_id: String,
+    title: String,
+    author: String,
+    _dimension: Option<u32>,
+    embeddings_url: String,
+    model: String,
+    api_key: Option<String>,
+) -> Result<IndexResult, String> {
+    if paper_id.trim().is_empty() {
+        return Err("paper_id is empty".into());
+    }
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let paper_dir = app_data_dir.join("books").join(&paper_id);
+    let db_path = app_data_dir.join("papers").join("vectors.sqlite");
+
+    #[derive(Serialize, Clone)]
+    struct PaperIndexProgressEvent {
+        paper_id: String,
+        current: usize,
+        total: usize,
+        percent: f32,
+        md_file_path: String,
+        chunk_index: usize,
+        related_chapter_titles: String,
+    }
+
+    let app_for_emit = app.clone();
+    let paper_id_for_emit = paper_id.clone();
+
+    let report = process_paper_to_db(
+        &paper_id,
+        &paper_dir,
+        &db_path,
+        &title,
+        &author,
+        ProcessOptions {
+            batch_size: None,
+            vectorizer: VectorizerConfig {
+                embeddings_url,
+                model_name: model,
+                api_key,
+            },
+        },
+        Some(move |u: ProgressUpdate| {
+            let payload = PaperIndexProgressEvent {
+                paper_id: paper_id_for_emit.clone(),
+                current: u.current,
+                total: u.total,
+                percent: u.percent,
+                md_file_path: u.md_file_path,
+                chunk_index: u.chunk_index,
+                related_chapter_titles: u.related_chapter_titles,
+            };
+            let _ = app_for_emit.emit("paper://index-progress", payload);
+        }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(IndexResult {
+        success: true,
+        message: "indexed".into(),
+        report: Some(report.into()),
+    })
+}
+
+#[derive(Serialize)]
+pub struct PaperSearchItemDto {
+    pub paper_id: String,
+    // 论文标题（存于 document_chunks.book_title）
+    pub book_title: String,
+    pub book_author: String,
+    pub content: String,
+    pub similarity: f32,
+
+    // 文件级别信息
+    pub md_file_path: String,
+    pub file_order_in_book: u32,
+
+    // 分片位置信息
+    pub chunk_id: i64,
+    pub chunk_order_in_file: usize,
+    pub total_chunks_in_file: usize,
+    pub global_chunk_index: usize,
+}
+
+/// 检索全局论文向量库：hybrid 融合（提供嵌入配置时）或 BM25 降级，
+/// paper_ids 为 Some 时按论文集合过滤（Some(空集) 返回空，None 不过滤）
+#[tauri::command]
+pub async fn search_papers_db<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    query: String,
+    paper_ids: Option<Vec<String>>,
+    top_k: Option<usize>,
+    vector_weight: Option<f32>,
+    bm25_weight: Option<f32>,
+    // 嵌入配置：缺省时降级为 BM25 检索
+    embeddings_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+) -> Result<Vec<PaperSearchItemDto>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_data_dir.join("papers").join("vectors.sqlite");
+
+    let vectorizer = embeddings_url
+        .filter(|url| !url.trim().is_empty())
+        .map(|url| VectorizerConfig {
+            embeddings_url: url,
+            model_name: model.unwrap_or_default(),
+            api_key,
+        });
+
+    let results = crate::pipeline::search_papers_global(
+        &db_path,
+        &query,
+        paper_ids,
+        top_k.unwrap_or(5),
+        vectorizer,
+        vector_weight,
+        bm25_weight,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(results
+        .into_iter()
+        .map(|r| PaperSearchItemDto {
+            paper_id: r.paper_id,
+            book_title: r.book_title,
+            book_author: r.book_author,
+            content: r.chunk_text,
+            similarity: r.similarity_score,
+            md_file_path: r.md_file_path,
+            file_order_in_book: r.file_order_in_book,
+            chunk_id: r.chunk_id,
+            chunk_order_in_file: r.chunk_order_in_file,
+            total_chunks_in_file: r.total_chunks_in_file,
+            global_chunk_index: r.global_chunk_index,
+        })
+        .collect())
+}
+
+/// 按 chunk_id 取全局论文库中该分块的前后邻居（同一 paper_id 内按 global_chunk_index 扩展），
+/// 供 paperSearch 命中片段不足时扩展上下文；库不存在时返回空数组
+#[tauri::command]
+pub async fn get_paper_chunk_context<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    chunk_id: i64,
+    before: Option<usize>,
+    after: Option<usize>,
+) -> Result<Vec<DocumentChunkDto>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_data_dir.join("papers").join("vectors.sqlite");
+
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let db = VectorDatabase::open_for_search(&db_path, 1024).map_err(|e| e.to_string())?;
+    let chunks = db
+        .get_paper_chunk_context(chunk_id, before.unwrap_or(2), after.unwrap_or(2))
+        .map_err(|e| e.to_string())?;
+
+    Ok(chunks.into_iter().map(DocumentChunkDto::from).collect())
 }

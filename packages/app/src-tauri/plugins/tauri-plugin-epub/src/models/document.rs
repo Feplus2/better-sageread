@@ -7,6 +7,9 @@ pub struct DocumentChunk {
     pub book_title: String,
     pub book_author: String,
 
+    // 全局论文库归属（per-book 库为空字符串）
+    pub paper_id: String,
+
     // 文件信息
     pub md_file_path: String,        // MD文件路径 "text/part001.md"
     pub file_order_in_book: u32,     // 文件在书中的顺序
@@ -32,6 +35,7 @@ pub struct SearchResult {
     pub chunk_id: i64,
     pub book_title: String,
     pub book_author: String,
+    pub paper_id: String,
     pub md_file_path: String,
     pub file_order_in_book: u32,
     pub related_chapter_titles: String,

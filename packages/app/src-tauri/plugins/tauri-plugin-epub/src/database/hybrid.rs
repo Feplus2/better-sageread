@@ -23,24 +23,47 @@ impl<'a> HybridSearch<'a> {
         limit: usize,
         config: &HybridSearchConfig,
     ) -> Result<Vec<SearchResult>> {
+        self.search_filtered(query, query_embedding, limit, config, None)
+    }
+
+    /// 执行混合搜索（可选按 paper_id 集合过滤，供全局论文库使用）
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        limit: usize,
+        config: &HybridSearchConfig,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         match config.mode {
-            SearchMode::VectorOnly => self.vector_only_search(query_embedding, limit),
-            SearchMode::BM25Only => self.bm25_only_search(query, limit, config),
-            SearchMode::Hybrid => self.hybrid_search(query, query_embedding, limit, config),
+            SearchMode::VectorOnly => self.vector_only_search_filtered(query_embedding, limit, paper_ids),
+            SearchMode::BM25Only => self.bm25_only_search_filtered(query, limit, config, paper_ids),
+            SearchMode::Hybrid => self.hybrid_search(query, query_embedding, limit, config, paper_ids),
         }
     }
 
     /// 纯向量搜索
-    fn vector_only_search(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
+    fn vector_only_search_filtered(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         let search = DatabaseSearch::new(self.db);
-        search.vector_search(query_embedding, limit)
+        search.vector_search_filtered(query_embedding, limit, paper_ids)
     }
 
     /// 纯BM25搜索
-    fn bm25_only_search(&self, query: &str, limit: usize, config: &HybridSearchConfig) -> Result<Vec<SearchResult>> {
+    fn bm25_only_search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        config: &HybridSearchConfig,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<SearchResult>> {
         let bm25_search = BM25Search::new(self.db, config.k1, config.b);
-        let bm25_results = bm25_search.search(query, limit)?;
-        
+        let bm25_results = bm25_search.search_filtered(query, limit, paper_ids)?;
+
         // 转换为SearchResult格式
         Ok(bm25_results.into_iter().map(|r| {
             let mut result = r.search_result;
@@ -56,10 +79,11 @@ impl<'a> HybridSearch<'a> {
         query_embedding: &[f32],
         limit: usize,
         config: &HybridSearchConfig,
+        paper_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>> {
         // 1. 并行执行两种搜索（这里是顺序执行，可以优化为真正的并行）
-        let vector_results = self.vector_only_search(query_embedding, limit * 2)?;
-        let bm25_results = self.bm25_only_search(query, limit * 2, config)?;
+        let vector_results = self.vector_only_search_filtered(query_embedding, limit * 2, paper_ids)?;
+        let bm25_results = self.bm25_only_search_filtered(query, limit * 2, config, paper_ids)?;
 
         // 2. 合并和重排序结果
         let hybrid_results = self.combine_and_rerank(vector_results, bm25_results, config)?;

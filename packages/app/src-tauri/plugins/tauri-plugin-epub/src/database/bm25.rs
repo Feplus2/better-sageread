@@ -20,6 +20,16 @@ impl<'a> BM25Search<'a> {
 
     /// 执行BM25搜索
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<BM25SearchResult>> {
+        self.search_filtered(query, limit, None)
+    }
+
+    /// 执行BM25搜索（可选按 paper_id 集合过滤，供全局论文库使用）
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        paper_ids: Option<&[String]>,
+    ) -> Result<Vec<BM25SearchResult>> {
         // 1. 预处理查询文本
         let query_terms = self.preprocess_text(query);
         if query_terms.is_empty() {
@@ -31,9 +41,9 @@ impl<'a> BM25Search<'a> {
 
         // 3. 计算每个文档的BM25分数
         let mut scores: HashMap<i64, f32> = HashMap::new();
-        
+
         for term in &query_terms {
-            let term_scores = self.calculate_term_scores(term, &stats)?;
+            let term_scores = self.calculate_term_scores(term, &stats, paper_ids)?;
             for (chunk_id, score) in term_scores {
                 *scores.entry(chunk_id).or_insert(0.0) += score;
             }
@@ -130,22 +140,36 @@ impl<'a> BM25Search<'a> {
     }
 
     /// 计算单个词项的BM25分数
-    fn calculate_term_scores(&self, term: &str, stats: &BM25Stats) -> Result<HashMap<i64, f32>> {
+    fn calculate_term_scores(
+        &self,
+        term: &str,
+        stats: &BM25Stats,
+        paper_ids: Option<&[String]>,
+    ) -> Result<HashMap<i64, f32>> {
         let mut scores = HashMap::new();
 
         // 获取包含该词项的所有文档
-        let mut stmt = self.db.connection().prepare(
+        let mut sql = String::from(
             r#"
             SELECT id, chunk_text, LENGTH(chunk_text) as doc_length
-            FROM document_chunks 
-            WHERE LOWER(chunk_text) LIKE ?1
+            FROM document_chunks
+            WHERE (LOWER(chunk_text) LIKE ?1
                OR LOWER(related_chapter_titles) LIKE ?1
-               OR LOWER(book_title) LIKE ?1
-            "#
-        )?;
+               OR LOWER(book_title) LIKE ?1)
+            "#,
+        );
 
-        let search_pattern = format!("%{}%", term);
-        let rows = stmt.query_map(params![search_pattern], |row| {
+        let mut param_values: Vec<rusqlite::types::Value> =
+            vec![rusqlite::types::Value::Text(format!("%{}%", term))];
+        if let Some(ids) = paper_ids {
+            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+            sql.push_str(&format!(" AND paper_id IN ({})", placeholders.join(",")));
+            param_values.extend(ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())));
+        }
+
+        let mut stmt = self.db.connection().prepare(&sql)?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
             Ok((
                 row.get::<_, i64>(0)?,      // chunk_id
                 row.get::<_, String>(1)?,   // chunk_text
@@ -227,7 +251,7 @@ impl<'a> BM25Search<'a> {
         let mut stmt = self.db.connection().prepare(
             r#"
             SELECT 
-                id, book_title, book_author, md_file_path, file_order_in_book,
+                id, book_title, book_author, paper_id, md_file_path, file_order_in_book,
                 related_chapter_titles, chunk_text, chunk_order_in_file,
                 total_chunks_in_file, global_chunk_index, created_at
             FROM document_chunks 
@@ -240,13 +264,14 @@ impl<'a> BM25Search<'a> {
                 chunk_id: row.get(0)?,
                 book_title: row.get(1)?,
                 book_author: row.get(2)?,
-                md_file_path: row.get(3)?,
-                file_order_in_book: row.get(4)?,
-                related_chapter_titles: row.get(5)?,
-                chunk_text: row.get(6)?,
-                chunk_order_in_file: row.get(7)?,
-                total_chunks_in_file: row.get(8)?,
-                global_chunk_index: row.get(9)?,
+                paper_id: row.get(3)?,
+                md_file_path: row.get(4)?,
+                file_order_in_book: row.get(5)?,
+                related_chapter_titles: row.get(6)?,
+                chunk_text: row.get(7)?,
+                chunk_order_in_file: row.get(8)?,
+                total_chunks_in_file: row.get(9)?,
+                global_chunk_index: row.get(10)?,
                 similarity_score: 1.0, // BM25分数将在外层设置
             })
         }).context("Failed to get search result by chunk_id")

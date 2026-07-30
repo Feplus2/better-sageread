@@ -9,6 +9,9 @@ const COMMANDS: &[&str] = &[
     "get_chunks_by_range",
     "prepare_manual_files",
     "index_manual",
+    "index_paper",
+    "search_papers_db",
+    "get_paper_chunk_context",
 ];
 
 fn main() {
