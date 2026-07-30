@@ -1,53 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+/// 提示词预设（prompt preset）：阅读/论文助手的命名系统提示词。
+/// 同 scope 内 is_active 互斥（由 set_active_prompt_preset 在事务内保证），
+/// 无激活行 = 使用内置默认提示词。
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Skill {
+pub struct PromptPreset {
     pub id: String,
+    /// 生效的 Agent 作用域：'reader' | 'paper'
+    pub scope: String,
     pub name: String,
     pub content: String,
     #[serde(rename = "isActive")]
     pub is_active: bool,
-    #[serde(rename = "isSystem")]
-    pub is_system: bool,
-    pub scope: String,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "updatedAt")]
     pub updated_at: i64,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct SkillCreateData {
-    pub name: String,
-    pub content: String,
-    #[serde(rename = "isActive")]
-    pub is_active: Option<bool>,
-    #[serde(rename = "isSystem")]
-    pub is_system: Option<bool>,
-    pub scope: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct SkillUpdateData {
-    pub name: Option<String>,
-    pub content: Option<String>,
-    #[serde(rename = "isActive")]
-    pub is_active: Option<bool>,
-    pub scope: Option<String>,
-    #[serde(rename = "updatedAt")]
-    pub updated_at: Option<i64>,
-}
-
-impl Skill {
-    pub fn new(id: String, name: String, content: String, is_active: bool, is_system: bool, scope: String) -> Self {
+impl PromptPreset {
+    pub fn new(id: String, scope: String, name: String, content: String, is_active: bool) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             id,
+            scope,
             name,
             content,
             is_active,
-            is_system,
-            scope,
             created_at: now,
             updated_at: now,
         }
@@ -58,11 +37,10 @@ impl Skill {
 
         Ok(Self {
             id: row.try_get("id")?,
+            scope: row.try_get("scope")?,
             name: row.try_get("name")?,
             content: row.try_get("content")?,
             is_active: row.try_get::<i32, _>("is_active")? != 0,
-            is_system: row.try_get::<i32, _>("is_system")? != 0,
-            scope: row.try_get("scope").unwrap_or_else(|_| "reader,central".to_string()),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

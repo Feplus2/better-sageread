@@ -4,6 +4,8 @@ pub mod database;
 pub mod fonts;
 pub mod llama;
 pub mod notes;
+pub mod papers;
+pub mod prompts;
 pub mod skills;
 pub mod state;
 pub mod sync;

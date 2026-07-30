@@ -173,6 +173,67 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     }
     println!("Migration applied: _sync_log + sync triggers.");
 
+    // 文献库文件夹模型（§3.2）：folders 树表 + paper_folders 多对多关系表（IF NOT EXISTS 幂等）。
+    // 删除文件夹时：子文件夹经 parent_id 级联删除，paper_folders 行经 folder_id 级联删除（论文本身不动）。
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS folders (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id TEXT REFERENCES folders(id) ON DELETE CASCADE,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS paper_folders (
+            paper_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+            folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+            PRIMARY KEY (paper_id, folder_id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_paper_folders_folder ON paper_folders(folder_id)")
+        .execute(pool)
+        .await?;
+    println!("Migration applied: folders + paper_folders.");
+
+    // folders.trashed_at（文件夹回收站软删除时间戳，毫秒，可空）
+    let result = sqlx::query("ALTER TABLE folders ADD COLUMN trashed_at INTEGER")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: folders.trashed_at added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    // 提示词预设（B 批）：阅读/论文助手的命名系统提示词，同 scope 内 is_active 互斥，
+    // 无激活行 = 使用内置默认提示词（IF NOT EXISTS 幂等）。
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS prompt_presets (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_prompt_presets_scope ON prompt_presets(scope)")
+        .execute(pool)
+        .await?;
+    println!("Migration applied: prompt_presets.");
+
     // 阅读助手系统提示词 v2（2026-07-27）：Agent 一分为二后聚焦"读懂这本书"，
     // 新增全局事务引导、webSearch、只读声明。仅升级未被用户修改过的 v1
     // （v1 以固定开场白开头且不含"全局助手"字样），用户自定义过的不动。
@@ -194,6 +255,39 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
                 }
             }
         }
+    }
+
+    // book_notes.category（C2 AI 重点标注的类别 id，如 goal/methods；NULL=人工标注）
+    let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN category TEXT")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: book_notes.category added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    // book_notes.source（标注来源：'user'=人工（默认，存量行回填）|'ai'=AI 生成）
+    let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN source TEXT NOT NULL DEFAULT 'user'")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: book_notes.source added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    // book_notes.starred（标注星标，0/1）
+    let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: book_notes.starred added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
     }
 
     Ok(())

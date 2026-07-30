@@ -1,4 +1,6 @@
 use super::models::*;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::fs;
 use tauri::{AppHandle, Manager};
@@ -309,6 +311,13 @@ async fn purge_book_by_id(app_handle: &AppHandle, db_pool: &SqlitePool, id: &str
         .app_data_dir()
         .map_err(|e| format!("获取应用目录失败: {}", e))?;
 
+    // MARKDOWN 论文在全局论文向量库中还有分片/向量，需在删行前拿到 format 并顺带清理
+    let format: Option<String> = sqlx::query_scalar("SELECT format FROM books WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db_pool)
+        .await
+        .map_err(|e| format!("查询书籍格式失败: {}", e))?;
+
     let book_dir = app_data_dir.join("books").join(id);
     if book_dir.exists() {
         std::fs::remove_dir_all(&book_dir).map_err(|e| format!("删除书籍文件失败: {}", e))?;
@@ -320,6 +329,76 @@ async fn purge_book_by_id(app_handle: &AppHandle, db_pool: &SqlitePool, id: &str
         .await
         .map_err(|e| format!("彻底删除书籍失败: {}", e))?;
 
+    if format.as_deref() == Some("MARKDOWN") {
+        purge_paper_vectors(&app_data_dir, id);
+    }
+
+    Ok(())
+}
+
+/// 清理全局论文向量库（{app_data}/papers/vectors.sqlite）中该 paper_id 的分片与向量。
+/// 与图书行为一致：软删不清理（回收站可恢复），仅彻底删除时调用。失败仅告警不阻塞主流程。
+fn purge_paper_vectors(app_data_dir: &std::path::Path, paper_id: &str) {
+    let db_path = app_data_dir.join("papers").join("vectors.sqlite");
+    if !db_path.exists() {
+        return;
+    }
+    if let Err(e) = purge_paper_vectors_inner(&db_path, paper_id) {
+        log::warn!("清理论文向量失败 (paper_id={}): {}", paper_id, e);
+    }
+}
+
+fn purge_paper_vectors_inner(db_path: &std::path::Path, paper_id: &str) -> rusqlite::Result<()> {
+    // 注册 sqlite-vec 扩展（chunk_embeddings 是 vec0 虚拟表，删除行需要扩展）
+    unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    }
+    let conn = rusqlite::Connection::open(db_path)?;
+
+    let table_exists = |name: &str| -> rusqlite::Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    };
+
+    if !table_exists("document_chunks")? {
+        return Ok(());
+    }
+
+    // 老库（迁移前）没有 paper_id 列，不可能存在论文分片
+    let has_paper_id = conn
+        .prepare("PRAGMA table_info(document_chunks)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|name| name.map(|n| n == "paper_id").unwrap_or(false));
+    if !has_paper_id {
+        return Ok(());
+    }
+
+    if table_exists("chunk_embeddings")? {
+        conn.execute(
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT id FROM document_chunks WHERE paper_id = ?1)",
+            [paper_id],
+        )?;
+    }
+    if table_exists("chunk_embeddings_fallback")? {
+        conn.execute(
+            "DELETE FROM chunk_embeddings_fallback WHERE chunk_id IN (SELECT id FROM document_chunks WHERE paper_id = ?1)",
+            [paper_id],
+        )?;
+    }
+    let deleted = conn.execute("DELETE FROM document_chunks WHERE paper_id = ?1", [paper_id])?;
+
+    // BM25 统计基于全库文档，内容变化后缓存即失效
+    if deleted > 0 && table_exists("bm25_stats")? {
+        conn.execute("DELETE FROM bm25_stats", [])?;
+    }
+
+    log::info!("已清理全局论文向量库：paper_id={}，删除 {} 个分片", paper_id, deleted);
     Ok(())
 }
 
@@ -895,6 +974,17 @@ pub async fn create_book_note(
         (None, None)
     };
 
+    // 来源只认 'ai'，其余（含缺省）一律按人工处理；类别仅 AI 标注携带，人工路径恒为 NULL
+    let source = match note_data.source.as_deref() {
+        Some("ai") => "ai".to_string(),
+        _ => "user".to_string(),
+    };
+    let category = if source == "ai" {
+        note_data.category.clone()
+    } else {
+        None
+    };
+
     let book_note = BookNote::new(
         id.clone(),
         note_data.book_id,
@@ -905,12 +995,14 @@ pub async fn create_book_note(
         note_data.color,
         note_data.note,
         note_data.context,
+        category,
+        source,
     );
 
     sqlx::query(
         r#"
-        INSERT INTO book_notes (id, book_id, type, cfi, text, style, color, note, context_before, context_after, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        INSERT INTO book_notes (id, book_id, type, cfi, text, style, color, note, context_before, context_after, category, source, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         "#
     )
     .bind(&book_note.id)
@@ -923,6 +1015,8 @@ pub async fn create_book_note(
     .bind(&book_note.note)
     .bind(&context_before)
     .bind(&context_after)
+    .bind(&book_note.category)
+    .bind(&book_note.source)
     .bind(book_note.created_at)
     .bind(book_note.updated_at)
     .execute(&db_pool)
@@ -941,7 +1035,7 @@ pub async fn get_book_notes(
 
     let rows = sqlx::query(
         r#"
-        SELECT id, book_id, type, cfi, text, style, color, note, context_before, context_after, created_at, updated_at
+        SELECT id, book_id, type, cfi, text, style, color, note, context_before, context_after, category, source, starred, created_at, updated_at
         FROM book_notes
         WHERE book_id = ?1
         ORDER BY created_at ASC
@@ -982,6 +1076,11 @@ pub async fn update_book_note(
     };
 
     // 简化：只更新提供的字段，使用单独的查询
+    // 来源只认 'ai'，其余值一律收敛为 'user'（None 时 COALESCE 保留原值）
+    let update_source = update_data
+        .source
+        .as_deref()
+        .map(|s| if s == "ai" { "ai" } else { "user" });
     let query = sqlx::query(
         r#"
         UPDATE book_notes 
@@ -993,6 +1092,9 @@ pub async fn update_book_note(
             note = COALESCE(?, note),
             context_before = COALESCE(?, context_before),
             context_after = COALESCE(?, context_after),
+            category = COALESCE(?, category),
+            source = COALESCE(?, source),
+            starred = COALESCE(?, starred),
             updated_at = ?
         WHERE id = ?
         "#,
@@ -1005,6 +1107,9 @@ pub async fn update_book_note(
     .bind(&update_data.note)
     .bind(&context_before)
     .bind(&context_after)
+    .bind(&update_data.category)
+    .bind(update_source)
+    .bind(update_data.starred.map(|b| if b { 1 } else { 0 }))
     .bind(now)
     .bind(&id);
 
@@ -1020,7 +1125,7 @@ pub async fn update_book_note(
     // 查询更新后的笔记
     let row = sqlx::query(
         r#"
-        SELECT id, book_id, type, cfi, text, style, color, note, context_before, context_after, created_at, updated_at
+        SELECT id, book_id, type, cfi, text, style, color, note, context_before, context_after, category, source, starred, created_at, updated_at
         FROM book_notes
         WHERE id = ?1
         "#
@@ -1048,6 +1153,232 @@ pub async fn delete_book_note(app_handle: AppHandle, id: String) -> Result<(), S
     }
 
     Ok(())
+}
+
+/// 清空某本书的全部 AI 标注（C2"重新生成"前置步骤）。
+/// 删除条件显式带 source = 'ai'：人工标注（'user'）绝不受此命令影响。
+/// 返回删除的行数。
+#[tauri::command]
+pub async fn delete_ai_book_notes(app_handle: AppHandle, book_id: String) -> Result<u64, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+
+    let result = sqlx::query("DELETE FROM book_notes WHERE book_id = ?1 AND source = 'ai'")
+        .bind(&book_id)
+        .execute(&db_pool)
+        .await
+        .map_err(|e| format!("清空 AI 标注失败: {}", e))?;
+
+    Ok(result.rows_affected())
+}
+
+// ==================== 论文（MARKDOWN）入库 ====================
+
+/// 扫描到的论文目录信息（frontmatter 为原始 YAML 字符串，由前端解析）
+#[derive(Serialize, Debug)]
+pub struct ScannedPaper {
+    pub dir: String,
+    /// paper.md 内容的 sha256 前 16 位 hex（与书籍 id 同为内容哈希惯例）
+    pub id: String,
+    pub frontmatter: Option<String>,
+    pub title_fallback: String,
+    pub file_size: i64,
+}
+
+/// 提取首个 `---` / `---` 包裹的 YAML frontmatter 块（str::lines 已兼容 \r\n）
+fn extract_frontmatter(content: &str) -> Option<String> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut yaml = String::new();
+    for line in lines {
+        if line.trim() == "---" {
+            return Some(yaml);
+        }
+        yaml.push_str(line);
+        yaml.push('\n');
+    }
+    None
+}
+
+/// 读取单个论文目录（必须含 paper.md），失败返回 None
+fn scan_one_paper_dir(dir: &std::path::Path) -> Option<ScannedPaper> {
+    let paper_path = dir.join("paper.md");
+    let content = fs::read(&paper_path).ok()?;
+    let id = format!("{:x}", Sha256::digest(&content))[..16].to_string();
+    let frontmatter = std::str::from_utf8(&content)
+        .ok()
+        .and_then(extract_frontmatter);
+    let title_fallback = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Some(ScannedPaper {
+        dir: dir.to_string_lossy().to_string(),
+        id,
+        frontmatter,
+        title_fallback,
+        file_size: content.len() as i64,
+    })
+}
+
+/// 扫描论文目录：dir 本身含 paper.md 则视为单篇；否则遍历一级子目录，凡含 paper.md 的都算
+#[tauri::command]
+pub async fn scan_papers_dir(dir: String) -> Result<Vec<ScannedPaper>, String> {
+    let root = std::path::PathBuf::from(&dir);
+    if !root.is_dir() {
+        return Err(format!("目录不存在: {}", dir));
+    }
+
+    if root.join("paper.md").is_file() {
+        return Ok(scan_one_paper_dir(&root).into_iter().collect());
+    }
+
+    let mut papers = Vec::new();
+    let entries = fs::read_dir(&root).map_err(|e| format!("读取目录失败: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.join("paper.md").is_file() {
+            if let Some(paper) = scan_one_paper_dir(&path) {
+                papers.push(paper);
+            }
+        }
+    }
+    Ok(papers)
+}
+
+/// 递归拷贝目录（内部会先创建目标目录）
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("创建目录失败 {}: {}", dst.display(), e))?;
+    let entries =
+        fs::read_dir(src).map_err(|e| format!("读取目录失败 {}: {}", src.display(), e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let dest_path = dst.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &dest_path)?;
+        } else if path.is_file() {
+            fs::copy(&path, &dest_path)
+                .map_err(|e| format!("拷贝文件失败 {}: {}", path.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+/// 论文入库：拷贝 paper.md 与 images/ 到 books/{id}/，写 metadata.json，单事务 INSERT books + book_status
+#[tauri::command]
+pub async fn save_paper(
+    app_handle: AppHandle,
+    source_dir: String,
+    id: String,
+    metadata: serde_json::Value,
+    title: String,
+    author: String,
+    language: String,
+) -> Result<SimpleBook, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+
+    // 幂等查重：id 已存在则报错，前端据"已存在"计 skipped（与 save_book 一致，回收站中的也算存在）
+    if let Some(book) = get_book_by_id(app_handle.clone(), id.clone()).await? {
+        return Err(format!("论文已存在: {} (ID: {})", book.title, book.id));
+    }
+
+    let source = std::path::PathBuf::from(&source_dir);
+    let source_paper = source.join("paper.md");
+    if !source_paper.is_file() {
+        return Err(format!("paper.md 不存在: {}", source_dir));
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用目录失败: {}", e))?;
+
+    let book_dir = app_data_dir.join("books").join(&id);
+    fs::create_dir_all(&book_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+    let paper_path = book_dir.join("paper.md");
+    fs::copy(&source_paper, &paper_path).map_err(|e| format!("拷贝 paper.md 失败: {}", e))?;
+    let file_size = fs::metadata(&paper_path)
+        .map_err(|e| format!("读取文件信息失败: {}", e))?
+        .len() as i64;
+
+    let source_images = source.join("images");
+    if source_images.is_dir() {
+        copy_dir_recursive(&source_images, &book_dir.join("images"))?;
+    }
+
+    let metadata_json = serde_json::to_string_pretty(&metadata)
+        .map_err(|e| format!("序列化元数据失败: {}", e))?;
+    fs::write(book_dir.join("metadata.json"), metadata_json)
+        .map_err(|e| format!("保存元数据失败: {}", e))?;
+
+    let file_path = format!("books/{}/paper.md", id);
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let mut tx = db_pool
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO books (
+            id, title, author, format, file_path, cover_path,
+            file_size, language, tags,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(&title)
+    .bind(&author)
+    .bind("MARKDOWN")
+    .bind(&file_path)
+    .bind(None::<String>) // cover_path：论文无封面
+    .bind(file_size)
+    .bind(&language)
+    .bind(None::<String>) // tags
+    .bind(now)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("数据库插入失败: {}", e))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO book_status (
+            book_id, status, progress_current, progress_total, location,
+            metadata, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind("unread")
+    .bind(0i64)
+    .bind(0i64)
+    .bind("")
+    .bind(None::<String>)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("创建书籍状态失败: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
+
+    Ok(SimpleBook::new(
+        id,
+        title,
+        author,
+        "MARKDOWN".to_string(),
+        file_path,
+        None,
+        file_size,
+        language,
+    ))
 }
 
 #[cfg(test)]

@@ -254,18 +254,28 @@ fn data_string(data: &Value, key: &str) -> Option<String> {
     })
 }
 
-/// 按注册表列把 JSON data 绑定进 INSERT/UPDATE 语句
+/// 按注册表列把 JSON data 绑定进 INSERT/UPDATE 语句。
+/// 宽容读者的写入侧：对端快照中**缺失**的列不参与写入（INSERT 让 SQLite DEFAULT 生效、
+/// UPDATE 保留本地原值）——老版本对端不认识新增列（如 book_notes.category/source，
+/// NOT NULL DEFAULT）时同步不至于失败或清掉本地新列；
+/// **显式 JSON null 仍按 NULL 写入**（对端确实清空了该列）。
 async fn insert_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     table: &tables::SyncTable,
     data: &Value,
 ) -> Result<(), String> {
-    let names = table.columns.iter().map(|(n, _)| *n).collect::<Vec<_>>();
+    let present: Vec<(&str, &ColType)> = table
+        .columns
+        .iter()
+        .map(|(n, t)| (*n, t))
+        .filter(|(n, _)| *n == table.pk || data.get(*n).is_some())
+        .collect();
+    let names = present.iter().map(|(n, _)| *n).collect::<Vec<_>>();
     let placeholders = names.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let sql = format!("INSERT INTO {} ({}) VALUES ({})", table.name, names.join(", "), placeholders);
     let mut query = sqlx::query(&sql);
-    for (name, col_type) in table.columns {
-        let value = data.get(*name).unwrap_or(&Value::Null);
+    for (name, col_type) in present {
+        let value = data.get(name).unwrap_or(&Value::Null);
         query = bind_value(query, value, col_type);
     }
     query.execute(&mut **tx).await.map_err(|e| format!("插入行失败: {e}"))?;
@@ -282,8 +292,11 @@ async fn update_row(
         .columns
         .iter()
         .map(|(n, _)| *n)
-        .filter(|n| *n != table.pk)
+        .filter(|n| *n != table.pk && data.get(*n).is_some())
         .collect();
+    if names.is_empty() {
+        return Ok(()); // 快照里没有可写的列（老版本对端），保留本地原值
+    }
     let assignments = names.iter().map(|n| format!("{n} = ?")).collect::<Vec<_>>().join(", ");
     let sql = format!("UPDATE {} SET {} WHERE {} = ?", table.name, assignments, table.pk);
     let mut query = sqlx::query(&sql);
@@ -1253,6 +1266,9 @@ mod tests {
                 note TEXT,
                 context_before TEXT,
                 context_after TEXT,
+                category TEXT,
+                source TEXT NOT NULL DEFAULT 'user',
+                starred INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -1789,6 +1805,9 @@ mod tests {
                 note TEXT NOT NULL,
                 context_before TEXT,
                 context_after TEXT,
+                category TEXT,
+                source TEXT NOT NULL DEFAULT 'user',
+                starred INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE

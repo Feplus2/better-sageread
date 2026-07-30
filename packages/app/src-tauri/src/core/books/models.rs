@@ -291,6 +291,13 @@ pub struct BookNote {
     pub note: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
+    /// AI 重点标注的类别 id（goal/methods/...）；NULL = 人工标注
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// 标注来源：'user'（默认）|'ai'
+    pub source: String,
+    /// 星标
+    pub starred: bool,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "updatedAt")]
@@ -309,6 +316,10 @@ pub struct BookNoteCreateData {
     pub color: Option<String>,
     pub note: String,
     pub context: Option<serde_json::Value>,
+    /// AI 重点标注类别（仅 source='ai' 时有意义）
+    pub category: Option<String>,
+    /// 标注来源；缺省按 'user' 处理（人工路径不传，行为不变）
+    pub source: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -321,6 +332,10 @@ pub struct BookNoteUpdateData {
     pub color: Option<String>,
     pub note: Option<String>,
     pub context: Option<serde_json::Value>,
+    pub category: Option<String>,
+    pub source: Option<String>,
+    /// 星标（COALESCE 语义：None 保留原值）
+    pub starred: Option<bool>,
 }
 
 impl BookNote {
@@ -334,6 +349,8 @@ impl BookNote {
         color: Option<String>,
         note: String,
         context: Option<serde_json::Value>,
+        category: Option<String>,
+        source: String,
     ) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
@@ -346,6 +363,9 @@ impl BookNote {
             color,
             note,
             context,
+            category,
+            source,
+            starred: false,
             created_at: now,
             updated_at: now,
         }
@@ -376,6 +396,15 @@ impl BookNote {
             color: row.try_get("color")?,
             note: row.try_get("note")?,
             context,
+            // category/source 为 C2 新增列；老库在迁移前查询不会走到这里（迁移在启动时完成）
+            category: row.try_get("category").ok().flatten(),
+            source: row
+                .try_get::<Option<String>, _>("source")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "user".to_string()),
+            // starred 为星标新增列，同样做宽容读取（0/1 → bool）
+            starred: row.try_get::<i32, _>("starred").map(|v| v != 0).unwrap_or(false),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

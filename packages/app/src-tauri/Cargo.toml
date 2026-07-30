@@ -39,6 +39,8 @@ reqwest = { version = "0.12", features = ["stream"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 futures-util = "0.3"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+sqlite-vec = "0.1.6"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
