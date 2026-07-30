@@ -9,6 +9,8 @@
 - quote-based anchoring：模型只返回类别+逐字引用，本地匹配换锚点，匹配失败丢弃
 
 ### D 批：杂项（未排期）
+- **MinerU 公式 legacy TeX 兼容扫荡（2026-07-30 converter 二轮发现）**：MinerU 公式/化学式里用 `\bf \cal \sf \tt \textcircled` 等 legacy 命令，pandoc texmath 与部分 KaTeX 路径报错（`paper.md` 验收"公式 KaTeX 渲染无报错"不达标）。修法：converter 落盘前做机械替换（`\bf→\mathbf`、`\cal→\mathcal`、`\sf→\mathsf`、`\tt→\mathtt`），`\textcircled` 另议；改完抽 5 篇公式密集产物过 pandoc + SageRead KaTeX 双验
+- **词对齐疑似 bug（2026-07-30 测试发现，下个任务修）**：句 223/223 对齐、词仅 1/223 对齐，且"重建对齐"后结果相同——词级对齐大概率整体失效（token 汇总/embed 输入组装或 alignW 写回链路问题，非模型漂移；重建幂等键不变所以结果一致属预期，但 1/223 明显异常）。排查方向：`paper-alignment-service.ts` 词级分片 embed 输入与 `alignW` 写回、`paper-cross-anchor.ts` 词级 DP
 - **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
 - webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
@@ -31,6 +33,8 @@
 ## 已消化
 
 ### 2026-07-29 T3 批：词级对齐 + 翻译菜单美化 + AI 重点按钮主题色
+- [x] **词级对齐修复（2026-07-29 二轮）**：`EMBED_W_BATCH_SIZE` 256→64——智谱 embedding API 单请求硬限 64 条（实测 65 条 HTTP 400 "input数组最大不得超过64条"），256 导致满 shard 全灭、词级仅末尾小 shard 幸存 1/223；修复后真实数据端到端验证 223/223 完成（`scripts/verify-paper-alignment-e2e.mjs`）。教训：嵌入批量上限按最严供应商（64）设计
+- [x] **嵌入自适应分批（2026-07-29 三轮）**：供应商 input 上限差异大（OpenAI 2048 / Cohere 96 / 智谱 64 / DashScope 10），写死任何值都不保险——`embedBatchAdaptive` 遇批量类 400 自动减半重试 + 运行期上限收敛（句词两相位共享），集成测试验证"上限 10 条也能句词全完成"
 - [x] 词级对齐（`paper-cross-anchor.ts` + `paper-alignment-service.ts`）：句对内分词（英文按词/中文按单字）→ token 汇总分片 embed（256 条/6k 字符双上限，单片失败仅牵连该片块）→ 单调 DP（(1,1)/(1,k)/(k,1)，k≤4，<0.45 标 low）；写回译本 `blocks[idx].alignW` + 顶层 `alignWStatus`，幂等键同句级；"重建对齐"句词两级同重建；词级失败降级不影响句级
 - [x] 映射升级：有 alignW 时 `mapTgtRangeToSrc`/`mapSrcRangeToTgt` 词级精确区间，缺失/未命中回退句级；`mapOffsetsViaTokens` 做 live↔stored 词 token 下标换算（oneLine 折叠/markdown 渲染场景）；22 组词级单测（分词/DP/映射/换算）
 - [x] 翻译下拉重排三区：显示模式（radio+图标）/ 翻译（入口+主题色进度条+取消）/ 句词对齐（状态行 句 n/m·词 n/m + "重建对齐"有译本始终可见，仅计算中禁用；无嵌入模型点击给配置引导 toast）——修复"重建句对齐"对齐完成后入口消失的问题
