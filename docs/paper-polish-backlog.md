@@ -10,7 +10,7 @@
 
 ### D 批：杂项（未排期）
 - **MinerU 公式 legacy TeX 兼容扫荡（2026-07-30 converter 二轮发现）**：MinerU 公式/化学式里用 `\bf \cal \sf \tt \textcircled` 等 legacy 命令，pandoc texmath 与部分 KaTeX 路径报错（`paper.md` 验收"公式 KaTeX 渲染无报错"不达标）。修法：converter 落盘前做机械替换（`\bf→\mathbf`、`\cal→\mathcal`、`\sf→\mathsf`、`\tt→\mathtt`），`\textcircled` 另议；改完抽 5 篇公式密集产物过 pandoc + SageRead KaTeX 双验
-- **词对齐疑似 bug（2026-07-30 测试发现，下个任务修）**：句 223/223 对齐、词仅 1/223 对齐，且"重建对齐"后结果相同——词级对齐大概率整体失效（token 汇总/embed 输入组装或 alignW 写回链路问题，非模型漂移；重建幂等键不变所以结果一致属预期，但 1/223 明显异常）。排查方向：`paper-alignment-service.ts` 词级分片 embed 输入与 `alignW` 写回、`paper-cross-anchor.ts` 词级 DP
+- **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 集成（方案 A：Rust jieba-rs + tokenize_zh）进行中，预期改善实义词边界
 - **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
 - webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
@@ -31,6 +31,15 @@
   - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
 
 ## 已消化
+
+### 2026-08-02 对齐系统性修复批（句词 DP 缩放成本 + 期刊缩写 + 无解兜底 + 公式归一）
+- [x] **根因：DP 成本函数少步偏置**——cost=1-avgSim 每步基线恒为 1，合并移动一步顶两步天然省基线；相似度区分度中等时正确 1:1 路径的相似度优势补不齐基线差 → 句级乱并句（块 39 实证：5 步错路 1.805 < 7 步对路 1.900）、词级向最大合并漂移致级联错位（"lead to stable structures"↔"根"）
+- [x] 修复：alignDP 成本按组大小缩放（×(src+tgt)/2，句词两级），合并只在交叉项确实差时胜出；词向量信号实测足够（stable→稳 0.68 行内最高），缩放后词对精确（stable↔稳 / structures↔定结构 / e.g↔例如）
+- [x] 切句器白名单补 40 个期刊缩写（Appl./Mater./Inter./Res./Bull./Adv./Chem./Phys./Lett./Nat. 等）——参考文献条目不再被切碎；块 200（5:2 失衡零对齐）随之切成 2:2 正常对齐
+- [x] DP 无解兜底：句数比超 maxGroup 时退化为整块单对（标 low），不再整块零对齐
+- [x] 公式感知坐标归一（2026-07-30 批，补记）：normalizeMathText / normalizeLiveElement / mapOffsetsMathAware，stored md 源文 ↔ live KaTeX DOM 的 token 序列对齐，含公式块划词/高亮不再错位；22 组单测（test-paper-math-normalize.mjs）
+- [x] 真机验收：块 39 七句全 1:1 正确；hover 中文"这展示了…"英文侧精确只亮"This demonstrates…"；"stable structures"↔"稳定结构"双向划词词级精确；整体 223/223 句词对齐、句级 low 0
+- [x] 回归测试 4 组（块 39 真实矩阵不乱并 / 正当合译保留 / 词级低区分度不漂移 / 无解兜底）+ 既有 147 组全过
 
 ### 2026-07-29 T3 批：词级对齐 + 翻译菜单美化 + AI 重点按钮主题色
 - [x] **词级对齐修复（2026-07-29 二轮）**：`EMBED_W_BATCH_SIZE` 256→64——智谱 embedding API 单请求硬限 64 条（实测 65 条 HTTP 400 "input数组最大不得超过64条"），256 导致满 shard 全灭、词级仅末尾小 shard 幸存 1/223；修复后真实数据端到端验证 223/223 完成（`scripts/verify-paper-alignment-e2e.mjs`）。教训：嵌入批量上限按最严供应商（64）设计
