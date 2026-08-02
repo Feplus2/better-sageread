@@ -42,6 +42,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::index_paper,
             commands::search_papers_db,
             commands::get_paper_chunk_context,
+            commands::tokenize_zh,
         ])
         .setup(|app, _api| {
             // Initialize and manage plugin state

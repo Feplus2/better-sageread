@@ -14,4 +14,5 @@ permissions = [
     "allow-index-paper",
     "allow-search-papers-db",
     "allow-get-paper-chunk-context",
+    "allow-tokenize-zh",
 ]

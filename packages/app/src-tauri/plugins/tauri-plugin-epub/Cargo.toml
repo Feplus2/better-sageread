@@ -28,6 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 epub2mdbook = "0.15.0"
 roxmltree = "0.20"
 percent-encoding = "2.3"
+jieba-rs = "0.6.8"
 
 [build-dependencies]
 tauri-plugin = { version = "2.3.1", features = ["build"] }

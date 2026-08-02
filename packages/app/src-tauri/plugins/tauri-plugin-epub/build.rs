@@ -12,6 +12,7 @@ const COMMANDS: &[&str] = &[
     "index_paper",
     "search_papers_db",
     "get_paper_chunk_context",
+    "tokenize_zh",
 ];
 
 fn main() {

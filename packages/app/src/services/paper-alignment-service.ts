@@ -37,6 +37,11 @@ import {
   loadPaperTranslation,
   savePaperTranslation,
 } from "./paper-translation-service";
+import { tokenizeZhBatch } from "./zh-tokenizer";
+
+/** 词级缓存版本：分词器变更（单字 → jieba）时旧 alignW 自动失效重算（拼入 alignWHash） */
+const ALIGN_W_CACHE_VERSION = "jieba1";
+const wordCacheKey = (tgtHash: string) => `${tgtHash}#${ALIGN_W_CACHE_VERSION}`;
 
 /** 句对平均相似度低于该阈值标 low: true（UI 可降级） */
 export const ALIGN_LOW_CONFIDENCE = 0.5;
@@ -236,7 +241,8 @@ export async function alignPaperTranslation(options: {
   for (const job of jobs) job.tgtHash = await hashBlockText(job.entry.text);
 
   const hasValidAlign = (job: AlignJob) => Boolean(job.entry.align && job.entry.alignHash === job.tgtHash);
-  const hasValidAlignW = (job: AlignJob) => Boolean(job.entry.alignW && job.entry.alignWHash === job.tgtHash);
+  const hasValidAlignW = (job: AlignJob) =>
+    Boolean(job.entry.alignW && job.entry.alignWHash === wordCacheKey(job.tgtHash));
   const sentPending = jobs.filter((job) => force || !hasValidAlign(job));
   const reused = total - sentPending.length;
   /** 词级可处理的块（句对齐缓存有效）；词级待算 = 其中词级缓存无效者（句级新算的块相位后自然并入） */
@@ -357,7 +363,14 @@ export async function alignPaperTranslation(options: {
   let wComputed = 0;
   let wFailed = 0;
   if (wordJobs.length > 0 && config) {
-    // 句对内分词（偏移加句对基址换算回块坐标系），全部待算块的 token 汇总统一分片 embed
+    // 句对内分词（偏移加句对基址换算回块坐标系），全部待算块的 token 汇总统一分片 embed。
+    // 中文侧走 jieba 批量分词（一次 IPC；不可用时 zh-tokenizer 内部回退单字，不中断对齐）
+    const tgtTexts: string[] = [];
+    for (const job of wordJobs) {
+      for (const pair of job.entry.align ?? []) tgtTexts.push(job.entry.text.slice(pair.ts, pair.te));
+    }
+    const tgtTokenLists = await tokenizeZhBatch(tgtTexts);
+    let tgtCursor = 0;
     const tokenized = wordJobs.map((job) => ({
       job,
       vecStart: 0,
@@ -366,7 +379,7 @@ export async function alignPaperTranslation(options: {
           start: t.start + pair.ss,
           end: t.end + pair.ss,
         }));
-        const tgt = tokenizeWords(job.entry.text.slice(pair.ts, pair.te)).map((t) => ({
+        const tgt = (tgtTokenLists[tgtCursor++] ?? []).map((t) => ({
           start: t.start + pair.ts,
           end: t.end + pair.ts,
         }));
@@ -443,7 +456,7 @@ export async function alignPaperTranslation(options: {
           }
         }
         entry.job.entry.alignW = wordPairs;
-        entry.job.entry.alignWHash = entry.job.tgtHash;
+        entry.job.entry.alignWHash = wordCacheKey(entry.job.tgtHash);
         wComputed += 1;
       } catch (error) {
         console.warn(`论文词对齐块 ${entry.job.index} 计算失败:`, error);
@@ -480,7 +493,7 @@ export async function inspectPaperAlignment(
   for (const job of jobs) {
     const tgtHash = await hashBlockText(job.entry.text);
     if (job.entry.align && job.entry.alignHash === tgtHash) aligned += 1;
-    if (job.entry.alignW && job.entry.alignWHash === tgtHash) alignedW += 1;
+    if (job.entry.alignW && job.entry.alignWHash === wordCacheKey(tgtHash)) alignedW += 1;
   }
   return { total: jobs.length, aligned, alignedW };
 }

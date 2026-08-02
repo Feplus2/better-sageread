@@ -595,3 +595,11 @@ pub async fn get_paper_chunk_context<R: Runtime>(
 
     Ok(chunks.into_iter().map(DocumentChunkDto::from).collect())
 }
+
+/// 批量中文分词（jieba，text/zh_segmenter.rs）：论文词级对齐的中文侧分词。
+/// 每条文本独立输出 token 序列（UTF-16 偏移，与 JS string 下标一致；空白/标点/符号已过滤）。
+/// 纯 CPU 短任务（句级文本、百条量级毫秒级），同步命令即可。
+#[tauri::command]
+pub fn tokenize_zh(texts: Vec<String>) -> Vec<Vec<crate::text::zh_segmenter::ZhToken>> {
+    crate::text::zh_segmenter::tokenize_zh(&texts)
+}

@@ -3,6 +3,7 @@ pub mod tokenizer;
 pub mod sanitizer;
 pub mod vectorizer;
 pub mod constants;
+pub mod zh_segmenter;
 
 // Re-export public types for convenience
 pub use chunker::*;
@@ -10,3 +11,4 @@ pub use tokenizer::*;
 pub use sanitizer::*;
 pub use vectorizer::*;
 pub use constants::*;
+pub use zh_segmenter::*;

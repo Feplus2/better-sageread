@@ -111,6 +111,27 @@ writeFileSync(
 }
 `,
 );
+// zh-tokenizer 桩：默认复刻单字路径（行为与接入前一致）；__ZH_STUB_FAKE_JIEBA__=true 时
+// 按两字符一组合模拟 jieba 分词（验证词级相位消费注入的分词器，与单字路径可区分）
+writeFileSync(
+  join(stubDir, "stub-zh-tokenizer.mjs"),
+  `import { tokenizeWords } from "@/pages/paper-reader/paper-cross-anchor";
+export async function tokenizeZhBatch(texts) {
+  if (globalThis.__ZH_STUB_FAKE_JIEBA__) {
+    return texts.map((t) => {
+      const chars = tokenizeWords(t);
+      const out = [];
+      for (let i = 0; i < chars.length; i += 2) {
+        const last = chars[Math.min(i + 1, chars.length - 1)];
+        out.push({ start: chars[i].start, end: last.end, text: t.slice(chars[i].start, last.end) });
+      }
+      return out;
+    });
+  }
+  return texts.map((t) => tokenizeWords(t).map((tok) => ({ start: tok.start, end: tok.end, text: t.slice(tok.start, tok.end) })));
+}
+`,
+);
 writeFileSync(
   join(stubDir, "entry.mjs"),
   `export { alignPaperTranslation, inspectPaperAlignment } from "@/services/paper-alignment-service";
@@ -126,6 +147,7 @@ const stubPlugin = {
     build.onResolve({ filter: /^\.\/paper-translation-service$/ }, () => ({
       path: join(stubDir, "stub-translation-service.mjs"),
     }));
+    build.onResolve({ filter: /^\.\/zh-tokenizer$/ }, () => ({ path: join(stubDir, "stub-zh-tokenizer.mjs") }));
     build.onResolve({ filter: /^@\/store\/llama-store$/ }, () => ({ path: join(stubDir, "stub-llama-store.mjs") }));
     build.onResolve({ filter: /^@\/utils\/model$/ }, () => ({ path: join(stubDir, "stub-model.mjs") }));
     build.onResolve({ filter: /^@\/(.*)/ }, (args) => {
@@ -234,7 +256,7 @@ check("全链路：词对齐写回（划词内容精确到词/字）", () => {
   const got = entry.alignW.map((p) => `${srcText.slice(p.ss, p.se)}→${zh1.slice(p.ts, p.te)}`);
   const expected = ["Deep→深度", "learning→学习", "works→有效", "It→它", "is→很", "great→好"];
   assert(JSON.stringify(got) === JSON.stringify(expected), `alignW: ${JSON.stringify(got)}`);
-  assert(entry.alignWHash === entry.alignHash, "词级幂等键与句级一致（同一译文 hash）");
+  assert(entry.alignWHash.startsWith(entry.alignHash), "词级幂等键含同一译文 hash（另有分词器版本后缀）");
   assert(file.alignWStatus === "done", `alignWStatus: ${file.alignWStatus}`);
 });
 
@@ -356,6 +378,21 @@ const info2 = await inspectPaperAlignment(markdown, __getFile());
 check("inspectPaperAlignment：对齐完成后 2/2", () => {
   assert(info2 && info2.total === 2 && info2.aligned === 2 && info2.alignedW === 2, JSON.stringify(info2));
 });
+
+// ─── jieba 分词接入：词级相位消费注入的中文分词器（两字符词落入 alignW，区别于单字路径） ───
+
+globalThis.__ZH_STUB_FAKE_JIEBA__ = true;
+resetRequests();
+await seedFile();
+const jiebaRes = await alignPaperTranslation({ paperId: "p", markdown });
+check("jieba 分词：alignW 中文区间按注入分词成词（非单字）", () => {
+  assert(jiebaRes.words.status === "done", `词级: ${JSON.stringify(jiebaRes.words)}`);
+  const entry = __getFile().blocks[index0];
+  const tgtTexts = entry.alignW.map((p) => zh1.slice(p.ts, p.te));
+  assert(tgtTexts.includes("深度"), `应含两字符词'深度': ${JSON.stringify(tgtTexts)}`);
+  assert(tgtTexts.includes("学习"), `应含两字符词'学习': ${JSON.stringify(tgtTexts)}`);
+});
+globalThis.__ZH_STUB_FAKE_JIEBA__ = false;
 
 // ─── DP 无解兜底：两侧句数比超 maxGroup（5:2）→ 整块单对（low），不是零对齐 ───
 
