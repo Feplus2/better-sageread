@@ -10,7 +10,8 @@
 
 ### D 批：杂项（未排期）
 - **MinerU 公式 legacy TeX 兼容扫荡（2026-07-30 converter 二轮发现）**：MinerU 公式/化学式里用 `\bf \cal \sf \tt \textcircled` 等 legacy 命令，pandoc texmath 与部分 KaTeX 路径报错（`paper.md` 验收"公式 KaTeX 渲染无报错"不达标）。修法：converter 落盘前做机械替换（`\bf→\mathbf`、`\cal→\mathcal`、`\sf→\mathsf`、`\tt→\mathtt`），`\textcircled` 另议；改完抽 5 篇公式密集产物过 pandoc + SageRead KaTeX 双验
-- **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 集成（方案 A：Rust jieba-rs + tokenize_zh）进行中，预期改善实义词边界
+- **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
+- **tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**：插件 `cargo test` 的 lib test 目标 25 个编译错误（database/search.rs 等测试引用过期字段如 `SearchResult.chunk`，与 struct 漂移）——lib 本体编译正常，属测试债；修前无法在插件内跑任何单测（新加的 zh_segmenter 测试也被牵连无法执行）
 - **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
 - webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
@@ -31,6 +32,15 @@
   - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
 
 ## 已消化
+
+### 2026-08-02 jieba 分词上线（方案 A：Rust jieba-rs + tokenize_zh）
+- [x] 决策依据：离线对比实验（13 探针 单字 7.5 vs jieba 11.5）——词向量在"词"粒度区分度远高于单字，单字路径映射常落词中间（"离"/"致"）或边界多带一字（"或者根"）
+- [x] Rust：`text/zh_segmenter.rs`（jieba-rs **0.6.8**——0.7 系依赖墦不可用：libflate 2.3.x let-chains 需 rustc 1.88（本地 1.87）、2.1/2.2 依赖被 yank 的 core2 0.4.0；0.6.8 无 libflate 依赖）；`tokenize_zh` 批量命令；token 偏移按 **UTF-16 code unit** 口径（与 JS string 下标一致）；空白/标点/符号过滤口径与单字路径一致
+- [x] 权限坑：插件 `permissions/default.toml` 必须登记新命令，否则 invoke 被拒并静默走兜底（表现为"命令通了但切出单字"）
+- [x] 前端：`zh-tokenizer.ts`（批量一次 IPC，失败回退单字不中断）；词级相位中文侧改 jieba；`alignWHash` 拼 `jieba1` 版本后缀——旧 alignW 自动失效重算，无需手动迁移
+- [x] service 集成测试：zh-tokenizer 桩（默认单字/开关假 jieba 两字词）验证注入分词生效；14 组全过
+- [x] 真机验收：重建后词对 7279→6961、low 18→6；落库探针 **10.5/11**（rocksalt→岩盐/spinel→尖晶石/or→或者/结晶/主要/致谢等全精确，仅"国家自然科学基金"多带"得到"0.5）；CDP 拖拽划"尖晶石"→EN 精确"spinel"（单字版会拖出 rocksalt）
+- [x] 插件测试目标既有损坏记录入 D 批（未修）
 
 ### 2026-08-02 对齐系统性修复批（句词 DP 缩放成本 + 期刊缩写 + 无解兜底 + 公式归一）
 - [x] **根因：DP 成本函数少步偏置**——cost=1-avgSim 每步基线恒为 1，合并移动一步顶两步天然省基线；相似度区分度中等时正确 1:1 路径的相似度优势补不齐基线差 → 句级乱并句（块 39 实证：5 步错路 1.805 < 7 步对路 1.900）、词级向最大合并漂移致级联错位（"lead to stable structures"↔"根"）
