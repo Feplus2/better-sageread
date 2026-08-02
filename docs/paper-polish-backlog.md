@@ -8,8 +8,16 @@
 - 辅助模型按类别（研究目标/方法/结论/创新点；综述另套模板）抽取 quote → 同一锚点体系换算 → 分类着色入侧栏"AI 重点"tab（占位已留）
 - quote-based anchoring：模型只返回类别+逐字引用，本地匹配换锚点，匹配失败丢弃
 
+### E 批：功能与愿景（2026-08-02 用户输入，按优先级排产见当轮结论）
+- **论文导出**：给用户快捷方式拿到解析后的论文文档——内容可选（原文/翻译/对照、划线标注、笔记评论、图片），格式可选（Markdown/HTML/PDF 等）；即"翻译+标注+图片"合并为一份文档导出。可复用标注导出管线（lib/export-annotations-{md,html,image,pdf}.ts）的机制，但对象从"标注列表"扩为"整篇论文文档"
+- **MCP 开放向量库语义查询**：外部 Agent 通过 sageread-MCP 只传文本查询，SageRead 内部完成嵌入（秘钥不出进程）并返回检索结果——把论文知识库盘活给 Agent 生态；前提是用户已配嵌入模型（无配置时明确降级提示）。需设计：查询 API（书籍/论文/全局三域？）、top-k 与重排、结果形态（chunk + 出处）、与现有 MCP 工具注册方式对齐
+- **多引擎解析适配**：不绑死单一解析引擎——MinerU / paddleOCR 可选（用户实测 paddleOCR 质量更好），设置页选择，书籍转换与论文解析两侧都适配；等 Converter 侧 paddleOCR 适配验证完成后排产。**2026-08-02 产出审查实测（126 MinerU + 125 paddle 全量）**：两者互补——paddle 段落顺序/图注绑定/引文保留/错字优，MinerU 公式/表格优；建议 paddle 为基线 + 表格密集论文走 MinerU 备选。**入 SageRead 前的数据质量门（Converter 侧三修复）**：① paddle 下标小数断裂（`$Li_{0$.75}` 类，1001 处 KaTeX 必挂，其 QC 文档称残留 0 与实际不符，疑回归）；② ~25% 论文 References 裸列无 heading（影响切片与向量库质量）；③ 引擎基线定死（含 MinerU 引文上标化 `$^{[n]}$` 是否回改 `[n]`）
+- **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线
+- **动态术语表学术翻译**：当前为分批直译 + 静态学术 prompt（"术语全篇一致"靠模型自觉，temperature 0.2），无动态术语表。改进方向：首轮先抽取术语表（辅助模型）→ 后续批次注入 prompt 强制一致；长文一致性与 AI 标亮命中稳定性可一并评估
+- **主题 CSS 上限探索（低优先，视觉向）**：图片/视频为底 + 毛玻璃等示例，探索全局主题系统能力边界（THEMING.md）；排在技术优化之后
+
 ### D 批：杂项（未排期）
-- **MinerU 公式 legacy TeX 兼容扫荡（2026-07-30 converter 二轮发现）**：MinerU 公式/化学式里用 `\bf \cal \sf \tt \textcircled` 等 legacy 命令，pandoc texmath 与部分 KaTeX 路径报错（`paper.md` 验收"公式 KaTeX 渲染无报错"不达标）。修法：converter 落盘前做机械替换（`\bf→\mathbf`、`\cal→\mathcal`、`\sf→\mathsf`、`\tt→\mathtt`），`\textcircled` 另议；改完抽 5 篇公式密集产物过 pandoc + SageRead KaTeX 双验
+- ~~**MinerU 公式 legacy TeX 兼容扫荡**~~（✅ 2026-08-02 实证关闭：对 Converter 全量产出 126 MinerU + 125 paddle 逐篇 grep，`\bf \cal \sf \tt \textcircled` 全库 0 次——Converter 侧已在落盘前处理，本项无需 SageRead 侧动作）
 - **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
 - **tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**：插件 `cargo test` 的 lib test 目标 25 个编译错误（database/search.rs 等测试引用过期字段如 `SearchResult.chunk`，与 struct 漂移）——lib 本体编译正常，属测试债；修前无法在插件内跑任何单测（新加的 zh_segmenter 测试也被牵连无法执行）
 - **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
