@@ -76,6 +76,23 @@ check("Fig. 1A 不切", () => {
   eq(cut("As shown in Fig. 1A, the curve rises. We agree."), ["As shown in Fig. 1A, the curve rises.", "We agree."]);
 });
 
+check("期刊缩写不切（参考文献条目不被切碎）", () => {
+  eq(
+    cut(
+      "A. K. Kalathil, P. Arunkumar, Influence of $Ti^{4+}$ on Li-Rich Layered Oxides. ACS Appl. Mater. Inter. 7, 7118-7128 (2015).",
+    ),
+    [
+      "A. K. Kalathil, P. Arunkumar, Influence of $Ti^{4+}$ on Li-Rich Layered Oxides.",
+      "ACS Appl. Mater. Inter. 7, 7118-7128 (2015).",
+    ],
+  );
+  eq(cut("K. Mizushima et al., $Li_{x}CoO_{2}$ cathode. Mater. Res. Bull. 15, 783-789 (1980). Next one here."), [
+    "K. Mizushima et al., $Li_{x}CoO_{2}$ cathode.",
+    "Mater. Res. Bull. 15, 783-789 (1980).",
+    "Next one here.",
+  ]);
+});
+
 check("小数点 2.5 不切", () => {
   eq(cut("The value is 2.5 times higher. We note it."), ["The value is 2.5 times higher.", "We note it."]);
 });

@@ -2,7 +2,7 @@ import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { BookNote, HighlightColor, HighlightStyle } from "@/types/book";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import renderMathInElement from "katex/contrib/auto-render";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -37,9 +37,15 @@ import type { PaperBlock, PaperViewMode } from "./paper-blocks";
 import {
   type PaperAlignPair,
   type SrcRange,
-  mapOffsetsViaTokens,
+  findAlignPairBySrc,
+  findAlignPairByTgt,
+  mapOffsetsMathAware,
+  mapSourceOffsetsToLive,
   mapSrcRangeToTgt,
   mapTgtRangeToSrc,
+  normalizeLiveElement,
+  normalizeMathText,
+  tokenizeWords,
 } from "./paper-cross-anchor";
 import { type PaperHighlightLocation, locateQuoteInPaper } from "./paper-highlight-locator";
 import { type HoverRect, mergeOverlappingRects } from "./paper-hover-rects";
@@ -193,9 +199,9 @@ function buildTranslationDivMap(container: Element): Map<number, Element> {
  * 对照模式 div.textContent 与 stored 文本一致时直接按偏移建 Range；
  * 不一致（KaTeX 重排了 $...$、译文模式 oneLine 折叠了换行）时：
  *   T2 句界区间按句索引换算（两侧各切句，句数一致则用实时句表对应句边界）；
- *   T3 词级区间（句内偏移）先经词 token 下标对应（oneLine 折叠/markdown 渲染只动
- *   空白与语法符时精确），失败再吸附到所在句按句索引换算（精度降级到整句），
- *   句数对不上则夹取偏移保底（不 crash，精度降级）。
+ *   T3 词级区间（句内偏移）先经公式归一 + 词 token 下标对应（两侧数学段各归一为 1 个
+ *   占位符后 token 序列一致，含公式块也能词级精确；oneLine 折叠只动空白同理），
+ *   失败再吸附到所在句按句索引换算（精度降级到整句），句数对不上则夹取偏移保底（不 crash）。
  */
 function tgtOffsetsToRange(el: Element, storedText: string, ts: number, te: number): Range | null {
   const live = el.textContent ?? "";
@@ -211,8 +217,8 @@ function tgtOffsetsToRange(el: Element, storedText: string, ts: number, te: numb
       start = liveSpans[si].start;
       end = liveSpans[ei].end;
     } else {
-      // T3 词级区间：词 token 下标对应 → 吸附整句句索引换算 → 夹取保底
-      const viaTokens = mapOffsetsViaTokens(storedText, live, ts, te);
+      // T3 词级区间：公式归一 + 词 token 下标对应 → 吸附整句句索引换算 → 夹取保底
+      const viaTokens = mapOffsetsMathAware(normalizeMathText(storedText), normalizeLiveElement(el), ts, te);
       if (viaTokens) {
         start = viaTokens.start;
         end = viaTokens.end;
@@ -238,6 +244,82 @@ function tgtOffsetsToRange(el: Element, storedText: string, ts: number, te: numb
   range.setStart(startPoint.node, startPoint.offset);
   range.setEnd(endPoint.node, endPoint.offset);
   return range;
+}
+
+/**
+ * md 源文偏移 → live 英文块 Range（hover 联动/中文侧映射的英文侧定位）。
+ * live 块文本与源文一致（无公式）直接按偏移建 Range；不一致（KaTeX 渲染改变了
+ * textContent）经 mapSourceOffsetsToLive（公式归一 + 词 token 对应，句索引兜底），
+ * 失败返回 null（调用方跳过联动）。excludeSelector 用于跳过块内嵌的译文 div
+ * （对照模式 li/td/th；译文在块尾，英文部分是前缀，换算坐标与块 textContent 坐标一致）。
+ */
+function srcOffsetsToRange(
+  block: Element,
+  sourceText: string,
+  ss: number,
+  se: number,
+  excludeSelector?: string,
+): Range | null {
+  const offsets = mapSourceOffsetsToLive(
+    normalizeMathText(sourceText),
+    normalizeLiveElement(block, excludeSelector),
+    ss,
+    se,
+  );
+  if (!offsets || offsets.end <= offsets.start) return null;
+  const startPoint = charOffsetToPoint(block, offsets.start);
+  const endPoint = charOffsetToPoint(block, offsets.end);
+  if (!startPoint || !endPoint) return null;
+  const range = document.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+  return range;
+}
+
+/**
+ * live 英文块偏移 → md 源文坐标（标注 cfi 是 live DOM 坐标，align/alignW 是源文坐标）。
+ * 无公式（raw 与源文一致）恒等返回；含公式经公式归一 + 词 token 下标对应；
+ * 失败返回 null（调用方保留原偏移，维持既有行为）。
+ */
+function liveSrcOffsetsToSource(
+  block: Element,
+  sourceText: string,
+  s: number,
+  e: number,
+  excludeSelector?: string,
+): { start: number; end: number } | null {
+  const normLive = normalizeLiveElement(block, excludeSelector);
+  if (normLive.raw === sourceText) return { start: s, end: e };
+  return mapOffsetsMathAware(normLive, normalizeMathText(sourceText), s, e);
+}
+
+/**
+ * 译文模式下英文块不在 DOM 中：按 md 源文重建"若原文渲染成 DOM"的等效元素
+ * （公式段用 katex.renderToString 的产物——与 rehype-katex 同源，textContent 结构一致），
+ * 供公式归一在 cfi live 坐标 ↔ 源文坐标之间换算。渲染失败按纯文本处理（归一退化为恒等）。
+ */
+function buildVirtualLiveSrc(sourceText: string): Element {
+  const { spans } = normalizeMathText(sourceText);
+  const div = document.createElement("div");
+  let last = 0;
+  for (const span of spans) {
+    div.appendChild(document.createTextNode(sourceText.slice(last, span.origStart)));
+    const raw = sourceText.slice(span.origStart, span.origEnd);
+    const display = raw.startsWith("$$");
+    const holder = document.createElement("span");
+    try {
+      holder.innerHTML = katex.renderToString(raw.slice(display ? 2 : 1, raw.length - (display ? 2 : 1)), {
+        displayMode: display,
+        throwOnError: false,
+      });
+    } catch {
+      holder.textContent = raw;
+    }
+    div.appendChild(holder);
+    last = span.origEnd;
+  }
+  div.appendChild(document.createTextNode(sourceText.slice(last)));
+  return div;
 }
 
 /** 自定义 a：http(s) 外链交给默认浏览器（Tauri opener），页内锚点在滚动容器内定位 */
@@ -542,6 +624,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 句子表按块懒计算并缓存（WeakMap 随正文 DOM 重建自动失效，textContent 比对兜底就地变更）。
   const sentenceCacheRef = useRef<WeakMap<Element, { text: string; spans: SentenceSpan[] }>>(new WeakMap());
   const hoverRangeRef = useRef<Range | null>(null);
+  // 对照模式联动 hover：命中句的对侧对应句 Range（无对齐/换算失败为 null，只显本侧）
+  const hoverLinkedRangeRef = useRef<Range | null>(null);
   const [hoverRects, setHoverRects] = useState<HoverRect[] | null>(null);
   const hoverRafRef = useRef(0);
   const lastMouseRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
@@ -555,12 +639,14 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     }
     lastMouseRef.current = null;
     hoverRangeRef.current = null;
+    hoverLinkedRangeRef.current = null;
     setHoverRects(null);
   }, []);
 
   // 容器坐标换算：与 scrollTo 相同的 getBoundingClientRect 差值 + scrollTop 做法。
   // getClientRects 对 inline 组件（KaTeX/MathML 副本、sup/sub、::marker）会返回互相重叠的
-  // 多个 rect，半透明 tint 叠加深色，故渲染前先做几何求并（mergeOverlappingRects，同行才并、跨行不并）
+  // 多个 rect，半透明 tint 叠加深色，故渲染前先做几何求并（mergeOverlappingRects，同行才并、跨行不并）。
+  // 联动句与本侧句的 rect 并入同一数组求并（两块上下相邻，y 带不相交，不会误并）。
   const updateHoverRects = useCallback(() => {
     const range = hoverRangeRef.current;
     const scroller = scrollRef.current;
@@ -569,8 +655,11 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       return;
     }
     const base = scroller.getBoundingClientRect();
+    const domRects = Array.from(range.getClientRects());
+    const linked = hoverLinkedRangeRef.current;
+    if (linked) domRects.push(...Array.from(linked.getClientRects()));
     const rects = mergeOverlappingRects(
-      Array.from(range.getClientRects())
+      domRects
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({
           x: r.left - base.left + scroller.scrollLeft,
@@ -585,31 +674,97 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 定位 (x, y) 处文本所属句子：caretRangeFromPoint → 切句根元素 → 句表 → 句子 Range。
   // 切句根：对照模式译文 div 内即 div 本身（T2 开放中文侧悬浮，句表按元素 textContent 切句并缓存，
   // 与英文块同一 WeakMap 机制）；否则为 listBlocks 同规则的原文块（译文模式下块内容即译文，天然适用）。
-  const locateSentenceAtPoint = useCallback((x: number, y: number): Range | null => {
-    const container = contentRef.current;
-    if (!container) return null;
-    const caret = document.caretRangeFromPoint?.(x, y);
-    if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
-    const textNode = caret.startContainer as Text;
-    if (textNode.parentElement?.closest("a, pre")) return null; // 链接保持可点、代码块不高亮
-    const segRoot = textNode.parentElement?.closest("[data-translation]") ?? findBlockForNode(container, textNode);
-    if (!segRoot) return null;
-    const text = segRoot.textContent ?? "";
-    let entry = sentenceCacheRef.current.get(segRoot);
-    if (!entry || entry.text !== text) {
-      entry = { text, spans: segmentSentences(text) };
-      sentenceCacheRef.current.set(segRoot, entry);
-    }
-    const span = findSentenceAt(entry.spans, offsetFromBlockStart(segRoot, textNode, caret.startOffset));
-    if (!span) return null;
-    const start = charOffsetToPoint(segRoot, span.start);
-    const end = charOffsetToPoint(segRoot, span.end);
-    if (!start || !end) return null;
-    const range = document.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset);
-    return range;
-  }, []);
+  // 返回 segRoot/span 供对照模式联动 hover 反查对侧句。
+  const locateSentenceAtPoint = useCallback(
+    (x: number, y: number): { range: Range; segRoot: Element; span: SentenceSpan } | null => {
+      const container = contentRef.current;
+      if (!container) return null;
+      const caret = document.caretRangeFromPoint?.(x, y);
+      if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
+      const textNode = caret.startContainer as Text;
+      if (textNode.parentElement?.closest("a, pre")) return null; // 链接保持可点、代码块不高亮
+      const segRoot = textNode.parentElement?.closest("[data-translation]") ?? findBlockForNode(container, textNode);
+      if (!segRoot) return null;
+      const text = segRoot.textContent ?? "";
+      let entry = sentenceCacheRef.current.get(segRoot);
+      if (!entry || entry.text !== text) {
+        entry = { text, spans: segmentSentences(text) };
+        sentenceCacheRef.current.set(segRoot, entry);
+      }
+      const span = findSentenceAt(entry.spans, offsetFromBlockStart(segRoot, textNode, caret.startOffset));
+      if (!span) return null;
+      const start = charOffsetToPoint(segRoot, span.start);
+      const end = charOffsetToPoint(segRoot, span.end);
+      if (!start || !end) return null;
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      return { range, segRoot, span };
+    },
+    [],
+  );
+
+  // 对照模式联动 hover：命中句的对侧对应句 Range。
+  // 英文句 → 译文句：live 英文句边界换算为 md 源文坐标（句索引对应，失败公式归一 + 词 token），
+  //   句级 align 找句对，ts/te 经 tgtOffsetsToRange（内含句索引/公式归一/降级链）换算到 live 译文 div；
+  // 中文句 → 英文句：live 译文句边界同法换算到 stored 坐标，句对 ss/se 经 srcOffsetsToRange
+  //   换算到 live 英文块。无对齐/换算失败返回 null（只显本侧）；译文模式无需联动（只有中文）。
+  const locateLinkedRange = useCallback(
+    (segRoot: Element, span: SentenceSpan): Range | null => {
+      if (viewMode !== "bilingual") return null;
+      const container = contentRef.current;
+      if (!container || !translation) return null;
+      const blocks = listBlocks(container);
+      /** live 句边界（segRoot 坐标）→ 对侧坐标系（stored 译文或 md 源文）：词 token 锚定优先
+       * （词级对齐不受两侧切句漂移影响——句索引对应在句数相等但边界错位时会拿错相邻句）；
+       * token 换算失败再句索引对应（边界精确 + 句数一致才用）。
+       * 英文块排除内嵌译文 div 后，hover 句可能越出英文前缀（英文末句无终止符时与译文粘连）：夹取/放弃联动 */
+      const convertSpan = (
+        normLive: ReturnType<typeof normalizeLiveElement>,
+        otherText: string,
+      ): { start: number; end: number } | null => {
+        if (span.start >= normLive.raw.length) return null;
+        const end = Math.min(span.end, normLive.raw.length);
+        const viaTokens = mapOffsetsMathAware(normLive, normalizeMathText(otherText), span.start, end);
+        if (viaTokens) return viaTokens;
+        const liveSpans = segmentSentences(normLive.raw);
+        const otherSpans = segmentSentences(otherText);
+        const si = liveSpans.findIndex((sp) => sp.start === span.start && sp.end === end);
+        if (si !== -1 && liveSpans.length === otherSpans.length) {
+          return { start: otherSpans[si].start, end: otherSpans[si].end };
+        }
+        return null;
+      };
+      if (segRoot.hasAttribute("data-translation")) {
+        let b = -1;
+        for (const [idx, div] of buildTranslationDivMap(container)) {
+          if (div === segRoot) {
+            b = idx;
+            break;
+          }
+        }
+        const align = translation.alignments.get(b);
+        const stored = translation.texts.get(b);
+        const block = blocks[b];
+        const sourceText = sourceBlocks?.[b]?.sourceText;
+        if (b < 0 || !align || !stored || !block || sourceText == null) return null;
+        const ts = convertSpan(normalizeLiveElement(segRoot), stored);
+        const pair = ts ? findAlignPairByTgt(align, ts.start, ts.end) : null;
+        // 英文块可能内嵌译文 div（li/td/th）：换算时排除（英文部分是前缀，坐标一致）
+        return pair ? srcOffsetsToRange(block, sourceText, pair.ss, pair.se, "[data-translation]") : null;
+      }
+      const b = blocks.indexOf(segRoot);
+      const align = translation.alignments.get(b);
+      const stored = translation.texts.get(b);
+      const div = buildTranslationDivMap(container).get(b);
+      const sourceText = sourceBlocks?.[b]?.sourceText;
+      if (b < 0 || !align || !stored || !div || sourceText == null) return null;
+      const ss = convertSpan(normalizeLiveElement(segRoot, "[data-translation]"), sourceText);
+      const pair = ss ? findAlignPairBySrc(align, ss.start, ss.end) : null;
+      return pair ? tgtOffsetsToRange(div, stored, pair.ts, pair.te) : null;
+    },
+    [viewMode, translation, sourceBlocks],
+  );
 
   const processHover = useCallback(
     (x: number, y: number, target: EventTarget | null) => {
@@ -618,8 +773,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) return clearHover();
       if (target instanceof Element && target.closest("img, pre, a")) return clearHover();
-      const range = locateSentenceAtPoint(x, y);
-      if (!range) return clearHover();
+      const found = locateSentenceAtPoint(x, y);
+      if (!found) return clearHover();
+      const { range } = found;
       const prev = hoverRangeRef.current;
       if (
         prev &&
@@ -631,9 +787,10 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         return; // 同一句子内移动：不重算
       }
       hoverRangeRef.current = range;
+      hoverLinkedRangeRef.current = locateLinkedRange(found.segRoot, found.span);
       updateHoverRects();
     },
-    [clearHover, locateSentenceAtPoint, updateHoverRects],
+    [clearHover, locateSentenceAtPoint, locateLinkedRange, updateHoverRects],
   );
 
   // mousemove 经 rAF 节流：每帧最多处理一次，取最新坐标
@@ -696,10 +853,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     [paperDir],
   );
 
-  // 渲染完成后从 DOM 收集标题生成 TOC（id 与 rehype-slug 产物天然一致），并上报给顶栏下拉；
-  // 同一时机用 katex auto-render 补渲染对照模式译文 div 内的公式——译文 div 是 rehype-raw 注入的
-  // 原始 HTML（不经过 rehype-katex），$...$ 会原样显示。auto-render 作用于文本节点（escapeHtml 后的
-  // 实体已被 HTML 解析还原），已渲染公式的 $ 定界符被消费，effect 重跑天然幂等，无需额外防护。
+  // 渲染完成后从 DOM 收集标题生成 TOC（id 与 rehype-slug 产物天然一致），并上报给顶栏下拉。
+  // 译文 div 的公式已在重建时烘焙为 .katex 元素（renderTranslationHtml），不再用 auto-render
+  // 改 React 管理的 DOM（那会让译文 div 与 React 重渲染冲突、内容损坏）。
   // biome-ignore lint/correctness/useExhaustiveDependencies: 需要在正文变化后重新收集已渲染的标题 DOM
   useEffect(() => {
     const container = contentRef.current;
@@ -712,15 +868,6 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     }));
     setToc(items);
     onTocChangeRef.current?.(items);
-    for (const el of container.querySelectorAll("[data-translation]")) {
-      renderMathInElement(el as HTMLElement, {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "$", right: "$", display: false },
-        ],
-        throwOnError: false,
-      });
-    }
   }, [body]);
 
   // IntersectionObserver 高亮当前阅读位置对应的标题（并向父组件上报，供论文助手使用）
@@ -857,13 +1004,42 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       const blocks = viewMode === "original" ? null : listBlocks(container);
       const divMap = viewMode === "bilingual" ? buildTranslationDivMap(container) : null;
       // 单段锚点 → 中文侧映射 Range（元素 + stored 译文 + 对齐表齐备才映射，否则空数组）；
-      // 有词级对齐时精确到词/字（T3），否则句吸附（T2，mapSrcRangeToTgt 内部回退）
-      const mapSegment = (el: Element | null | undefined, b: number, s: number, e: number): Range[] => {
+      // 有词级对齐时精确到词/字（T3），否则句吸附（T2，mapSrcRangeToTgt 内部回退）。
+      // cfi 偏移是 live 英文 DOM（KaTeX）坐标，align/alignW 是 md 源文坐标：含公式块先经
+      // 公式归一换算（srcEl 为 live 英文块；译文模式英文不在 DOM，按源文虚拟重建），
+      // 换算失败保留原偏移（既有行为）；无公式块归一为恒等，行为零变化。
+      const virtualSrcCache = new Map<number, Element>();
+      const mapSegment = (
+        el: Element | null | undefined,
+        srcEl: Element | null,
+        b: number,
+        s: number,
+        e: number,
+      ): Range[] => {
         const align = translation?.alignments.get(b);
         const stored = translation?.texts.get(b);
         if (!el || !align || !stored) return [];
+        let ss = s;
+        let se = e;
+        const sourceText = sourceBlocks?.[b]?.sourceText;
+        if (sourceText != null) {
+          let liveEl = srcEl;
+          if (!liveEl) {
+            liveEl = virtualSrcCache.get(b) ?? null;
+            if (!liveEl) {
+              liveEl = buildVirtualLiveSrc(sourceText);
+              virtualSrcCache.set(b, liveEl);
+            }
+          }
+          // 对照模式 li/td/th 块内嵌译文 div：换算时排除（英文部分是前缀，坐标一致）
+          const mapped = liveSrcOffsetsToSource(liveEl, sourceText, s, e, srcEl ? "[data-translation]" : undefined);
+          if (mapped) {
+            ss = mapped.start;
+            se = mapped.end;
+          }
+        }
         const ranges: Range[] = [];
-        for (const { ts, te } of mapSrcRangeToTgt(align, s, e, translation?.wordAlignments.get(b)) ?? []) {
+        for (const { ts, te } of mapSrcRangeToTgt(align, ss, se, translation?.wordAlignments.get(b)) ?? []) {
           const range = tgtOffsetsToRange(el, stored, ts, te);
           if (range) ranges.push(range);
         }
@@ -879,7 +1055,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             for (const segment of anchor.segments) {
               const block = blocks[segment.b];
               if (!block) continue;
-              const mapped = mapSegment(block, segment.b, segment.s, segment.e);
+              // 译文模式英文块不在 DOM：srcEl 传 null，mapSegment 内按源文虚拟重建
+              const mapped = mapSegment(block, null, segment.b, segment.s, segment.e);
               if (mapped.length > 0) {
                 tgtRanges.push(...mapped);
               } else {
@@ -898,9 +1075,11 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
           }
           if (ranges) srcRanges.push(...ranges);
           // 对照模式：为每条锚点段追加译文 div 内的映射高亮（无对齐的块静默跳过）
-          if (viewMode === "bilingual" && anchor && divMap) {
+          if (viewMode === "bilingual" && anchor && divMap && blocks) {
             for (const segment of anchor.segments) {
-              tgtRanges.push(...mapSegment(divMap.get(segment.b), segment.b, segment.s, segment.e));
+              tgtRanges.push(
+                ...mapSegment(divMap.get(segment.b), blocks[segment.b] ?? null, segment.b, segment.s, segment.e),
+              );
             }
           }
         }
@@ -935,7 +1114,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         }
       }
     };
-  }, [body, annotations, viewMode, translation]);
+  }, [body, annotations, viewMode, translation, sourceBlocks]);
 
   // 侧栏点击标注 → 容器内滚动定位（约 1/3 视口高度处）+ paper-anno-current 闪烁强调
   useEffect(() => {
@@ -1037,6 +1216,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // el 为对照模式的译文 div 或译文模式的译文块；range 为其内部选区。
   const openTranslationPopup = useCallback(
     (el: Element, range: Range) => {
+      console.debug(`[zh-dbg0] enter ${el.tagName}.${el.className}`);
       const container = contentRef.current;
       if (!container) return;
       const clamped = clampRangeToContainer(el, range);
@@ -1064,12 +1244,27 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         const s = offsetFromBlockStart(el, clamped.startContainer, clamped.startOffset);
         const e = offsetFromBlockStart(el, clamped.endContainer, clamped.endOffset);
         let mapped: SrcRange | null = null;
-        // T3 词级精确路径：live 选区偏移换算回 stored 坐标（一致时直接用；否则词 token 下标对应），
-        // 词级映射出英文精确词区间（划中文几个字 → 英文精确词区间）
+        // T3 词级精确路径：live 选区偏移换算回 stored 坐标（一致时直接用；否则公式归一 +
+        // 词 token 下标对应，含公式块也能精确），词级映射出英文精确词区间（划中文几个字 → 英文精确词区间）
         const alignW = translation?.wordAlignments.get(blockIndex);
         if (alignW && alignW.length > 0) {
-          const storedRange = live === stored ? { start: s, end: e } : mapOffsetsViaTokens(live, stored, s, e);
+          const normL = normalizeLiveElement(el);
+          const normS = normalizeMathText(stored);
+          console.debug(
+            `[zh-dbg] ${JSON.stringify({
+              liveEq: live === stored,
+              lTok: tokenizeWords(normL.text).length,
+              sTok: tokenizeWords(normS.text).length,
+              lSpans: normL.spans.length,
+              sSpans: normS.spans.length,
+              storedHead: stored.slice(0, 40),
+              liveHead: live.slice(0, 40),
+            })}`,
+          );
+          const storedRange =
+            live === stored ? { start: s, end: e } : mapOffsetsMathAware(normL, normS, s, e);
           if (storedRange) mapped = mapTgtRangeToSrc(align, storedRange.start, storedRange.end, alignW);
+          console.debug(`[zh-dbg2] ${JSON.stringify({ blockIndex, storedRange, mapped })}`);
         }
         if (!mapped) {
           // T2 句级降级路径：句吸附（划一半中文也映射到整个英文句），再按句索引换算回 stored 译文偏移
@@ -1089,16 +1284,32 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             mapped = mapTgtRangeToSrc(align, ts, te);
           }
         }
-        const enText = mapped ? srcBlock.sourceText.slice(mapped.ss, mapped.se) : "";
-        if (mapped && enText.trim()) {
-          highlight = {
-            cfi: serializeAnchor({ v: 1, segments: [{ b: blockIndex, s: mapped.ss, e: mapped.se }] }),
-            text: enText,
-            context: {
-              before: srcBlock.sourceText.slice(Math.max(0, mapped.ss - PAPER_CONTEXT_LENGTH), mapped.ss),
-              after: srcBlock.sourceText.slice(mapped.se, mapped.se + PAPER_CONTEXT_LENGTH),
-            },
-          };
+        if (mapped) {
+          // cfi 统一存 live 英文块 DOM 坐标（与英文侧标注一致：anchorToRanges/mapSegment 均按
+          // live 坐标消费）；text/context 同步用 live 文本切片（quote 兜底在 live DOM 查找）。
+          // 对照模式取真实英文块（排除内嵌译文 div）；译文模式英文不在 DOM，按源文虚拟重建
+          // （buildVirtualLiveSrc，与 rehype-katex 同源的 textContent 结构）。换算失败 highlight=null
+          // （显式降级，不写源坐标——源坐标会被下游当 live 坐标消费，三处错开）。
+          const enBlock = el.hasAttribute("data-translation") ? listBlocks(container)[blockIndex] : null;
+          const liveEl = enBlock ?? buildVirtualLiveSrc(srcBlock.sourceText);
+          const normLive = normalizeLiveElement(liveEl, enBlock ? "[data-translation]" : undefined);
+          const liveOffsets = mapSourceOffsetsToLive(
+            normalizeMathText(srcBlock.sourceText),
+            normLive,
+            mapped.ss,
+            mapped.se,
+          );
+          const enText = liveOffsets ? normLive.raw.slice(liveOffsets.start, liveOffsets.end) : "";
+          if (liveOffsets && enText.trim()) {
+            highlight = {
+              cfi: serializeAnchor({ v: 1, segments: [{ b: blockIndex, s: liveOffsets.start, e: liveOffsets.end }] }),
+              text: enText,
+              context: {
+                before: normLive.raw.slice(Math.max(0, liveOffsets.start - PAPER_CONTEXT_LENGTH), liveOffsets.start),
+                after: normLive.raw.slice(liveOffsets.end, liveOffsets.end + PAPER_CONTEXT_LENGTH),
+              },
+            };
+          }
         }
       }
       setPopupState({
@@ -1177,13 +1388,13 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       }
       // 译文 div 不参与块枚举（句选无法锚定）：保留系统菜单（译文划词标亮走左键选区路径）
       if (target instanceof Element && target.closest("[data-translation]")) return;
-      const range = locateSentenceAtPoint(event.clientX, event.clientY);
-      if (!range || viewMode === "translated") return; // 不在句子上（或译文模式禁止句选新建）：保留系统菜单
+      const found = locateSentenceAtPoint(event.clientX, event.clientY);
+      if (!found || viewMode === "translated") return; // 不在句子上（或译文模式禁止句选新建）：保留系统菜单
       event.preventDefault();
       const selection = window.getSelection();
       selection?.removeAllRanges();
-      selection?.addRange(range);
-      openCreatePopupForRange(range);
+      selection?.addRange(found.range);
+      openCreatePopupForRange(found.range);
     },
     [
       onCreateAnnotation,

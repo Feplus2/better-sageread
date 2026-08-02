@@ -114,10 +114,19 @@ check("每块文本归一化后相等", () => {
 });
 
 // ─── 重建产物锚点安全性（假译文全量填充） ───
+// 部分块用含空行/单字母行的多段译文：图注类译文的真实形态（用户实测 "B\n\n图1…"、"C\n\nD"），
+// 钉死"HTML 块遇空行终止 → 译文拆出新段落 → DOM 块枚举多于切块器"的回归（229 vs 226）。
 const translations = new Map();
 for (const block of cutterBlocks) {
-  if (block.translatable) translations.set(block.index, `译文${block.index}`);
+  if (!block.translatable) continue;
+  const i = block.index;
+  if (i % 10 === 3) translations.set(i, `B\n\n译文${i} 第二段`);
+  else if (i % 10 === 7) translations.set(i, "C\n\nD");
+  else if (i % 5 === 4) translations.set(i, `译文${i} 第一段\n\n第二段`);
+  else translations.set(i, `译文${i}`);
 }
+/** 译文 div 内容的期望形态（translationDiv 内 oneLine：换行折叠为空格） */
+const oneLine = (text) => text.replace(/\s*\n\s*/g, " ").trim();
 
 check("对照模式：块枚举不漂移，译文 div 全部被 [data-translation] 排除", () => {
   const rebuilt = buildPaperViewMarkdown(markdown, translations, "bilingual");
@@ -128,6 +137,11 @@ check("对照模式：块枚举不漂移，译文 div 全部被 [data-translatio
   container.innerHTML = renderPaperBody(body);
   const divs = container.querySelectorAll("[data-translation]");
   assert(divs.length === translations.size, `译文 div 数 ${divs.length} ≠ 译文体块数 ${translations.size}`);
+  // 含空行译文不得拆出新段落：每个 div 文本即 oneLine 后的完整译文（未被空行截断）
+  const divTexts = new Set(Array.from(divs, (div) => div.textContent));
+  for (const [index, text] of translations) {
+    assert(divTexts.has(oneLine(text)), `块 ${index} 译文 div 内容被空行拆散: ${JSON.stringify(text.slice(0, 40))}`);
+  }
   for (let i = 0; i < cutterBlocks.length; i++) {
     const src = normalizeSrcText(cutterBlocks[i].sourceText);
     const domText = normalizeDomText(blocks[i]);
@@ -176,12 +190,15 @@ check("对照模式：译文 div → 块索引映射全部正确（T2 映射高�
   const { body } = parsePaperMarkdown(rebuilt);
   container.innerHTML = renderPaperBody(body);
   const divMap = buildTranslationDivMap(container);
-  // 假译文即块索引（译文${index}）：div 文本直接回证归属块
+  // 假译文含块索引（译文${index}）：div 文本（oneLine 后）直接回证归属块
   assert(divMap.size === translations.size, `映射到的译文 div 数 ${divMap.size} ≠ 译文体块数 ${translations.size}`);
   const mismatches = [];
   for (const [index, div] of divMap) {
-    if (div.textContent !== `译文${index}`) {
-      mismatches.push(`div 归属块 ${index}，但文本为 ${div.textContent?.slice(0, 30)}`);
+    const expected = translations.has(index) ? oneLine(translations.get(index)) : null;
+    if (expected === null || div.textContent !== expected) {
+      mismatches.push(
+        `div 归属块 ${index}，但文本为 ${div.textContent?.slice(0, 30)}（期望 ${expected?.slice(0, 30)}）`,
+      );
     }
   }
   assert(mismatches.length === 0, `${mismatches.length} 个译文 div 归属错位：\n${mismatches.slice(0, 5).join("\n")}`);
@@ -193,8 +210,10 @@ check("译文模式：可翻译块的 DOM 文本即对应块译文（块索引�
   const mismatches = [];
   for (let i = 0; i < cutterBlocks.length; i++) {
     if (!cutterBlocks[i].translatable) continue;
-    if (normalizeDomText(blocks[i]) !== `译文${i}`) {
-      mismatches.push(`块 ${i}: DOM "${normalizeDomText(blocks[i]).slice(0, 30)}" ≠ 译文${i}`);
+    if (normalizeDomText(blocks[i]) !== oneLine(translations.get(i))) {
+      mismatches.push(
+        `块 ${i}: DOM "${normalizeDomText(blocks[i]).slice(0, 30)}" ≠ ${oneLine(translations.get(i)).slice(0, 30)}`,
+      );
     }
   }
   assert(mismatches.length === 0, `${mismatches.length} 块译文错位：\n${mismatches.slice(0, 5).join("\n")}`);

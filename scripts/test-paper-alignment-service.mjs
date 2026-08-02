@@ -51,6 +51,7 @@ function vecFor(text) {
 }
 
 let reqCount = 0;
+let batchCap = 0; // >0 时模拟供应商批量上限（超出返回 HTTP 400）
 const failSet = new Set(); // 全局请求序号（1 起）置 500，模拟分片失败
 const server = createServer((req, res) => {
   let body = "";
@@ -64,6 +65,10 @@ const server = createServer((req, res) => {
       return;
     }
     const parsed = JSON.parse(body);
+    if (batchCap > 0 && parsed.input.length > batchCap) {
+      res.writeHead(400).end(JSON.stringify({ error: { message: "batch too large" } }));
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ data: parsed.input.map((t, i) => ({ embedding: vecFor(t), index: i })) }));
   });
@@ -252,14 +257,14 @@ const forced = await alignPaperTranslation({ paperId: "p", markdown, force: true
 check("force：句词两级全部重算", () => {
   assert(forced.computed === 2 && forced.reused === 0, `句级: ${JSON.stringify(forced)}`);
   assert(forced.words.computed === 2 && forced.words.reused === 0, `词级: ${JSON.stringify(forced.words)}`);
-  assert(reqCount === 4, `句 1 片 + 词 3 片共 4 次请求，实际 ${reqCount}`);
+  assert(reqCount === 11, `句 1 片 + 词 10 片共 11 次请求（615 token / 64 条每片），实际 ${reqCount}`);
 });
 
 // ─── 降级：词级 embed 全挂不影响句级，恢复后可补齐 ───
 
 await seedFile(); // 重置为无对齐的译本
 resetRequests();
-failSet.add(2).add(3).add(4); // 句级第 1 片放行，词级 3 片全挂
+failSet.add(2).add(3).add(4); // 句级第 1 片放行，词级前 3 片全挂（两块均沾片→均失败）
 const degraded = await alignPaperTranslation({ paperId: "p", markdown });
 
 check("降级：词级 embed 全挂 → 句级 done、词级 partial 且不落 alignW", () => {
@@ -306,6 +311,20 @@ check("分片恢复：失败块补齐、成功块复用", () => {
   assert(healed.words.status === "done", `词级: ${JSON.stringify(healed.words)}`);
 });
 
+// ─── 自适应分批：供应商上限 10 条（DashScope 级）也能句词两级全部完成 ───
+
+await seedFile();
+resetRequests();
+batchCap = 10;
+const adapted = await alignPaperTranslation({ paperId: "p", markdown });
+
+check("自适应分批：供应商限 10 条时句词两级全部完成", () => {
+  assert(adapted.status === "done" && adapted.computed === 2, `句级: ${JSON.stringify(adapted)}`);
+  assert(adapted.words.status === "done" && adapted.words.computed === 2, `词级: ${JSON.stringify(adapted.words)}`);
+  assert(__getFile().alignWStatus === "done", "alignWStatus 应为 done");
+});
+batchCap = 0;
+
 // ─── 无嵌入能力：skipped，零 HTTP 调用 ───
 
 await seedFile();
@@ -337,6 +356,31 @@ const info2 = await inspectPaperAlignment(markdown, __getFile());
 check("inspectPaperAlignment：对齐完成后 2/2", () => {
   assert(info2 && info2.total === 2 && info2.aligned === 2 && info2.alignedW === 2, JSON.stringify(info2));
 });
+
+// ─── DP 无解兜底：两侧句数比超 maxGroup（5:2）→ 整块单对（low），不是零对齐 ───
+
+const srcUnsolvable = "Alpha one runs. Beta two walks. Gamma three jumps. Delta four swims. Epsilon five flies.";
+const tgtUnsolvable = "甲一跑。乙二走。";
+const mdUnsolvable = srcUnsolvable;
+{
+  const blocks = {};
+  for (const block of cutPaperBlocks(mdUnsolvable)) {
+    if (!block.translatable) continue;
+    blocks[String(block.index)] = { hash: await hashBlockText(block.sourceText), text: tgtUnsolvable };
+  }
+  __setFile({ version: 1, lang: "zh", updatedAt: new Date().toISOString(), blocks });
+  resetRequests();
+  const res = await alignPaperTranslation({ paperId: "p", markdown: mdUnsolvable });
+  check("DP 无解兜底：整块单对（low）而不是空表", () => {
+    assert(res.status === "done", `status: ${res.status}`);
+    const entry = __getFile().blocks["0"];
+    assert(Array.isArray(entry.align) && entry.align.length === 1, `align: ${JSON.stringify(entry.align)}`);
+    const p = entry.align[0];
+    assert(p.low === true, "兜底对应标 low");
+    assert(p.ss === 0 && p.ts === 0, `兜底对从块首开始: ${JSON.stringify(p)}`);
+    assert(p.se === srcUnsolvable.length && p.te === tgtUnsolvable.length, `兜底对覆盖整块: ${JSON.stringify(p)}`);
+  });
+}
 
 server.close();
 rmSync(stubDir, { recursive: true, force: true });

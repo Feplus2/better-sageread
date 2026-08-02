@@ -13,10 +13,12 @@
  *   脚注（remark-gfm 会在文末生成 <section data-footnotes> 内的 li）、原始 HTML 块。
  */
 
+import katex from "katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { MATH_SEGMENT_RE } from "./paper-cross-anchor";
 import { parsePaperMarkdown } from "./paper-metadata";
 
 export type PaperBlockKind =
@@ -172,9 +174,42 @@ const oneLine = (text: string) => text.replace(/\s*\n\s*/g, " ").trim();
 
 const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/**
+ * 译文 HTML 在重建时烘焙：数学段用与 normalizeMathText 同一正则检出、KaTeX 服务端渲染为
+ * .katex 元素（与 normalizeLiveElement 的占位对应天然一致），其余文本 escapeHtml。
+ * 不再依赖 KaTeX auto-render 在客户端改 React 管理的 DOM（该做法会让译文 div 与
+ * React 重渲染冲突、内容损坏，是跨语言映射错乱的根因）。
+ */
+export function renderTranslationHtml(text: string): string {
+  let out = "";
+  let last = 0;
+  for (const match of text.matchAll(MATH_SEGMENT_RE)) {
+    const start = match.index;
+    const raw = match[0];
+    out += escapeHtml(text.slice(last, start));
+    const display = raw.startsWith("$$");
+    const inner = display ? raw.slice(2, -2) : raw.slice(1, -1);
+    try {
+      out += katex.renderToString(inner, { displayMode: display, throwOnError: true });
+    } catch {
+      out += escapeHtml(raw); // KaTeX 解析失败则保留源码文本（与 auto-render 的 throwOnError:false 同语义）
+    }
+    last = start + raw.length;
+  }
+  return out + escapeHtml(text.slice(last));
+}
+
 const TRANSLATION_DIV_CLASS = "paper-translation";
+/**
+ * 对照模式译文 div：内容必须 oneLine——div 以原始 HTML 块注入 markdown，CommonMark 的
+ * HTML 块（<div> 起始）遇空行即终止，译文含空行（如图注 "B\n\n图1…"）会把后半段（含字面
+ * </div>）拆成新的 markdown 段落，DOM 块枚举多于切块器、块索引自此整体错位。
+ * oneLine 在 KaTeX 烘焙之前：$$...$$ 内换行折叠为空格不影响渲染；oneLine 后 live 文本与
+ * stored 译文只差空白（换行→空格），由 token/句索引换算层处理（与译文模式同一语义）；
+ * HTML 默认折叠空白，视觉无变化。
+ */
 const translationDiv = (text: string) =>
-  `<div class="${TRANSLATION_DIV_CLASS}" data-translation>${escapeHtml(text)}</div>`;
+  `<div class="${TRANSLATION_DIV_CLASS}" data-translation>${renderTranslationHtml(oneLine(text))}</div>`;
 
 const LIST_MARKER_RE = /^(\s*(?:[-+*]|\d+[.)])\s+)/;
 

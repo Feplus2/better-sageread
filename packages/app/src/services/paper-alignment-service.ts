@@ -46,8 +46,9 @@ export const ALIGN_W_LOW_CONFIDENCE = 0.45;
 const EMBED_BATCH_SIZE = 64;
 /** 嵌入前截断的句长上限（字符）：嵌入模型上下文有限（jina/bge 约 512 token），长句截断保底 */
 const EMBED_MAX_CHARS = 1200;
-/** 词级 embed 分片上限：单批最大 token 条数 / 单批最大总字符（token 短，双上限防超大请求） */
-const EMBED_W_BATCH_SIZE = 256;
+/** 词级 embed 分片上限：单批最大 token 条数 / 单批最大总字符（token 短，双上限防超大请求）。
+ *  条数取 64：智谱等供应商硬性限制单请求 ≤64 条（超限 HTTP 400），256 会导致整片失败 */
+const EMBED_W_BATCH_SIZE = 64;
 const EMBED_W_BATCH_CHARS = 6000;
 
 export interface AlignProgress {
@@ -129,6 +130,34 @@ async function embedBatch(texts: string[], config: VectorModelConfig, signal?: A
   }
   // OpenAI 协议不保证 data 顺序，按 index 归位
   return [...json.data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((item) => item.embedding ?? []);
+}
+
+/**
+ * 自适应批量 embed：各家供应商 input 数组上限差异巨大（OpenAI 2048 / Voyage 128 / Cohere 96 /
+ * 智谱 64 / DashScope 10），无法预设安全值——遇批量类错误（HTTP 400/413/422）即减半重试，
+ * 并把收敛后的上限记入 state.limit（本次运行内后续分片直接使用，不再试错）。
+ * 非批量类错误（401/500 等）直接上抛，走既有分片失败降级。
+ */
+async function embedBatchAdaptive(
+  texts: string[],
+  config: VectorModelConfig,
+  state: { limit: number },
+  signal?: AbortSignal,
+): Promise<number[][]> {
+  if (texts.length <= state.limit) {
+    try {
+      return await embedBatch(texts, config, signal);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      if (!/HTTP (400|413|422)/.test(msg) || texts.length <= 1) throw error;
+      state.limit = Math.max(1, Math.floor(Math.min(state.limit, texts.length) / 2));
+      console.warn(`嵌入批量超限，上限收敛为 ${state.limit} 条后重试`);
+    }
+  }
+  const mid = Math.ceil(texts.length / 2);
+  const first = await embedBatchAdaptive(texts.slice(0, mid), config, state, signal);
+  const second = await embedBatchAdaptive(texts.slice(mid), config, state, signal);
+  return [...first, ...second];
 }
 
 /** 余弦相似度矩阵（行=源句，列=译文句） */
@@ -237,6 +266,8 @@ export async function alignPaperTranslation(options: {
   }
 
   // ── T2 句级相位：切句 → 汇总批量 embed（一次或少量 HTTP 调用）→ 余弦矩阵 → 单调 DP ──
+  // embedLimit：批量上限的运行期状态（遇供应商限流自动收敛，句词两相位共享）
+  const embedLimit = { limit: EMBED_BATCH_SIZE };
   let computed = 0;
   let failed = 0;
   if (sentPending.length > 0 && config) {
@@ -256,7 +287,7 @@ export async function alignPaperTranslation(options: {
       vectors = [];
       for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
         if (signal?.aborted) throw new DOMException("已取消", "AbortError");
-        vectors.push(...(await embedBatch(texts.slice(i, i + EMBED_BATCH_SIZE), config, signal)));
+        vectors.push(...(await embedBatchAdaptive(texts.slice(i, i + EMBED_BATCH_SIZE), config, embedLimit, signal)));
       }
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -286,7 +317,7 @@ export async function alignPaperTranslation(options: {
       cursor += n + m;
       try {
         // 任一侧无句子：对齐为空表（缓存键照写，避免每次重试）
-        const pairs: PaperAlignPair[] =
+        let pairs: PaperAlignPair[] =
           n === 0 || m === 0
             ? []
             : alignSentenceDP(cosineMatrix(srcVecs, tgtVecs)).map((pair) => ({
@@ -296,6 +327,19 @@ export async function alignPaperTranslation(options: {
                 te: job.tgtSpans[pair.ti + pair.tgtCount - 1].end,
                 ...(pair.score < ALIGN_LOW_CONFIDENCE ? { low: true } : {}),
               }));
+        // DP 无解兜底：两侧句数比超 maxGroup 时 DP 返回空表（结构无解，重算亦然）——
+        // 退化为整块单对（标 low），保住块级 hover/标亮映射，而不是整块零对齐
+        if (pairs.length === 0 && n > 0 && m > 0) {
+          pairs = [
+            {
+              ss: job.srcSpans[0].start,
+              se: job.srcSpans[n - 1].end,
+              ts: job.tgtSpans[0].start,
+              te: job.tgtSpans[m - 1].end,
+              low: true,
+            },
+          ];
+        }
         job.entry.align = pairs;
         job.entry.alignHash = job.tgtHash;
         computed += 1;
@@ -364,7 +408,7 @@ export async function alignPaperTranslation(options: {
       if (shardEnd === shardStart) shardEnd += 1; // 兜底：单 token 超字符上限也自成一片（理论不存在）
       if (signal?.aborted) throw new DOMException("已取消", "AbortError");
       try {
-        const vecs = await embedBatch(flatTexts.slice(shardStart, shardEnd), config, signal);
+        const vecs = await embedBatchAdaptive(flatTexts.slice(shardStart, shardEnd), config, embedLimit, signal);
         for (let i = shardStart; i < shardEnd; i++) vectors[i] = vecs[i - shardStart];
       } catch (error) {
         if (signal?.aborted) throw error;
