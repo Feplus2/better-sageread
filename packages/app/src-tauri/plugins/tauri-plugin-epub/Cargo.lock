@@ -4144,6 +4144,7 @@ dependencies = [
  "sqlite-vec",
  "tauri",
  "tauri-plugin",
+ "tempfile",
  "thiserror 2.0.16",
  "tiktoken-rs",
  "tokio",
