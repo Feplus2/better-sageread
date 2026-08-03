@@ -17,7 +17,7 @@
 - ~~**MinerU 公式 legacy TeX 兼容扫荡**~~（✅ 2026-08-02 实证关闭：对 Converter 全量产出 126 MinerU + 125 paddle 逐篇 grep，`\bf \cal \sf \tt \textcircled` 全库 0 次——Converter 侧已在落盘前处理，本项无需 SageRead 侧动作）
 - **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
 - ~~**tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**~~（✅ 2026-08-03 已修，提交 4fa902e：25 个过期测试编译错误清零——失效 API 测试删除/接口变更跟进/tempfile 补 dev-dep，cargo test 15 全绿，zh_segmenter 3 组同步解锁）
-- **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
+- ~~**"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**~~（✅ 2026-08-03 全部消化，见下"笔记概念清除收尾"批）
 - webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
 - **C2 打磨项**：AI 标亮命中稳定性——降 temperature 抑制 3~8 条抽奖波动、toast 附丢弃原因（复述/公式句/未匹配分类）、quote 匹配器再加一层宽松归一
@@ -36,6 +36,13 @@
   - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
 
 ## 已消化
+
+### 2026-08-03 笔记概念清除收尾（D 批）
+- [x] **Agent 工具迁移标注**：`notesTool` 数据源从 notes 表改为 book_notes（type='annotation'，经新 Rust 命令 `get_all_book_notes` 跨书查询，JOIN books 带书名/作者；days/bookId/bookTitle/limit 参数不变）；`exportNotesTool` 剥离独立笔记（只导出书内标注，文件名改"-划线标注.md"）
+- [x] **服务与类型残留**：删除 `services/note-service.ts`、`types/note.ts`（grep 零引用）
+- [x] **Rust 侧移除**：删 `core/notes/` 模块与 5 个命令注册；schema.sql 删 notes 表与索引；迁移 `DROP TABLE IF EXISTS notes` + 清 `_sync_log` 残留行；同步注册 SYNC_TABLES/sync tables.rs 8→7；engine `notes_changed` 只匹配 book_notes；sync 测试改用 book_notes 覆盖同一机制（34 个 cargo test 全绿）；merge 对未注册表现状即跳过（零改动）
+- [x] **MCP 侧**：sageread-mcp 删 `list_notes`/`get_note`（标注由 `list_book_notes` 覆盖）+ README 同步，build/smoke 绿
+- [x] **文档**：路线图 §3.4"批注/笔记回写 Zotero"→"标注回写 Zotero"； backlog 清理 C2/翻译/句级基建三条僵尸条目
 
 ### 2026-08-03 动态术语表学术翻译（E 批）
 - [x] `paper-translation-service.ts`：首轮翻译前 `extractGlossary`（辅助模型，标题+摘要+正文前 12k 字符采样 → 30~60 条领域术语规范译法，去重/上限 80 条），随译本落盘 `translation-zh.json` 顶层 `glossary` 字段

@@ -202,7 +202,7 @@ Zotero 同步    ─┐
 - 从 Zotero 导入：直接读取 Zotero 库（Web API 或本地库，**不经 Zotero Brain**）→ 选择论文 → 取 PDF → 解析 → 入库
 - Collection 映射：Zotero 文件夹树 → folders 表，成员关系 → paper_folders（§3.2）
 - 元数据同步：标题/作者/DOI/年份/标签
-- 可选双向：SageRead 批注/笔记回写 Zotero（远景）
+- 可选双向：SageRead 标注回写 Zotero（远景）
 
 #### 3.5 PDF 原文对照面板
 
