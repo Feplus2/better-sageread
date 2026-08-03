@@ -366,6 +366,78 @@ function collectEdits(
 }
 
 /**
+ * 对照导出用 markdown（导出专用，与 buildPaperViewMarkdown 的对照模式并列）：
+ * 可翻译块后以 markdown 原生形式插入译文——普通块/引用块后插入 `> 译文` 引用块、
+ * 列表项内缩进续行 `  > 译文`、表格单元格内 `<br> 译文`。
+ * 公式保持 $...$ 文本（不烘焙 KaTeX HTML），译文中的图片引用清除（原文块已带图）：
+ * 导出文档要可编辑、由 md 阅读器原生渲染，对照 div（HTML）只服务阅读区与 HTML 导出。
+ */
+export function buildPaperBilingualExportMarkdown(
+  markdown: string,
+  translations: ReadonlyMap<number, string>,
+): string {
+  const { head, body } = splitBody(markdown);
+  const tree = parser.parse(body) as unknown as MdNode;
+  const clean = (text: string) => oneLine(text).replace(IMAGE_REF_RE, "").replace(/\s{2,}/g, " ").trim();
+  const edits: Edit[] = [];
+  let index = 0;
+  /** 取当前块译文（清理图片引用后）；无译文/空白译文返回 null */
+  const take = (): string | null => {
+    const text = translations.get(index);
+    index += 1;
+    return text?.trim() ? clean(text) : null;
+  };
+  for (const node of tree.children ?? []) {
+    const nodeEnd = offsetOf(node.position?.end, node);
+    switch (node.type) {
+      case "heading":
+      case "paragraph":
+      case "blockquote": {
+        const text = take();
+        if (!text) break;
+        edits.push({ start: nodeEnd, end: nodeEnd, text: `\n\n> ${text}` });
+        break;
+      }
+      case "list":
+        for (const item of node.children ?? []) {
+          const text = take();
+          if (!text) continue;
+          const start = offsetOf(item.position?.start, item);
+          const end = offsetOf(item.position?.end, item);
+          // 译文作为列表项续行内容（缩进对齐标记宽度），不破坏列表结构
+          const marker = body.slice(start, end).match(LIST_MARKER_RE)?.[0] ?? "- ";
+          const indent = " ".repeat(marker.trimEnd().length + 1);
+          edits.push({ start: end, end, text: `\n${indent}> ${text}` });
+        }
+        break;
+      case "table":
+        for (const row of node.children ?? []) {
+          for (const cell of row.children ?? []) {
+            const text = take();
+            if (!text) continue;
+            const span = contentSpan(cell);
+            if (!span) continue;
+            // 单元格内：原文 <br> 译文（单行，转义管道符）
+            edits.push({
+              start: span.start,
+              end: span.end,
+              text: `${body.slice(span.start, span.end)} <br> ${text.replace(/\|/g, "\\|")}`,
+            });
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  let result = body;
+  for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+    result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
+  }
+  return head + result;
+}
+
+/**
  * 用译文重建一份交给 PaperReader 渲染的 markdown（原文永远是唯一事实源，不落盘）。
  * 译文模式：可翻译块替换为译文（语法标记/公式/代码/图片原样保留；译文丢失的图片引用按原位补回，
  * 见 restoreImageRefs），块数量与顺序不变；
