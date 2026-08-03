@@ -12,14 +12,14 @@
 - **论文导出**：给用户快捷方式拿到解析后的论文文档——内容可选（原文/翻译/对照、划线标注、笔记评论、图片），格式可选（Markdown/HTML/PDF 等）；即"翻译+标注+图片"合并为一份文档导出。可复用标注导出管线（lib/export-annotations-{md,html,image,pdf}.ts）的机制，但对象从"标注列表"扩为"整篇论文文档"
 - **MCP 开放向量库语义查询**：外部 Agent 通过 sageread-MCP 只传文本查询，SageRead 内部完成嵌入（秘钥不出进程）并返回检索结果——把论文知识库盘活给 Agent 生态；前提是用户已配嵌入模型（无配置时明确降级提示）。需设计：查询 API（书籍/论文/全局三域？）、top-k 与重排、结果形态（chunk + 出处）、与现有 MCP 工具注册方式对齐
 - **多引擎解析适配**：不绑死单一解析引擎——MinerU / paddleOCR 可选（用户实测 paddleOCR 质量更好），设置页选择，书籍转换与论文解析两侧都适配；等 Converter 侧 paddleOCR 适配验证完成后排产。**2026-08-02 产出审查实测（126 MinerU + 125 paddle 全量）**：两者互补——paddle 段落顺序/图注绑定/引文保留/错字优，MinerU 公式/表格优；基线已定 paddle + MinerU 表格备选。**数据质量门已修复（2026-08-03，Converter 七轮 e756771）**：paddle 断裂公式 unexpected eof 1001→20（残留 7 篇高定形态挂账）、References heading 缺失 32→0、引文 `$^{[n]}$` 全形态归一 `[n]`（残留仅作者单位脚注）、stage1 伪包裹源头封堵；125 篇 staging 零配额重跑复扫达标（详见 Converter docs/ocr-providers.md 五之六）。**遗留**：lamb2020 等 7 篇 20 处 eof 长尾、LLM slug 漂移需 zotero_key 锚定、Zotero 库 8 组重复条目待治理、MinerU 输出未重跑（修复已进共享 Stage 2/3，重跑自动生效）
-- **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线
+- **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线。**slug 与元数据确定性（2026-08-03 定论）**：slug 必须由确定性输入生成——有 Zotero 时用 CSL（author 姓 + year + title 首词）；无 Zotero 的裸 PDF 场景把 LLM 提取结果缓存进 staging（metadata.json），重跑复用而非重新提取（Converter 七轮暴露 LLM 年份判定跨轮翻转致 slug 漂移 wang2018↔wang2013）；不统一走 LLM（非确定性反而加重）。**实质重复条目识别（用户提出的设计题，导入批次实现）**：元数据不同（机构/日期差异）但内容实质一致的文献判定重复——分层策略：① DOI 精确匹配；② 标题归一化模糊匹配 + 第一作者姓 + 年份容忍（±1）；③ 内容指纹（PDF 首页文本 simhash 汉明距离阈值）；④ 向量库近邻（嵌入已就绪， cosine 阈值辅助判定）。命中后：保留新条目并保留双方 zotero_key 链（Zotero 库治理在 Zotero 侧，SageRead 侧只标记重复关系不物理删除；Collection 分组对不上的条目进"未分组"虚拟集合人工归并）
 - **动态术语表学术翻译**：当前为分批直译 + 静态学术 prompt（"术语全篇一致"靠模型自觉，temperature 0.2），无动态术语表。改进方向：首轮先抽取术语表（辅助模型）→ 后续批次注入 prompt 强制一致；长文一致性与 AI 标亮命中稳定性可一并评估
 - **主题 CSS 上限探索（低优先，视觉向）**：图片/视频为底 + 毛玻璃等示例，探索全局主题系统能力边界（THEMING.md）；排在技术优化之后
 
 ### D 批：杂项（未排期）
 - ~~**MinerU 公式 legacy TeX 兼容扫荡**~~（✅ 2026-08-02 实证关闭：对 Converter 全量产出 126 MinerU + 125 paddle 逐篇 grep，`\bf \cal \sf \tt \textcircled` 全库 0 次——Converter 侧已在落盘前处理，本项无需 SageRead 侧动作）
 - **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
-- **tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**：插件 `cargo test` 的 lib test 目标 25 个编译错误（database/search.rs 等测试引用过期字段如 `SearchResult.chunk`，与 struct 漂移）——lib 本体编译正常，属测试债；修前无法在插件内跑任何单测（新加的 zh_segmenter 测试也被牵连无法执行）
+- ~~**tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**~~（✅ 2026-08-03 已修，提交 4fa902e：25 个过期测试编译错误清零——失效 API 测试删除/接口变更跟进/tempfile 补 dev-dep，cargo test 15 全绿，zh_segmenter 3 组同步解锁）
 - **"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**：开发版无用户无数据负担。后续批次：Agent 工具（notesTool 等）改为读取标注（高亮+划线下评论）；MCP（list_notes/get_note 等）迁移为标注；导出对象为标注；最终移除 notes 表与 notes 服务残留；文档同步（路线图 §3.4"批注/笔记回写 Zotero"→标注）。本批已完成 UI 层清除（弹窗按钮、notepad 笔记 tab、对话"存为笔记"按钮）
 - webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
