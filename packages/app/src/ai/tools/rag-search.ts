@@ -30,7 +30,9 @@ export const createRagSearchTool = (activeBookId: string | undefined) =>
 • 长查询（复杂问题）：系统自动偏重语义理解
 • 专业术语：建议使用bm25模式获得精确匹配
 • 概念理解：建议使用vector模式获得语义相关内容
-• 标注需求：记录返回结果中的 chunk_id，用于后续的文本标注操作`,
+• 标注需求：记录返回结果中的 chunk_id，用于后续的文本标注操作
+• 检索语言：query 与正文同语言命中率最高（英文书用英文术语检索，中文提问先翻译再查）
+• 复杂问题拆成 2-3 个不同措辞的 query 分次检索，比一次长查询覆盖更全`,
     inputSchema: z.object({
       reasoning: z
         .string()

@@ -23,10 +23,11 @@
 - **C2 打磨项**：AI 标亮命中稳定性——降 temperature 抑制 3~8 条抽奖波动、toast 附丢弃原因（复述/公式句/未匹配分类）、quote 匹配器再加一层宽松归一
 - **对话选段存笔记/引用**：AI 问答消息划词 → 引用到对话/存为笔记（与标注锚点不撞车——标注锚的是 paper.md DOM 块，对话是另一 DOM 语境；可按 book_notes type="excerpt" 挂论文，独立小功能）
 - foliate paginator 启动时对隐藏 tab 过早渲染抛 `el is null`（无害、切换即恢复；修复需动书籍挂载生命周期，风险不值，持续观察）
-- **RAG 精度增强**（2026-07-29 评估，结论：融合骨架正确，按优先级升级）：
-  - [ ] LLM 重排（召回 top 20-30 → 辅助/对话模型打分重排，性价比最高的精度升级）
-  - [ ] query 改写/关键词扩展（辅助模型，成本低收益稳，治查询措辞 mismatch）
-  - 暂不做：动态召回数量（边际收益小）、FTS5 迁移与空间压缩（BM25 LIKE 全表扫是工程债，万篇量级再议）
+- **RAG 精度增强**（2026-08-03 重新评估，结论：**机制侧不改，提示词侧收口**）：
+  - ~~LLM 重排~~（暂缓，证据驱动：当前融合检索无失败案例，重排每次检索多一次 LLM 调用（延迟+配额）；真出现召回质量问题时，先做便宜机制——命中块按小节/论文去重限流（top-k 被相邻重复块占满是真实痛点），重排兜底）
+  - ~~query 改写/关键词扩展~~（**归 Agent 侧**：检索词由聊天模型生成，改写/扩写是它本来就会做的事；已补工具描述引导——paperSearch/ragSearch 注明"英文论文用英文术语查询 + 复杂问题拆 2-3 个不同措辞分次检索"（2026-08-03），此前只有"支持自然语言表达"）
+  - ~~译文 chunks 入库~~（**不做**：论文正文为英文，译文入库徒增索引体积与同步陈旧问题；中文查询由 Agent 侧翻译后检索即可覆盖）
+  - 仍暂不做：动态召回数量、FTS5 迁移与空间压缩
 - Tooltip 统一扫尾（E 批只覆盖了阅读区/论文区 chrome 与文献库页，其余页面的原生 `title=` 待改项目 Tooltip）：
   - 图书馆页：`pages/library/components/status-bar.tsx`、`book-item.tsx`、`data-cleanup-button.tsx`、`embedding-dialog.tsx`
   - 设置弹窗：`components/settings/general.tsx`、`llama.tsx`、`sync.tsx`、`vector-model-manager.tsx`、`web-search-settings.tsx`

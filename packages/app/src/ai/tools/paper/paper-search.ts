@@ -32,10 +32,15 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
 • 跨论文的主题对比、文献调研类问题（"这些论文里谁用了 XX 方法"）
 • 范围为"本篇论文"时，在当前论文中按语义查找相关内容
 
-📝 **引用要求**：结果来自不同论文时，回答中必须注明片段出自哪篇论文（标题）。`,
+📝 **引用要求**：结果来自不同论文时，回答中必须注明片段出自哪篇论文（标题）。
+
+🌐 **检索技巧**：
+• 论文正文为英文：**请用英文术语构造 query**（中文提问先在心里翻译成英文专业术语再检索），命中率显著更高
+• 复杂问题拆成 2-3 个不同措辞的 query 分次检索（同义词/上下位词/具体↔抽象），比一次长查询覆盖更全
+• 概念性查询可调高 vectorWeight，精确术语/符号/人名可调高 bm25Weight`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想比较多篇论文的方法'"),
-      query: z.string().min(1).describe("检索问题，支持自然语言表达"),
+      query: z.string().min(1).describe("检索问题（论文正文为英文，请用英文专业术语构造，命中率更高）"),
       topK: z.number().int().min(1).max(20).default(5).describe("返回的片段数量，建议 3-8 个"),
       vectorWeight: z.number().min(0).max(1).default(0.7).describe("向量搜索权重（0-1），概念性查询可调高"),
       bm25Weight: z.number().min(0).max(1).default(0.3).describe("关键词搜索权重（0-1），术语查询可调高"),
