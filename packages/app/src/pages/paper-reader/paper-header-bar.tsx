@@ -10,7 +10,7 @@ import type { PaperAlignmentInfo } from "@/services/paper-alignment-service";
 import type { TranslateProgress } from "@/services/paper-translation-service";
 import { useThemeStore } from "@/store/theme-store";
 import type { PaperViewModeType } from "@/types/settings";
-import { TableOfContents } from "lucide-react";
+import { Download, TableOfContents } from "lucide-react";
 import { useState } from "react";
 import {
   TbLayoutSidebarLeftCollapse,
@@ -51,6 +51,8 @@ interface PaperHeaderBarProps {
   alignInfo: PaperAlignmentInfo | null;
   aligning: boolean;
   onRebuildAlign: () => void;
+  /** 打开论文导出对话框（数据在 PaperReaderView） */
+  onOpenExport: () => void;
 }
 
 /**
@@ -80,6 +82,7 @@ export default function PaperHeaderBar({
   alignInfo,
   aligning,
   onRebuildAlign,
+  onOpenExport,
 }: PaperHeaderBarProps) {
   const [openDropdown, setOpenDropdown] = useState<PaperDropdown | null>(null);
   // swapSidebars 时左右开关互换控制对象（与书籍 HeaderBar 同一语义）
@@ -200,6 +203,17 @@ export default function PaperHeaderBar({
             showControls ? "opacity-100" : "opacity-0"
           }`}
         >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="btn btn-ghost flex h-6 w-6 items-center justify-center rounded-full p-0 outline-none focus:outline-none focus-visible:ring-0"
+                onClick={onOpenExport}
+              >
+                <Download size={18} className="text-base-content" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">导出论文</TooltipContent>
+          </Tooltip>
           <PaperSearchDropdown
             open={openDropdown === "search"}
             onOpenChange={handleSearchOpenChange}

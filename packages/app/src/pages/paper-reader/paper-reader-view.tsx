@@ -1,4 +1,5 @@
 import { type PaperViewMode, buildPaperViewMarkdown, cutPaperBlocks } from "@/pages/paper-reader/paper-blocks";
+import PaperExportDialog from "@/pages/paper-reader/paper-export-dialog";
 import PaperHeaderBar from "@/pages/paper-reader/paper-header-bar";
 import { PaperNotepadPanel } from "@/pages/paper-reader/paper-notepad-panel";
 import PaperReader, {
@@ -69,6 +70,8 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchCount, setSearchMatchCount] = useState(0);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  // 论文导出对话框（数据在本视图，入口在顶栏）
+  const [exportOpen, setExportOpen] = useState(false);
   const paperReaderRef = useRef<PaperReaderHandle>(null);
   // 论文标注（book_notes 表复用）：CRUD 后 invalidate，下传给 PaperReader 与 PaperNotepadPanel
   const {
@@ -435,6 +438,7 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
           alignInfo={alignInfo}
           aligning={aligning}
           onRebuildAlign={handleRebuildAlign}
+          onOpenExport={() => setExportOpen(true)}
         />
 
         {loadError ? (
@@ -475,6 +479,22 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
       </div>
 
       {swapSidebars ? notepadSidebar : chatSidebar}
+
+      {/* 论文导出对话框（markdown 加载完成才渲染，保证拿到原文） */}
+      {markdown !== null && (
+        <PaperExportDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          paperId={paperId}
+          title={title}
+          markdown={markdown}
+          translationMap={translationMap}
+          translationFile={translationFile}
+          translatedMeta={translatedMeta}
+          annotations={annotations}
+          currentViewMode={viewMode}
+        />
+      )}
     </div>
   );
 }
