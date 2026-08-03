@@ -88,19 +88,6 @@ pub const TABLES: &[SyncTable] = &[
         ],
     },
     SyncTable {
-        name: "notes",
-        pk: "id",
-        columns: &[
-            ("id", ColType::Text),
-            ("book_id", ColType::Text),
-            ("book_meta", ColType::Text),
-            ("title", ColType::Text),
-            ("content", ColType::Text),
-            ("created_at", ColType::Int),
-            ("updated_at", ColType::Int),
-        ],
-    },
-    SyncTable {
         name: "book_notes",
         pk: "id",
         columns: &[

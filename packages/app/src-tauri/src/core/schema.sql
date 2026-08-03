@@ -85,23 +85,6 @@ CREATE TABLE IF NOT EXISTS tags (
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_tags_updated_at ON tags(updated_at DESC);
 
--- 笔记表
-CREATE TABLE IF NOT EXISTS notes (
-    id TEXT PRIMARY KEY NOT NULL,
-    book_id TEXT,                           -- 可选关联的书籍ID
-    book_meta TEXT,                         -- JSON 存储书籍信息（title, author）
-    title TEXT,                             -- 笔记标题（可选）
-    content TEXT,                           -- 笔记内容（可选，支持markdown）
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
-);
-
--- notes 表的索引
-CREATE INDEX IF NOT EXISTS idx_notes_book_id ON notes(book_id);
-CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC);
-
 -- BookNote 表 - 存储书籍标注、书签、摘录等
 CREATE TABLE IF NOT EXISTS book_notes (
     id TEXT PRIMARY KEY NOT NULL,

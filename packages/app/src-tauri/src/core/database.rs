@@ -132,7 +132,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         .execute(pool)
         .await?;
 
-    // L2 增量同步：变更日志表 + 八张同步表的触发器（CREATE TRIGGER IF NOT EXISTS 幂等）
+    // L2 增量同步：变更日志表 + 七张同步表的触发器（CREATE TRIGGER IF NOT EXISTS 幂等）
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS _sync_log (
             seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,11 +145,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     .execute(pool)
     .await?;
 
-    const SYNC_TABLES: [(&str, &str); 8] = [
+    const SYNC_TABLES: [(&str, &str); 7] = [
         ("books", "id"),
         ("book_status", "book_id"),
         ("book_notes", "id"),
-        ("notes", "id"),
         ("threads", "id"),
         ("reading_sessions", "id"),
         ("skills", "id"),
@@ -172,6 +171,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         }
     }
     println!("Migration applied: _sync_log + sync triggers.");
+
+    // notes 概念废弃（2026-08）：独立"笔记"全部迁移到 book_notes，删表清库。
+    // DROP TABLE 幂等，且连带删除其上的 _sync_notes_* 触发器；同时清掉 _sync_log 里的残留行
+    sqlx::query("DROP TABLE IF EXISTS notes").execute(pool).await?;
+    sqlx::query("DELETE FROM _sync_log WHERE table_name = 'notes'")
+        .execute(pool)
+        .await?;
+    println!("Migration applied: notes table dropped.");
 
     // 文献库文件夹模型（§3.2）：folders 树表 + paper_folders 多对多关系表（IF NOT EXISTS 幂等）。
     // 删除文件夹时：子文件夹经 parent_id 级联删除，paper_folders 行经 folder_id 级联删除（论文本身不动）。

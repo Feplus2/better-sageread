@@ -28,7 +28,7 @@ pub struct SyncRunResult {
     pub thread_ids: Vec<String>,
     /// 本轮拉取 books 表有实际变更（供前端刷新书架）
     pub books_changed: bool,
-    /// 本轮拉取 notes / book_notes 表有实际变更（供前端刷新划线笔记）
+    /// 本轮拉取 book_notes 表有实际变更（供前端刷新划线笔记）
     pub notes_changed: bool,
     /// 本轮下载的字体数（供前端刷新字体）
     pub fonts_downloaded: usize,
@@ -347,7 +347,7 @@ async fn local_updated_at(
 /// 记录实际执行的写入（table, row_id, op），供防回环精确删除
 type AppliedOps = Vec<(String, String, String)>;
 
-/// 默认 LWW 表：books / book_notes / notes / skills / tags
+/// 默认 LWW 表：books / book_notes / skills / tags
 async fn apply_lww_upsert(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     row: &ChangeRow,
@@ -685,7 +685,7 @@ pub async fn apply_changeset(pool: &SqlitePool, bytes: &[u8]) -> Result<ApplyOut
                 outcome.books_changed = true;
                 outcome.books_count += 1;
             }
-            "notes" | "book_notes" => outcome.notes_changed = true,
+            "book_notes" => outcome.notes_changed = true,
             _ => {}
         }
     }
@@ -698,7 +698,7 @@ pub async fn apply_changeset(pool: &SqlitePool, bytes: &[u8]) -> Result<ApplyOut
 
 /* ---------------- 存量回填引导（协议 §11 2c / §13） ---------------- */
 
-/// 把 8 张同步表的全部现存行以 op=INSERT 写入 _sync_log（books 含回收站行，全保真）。
+/// 把 7 张同步表的全部现存行以 op=INSERT 写入 _sync_log（books 含回收站行，全保真）。
 /// 触发器只记录迁移之后的变更，存量行永远进不了 changeset——引导时回填一次，
 /// 让新设备经增量通道收到全量现状。接收端按主键 UPSERT 幂等应用，重放无害。
 /// 返回回填行数。
@@ -1165,7 +1165,7 @@ pub async fn run_pull_only(app: &AppHandle, pool: &SqlitePool, config: &WebdavCo
 mod tests {
     use super::*;
 
-    /// 建内存测试库：_sync_log + threads + notes + 触发器（与迁移同构）
+    /// 建内存测试库：_sync_log + threads + book_notes 等表 + 触发器（与迁移同构）
     async fn setup_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
@@ -1190,21 +1190,6 @@ mod tests {
                 title TEXT NOT NULL,
                 messages TEXT NOT NULL,
                 starred INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE notes (
-                id TEXT PRIMARY KEY NOT NULL,
-                book_id TEXT,
-                book_meta TEXT,
-                title TEXT,
-                content TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -1277,7 +1262,7 @@ mod tests {
         .await
         .unwrap();
 
-        for (table, pk) in [("threads", "id"), ("notes", "id"), ("book_status", "book_id"), ("books", "id"), ("book_notes", "id")] {
+        for (table, pk) in [("threads", "id"), ("book_status", "book_id"), ("books", "id"), ("book_notes", "id")] {
             for (suffix, op, key) in [
                 ("ai", "INSERT", format!("NEW.{pk}")),
                 ("au", "UPDATE", format!("NEW.{pk}")),
@@ -1296,18 +1281,26 @@ mod tests {
         pool
     }
 
-    fn note_row(id: &str, title: &str, updated_at: i64) -> ChangeRow {
+    fn note_row(id: &str, note: &str, updated_at: i64) -> ChangeRow {
         ChangeRow {
-            table: "notes".to_string(),
+            table: "book_notes".to_string(),
             id: id.to_string(),
             op: "UPDATE".to_string(),
             updated_at,
             data: Some(serde_json::json!({
                 "id": id,
-                "book_id": null,
-                "book_meta": null,
-                "title": title,
-                "content": "内容",
+                "book_id": "b1",
+                "type": "annotation",
+                "cfi": "epubcfi(/6/2)",
+                "text": null,
+                "style": null,
+                "color": null,
+                "note": note,
+                "context_before": null,
+                "context_after": null,
+                "category": null,
+                "source": "user",
+                "starred": 0,
                 "created_at": 1000,
                 "updated_at": updated_at,
             })),
@@ -1323,13 +1316,13 @@ mod tests {
         jsonl.into_bytes()
     }
 
-    async fn note_title(pool: &SqlitePool, id: &str) -> Option<String> {
-        sqlx::query("SELECT title FROM notes WHERE id = ?")
+    async fn note_text(pool: &SqlitePool, id: &str) -> Option<String> {
+        sqlx::query("SELECT note FROM book_notes WHERE id = ?")
             .bind(id)
             .fetch_optional(pool)
             .await
             .unwrap()
-            .map(|r| r.get("title"))
+            .map(|r| r.get("note"))
     }
 
     async fn log_count(pool: &SqlitePool) -> i64 {
@@ -1349,10 +1342,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(applied.count, 1);
-        assert_eq!(note_title(&pool, "n1").await.as_deref(), Some("远端标题"));
+        assert_eq!(note_text(&pool, "n1").await.as_deref(), Some("远端标题"));
 
         // 远端更旧 → 本地保留
-        sqlx::query("UPDATE notes SET title = '本地标题', updated_at = 3000 WHERE id = 'n1'")
+        sqlx::query("UPDATE book_notes SET note = '本地标题', updated_at = 3000 WHERE id = 'n1'")
             .execute(&pool)
             .await
             .unwrap();
@@ -1360,7 +1353,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(applied2.count, 0);
-        assert_eq!(note_title(&pool, "n1").await.as_deref(), Some("本地标题"));
+        assert_eq!(note_text(&pool, "n1").await.as_deref(), Some("本地标题"));
     }
 
     #[tokio::test]
@@ -1368,38 +1361,38 @@ mod tests {
         let pool = setup_pool().await;
 
         // 本地有行（updated_at=2000）
-        sqlx::query("INSERT INTO notes (id, title, content, created_at, updated_at) VALUES ('n1', '本地', 'x', 1000, 2000)")
+        sqlx::query("INSERT INTO book_notes (id, book_id, type, cfi, note, created_at, updated_at) VALUES ('n1', 'b1', 'annotation', 'epubcfi(/6/2)', '本地', 1000, 2000)")
             .execute(&pool)
             .await
             .unwrap();
 
         // 远端墓碑（updated_at=3000 更新）→ 删除
         let tombstone = ChangeRow {
-            table: "notes".to_string(),
+            table: "book_notes".to_string(),
             id: "n1".to_string(),
             op: "DELETE".to_string(),
             updated_at: 3000,
             data: None,
         };
         apply_changeset(&pool, &changeset_bytes(&[tombstone])).await.unwrap();
-        assert_eq!(note_title(&pool, "n1").await, None);
+        assert_eq!(note_text(&pool, "n1").await, None);
 
         // 远端重建（updated_at=4000 更新）→ 墓碑输，行回来
         apply_changeset(&pool, &changeset_bytes(&[note_row("n1", "重建", 4000)]))
             .await
             .unwrap();
-        assert_eq!(note_title(&pool, "n1").await.as_deref(), Some("重建"));
+        assert_eq!(note_text(&pool, "n1").await.as_deref(), Some("重建"));
 
         // 远端墓碑更旧（updated_at=1000）→ 本地保留
         let old_tombstone = ChangeRow {
-            table: "notes".to_string(),
+            table: "book_notes".to_string(),
             id: "n1".to_string(),
             op: "DELETE".to_string(),
             updated_at: 1000,
             data: None,
         };
         apply_changeset(&pool, &changeset_bytes(&[old_tombstone])).await.unwrap();
-        assert_eq!(note_title(&pool, "n1").await.as_deref(), Some("重建"));
+        assert_eq!(note_text(&pool, "n1").await.as_deref(), Some("重建"));
     }
 
     #[tokio::test]
@@ -1573,12 +1566,12 @@ mod tests {
         assert_eq!(status_location(&pool, "b1").await.as_deref(), Some("cfi-remote"));
     }
 
-    /// books / notes / book_notes 实际变更时置对应信号；无实际变更（重放幂等）时不置
+    /// books / book_notes 实际变更时置对应信号；无实际变更（重放幂等）时不置
     #[tokio::test]
     async fn test_books_notes_changed_flags() {
         let pool = setup_pool().await;
 
-        // notes 实际变更 → notes_changed=true，books_changed=false
+        // book_notes 实际变更 → notes_changed=true，books_changed=false
         let outcome = apply_changeset(&pool, &changeset_bytes(&[note_row("n1", "远端", 2000)]))
             .await
             .unwrap();
@@ -1617,31 +1610,6 @@ mod tests {
         let outcome = apply_changeset(&pool, &changeset_bytes(&[book])).await.unwrap();
         assert!(outcome.books_changed);
         assert!(!outcome.notes_changed);
-
-        // book_notes 实际变更 → notes_changed=true
-        let book_note = ChangeRow {
-            table: "book_notes".to_string(),
-            id: "bn1".to_string(),
-            op: "UPDATE".to_string(),
-            updated_at: 2000,
-            data: Some(serde_json::json!({
-                "id": "bn1",
-                "book_id": "b1",
-                "type": "highlight",
-                "cfi": "epubcfi(/6/2)",
-                "text": "划线",
-                "style": null,
-                "color": "yellow",
-                "note": null,
-                "context_before": null,
-                "context_after": null,
-                "created_at": 1000,
-                "updated_at": 2000,
-            })),
-        };
-        let outcome = apply_changeset(&pool, &changeset_bytes(&[book_note])).await.unwrap();
-        assert!(outcome.notes_changed);
-        assert!(!outcome.books_changed);
     }
 
     #[tokio::test]
@@ -1664,7 +1632,7 @@ mod tests {
         assert!(!has_unpushed(&pool, 0).await.unwrap());
 
         // 写入一行触发日志（触发器产生 seq=1）
-        sqlx::query("INSERT INTO notes (id, title, content, created_at, updated_at) VALUES ('n1', 't', 'c', 1000, 1000)")
+        sqlx::query("INSERT INTO book_notes (id, book_id, type, cfi, note, created_at, updated_at) VALUES ('n1', 'b1', 'annotation', 'epubcfi(/6/2)', 't', 1000, 1000)")
             .execute(&pool)
             .await
             .unwrap();
@@ -1678,7 +1646,7 @@ mod tests {
 
         // 造 150 条日志（150 次写入）
         for i in 0..150 {
-            sqlx::query("INSERT INTO notes (id, title, content, created_at, updated_at) VALUES (?, 't', 'c', 1000, 1000)")
+            sqlx::query("INSERT INTO book_notes (id, book_id, type, cfi, note, created_at, updated_at) VALUES (?, 'b1', 'annotation', 'epubcfi(/6/2)', 't', 1000, 1000)")
                 .bind(format!("n{i}"))
                 .execute(&pool)
                 .await
@@ -1758,7 +1726,7 @@ mod tests {
             .get("c")
     }
 
-    /// 引导测试库：8 张同步表 + _sync_log（与线上一致的 FK），seed=true 时先插存量再建触发器
+    /// 引导测试库：7 张同步表 + _sync_log（与线上一致的 FK），seed=true 时先插存量再建触发器
     /// （模拟"迁移前已有数据"——这些行靠触发器永远进不了 changeset）
     async fn bootstrap_pool(seed: bool) -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -1811,16 +1779,6 @@ mod tests {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
-            )",
-            "CREATE TABLE notes (
-                id TEXT PRIMARY KEY NOT NULL,
-                book_id TEXT,
-                book_meta TEXT,
-                title TEXT,
-                content TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
             )",
             "CREATE TABLE threads (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -1877,7 +1835,6 @@ mod tests {
                     ('b2', '回收站的书', '作者', 'EPUB', 'books/b2/book.epub', 200, 'zh', 123, 1000, 1000)",
                 "INSERT INTO book_status (book_id, status, created_at, updated_at) VALUES ('b1', 'reading', 1000, 1000)",
                 "INSERT INTO book_notes (id, book_id, type, cfi, note, created_at, updated_at) VALUES ('bn1', 'b1', 'highlight', 'epubcfi(/6/2)', '批注', 1000, 1000)",
-                "INSERT INTO notes (id, book_id, title, content, created_at, updated_at) VALUES ('n1', 'b1', '笔记', '内容', 1000, 1000)",
                 "INSERT INTO threads (id, book_id, metadata, title, messages, starred, created_at, updated_at) VALUES ('t1', 'b1', '{}', '对话', '[]', 0, 1000, 1000)",
                 "INSERT INTO reading_sessions (id, book_id, started_at, duration_seconds, created_at, updated_at) VALUES ('s1', 'b1', 1000, 60, 1000, 1000)",
                 "INSERT INTO skills (id, name, content, is_active, is_system, created_at, updated_at) VALUES ('sk1', '技能', '内容', 1, 0, 1000, 1000)",
@@ -1892,7 +1849,6 @@ mod tests {
             ("books", "id"),
             ("book_status", "book_id"),
             ("book_notes", "id"),
-            ("notes", "id"),
             ("threads", "id"),
             ("reading_sessions", "id"),
             ("skills", "id"),
@@ -1925,9 +1881,9 @@ mod tests {
         assert_eq!(log_count(&src).await, 0);
         assert!(!has_unpushed(&src, 0).await.unwrap());
 
-        // 引导回填：8 张表 9 行全部进日志
+        // 引导回填：7 张表 8 行全部进日志
         let dumped = emit_bootstrap_dump(&src).await.unwrap();
-        assert_eq!(dumped, 9);
+        assert_eq!(dumped, 8);
         assert!(has_unpushed(&src, 0).await.unwrap());
 
         // 打包：每行一条（含回收站的书 b2）
@@ -1935,19 +1891,18 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(packed.row_count, 9);
+        assert_eq!(packed.row_count, 8);
 
         // 对端空库应用：book_notes/book_status 排序在 books 前，靠 FK 延迟校验整包落库
         let dst = bootstrap_pool(false).await;
         let outcome = apply_changeset(&dst, packed.jsonl.as_bytes()).await.unwrap();
-        assert_eq!(outcome.count, 9, "全量包应整体应用，无 FK 静默丢数据");
+        assert_eq!(outcome.count, 8, "全量包应整体应用，无 FK 静默丢数据");
 
         assert_eq!(table_count(&dst, "books").await, 2, "含回收站行全保真");
         assert_eq!(table_count(&dst, "reading_sessions").await, 1);
         assert_eq!(table_count(&dst, "book_notes").await, 1);
         assert_eq!(table_count(&dst, "book_status").await, 1);
         assert_eq!(table_count(&dst, "threads").await, 1);
-        assert_eq!(table_count(&dst, "notes").await, 1);
         assert_eq!(table_count(&dst, "skills").await, 1);
         assert_eq!(table_count(&dst, "tags").await, 1);
         assert_eq!(log_count(&dst).await, 0, "应用侧防回环应清掉日志");
@@ -2012,7 +1967,7 @@ mod tests {
         let peers = new_bootstrap_peers(index.keys().cloned(), "dev-a", &[]);
         assert_eq!(peers, vec!["dev-b".to_string()], "A 应发现新设备 B");
         let dumped = emit_bootstrap_dump(&a).await.unwrap();
-        assert_eq!(dumped, 9);
+        assert_eq!(dumped, 8);
         // 已引导过的 peer 不再重复发现（防重复 dump）
         assert!(new_bootstrap_peers(index.keys().cloned(), "dev-a", &["dev-b".to_string()]).is_empty());
         // A 自身不出现在新 peer 列表
@@ -2024,17 +1979,16 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(packed.row_count, 9);
+        assert_eq!(packed.row_count, 8);
 
-        // B 拉到全量：8 表齐全、无 FK 错误
+        // B 拉到全量：7 表齐全、无 FK 错误
         let outcome = apply_changeset(&b, packed.jsonl.as_bytes()).await.unwrap();
-        assert_eq!(outcome.count, 9);
+        assert_eq!(outcome.count, 8);
         assert_eq!(outcome.books_count, 2, "books 应用条数可用于 B 端可见性日志");
         for (table, expected) in [
             ("books", 2),
             ("book_status", 1),
             ("book_notes", 1),
-            ("notes", 1),
             ("threads", 1),
             ("reading_sessions", 1),
             ("skills", 1),

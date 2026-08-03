@@ -1052,6 +1052,54 @@ pub async fn get_book_notes(
     notes.map_err(|e| format!("转换查询结果失败: {}", e))
 }
 
+/// 跨书标注查询（默认按 created_at DESC；note_type 给定时按 type 过滤；limit 缺省 200）
+#[tauri::command]
+pub async fn get_all_book_notes(
+    app_handle: AppHandle,
+    note_type: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<BookNoteWithBook>, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+    let limit = i64::from(limit.unwrap_or(200));
+
+    const SELECT: &str = r#"
+        SELECT n.id, n.book_id, n.type, n.cfi, n.text, n.style, n.color, n.note,
+               n.context_before, n.context_after, n.category, n.source, n.starred,
+               n.created_at, n.updated_at,
+               b.title AS book_title, b.author AS book_author
+        FROM book_notes n
+        LEFT JOIN books b ON b.id = n.book_id
+    "#;
+
+    let rows = match note_type {
+        Some(t) => {
+            sqlx::query(&format!("{SELECT} WHERE n.type = ?1 ORDER BY n.created_at DESC LIMIT ?2"))
+                .bind(t)
+                .bind(limit)
+                .fetch_all(&db_pool)
+                .await
+        }
+        None => sqlx::query(&format!("{SELECT} ORDER BY n.created_at DESC LIMIT ?2"))
+            .bind(limit)
+            .fetch_all(&db_pool)
+            .await,
+    }
+    .map_err(|e| format!("查询全部标注失败: {}", e))?;
+
+    let notes: Result<Vec<BookNoteWithBook>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(BookNoteWithBook {
+                note: BookNote::from_db_row(row)?,
+                book_title: row.try_get("book_title")?,
+                book_author: row.try_get("book_author")?,
+            })
+        })
+        .collect();
+
+    notes.map_err(|e| format!("转换查询结果失败: {}", e))
+}
+
 #[tauri::command]
 pub async fn update_book_note(
     app_handle: AppHandle,

@@ -103,7 +103,7 @@ registerTools([
     name: "notes",
     scope: "shared",
     tool: notesTool as CoreTool,
-    description: "查询用户笔记",
+    description: "查询用户标注（划线与想法）",
   },
   {
     name: "getBooks",

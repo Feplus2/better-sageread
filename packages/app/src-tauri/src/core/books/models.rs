@@ -410,3 +410,14 @@ impl BookNote {
         })
     }
 }
+
+/// 跨书标注视图：BookNote 全字段 + 所属书名/作者（LEFT JOIN books；书已删时为 None）
+#[derive(Serialize, Debug)]
+pub struct BookNoteWithBook {
+    #[serde(flatten)]
+    pub note: BookNote,
+    #[serde(rename = "bookTitle")]
+    pub book_title: Option<String>,
+    #[serde(rename = "bookAuthor")]
+    pub book_author: Option<String>,
+}

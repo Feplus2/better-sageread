@@ -9,6 +9,7 @@ use crate::core::{
         delete_book,
         delete_book_note,
         get_active_reading_session,
+        get_all_book_notes,
         get_all_reading_sessions,
         get_book_by_id,
         get_book_notes,
@@ -37,7 +38,6 @@ use crate::core::{
         ensure_llamacpp_directories, get_app_data_dir, get_llamacpp_backend_path, greet,
         list_local_models, llama_server_binary_name_cmd,
     },
-    notes::commands::{create_note, delete_note, get_note_by_id, get_notes, update_note},
     papers::commands::{
         create_folder, delete_folder, get_paper_folder_map, list_folders, list_trashed_folders,
         move_folder, purge_folder, rename_folder, restore_folder, set_paper_folders,
@@ -203,6 +203,7 @@ pub fn run() {
             // book notes
             create_book_note,
             get_book_notes,
+            get_all_book_notes,
             update_book_note,
             delete_book_note,
             delete_ai_book_notes,
@@ -212,12 +213,6 @@ pub fn run() {
             get_tag_by_name,
             update_tag,
             delete_tag,
-            // notes
-            create_note,
-            update_note,
-            delete_note,
-            get_note_by_id,
-            get_notes,
             // skills
             create_skill,
             get_skills,

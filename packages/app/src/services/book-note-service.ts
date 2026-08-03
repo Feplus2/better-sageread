@@ -56,6 +56,21 @@ export async function getBookNotes(bookId: string): Promise<BookNote[]> {
   return result;
 }
 
+/** 跨书标注条目：book_notes 全字段 + 所属书 id/书名/作者（书已删为 null） */
+export type BookNoteWithBook = BookNote & { bookId: string; bookTitle: string | null; bookAuthor: string | null };
+
+/**
+ * 跨书查询标注（notes 概念清除后 Agent 工具的数据源）：默认按创建时间倒序；
+ * noteType 过滤（annotation/excerpt/bookmark），limit 缺省 200
+ */
+export async function getAllBookNotes(options?: { noteType?: string; limit?: number }): Promise<BookNoteWithBook[]> {
+  const result = await invoke<BookNoteWithBook[]>("get_all_book_notes", {
+    noteType: options?.noteType ?? null,
+    limit: options?.limit ?? null,
+  });
+  return result;
+}
+
 /**
  * 更新指定的书籍笔记
  */

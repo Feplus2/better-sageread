@@ -1,57 +1,33 @@
-import { getNotes } from "@/services/note-service";
-import type { Note } from "@/types/note";
+import { getAllBookNotes } from "@/services/book-note-service";
 import { tool } from "ai";
 import { z } from "zod";
 
-interface FormattedNote {
+/**
+ * 全局/阅读助手共用工具：查询用户的标注（划线文本 + 划线下想法评论）。
+ * notes 概念清除后，本工具的数据源从独立 notes 表迁移到 book_notes（type='annotation'）。
+ */
+
+interface FormattedAnnotation {
   id: string;
-  title: string | null;
-  content: string | null;
   bookInfo: {
     id: string;
     title: string;
     author: string;
   } | null;
+  /** 划线原文 */
+  text: string | null;
+  /** 划线下的想法/评论 */
+  note: string | null;
+  color: string | null;
+  starred: boolean;
+  /** AI 重点类别（goal/methods/...）；人工标注为 null */
+  category: string | null;
+  source: string;
   createdAt: string;
-  updatedAt: string;
 }
 
 function formatTimestamp(timestamp: number): string {
   return new Date(timestamp).toISOString();
-}
-
-function formatNote(note: Note): FormattedNote {
-  return {
-    id: note.id,
-    title: note.title ?? null,
-    content: note.content ?? null,
-    bookInfo: note.bookMeta
-      ? {
-          id: note.bookId ?? "",
-          title: note.bookMeta.title,
-          author: note.bookMeta.author ?? "",
-        }
-      : null,
-    createdAt: formatTimestamp(note.createdAt),
-    updatedAt: formatTimestamp(note.updatedAt),
-  };
-}
-
-function filterNotesByTimeRange(notes: Note[], days?: number): Note[] {
-  if (!days) return notes;
-
-  const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
-  return notes.filter((note) => note.createdAt >= cutoffTime);
-}
-
-function filterNotesByBookTitle(notes: Note[], bookTitle?: string): Note[] {
-  if (!bookTitle) return notes;
-
-  const searchTerm = bookTitle.toLowerCase().trim();
-  return notes.filter((note) => {
-    if (!note.bookMeta?.title) return false;
-    return note.bookMeta.title.toLowerCase().includes(searchTerm);
-  });
 }
 
 function getTimeRangeDescription(days?: number): string {
@@ -64,28 +40,26 @@ function getTimeRangeDescription(days?: number): string {
 }
 
 export const notesTool = tool({
-  description: `获取用户创建的笔记，支持按时间和书籍筛选。
+  description: `获取用户的标注（划线文本与划线下的想法/评论），支持按时间和书籍筛选。
 
 🎯 **常见用法**：
-• "总结最近的笔记" → days=7
-• "我这一周添加了什么笔记" → days=7
-• "分析这个月的笔记" → days=30
-• "分析这两个月的笔记" → days=60
-• "分析今年的笔记" → days=365
-• "总结《人类简史》相关的笔记" → bookTitle="人类简史"
+• "总结最近的标注/划线" → days=7
+• "我这一周标了什么" → days=7
+• "分析这个月的标注" → days=30
+• "总结《人类简史》相关的标注" → bookTitle="人类简史"
 
 📊 **返回内容**：
-笔记列表，包含标题、完整内容、书籍信息、创建时间，适合AI分析和总结`,
+标注列表，包含所属书籍、划线原文、想法评论、颜色/星标/类别、创建时间，适合AI分析和总结`,
 
   inputSchema: z.object({
-    reasoning: z.string().min(1).describe("调用此工具的原因，例如：'用户想总结最近一周的笔记'"),
+    reasoning: z.string().min(1).describe("调用此工具的原因，例如：'用户想总结最近一周的标注'"),
     days: z
       .number()
       .int()
       .min(1)
       .max(3650)
       .optional()
-      .describe("时间范围：最近几天的笔记。7=一周, 30=一个月, 60=两个月, 365=今年。不传则返回所有"),
+      .describe("时间范围：最近几天的标注。7=一周, 30=一个月, 60=两个月, 365=今年。不传则返回所有"),
     bookId: z.string().min(1).optional().describe("指定书籍ID，精确匹配"),
     bookTitle: z.string().min(1).optional().describe("按书名搜索，模糊匹配（如'人类'可匹配'人类简史'）"),
     limit: z.number().int().min(1).max(200).default(50).describe("最多返回条数，默认50"),
@@ -105,28 +79,35 @@ export const notesTool = tool({
     limit?: number;
   }) => {
     try {
-      // 1. 从数据库获取笔记（可能按 bookId 过滤）
-      const rawNotes = await getNotes({
-        bookId: bookId?.trim() || undefined,
-        sortBy: "created_at",
-        sortOrder: "desc",
-        limit: limit || 50,
-      });
+      // 跨书查询标注（type='annotation'，创建时间倒序）；limit 放宽一倍给后续过滤留余量
+      const raw = await getAllBookNotes({ noteType: "annotation", limit: Math.min(200, (limit || 50) * 2) });
 
-      // 2. 应用时间范围过滤
-      let filteredNotes = filterNotesByTimeRange(rawNotes, days);
+      const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : null;
+      const titleTerm = bookTitle?.toLowerCase().trim() || null;
 
-      // 3. 应用书名模糊搜索（如果提供了 bookTitle）
-      filteredNotes = filterNotesByBookTitle(filteredNotes, bookTitle);
+      const formatted: FormattedAnnotation[] = [];
+      for (const item of raw) {
+        if (cutoff && item.createdAt < cutoff) continue;
+        if (bookId?.trim() && item.bookId !== bookId.trim()) continue;
+        if (titleTerm && !(item.bookTitle ?? "").toLowerCase().includes(titleTerm)) continue;
+        formatted.push({
+          id: item.id,
+          bookInfo: item.bookTitle ? { id: item.bookId, title: item.bookTitle, author: item.bookAuthor ?? "" } : null,
+          text: item.text ?? null,
+          note: item.note?.trim() ? item.note.trim() : null,
+          color: item.color ?? null,
+          starred: item.starred ?? false,
+          category: item.category ?? null,
+          source: item.source ?? "user",
+          createdAt: formatTimestamp(item.createdAt),
+        });
+        if (formatted.length >= (limit || 50)) break;
+      }
 
-      // 4. 格式化数据
-      const formattedNotes = filteredNotes.map(formatNote);
-
-      // 5. 构建返回结果（统一使用 results 字段）
       return {
-        results: formattedNotes,
+        results: formatted,
         summary: {
-          total: formattedNotes.length,
+          total: formatted.length,
           timeRange: getTimeRangeDescription(days),
           bookFilter: bookTitle || (bookId ? "指定书籍" : null),
         },
@@ -141,7 +122,7 @@ export const notesTool = tool({
         },
       };
     } catch (error) {
-      throw new Error(`获取笔记失败: ${error instanceof Error ? error.message : "未知错误"}`);
+      throw new Error(`获取标注失败: ${error instanceof Error ? error.message : "未知错误"}`);
     }
   },
 });
