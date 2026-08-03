@@ -22,7 +22,20 @@ globalThis.__testDataDir = dataDir;
 // 模型行为队列："ok" 返回合法 JSON（从 prompt 解析批次并逐条造译文）；"bad" 返回无法解析的内容
 let behaviorQueue = [];
 const calls = [];
+// 术语表通道：独立记录（不占批次行为队列，calls 语义不变=批次调用）
+const glossaryCalls = [];
+let glossaryBehavior = "ok"; // "ok" 返回两条术语；"bad" 返回垃圾（验证抽取失败不阻断翻译）
 globalThis.__mockGenerateText = async ({ prompt }) => {
+  if (prompt.includes("学术翻译术语专家")) {
+    glossaryCalls.push(prompt);
+    if (glossaryBehavior === "bad") return { text: "这不是合法 JSON……" };
+    return {
+      text: JSON.stringify([
+        { src: "rock-salt", tgt: "岩盐" },
+        { src: "spinel", tgt: "尖晶石" },
+      ]),
+    };
+  }
   calls.push(prompt);
   const behavior = behaviorQueue.shift() ?? "ok";
   if (behavior === "bad") return { text: "这不是合法 JSON（bad control character in string literal …）" };
@@ -151,6 +164,56 @@ await check("全部批次失败：结果正常返回（不抛错），failedBatc
   assert(result.translated === 0, "不应有块被翻译");
   const file = await loadPaperTranslation("p3");
   assert(Object.keys(file?.blocks ?? {}).length === 0, "失败块不应落盘");
+});
+
+// ─── 动态术语表 ───
+
+await check("术语表：首轮抽取 → 注入全部批次 prompt → 随译本落盘", async () => {
+  mkdirSync(paperDir("p4"), { recursive: true });
+  glossaryCalls.length = 0;
+  calls.length = 0;
+  const result = await translatePaper({ paperId: "p4", markdown: MD12 });
+  assert(result.translated === 12, `12 块应全部翻译，got ${result.translated}`);
+  assert(glossaryCalls.length === 1, `术语表应抽取 1 次，got ${glossaryCalls.length}`);
+  assert(glossaryCalls[0].includes("标题") === false, "无 frontmatter 的 fixture 不应含标题段");
+  const injected = calls.every((p) => p.includes("术语表（以下术语必须严格采用给定译法") && p.includes("rock-salt → 岩盐"));
+  assert(injected, "全部批次 prompt 应注入术语表");
+  const file = await loadPaperTranslation("p4");
+  assert(file?.glossary?.length === 2, `术语表应随译本落盘 2 条，got ${file?.glossary?.length}`);
+  assert(file.glossary[0].src === "rock-salt" && file.glossary[0].tgt === "岩盐", "落盘术语表内容应正确");
+});
+
+await check("术语表续翻复用（force=false 不重抽），force=true 重新抽取", async () => {
+  glossaryCalls.length = 0;
+  // p4 已全部翻完：续翻 pending=0 → 不抽取不调用
+  await translatePaper({ paperId: "p4", markdown: MD12 });
+  assert(glossaryCalls.length === 0, "全部已翻时不应再抽取术语表");
+  // 手动制造缺口：改一块内容使 hash 失配 → 续翻只翻该块且复用既有术语表
+  const mdChanged = MD12.replace("paragraph 3", "paragraph three changed");
+  const result = await translatePaper({ paperId: "p4", markdown: mdChanged });
+  assert(result.translated === 1, `应只补翻 1 块，got ${result.translated}`);
+  assert(glossaryCalls.length === 0, "续翻应复用既有术语表不重抽");
+  // force=true：重新抽取并重翻
+  const forced = await translatePaper({ paperId: "p4", markdown: mdChanged, force: true });
+  assert(forced.translated === 12, `force 应全量重翻 12 块，got ${forced.translated}`);
+  assert(glossaryCalls.length === 1, "force 应重新抽取术语表");
+});
+
+await check("术语表抽取失败：不阻断翻译，批次 prompt 无术语表段", async () => {
+  mkdirSync(paperDir("p6"), { recursive: true });
+  glossaryBehavior = "bad";
+  glossaryCalls.length = 0;
+  calls.length = 0;
+  try {
+    const result = await translatePaper({ paperId: "p6", markdown: MD12 });
+    assert(result.translated === 12, `抽取失败仍应翻完 12 块，got ${result.translated}`);
+    assert(glossaryCalls.length === 1, "抽取应尝试过 1 次");
+    assert(calls.every((p) => !p.includes("术语表（以下术语")), "批次 prompt 不应含术语表段");
+    const file = await loadPaperTranslation("p6");
+    assert(!file?.glossary, "抽取失败不应落盘术语表");
+  } finally {
+    glossaryBehavior = "ok";
+  }
 });
 
 rmSync(outDir, { recursive: true, force: true });
