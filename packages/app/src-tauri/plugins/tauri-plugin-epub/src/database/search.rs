@@ -289,8 +289,8 @@ mod tests {
             chunk_text: "This is a test chunk about artificial intelligence.".to_string(),
             chunk_order_in_file: 0,
             total_chunks_in_file: 1,
+            embedding: vec![0.1; 384], // 向量列不支持零长向量（与库维度一致）
             global_chunk_index: 0,
-            created_at: "2023-01-01 00:00:00".to_string(),
         };
         
         let mut ops = DatabaseOperations::new(&mut db);
@@ -306,7 +306,7 @@ mod tests {
         
         let results = search.text_search("artificial intelligence", 10).unwrap();
         assert_eq!(results.len(), 1);
-        assert!(results[0].chunk.chunk_text.contains("artificial intelligence"));
+        assert!(results[0].chunk_text.contains("artificial intelligence"));
     }
 
     #[test]

@@ -11,4 +11,3 @@ pub use tokenizer::*;
 pub use sanitizer::*;
 pub use vectorizer::*;
 pub use constants::*;
-pub use zh_segmenter::*;

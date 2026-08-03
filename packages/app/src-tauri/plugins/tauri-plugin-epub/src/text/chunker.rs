@@ -644,7 +644,7 @@ mod tests {
     fn test_basic_chunking() {
         let chunker = TextChunker::new().unwrap();
         let text = "This is a test.\nThis is another line.\nAnd one more line.";
-        let chunks = chunker.chunk_text(text, 100, 0);
+        let chunks = chunker.chunk_text_by_tokens(text, 10, 100, 0);
 
         assert!(!chunks.is_empty());
         // 所有块合起来应该包含原始内容的主要部分

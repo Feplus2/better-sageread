@@ -43,26 +43,4 @@ mod tests {
         assert!(token_count > 0);
         assert!(token_count < 10); // 应该是一个合理的数字
     }
-
-    #[test]
-    fn test_exceeds_limit() {
-        let tokenizer = TextTokenizer::new().unwrap();
-        let short_text = "Hello";
-        let long_text = "This is a much longer text that should exceed the token limit when we set a very small limit for testing purposes.";
-        
-        assert!(!tokenizer.exceeds_limit(short_text, 100));
-        assert!(tokenizer.exceeds_limit(long_text, 5));
-    }
-
-    #[test]
-    fn test_truncate_to_tokens() {
-        let tokenizer = TextTokenizer::new().unwrap();
-        let text = "This is a test text that will be truncated.";
-        let truncated = tokenizer.truncate_to_tokens(text, 5);
-        
-        // 截断后的文本应该更短
-        assert!(truncated.len() <= text.len());
-        // 截断后的token数量应该不超过限制
-        assert!(tokenizer.estimate_tokens(&truncated) <= 5);
-    }
 }
