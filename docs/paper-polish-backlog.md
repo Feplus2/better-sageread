@@ -9,7 +9,7 @@
 - quote-based anchoring：模型只返回类别+逐字引用，本地匹配换锚点，匹配失败丢弃
 
 ### E 批：功能与愿景（2026-08-02 用户输入，按优先级排产见当轮结论）
-- **论文导出**：给用户快捷方式拿到解析后的论文文档——内容可选（原文/翻译/对照、划线标注、笔记评论、图片），格式可选（Markdown/HTML/PDF 等）；即"翻译+标注+图片"合并为一份文档导出。可复用标注导出管线（lib/export-annotations-{md,html,image,pdf}.ts）的机制，但对象从"标注列表"扩为"整篇论文文档"
+- ~~**论文导出**~~（✅ 2026-08-03 已消化，见下"论文整篇导出"批；遗留：正文内联高亮导出、frontmatter 中文化，见 D 批）
 - **MCP 开放向量库语义查询**：外部 Agent 通过 sageread-MCP 只传文本查询，SageRead 内部完成嵌入（秘钥不出进程）并返回检索结果——把论文知识库盘活给 Agent 生态；前提是用户已配嵌入模型（无配置时明确降级提示）。需设计：查询 API（书籍/论文/全局三域？）、top-k 与重排、结果形态（chunk + 出处）、与现有 MCP 工具注册方式对齐
 - **多引擎解析适配**：不绑死单一解析引擎——MinerU / paddleOCR 可选（用户实测 paddleOCR 质量更好），设置页选择，书籍转换与论文解析两侧都适配；等 Converter 侧 paddleOCR 适配验证完成后排产。**2026-08-02 产出审查实测（126 MinerU + 125 paddle 全量）**：两者互补——paddle 段落顺序/图注绑定/引文保留/错字优，MinerU 公式/表格优；基线已定 paddle + MinerU 表格备选。**数据质量门已修复（2026-08-03，Converter 七轮 e756771）**：paddle 断裂公式 unexpected eof 1001→20（残留 7 篇高定形态挂账）、References heading 缺失 32→0、引文 `$^{[n]}$` 全形态归一 `[n]`（残留仅作者单位脚注）、stage1 伪包裹源头封堵；125 篇 staging 零配额重跑复扫达标（详见 Converter docs/ocr-providers.md 五之六）。**遗留**：lamb2020 等 7 篇 20 处 eof 长尾、LLM slug 漂移需 zotero_key 锚定、Zotero 库 8 组重复条目待治理、MinerU 输出未重跑（修复已进共享 Stage 2/3，重跑自动生效）
 - **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线。**slug 与元数据确定性（2026-08-03 定论）**：slug 必须由确定性输入生成——有 Zotero 时用 CSL（author 姓 + year + title 首词）；无 Zotero 的裸 PDF 场景把 LLM 提取结果缓存进 staging（metadata.json），重跑复用而非重新提取（Converter 七轮暴露 LLM 年份判定跨轮翻转致 slug 漂移 wang2018↔wang2013）；不统一走 LLM（非确定性反而加重）。**实质重复条目识别（用户提出的设计题，导入批次实现）**：元数据不同（机构/日期差异）但内容实质一致的文献判定重复——分层策略：① DOI 精确匹配；② 标题归一化模糊匹配 + 第一作者姓 + 年份容忍（±1）；③ 内容指纹（PDF 首页文本 simhash 汉明距离阈值）；④ 向量库近邻（嵌入已就绪， cosine 阈值辅助判定）。命中后：保留新条目并保留双方 zotero_key 链（Zotero 库治理在 Zotero 侧，SageRead 侧只标记重复关系不物理删除；Collection 分组对不上的条目进"未分组"虚拟集合人工归并）
@@ -17,6 +17,7 @@
 - **主题 CSS 上限探索（低优先，视觉向）**：图片/视频为底 + 毛玻璃等示例，探索全局主题系统能力边界（THEMING.md）；排在技术优化之后
 
 ### D 批：杂项（未排期）
+- **论文导出遗留（2026-08-03 整篇导出批）**：译文/对照模式 frontmatter 仍是英文元数据（title_zh/abstract_zh 不回写 YAML，js-yaml 重排会动用户字段顺序，暂缓）
 - ~~**MinerU 公式 legacy TeX 兼容扫荡**~~（✅ 2026-08-02 实证关闭：对 Converter 全量产出 126 MinerU + 125 paddle 逐篇 grep，`\bf \cal \sf \tt \textcircled` 全库 0 次——Converter 侧已在落盘前处理，本项无需 SageRead 侧动作）
 - **词对齐残留打磨（2026-08-02 测试发现）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
 - ~~**tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**~~（✅ 2026-08-03 已修，提交 4fa902e：25 个过期测试编译错误清零——失效 API 测试删除/接口变更跟进/tempfile 补 dev-dep，cargo test 15 全绿，zh_segmenter 3 组同步解锁）
@@ -40,6 +41,18 @@
   - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
 
 ## 已消化
+
+### 2026-08-03 E 批：论文整篇导出（原文/译文/对照 + 标注 + 图片）
+- [x] 管线 `lib/export-paper.ts`：复用 `buildPaperViewMarkdown` 视图重建（原文唯一事实源，译文不落盘）；导出文档 = frontmatter 原样 + 标题 H1（译文/对照优先 title_zh）+ 模式化正文 + 可选文末标注节（复用 renderAnnotationMarkdown/buildAnnotationsListHtml，按锚点块序排序）
+- [x] 三格式：Markdown / HTML / PDF（打印版 HTML 路线，与标注 PDF 导出一致，零新依赖）；图片统一 base64 data URI 内嵌（单文件自包含，零新权限；对照模式译文 div 内的字面图片引用导出时清理——原文块紧邻其上已带图）
+- [x] HTML：marked 渲染 + 公式占位保护（@@PAPER_MATH_n@@）→ KaTeX 服务端烘焙换回；`lib/export-html-shared.ts` 拆出 sanitizeHtml/EXPORT_HTML_CSS（thread 导出改复用同一份，避免论文导出经对话导出拖入 book-service→foliate-js 链）；KaTeX CSS + 20 个 woff2 字体 `?inline` 全内联（`lib/export-paper-katex-css.ts`，动态 import 懒加载 ~400KB 不进主 chunk）
+- [x] 入口：论文顶栏 Download 按钮 → `paper-export-dialog.tsx`（内容默认跟随当前显示模式/无译本禁用译文与对照、附标注复选/嵌图片复选、三格式单选；卡片式选项行 + 分区标题层级）
+- [x] **对照 markdown 原生重建（二轮反馈）**：`buildPaperBilingualExportMarkdown`（paper-blocks.ts）——译文以 md 原生形式插入（普通块/引用块后 `> 译文`、列表项缩进续行、表格单元格 `<br>`），公式保持 $...$ 文本、译文内图片引用清理；弃用"对照 div 烘焙 KaTeX 进 md"（MathML+HTML 双份渲染致公式重复、文档臃肿不可编辑）
+- [x] **HTML 标注内联高亮（二轮反馈）**：锚点（块索引+textContent 偏移）经公式感知换算（mapSourceOffsetsToLive）映射进导出 DOM → `<mark>` 逐文本节点包裹（笔触三态 + --pa-color 颜色变量，逆文档序应用防坐标失效）；行间公式占位用 `<pre>` 包裹保证导出 DOM 块枚举与阅读区一致；映射失败静默跳过，文末标注节仍是完整事实源；Markdown 格式受格式限制只做文末标注节
+- [x] **译文模式跨语言内联修复（三轮反馈：13 条标注只出 3 条）**：根因——用户导出的是译文模式，导出 DOM 已是中文，英文锚点 token 映射必然失败。修复：译文模式先经句/词对齐（mapSrcRangeToTgt，词级精确/句级吸附）映射为中文区间再包裹（未翻译块回退英文直接映射，无对齐表静默跳过）；对照模式加中文侧镜像（pa-mark-tgt 低透明，同阅读区 -tgt 语义）；params 新增 translationFile（携带 align/alignW）。真实数据（a27b187c 13 标注）验证：译文 35 marks / 对照 48 marks
+- [x] **导出对话框重设计（三轮反馈：顶格/头部怪换行/粗糙）**：图标块 + 标题/描述双行 + 尾部选中指示圈的卡片式选项行；格式改三列紧凑卡片；头部/底部细分隔线；小区距字距标签分区
+- [x] 单测 `scripts/test-paper-export.mjs` 46 组全过（新增：译文跨语言词级/句级/无对齐三档内联、对照中文镜像）；paper-blocks 两既有套件 33 组回归全过
+- [x] 遗留记入 D 批：frontmatter 中文化（title_zh/abstract_zh 不回写 YAML）
 
 ### 2026-08-02 jieba 分词上线（方案 A：Rust jieba-rs + tokenize_zh）
 - [x] 决策依据：离线对比实验（13 探针 单字 7.5 vs jieba 11.5）——词向量在"词"粒度区分度远高于单字，单字路径映射常落词中间（"离"/"致"）或边界多带一字（"或者根"）
