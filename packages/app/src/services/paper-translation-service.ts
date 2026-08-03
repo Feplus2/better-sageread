@@ -44,12 +44,20 @@ export interface PaperTranslationFile {
   alignStatus?: PaperAlignStatus;
   /** T3 词对齐状态（缺省 = 尚未计算词对齐） */
   alignWStatus?: PaperAlignStatus;
+  /** 动态术语表（翻译首轮抽取并注入后续批次；随译本同生命周期，force 重翻时重新抽取） */
+  glossary?: PaperGlossaryItem[];
   blocks: Record<string, PaperTranslationBlock>;
 }
 
 export interface PaperTranslatedMeta {
   title_zh?: string;
   abstract_zh?: string;
+}
+
+/** 动态术语表条目：src 为原文逐字术语，tgt 为规范中文译法（后续批次强制一致） */
+export interface PaperGlossaryItem {
+  src: string;
+  tgt: string;
 }
 
 export interface TranslateProgress {
@@ -127,9 +135,16 @@ export async function loadPaperTranslatedMeta(paperId: string): Promise<PaperTra
   }
 }
 
-function buildBatchPrompt(batch: { index: number; text: string }[], strict = false): string {
+function buildBatchPrompt(
+  batch: { index: number; text: string }[],
+  strict = false,
+  glossary?: PaperGlossaryItem[] | null,
+): string {
   const strictNote = strict
     ? "\n\n注意：上一次输出的 JSON 无法解析。本次必须只输出一个严格合法的 JSON 数组（双引号、无尾随逗号、字符串内控制字符已转义），不要任何额外文字。"
+    : "";
+  const glossaryNote = glossary?.length
+    ? `\n\n术语表（以下术语必须严格采用给定译法，全篇保持一致）：\n${glossary.map((g) => `${g.src} → ${g.tgt}`).join("\n")}`
     : "";
   return `你是专业的学术论文翻译引擎。把给定英文论文片段逐条翻译为简体中文。
 
@@ -138,10 +153,70 @@ function buildBatchPrompt(batch: { index: number; text: string }[], strict = fal
 2. $...$ 与 $$...$$ 包裹的数学公式、代码片段、URL、DOI、参考文献条目原样保留，不得翻译或改动。
 3. 保留原文的 Markdown 行内格式（**粗体**、*斜体*、\`代码\`、链接文字可译但保留 [文字](URL) 结构）。
 4. ![...](...) 图片引用必须原样保留（路径与定界符不得改动），不得翻译、删除或改写为普通文字。
-5. 输入是 JSON 数组 [{"index":N,"text":"..."}]，只输出 JSON 数组 [{"index":N,"text":"译文"}]：index 与输入一一对应、不得遗漏或新增，不要输出任何其他文字或解释。${strictNote}
+5. 输入是 JSON 数组 [{"index":N,"text":"..."}]，只输出 JSON 数组 [{"index":N,"text":"译文"}]：index 与输入一一对应、不得遗漏或新增，不要输出任何其他文字或解释。${glossaryNote}${strictNote}
 
 待翻译内容：
 ${JSON.stringify(batch)}`;
+}
+
+/** 术语表抽取的源文本采样上限（标题+摘要+正文前若干块） */
+const GLOSSARY_SAMPLE_CHARS = 12000;
+const GLOSSARY_MAX_ITEMS = 80;
+
+/**
+ * 动态术语表抽取（翻译首轮一次）：从标题/摘要/正文前部采样提取领域术语及规范译法。
+ * 失败（模型不可用/输出无法解析）抛出——调用方捕获并按无术语表继续（不阻断翻译）。
+ */
+async function extractGlossary(
+  markdown: string,
+  model: ReturnType<typeof createModelInstance>,
+  signal?: AbortSignal,
+): Promise<PaperGlossaryItem[] | null> {
+  const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
+  const parts: string[] = [];
+  if (metadata.title) parts.push(`标题：${metadata.title}`);
+  if (metadata.abstract) parts.push(`摘要：${metadata.abstract}`);
+  let chars = 0;
+  for (const block of cutPaperBlocks(markdown)) {
+    if (!block.translatable) continue;
+    if (chars + block.sourceText.length > GLOSSARY_SAMPLE_CHARS) break;
+    parts.push(block.sourceText);
+    chars += block.sourceText.length;
+  }
+
+  const prompt = `你是学术翻译术语专家。从以下论文内容中提取 30~60 个关键术语，并给出规范的简体中文译法。
+要求：
+1. 只提取领域专有名词、技术术语、材料/方法/体系名称；通用词汇不提取。
+2. src 必须是原文中逐字出现的英文术语（含大小写），tgt 为规范中文译法——后续全篇将强制统一使用。
+3. 人名、化学式、数学符号、纯缩写不收录。
+4. 只输出 JSON 数组 [{"src":"...","tgt":"..."}]，不要输出任何其他文字。
+
+论文内容：
+${parts.join("\n\n")}`;
+
+  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal });
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/, "");
+  const start = cleaned.indexOf("[");
+  const end = cleaned.lastIndexOf("]");
+  if (start === -1 || end <= start) throw new Error("术语表响应中未找到 JSON 数组");
+  const parsed = JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("术语表响应不是 JSON 数组");
+
+  const seen = new Set<string>();
+  const items: PaperGlossaryItem[] = [];
+  for (const entry of parsed) {
+    const record = entry as { src?: unknown; tgt?: unknown };
+    const src = typeof record?.src === "string" ? record.src.trim() : "";
+    const tgt = typeof record?.tgt === "string" ? record.tgt.trim() : "";
+    if (!src || !tgt || seen.has(src.toLowerCase())) continue;
+    seen.add(src.toLowerCase());
+    items.push({ src, tgt });
+    if (items.length >= GLOSSARY_MAX_ITEMS) break;
+  }
+  return items.length > 0 ? items : null;
 }
 
 /** 解析模型输出为 [{index, text}]，容忍 ```json 围栏与前后杂讯；结构非法抛错 */
@@ -189,6 +264,7 @@ async function translateMetadata(
   model: ReturnType<typeof createModelInstance>,
   force: boolean,
   signal?: AbortSignal,
+  glossary?: PaperGlossaryItem[] | null,
 ): Promise<void> {
   const metaPath = await join(dir, "metadata.json");
   if (!(await exists(metaPath))) return;
@@ -204,7 +280,10 @@ async function translateMetadata(
   const needAbstract = typeof source.abstract === "string" && !!source.abstract;
   if (!needTitle && !needAbstract) return;
 
-  const prompt = `你是专业的学术论文翻译引擎。把给定论文的标题和摘要翻译为简体中文（术语与正文译法一致，人名不译，$...$ 数学与化学式原样保留）。
+  const glossaryNote = glossary?.length
+    ? `\n术语表（必须严格采用）：${glossary.map((g) => `${g.src} → ${g.tgt}`).join("；")}`
+    : "";
+  const prompt = `你是专业的学术论文翻译引擎。把给定论文的标题和摘要翻译为简体中文（术语与正文译法一致，人名不译，$...$ 数学与化学式原样保留）。${glossaryNote}
 只输出 JSON 对象 {"title_zh":"...","abstract_zh":"..."}，缺省字段输出空字符串，不要输出任何其他文字。
 输入：${JSON.stringify({ title: source.title ?? "", abstract: source.abstract ?? "" })}`;
   const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal });
@@ -269,11 +348,25 @@ export async function translatePaper(options: {
   let failedBatches = 0;
   onProgress?.({ done, total });
 
+  // 动态术语表：有待翻块且（无既有术语表或强制重翻）时，首轮先抽取并注入后续所有批次；
+  // 抽取失败不阻断翻译（按无术语表继续）；force=false 续翻复用译本中已有术语表
+  let glossary = existing?.glossary ?? null;
+  if (pending.length > 0 && (!glossary || force)) {
+    try {
+      const extracted = await extractGlossary(markdown, model, signal);
+      if (extracted) glossary = extracted;
+    } catch (error) {
+      if (signal?.aborted) throw error; // 取消优先
+      console.warn("术语表抽取失败，按无术语表继续翻译:", error);
+    }
+  }
+
   const save = async () => {
     const file: PaperTranslationFile = {
       version: 1,
       lang: PAPER_TRANSLATION_LANG,
       updatedAt: new Date().toISOString(),
+      ...(glossary ? { glossary } : {}),
       blocks: working,
     };
     await writeTextFile(await join(dir, TRANSLATION_FILE), JSON.stringify(file, null, 2));
@@ -283,7 +376,7 @@ export async function translatePaper(options: {
   const generateBatch = async (batch: { index: number; text: string }[], strict: boolean) => {
     const { text } = await generateText({
       model,
-      prompt: buildBatchPrompt(batch, strict),
+      prompt: buildBatchPrompt(batch, strict, glossary),
       temperature: 0.2,
       abortSignal: signal,
     });
@@ -335,7 +428,7 @@ export async function translatePaper(options: {
   // 元数据（title/abstract）顺带翻译；失败不影响正文译本
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   try {
-    await translateMetadata(dir, { title: metadata.title, abstract: metadata.abstract }, model, force, signal);
+    await translateMetadata(dir, { title: metadata.title, abstract: metadata.abstract }, model, force, signal, glossary);
   } catch (error) {
     if (signal?.aborted) return result(true);
     console.warn("论文元数据翻译失败（正文译本不受影响）:", error);
