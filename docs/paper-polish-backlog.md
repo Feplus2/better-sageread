@@ -9,11 +9,11 @@
 - quote-based anchoring：模型只返回类别+逐字引用，本地匹配换锚点，匹配失败丢弃
 
 ### E 批：功能与愿景（2026-08-02 用户输入，按优先级排产见当轮结论）
-- ~~**论文导出**~~（✅ 2026-08-03 已消化，见下"论文整篇导出"批；遗留：正文内联高亮导出、frontmatter 中文化，见 D 批）
-- **MCP 开放向量库语义查询**：外部 Agent 通过 sageread-MCP 只传文本查询，SageRead 内部完成嵌入（秘钥不出进程）并返回检索结果——把论文知识库盘活给 Agent 生态；前提是用户已配嵌入模型（无配置时明确降级提示）。需设计：查询 API（书籍/论文/全局三域？）、top-k 与重排、结果形态（chunk + 出处）、与现有 MCP 工具注册方式对齐
+- ~~**论文导出**~~（✅ 2026-08-03 已消化，见下"论文整篇导出"批；遗留：frontmatter 中文化，见 D 批）
+- ~~**MCP 开放向量库语义查询**~~（✅ 2026-08-03 已消化，见下"sageread-mcp 论文适配 + 语义查询"批）
 - **多引擎解析适配**：不绑死单一解析引擎——MinerU / paddleOCR 可选（用户实测 paddleOCR 质量更好），设置页选择，书籍转换与论文解析两侧都适配；等 Converter 侧 paddleOCR 适配验证完成后排产。**2026-08-02 产出审查实测（126 MinerU + 125 paddle 全量）**：两者互补——paddle 段落顺序/图注绑定/引文保留/错字优，MinerU 公式/表格优；基线已定 paddle + MinerU 表格备选。**数据质量门已修复（2026-08-03，Converter 七轮 e756771）**：paddle 断裂公式 unexpected eof 1001→20（残留 7 篇高定形态挂账）、References heading 缺失 32→0、引文 `$^{[n]}$` 全形态归一 `[n]`（残留仅作者单位脚注）、stage1 伪包裹源头封堵；125 篇 staging 零配额重跑复扫达标（详见 Converter docs/ocr-providers.md 五之六）。**遗留**：lamb2020 等 7 篇 20 处 eof 长尾、LLM slug 漂移需 zotero_key 锚定、Zotero 库 8 组重复条目待治理、MinerU 输出未重跑（修复已进共享 Stage 2/3，重跑自动生效）
 - **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线。**slug 与元数据确定性（2026-08-03 定论）**：slug 必须由确定性输入生成——有 Zotero 时用 CSL（author 姓 + year + title 首词）；无 Zotero 的裸 PDF 场景把 LLM 提取结果缓存进 staging（metadata.json），重跑复用而非重新提取（Converter 七轮暴露 LLM 年份判定跨轮翻转致 slug 漂移 wang2018↔wang2013）；不统一走 LLM（非确定性反而加重）。**实质重复条目识别（用户提出的设计题，导入批次实现）**：元数据不同（机构/日期差异）但内容实质一致的文献判定重复——分层策略：① DOI 精确匹配；② 标题归一化模糊匹配 + 第一作者姓 + 年份容忍（±1）；③ 内容指纹（PDF 首页文本 simhash 汉明距离阈值）；④ 向量库近邻（嵌入已就绪， cosine 阈值辅助判定）。命中后：保留新条目并保留双方 zotero_key 链（Zotero 库治理在 Zotero 侧，SageRead 侧只标记重复关系不物理删除；Collection 分组对不上的条目进"未分组"虚拟集合人工归并）
-- **动态术语表学术翻译**：当前为分批直译 + 静态学术 prompt（"术语全篇一致"靠模型自觉，temperature 0.2），无动态术语表。改进方向：首轮先抽取术语表（辅助模型）→ 后续批次注入 prompt 强制一致；长文一致性与 AI 标亮命中稳定性可一并评估
+- ~~**动态术语表学术翻译**~~（✅ 2026-08-03 已消化，见下"动态术语表"批；跨论文/文件夹沉淀复用仍待做）
 - **主题 CSS 上限探索（低优先，视觉向）**：图片/视频为底 + 毛玻璃等示例，探索全局主题系统能力边界（THEMING.md）；排在技术优化之后
 
 ### D 批：杂项（未排期）
@@ -41,6 +41,23 @@
   - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
 
 ## 已消化
+
+### 2026-08-03 动态术语表学术翻译（E 批）
+- [x] `paper-translation-service.ts`：首轮翻译前 `extractGlossary`（辅助模型，标题+摘要+正文前 12k 字符采样 → 30~60 条领域术语规范译法，去重/上限 80 条），随译本落盘 `translation-zh.json` 顶层 `glossary` 字段
+- [x] 注入：`buildBatchPrompt` 全部批次附"术语表（必须严格采用给定译法）"段；元数据（title/abstract）翻译同步注入
+- [x] 幂等：force=false 续翻复用既有术语表（不重抽），force=true 重翻时重新抽取；抽取失败不阻断翻译（按无术语表继续，不落盘 glossary）；对齐服务读改写同一文件对象，术语表天然幸存
+- [x] 测试：translation-tolerance 套件扩至 7 组（抽取注入落盘/续翻复用/force 重抽/抽取失败降级），mock 术语表通道独立于批次行为队列；export 46 组 + alignment-service 14 组回归全过
+- [x] 遗留：跨论文/文件夹术语沉淀复用（路线图 §3.7 愿景，现为单篇动态抽取）；长文一致性真机评估
+
+### 2026-08-03 sageread-mcp 论文适配 + 语义查询（E 批）
+- [x] **论文库适配**（sageread-mcp `src/index.ts`）：`list_book_notes` 补 `starred/category/source` 三列（PRAGMA 防御检测）+ 论文锚点 cfi 渲染为可读形式（`论文块#N 字符[s,e)`）；新增 `get_paper_toc`（ATX 目录）/`read_paper`（offset/limit 切片，默认 30k 字符）/`read_paper_section`（小节截取）三论文内容工具（仅 format=MARKDOWN 开放，读 `{appDir}/books/{id}/paper.md`）；新增 `list_paper_folders`（folders + paper_folders 分组）
+- [x] **语义查询 `semantic_search`**（新模块 `src/semantic-search.ts`）：解析 `{appDir}/llama-store.json` 的嵌入配置（外部选中模型优先，否则本地 127.0.0.1:3544，皆无→明确降级文案）→ 镜像 Rust vectorizer 的 OpenAI/Ollama 嵌入调用（URL 尾 `/api/embed` 判别）→ sqlite-vec（新依赖，vec0 `MATCH ? AND k=?`）检索；scope 三域（papers 全局库/books 逐书库/all 合并），paper_id 过滤 k 放大（max(topK*10,100)，同主应用），索引维度从 vec0 DDL `FLOAT[N]` 解析并与查询向量比对（不一致提示重建索引）；结果 = rank + 相似度（1-distance，与主应用同口径）+ chunk（截 800）+ 出处（书名/作者/类型/章节/文件/块位置）
+- [x] 设计要点：秘钥不出本机——MCP 作为 SageRead 一方进程读本机配置自嵌，外部 Agent 只见查询文本与结果；standalone 设计保持（应用不在运行也能用，本地模型场景除外，有专属文案）
+- [x] 实测：tsc 无错、smoke 全绿（含 `|| true` 恒真 bug 修复）、真实嵌入端到端命中（智谱 embedding-3 2048 维，"cationic potential" top-k 命中正确论文块）；README 工具表补全 16 个 + 语义检索说明
+- [x] 遗留：LLM 重排/BM25 融合未做（D 批 RAG 精度增强统筹）；书籍域 BM25 中文弱（jieba 未接入）；相似度绝对值偏低是 vec0 L2 距离口径（与主应用一致，非 bug）
+- [x] **可用性二轮拓展（科研 Agent 写调研报告场景驱动）**：`get_paper_info`（frontmatter 元数据 + metadata.json 的 title_zh/abstract_zh + 所属收藏，yaml 依赖解析折叠块/嵌套作者）——文献筛选与引用列表刚需；`semantic_search` 加 `collection` 过滤（文件夹名/id → paper_id 集合，与 paper_id 取交集；findFolder 按 id 精确→名称精确→子串优先级，防"测试文件夹1"误命中"测试文件夹1.1"）。真实冒烟全绿（collection 过滤前后对比/交集边界/未命中列可选名）
+- [x] **可用性三轮拓展**：`list_papers` 批量文献卡片（collection 过滤/include_abstract 截 300/limit 防拉爆，读取失败降级不中断）；`export_paper_citation` 引用导出（bibtex key=首作者姓+年+标题首实词、GB/T 7714-2015 期刊格式三位作者 et al.、缺字段省略/跳过计数）；`get_chunk_context` 命中块上下文扩展（论文全局库/书籍单库两域，md_file_path 约束防跨文件拼接，当前块标记）；semantic_search 结果项附上下文提示引导发现。检索质量（LLM 重排/BM25 融合/中文分词）留在 SageRead 侧 D 批 RAG 精度增强统筹，MCP 镜像跟进
+- [x] **引用导出八格式（四轮）**：bibtex / gbt7714 / apa(7th，>20 位前 19+…+末位) / mla(9th，Title Case) / chicago(>10 位前 7+et al.) / ieee(>6 位仅首作者 et al.) / vancouver(≤6 位，尾页缩写 708-11) / ris（Zotero/EndNote 可导入）；保守 Title Case（化学式/公式/含数字内部大写 token 原样）；17 断言式冒烟 + 八格式真实输出人工核对
 
 ### 2026-08-03 E 批：论文整篇导出（原文/译文/对照 + 标注 + 图片）
 - [x] 管线 `lib/export-paper.ts`：复用 `buildPaperViewMarkdown` 视图重建（原文唯一事实源，译文不落盘）；导出文档 = frontmatter 原样 + 标题 H1（译文/对照优先 title_zh）+ 模式化正文 + 可选文末标注节（复用 renderAnnotationMarkdown/buildAnnotationsListHtml，按锚点块序排序）
