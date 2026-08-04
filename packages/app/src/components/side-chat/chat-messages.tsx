@@ -261,11 +261,11 @@ export function ChatMessages({
     const flushText = () => {
       if (!textBuffer) return;
       const className = isAssistant
-        ? "prose prose-neutral flex-1 rounded bg-transparent p-0 text-foreground"
+        ? "prose prose-neutral min-w-0 flex-1 rounded bg-transparent p-0 text-foreground"
         : "rounded-xl bg-muted p-2 text-base leading-5";
 
       elements.push(
-        <div key={`text-${elements.length}`} onMouseUp={handleTextSelection}>
+        <div key={`text-${elements.length}`} className="min-w-0" onMouseUp={handleTextSelection}>
           <MessageContent className={className} markdown={isAssistant}>
             {textBuffer}
           </MessageContent>

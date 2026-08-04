@@ -640,6 +640,25 @@ foliate-view {
   box-shadow: 0 1px 10px color-mix(in oklab, var(--primary) 36%, transparent);
 }
 
+/* ---------- 对话消息区横向溢出入口 ----------
+ * 容器层 overflow-x-hidden 裁掉意外溢出（chat-container），此层保证内容自适应换行/自滚：
+ * 长串（URL/DOI/无空格 token）断行；表格与 KaTeX 行间公式用各自独立横向滑块（不连累整列）。 */
+.prose {
+  overflow-wrap: break-word;
+}
+
+.prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
 /* ---------- 论文逐段对照译文块 ----------
  * 对照模式在每个可翻译块后插入 <div class="paper-translation" data-translation>（paper-blocks.ts），
  * listBlocks 已按 [data-translation] 同级排除，不占锚点块序号。样式：左竖线 + 次要色 + 略小字号。 */

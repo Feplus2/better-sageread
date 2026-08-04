@@ -358,7 +358,8 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
           : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
       }
       // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘）
-      handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+      // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
+      handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
       className="h-full"
     >
       {/* 与书籍 Notepad 同款包装：region 钩子 + 4px 间隙 + 顶栏对齐高度 */}
@@ -408,7 +409,8 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
           : { left: <div className="custom-resize-handle" /> }
       }
       // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘的滚动条）
-      handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+      // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
+      handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
       className="h-full"
     >
       {/* 与书籍 SideChat 同款包装：四周 4px（顶部除外）间隙 + 顶栏对齐高度 */}

@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
 import { updateBookStatus } from "@/services/book-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
@@ -31,6 +32,7 @@ import {
   vectorizePaper,
 } from "@/services/paper-service";
 import { Progress } from "@/components/ui/progress";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useLayoutStore } from "@/store/layout-store";
 import type { BookWithStatus } from "@/types/simple-book";
 import { listen } from "@tauri-apps/api/event";
@@ -374,10 +376,52 @@ export default function PapersPage() {
   const [movePaper, setMovePaper] = useState<BookWithStatus | null>(null);
   const [moveChecked, setMoveChecked] = useState<Set<string>>(new Set());
   const [moveSubmitting, setMoveSubmitting] = useState(false);
-  // 单篇 PDF 解析导入（Papers_Converter sidecar）进度状态
+  // 单篇 PDF 解析导入：选择弹窗（点选/拖拽）+ 后台任务（右下角进度卡）
+  const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
+  const [pdfCandidate, setPdfCandidate] = useState<string | null>(null);
+  const [pdfDragOver, setPdfDragOver] = useState(false);
   const [pdfImport, setPdfImport] = useState<PdfImportState | null>(null);
   const pdfImportUnlistenRef = useRef<(() => void) | null>(null);
   const { paperEngine } = useConverterStore();
+
+  // 拖拽导入：弹窗开启期间注册 Tauri 拖放事件（窗口级，HTML5 drop 拿不到文件路径，sidecar 需要路径）
+  useEffect(() => {
+    if (!pdfPickerOpen) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebviewWindow()
+      .onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === "enter" || payload.type === "over") {
+          setPdfDragOver(true);
+        } else if (payload.type === "leave") {
+          setPdfDragOver(false);
+        } else if (payload.type === "drop") {
+          setPdfDragOver(false);
+          const path = payload.paths[0];
+          if (path?.toLowerCase().endsWith(".pdf")) {
+            setPdfCandidate(path);
+          } else {
+            toast.error("请拖入 PDF 文件");
+          }
+        }
+      })
+      .then((off) => {
+        if (cancelled) off();
+        else unlisten = off;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [pdfPickerOpen]);
+
+  // 成功态进度卡 6 秒后自动消失（失败/取消态保留待手动关闭）
+  useEffect(() => {
+    if (pdfImport?.status !== "success") return;
+    const timer = setTimeout(() => setPdfImport(null), 6000);
+    return () => clearTimeout(timer);
+  }, [pdfImport?.status]);
 
   // metadata.json 缓存：入库后内容不可变，避免每次刷新列表都重读磁盘
   const metaCacheRef = useRef<Map<string, PaperMetadata>>(new Map());
@@ -725,28 +769,40 @@ export default function PapersPage() {
     }
   };
 
-  /** 单篇 PDF 解析入库：Papers_Converter sidecar 解析 → 复用 save_paper 链路入库（进度对话框展示） */
-  const handleImportPdf = async () => {
+  /** 点「导入 PDF」：先做引擎 Token 检查，再开选择弹窗（点选/拖拽二选一后开始解析） */
+  const handleImportPdf = () => {
     const tokenError = paperEngineTokenError(paperEngine);
     if (tokenError) {
       toast.error(tokenError);
       return;
     }
-    let selected: string | null = null;
+    setPdfCandidate(null);
+    setPdfPickerOpen(true);
+  };
+
+  /** 弹窗内"点击选择文件" */
+  const handlePickPdfFile = async () => {
     try {
-      selected = await open({
+      const selected = await open({
         multiple: false,
         directory: false,
         title: "选择论文 PDF",
         filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
+      if (typeof selected === "string" && selected) setPdfCandidate(selected);
     } catch (error) {
       console.error("选择 PDF 失败:", error);
-      return;
     }
-    if (typeof selected !== "string" || !selected) return;
+  };
 
-    const fileName = selected.split(/[\\/]/).pop() ?? selected;
+  /** 开始解析：关闭选择弹窗，任务转入后台（右下角进度卡呈现），完成后 toast 提醒 */
+  const handleStartPdfImport = async () => {
+    if (!pdfCandidate) return;
+    const pdfPath = pdfCandidate;
+    setPdfPickerOpen(false);
+    setPdfCandidate(null);
+
+    const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
     setPdfImport({ status: "running", fileName, percent: 0, detail: "启动解析…", stages: buildPdfStages() });
 
     try {
@@ -817,7 +873,7 @@ export default function PapersPage() {
         }
       });
       pdfImportUnlistenRef.current = unlisten;
-      await startPaperPdfImport(selected);
+      await startPaperPdfImport(pdfPath);
     } catch (error) {
       setPdfImport((prev) =>
         prev ? { ...prev, status: "error", error: error instanceof Error ? error.message : String(error) } : prev,
@@ -837,17 +893,15 @@ export default function PapersPage() {
     setPdfImport((prev) => (prev ? { ...prev, status: "error", error: "已取消解析" } : prev));
   };
 
-  /** 关闭进度对话框：running 状态先取消解析 */
-  const handlePdfImportDialogChange = (openState: boolean) => {
-    if (!openState && pdfImport?.status === "running") {
+  /** 关闭后台进度卡（running 时等同取消） */
+  const handleDismissPdfImport = () => {
+    if (pdfImport?.status === "running") {
       handleCancelPdfImport();
-      return; // 保持对话框开着，等取消态呈现
+      return;
     }
-    if (!openState) {
-      pdfImportUnlistenRef.current?.();
-      pdfImportUnlistenRef.current = null;
-      setPdfImport(null);
-    }
+    pdfImportUnlistenRef.current?.();
+    pdfImportUnlistenRef.current = null;
+    setPdfImport(null);
   };
 
   /** 列表行点击 = 打开论文标签页（阅读视图在标签页三段布局中，正文由 PaperReaderView 自行加载） */
@@ -894,7 +948,7 @@ export default function PapersPage() {
 
   // ---- 列表视图 ----
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between gap-4 px-4 pt-4 pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="font-bold text-2xl text-neutral-900 dark:text-neutral-100">文献库</h1>
@@ -1145,7 +1199,7 @@ export default function PapersPage() {
 
                       <div className="min-w-0 flex-1">
                         <h3 className="line-clamp-2 font-semibold text-neutral-900 leading-snug dark:text-neutral-100">
-                          {displayTitle}
+                          <InlineMathText text={displayTitle} />
                         </h3>
                         {renderAuthorLine(paper) && (
                           <p className="mt-1 line-clamp-1 text-neutral-600 text-sm dark:text-neutral-400">
@@ -1159,7 +1213,7 @@ export default function PapersPage() {
                         )}
                         {displayAbstract && (
                           <p className="mt-2 line-clamp-2 text-neutral-600 text-sm leading-relaxed dark:text-neutral-400">
-                            {displayAbstract}
+                            <InlineMathText text={displayAbstract} />
                           </p>
                         )}
                       </div>
@@ -1239,80 +1293,104 @@ export default function PapersPage() {
         </div>
       </div>
 
-      {/* 单篇 PDF 解析导入进度对话框（关闭即取消） */}
-      <Dialog open={pdfImport !== null} onOpenChange={handlePdfImportDialogChange}>
+      {/* 导入 PDF 选择弹窗：点击选择 / 拖入文件，确认后任务转后台 */}
+      <Dialog open={pdfPickerOpen} onOpenChange={setPdfPickerOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="px-5">
             <DialogTitle>导入 PDF 论文</DialogTitle>
-            <DialogDescription className="truncate px-0">{pdfImport?.fileName}</DialogDescription>
+            <DialogDescription className="px-0">解析为 Markdown 论文并入库（后台运行，完成时提醒）</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 px-5 py-4">
-            {/* 阶段列表（编号对齐 headless 协议 1-4） */}
-            <div className="space-y-2">
-              {pdfImport?.stages.map((stage) => (
-                <div key={stage.n} className="flex items-center gap-2.5 text-sm">
-                  {stage.status === "done" ? (
-                    <span className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <Check className="size-3" />
-                    </span>
-                  ) : stage.status === "active" ? (
-                    <Loader2 className="size-5 animate-spin text-primary" />
-                  ) : stage.status === "error" ? (
-                    <span className="flex size-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
-                      <X className="size-3" />
-                    </span>
-                  ) : (
-                    <span className="flex size-5 items-center justify-center rounded-full border text-muted-foreground text-xs">
-                      {stage.n}
-                    </span>
-                  )}
-                  <span
-                    className={clsx(
-                      stage.status === "active"
-                        ? "text-foreground"
-                        : stage.status === "done"
-                          ? "text-muted-foreground"
-                          : "text-muted-foreground/70",
-                    )}
-                  >
-                    {stage.name}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {pdfImport?.status === "running" && (
-              <>
-                <Progress value={pdfImport.percent} className="h-1.5" />
-                <div className="flex items-center justify-between text-muted-foreground text-xs">
-                  <span className="min-w-0 flex-1 truncate">{pdfImport.detail}</span>
-                  <span className="shrink-0">{pdfImport.percent}%</span>
-                </div>
-              </>
-            )}
-
-            {pdfImport?.status === "success" && (
-              <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-green-700 text-sm dark:border-green-900 dark:bg-green-950/40 dark:text-green-400">
-                {pdfImport.detail}
-              </p>
-            )}
-            {pdfImport?.status === "error" && (
-              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700 text-sm dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
-                {pdfImport.error}
+            <button
+              type="button"
+              onClick={handlePickPdfFile}
+              className={clsx(
+                "flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors",
+                pdfDragOver
+                  ? "border-primary bg-primary/5"
+                  : "border-neutral-300 hover:border-primary/50 hover:bg-muted/40 dark:border-neutral-700",
+              )}
+            >
+              <FileDown className={clsx("size-8", pdfDragOver ? "text-primary" : "text-neutral-400")} />
+              {pdfCandidate ? (
+                <span className="w-full truncate font-medium text-foreground text-sm">
+                  {pdfCandidate.split(/[\\/]/).pop()}
+                </span>
+              ) : (
+                <>
+                  <span className="font-medium text-sm">{pdfDragOver ? "松开以选择此 PDF" : "点击选择或拖入 PDF"}</span>
+                  <span className="text-muted-foreground text-xs">单篇论文 PDF，解析约需十几秒到几分钟</span>
+                </>
+              )}
+            </button>
+            {pdfCandidate && (
+              <p className="truncate text-muted-foreground text-xs" title={pdfCandidate}>
+                {pdfCandidate}
               </p>
             )}
           </div>
           <DialogFooter className="px-5 pt-0 pb-4">
-            {pdfImport?.status === "running" ? (
-              <Button variant="outline" onClick={handleCancelPdfImport}>
-                取消解析
-              </Button>
-            ) : (
-              <Button onClick={() => handlePdfImportDialogChange(false)}>完成</Button>
-            )}
+            <Button variant="outline" onClick={() => setPdfPickerOpen(false)}>
+              取消
+            </Button>
+            <Button disabled={!pdfCandidate} onClick={handleStartPdfImport}>
+              开始解析
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 后台解析进度卡（右下角浮层；成功 6s 自动消失，关闭即取消） */}
+      {pdfImport && (
+        <div className="absolute right-4 bottom-4 z-40 w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate font-medium text-sm">{pdfImport.fileName}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+              onClick={handleDismissPdfImport}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          {/* 阶段行（紧凑：4 个状态点 + 当前阶段名） */}
+          <div className="mb-2.5 flex items-center gap-1.5">
+            {pdfImport.stages.map((stage) => (
+              <span
+                key={stage.n}
+                className={clsx(
+                  "flex size-4 items-center justify-center rounded-full text-[9px]",
+                  stage.status === "done" && "bg-primary text-primary-foreground",
+                  stage.status === "active" && "border border-primary text-primary",
+                  stage.status === "pending" && "border text-muted-foreground",
+                  stage.status === "error" && "bg-destructive text-destructive-foreground",
+                )}
+              >
+                {stage.status === "done" ? <Check className="size-2.5" /> : stage.n}
+              </span>
+            ))}
+            <span className="ml-1 truncate text-muted-foreground text-xs">
+              {pdfImport.stages.find((s) => s.status === "active")?.name ??
+                (pdfImport.status === "success" ? "完成" : pdfImport.status === "error" ? "失败" : "准备中")}
+            </span>
+          </div>
+
+          {pdfImport.status === "running" && (
+            <>
+              <Progress value={pdfImport.percent} className="h-1.5" />
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+                <span className="min-w-0 flex-1 truncate">{pdfImport.detail}</span>
+                <span className="shrink-0">{pdfImport.percent}%</span>
+              </div>
+            </>
+          )}
+          {pdfImport.status === "success" && (
+            <p className="truncate text-green-600 text-xs dark:text-green-400">{pdfImport.detail}</p>
+          )}
+          {pdfImport.status === "error" && <p className="text-red-600 text-xs dark:text-red-400">{pdfImport.error}</p>}
+        </div>
+      )}
 
       {/* 新建/重命名文件夹对话框 */}
       <Dialog

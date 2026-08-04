@@ -1,4 +1,5 @@
 import { useAppSettingsStore } from "@/store/app-settings-store";
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import type { BookNote, HighlightColor, HighlightStyle } from "@/types/book";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -402,7 +403,18 @@ function createPaperImageComponent(paperDir: string, cache: BlobUrlCache): Compo
     if (status === "loading") {
       return <span className="my-4 block h-48 w-full animate-pulse rounded-lg bg-neutral-100 dark:bg-neutral-800" />;
     }
-    return <img src={resolvedSrc} alt={alt ?? ""} loading="lazy" {...props} />;
+    return (
+      <span className="my-3 block">
+        <img src={resolvedSrc} alt={alt ?? ""} loading="lazy" {...props} />
+        {/* 图注可见化：Papers_Converter 把图注放在 alt 里（切块/RAG 暂不可见，先视觉上兜底显示） */}
+        {alt?.trim() && (
+          <InlineMathText
+            text={alt.trim()}
+            className="mt-1.5 block text-center text-neutral-500 text-xs leading-relaxed dark:text-neutral-400"
+          />
+        )}
+      </span>
+    );
   };
 }
 
@@ -443,7 +455,9 @@ function MetadataBlock({
   return (
     <header data-paper-metadata className="not-prose mb-8 border-b pb-6">
       {displayTitle && (
-        <h1 className="font-bold text-2xl text-neutral-900 leading-snug dark:text-neutral-100">{displayTitle}</h1>
+        <h1 className="font-bold text-2xl text-neutral-900 leading-snug dark:text-neutral-100">
+          <InlineMathText text={displayTitle} />
+        </h1>
       )}
 
       {authors.length > 0 && (
@@ -520,7 +534,7 @@ function MetadataBlock({
           </div>
           {abstractOpen && (
             <p className="mt-2 text-justify text-neutral-600 text-sm leading-relaxed dark:text-neutral-400">
-              {displayAbstract}
+              <InlineMathText text={displayAbstract} />
             </p>
           )}
         </div>

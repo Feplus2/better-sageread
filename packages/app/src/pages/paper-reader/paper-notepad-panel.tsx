@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,7 +144,7 @@ function PaperAnnotationItem({
                     ...{collapseWs(annotation.context.before)}
                   </span>
                   <span className="font-medium text-sm" style={{ backgroundColor: bgColor }}>
-                    {collapseWs(annotation.text ?? "")}
+                    <InlineMathText text={collapseWs(annotation.text ?? "")} />
                   </span>
                   <span className="text-neutral-600 dark:text-neutral-200">
                     {collapseWs(annotation.context.after)}...
@@ -153,7 +154,7 @@ function PaperAnnotationItem({
               {!annotation.context && (
                 <div className="mb-1">
                   <span className="font-medium text-sm" style={{ backgroundColor: bgColor }}>
-                    {collapseWs(annotation.text ?? "")}
+                    <InlineMathText text={collapseWs(annotation.text ?? "")} />
                   </span>
                 </div>
               )}
@@ -244,7 +245,7 @@ function PaperAiHighlightItem({ annotation, onLocate, onDelete }: PaperAiHighlig
             <div className="w-1 shrink-0 rounded-full" style={{ backgroundColor: lineColor }} />
             <div className="min-w-0 flex-1">
               <span className="font-medium text-sm leading-relaxed" style={{ backgroundColor: bgColor }}>
-                {collapseWs(annotation.text ?? "")}
+                <InlineMathText text={collapseWs(annotation.text ?? "")} />
               </span>
               {aiNote && (
                 <div className="mt-1 flex items-start gap-1 text-neutral-500 text-xs dark:text-neutral-400">
