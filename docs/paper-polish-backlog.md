@@ -39,7 +39,7 @@
 - [x] **~~ 误删线修复**：论文里 ~~ 是"约"的意思——rehype-del-tilde 插件把 <del> 还原为字面 ~~，remarkGfm 关 singleTilde（单 ~ 同样误伤 ~25 μm 类写法）
 - [x] **对话区横向滑块**：chat-container 加 overflow-x-hidden、消息气泡补 min-w-0、index.css 加 prose 换行（overflow-wrap:break-word）+ table/katex-display 各自独立横向滚动（不再连累整列）；**二轮根因**：两个空状态（论文助手/阅读助手）的 max-w-md(448px) 超出窄面板宽度，改 max-w-full + 容器 overflow-x-hidden
 - [x] **标注面板滑块与缩放手柄重叠**：handleStyles right 0px → -6px（手柄感应区移到面板外侧间隙，不再盖住内容滚动条）
-- [x] **导入 PDF 交互重构**：模态进度窗 → 选择弹窗（点击选择/拖入 PDF）→ 后台运行 + 右下角浮动进度卡（阶段点/进度条/可取消，成功 6s 自消失）+ 完成 toast；长题目一律 truncate（修原弹窗撑破问题）；**拖放分流（三轮）**：home-layout 书籍拖入导入限定图书馆/回收站页（此前全局 preventDefault 吞掉 Tauri 原生拖放事件，是拖入完全无感应的根因）；文献库页 Tauri onDragDropEvent 常驻监听——拖 PDF 到页面任意位置直接开始解析（弹窗开启时落入候选区），页面级感应遮罩，非 PDF 提示去图书馆页；CDP 冒烟验证（遮罩/启动/失败兜底全过，scripts/cdp-test-pdf-drag-import.mjs）
+- [x] **导入 PDF 交互重构**：模态进度窗 → 选择弹窗（点击选择/拖入 PDF）→ 后台运行 + 右下角浮动进度卡（阶段点/进度条/可取消，成功 6s 自消失）+ 完成 toast；**拖放两轮根因**：① home-layout 书籍拖入导入限定图书馆/回收站页（此前全局 preventDefault 吞掉 Tauri 原生事件）；② **`tauri.conf dragDropEnabled:false` 才是拖入完全无感应的根因**（webview 原生拖放通道被关死，改 true 后两种方式均实测可用）；弹窗撑爆根治：grid/flex 的 min-width:auto=min-content 让 nowrap 长路径撑破轨道——dialog.tsx 头部内列与弹窗内容区/路径行补 min-w-0（CDP 实测 overflowCount=0）；CDP 冒烟（scripts/cdp-test-pdf-drag-import.mjs / cdp-diag-dialog-overflow.mjs / cdp-drag-probe.mjs）
 - [x] **设置页 PDF 转换重排**：解析引擎配置（三 Token 常驻）/ 书籍转换 / 论文解析三区域；选中未配 Token 的引擎时该区域显示 amber 警告条
 - [x] **converter QC 自检**（qc_paper.py，转换末尾 stderr WARN 不阻断）：图/表编号断号（Fig.5 无 Fig.4 类）、References 结构顺序异常（文首 References/后随正文节）、References 未分段迹象；laine 篇实测唯一 WARN 正确命中排序异常
 - [x] 遗留：laine 篇 References 文首/Experimental 文末属 stage1/2 排序根因（QC 可探测，未修）；refs 标题公式缺 $ 定界属 converter 提取质量项（逐条粒度，挂 converter 后续）；存量论文需重转获得图注/refs 修复（exe 已重打包）
