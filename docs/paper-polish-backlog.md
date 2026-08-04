@@ -35,13 +35,14 @@
 ### 2026-08-04 阅读体验修复 + 导入后台化批（用户反馈轮）
 - [x] **图注可见化（两层）**：SageRead 侧 img 组件把 alt 图注渲染为可见 caption（InlineMathText 渲染含公式图注，对存量产物立即生效）；converter 侧根治——renderer 改为「图片行（短 alt）+ 图注正文行（同段软换行）」，图注进 sourceText/RAG/翻译（见下 converter 批）
 - [x] **References 堆叠根治（converter 侧）**：renderer 每条引用前插空行各自成段（此前裸行被 CommonMark 软换行合并成巨型单段）；附带修 paragraph 前驱集合补 image/table_image（图注行与后段粘连隐患）
-- [x] **公式渲染**：新组件 `components/markdown/inline-math-text.tsx`（纯文本+KaTeX 混合，MATH_SEGMENT_RE 切段，失败保留 $ 源码）；应用于论文元数据标题/摘要、papers 列表标题/摘要、标注面板 quote（人工+AI）、图片 caption
-- [x] **对话区横向滑块**：chat-container 加 overflow-x-hidden、消息气泡补 min-w-0、index.css 加 prose 换行（overflow-wrap:break-word）+ table/katex-display 各自独立横向滚动（不再连累整列）
+- [x] **公式渲染**：新组件 `components/markdown/inline-math-text.tsx`（纯文本+KaTeX 混合，MATH_SEGMENT_RE 切段，失败保留 $ 源码）；应用于论文元数据标题/摘要、papers 列表标题/摘要、标注面板 quote（人工+AI）、图片 caption、论文助手空状态标题、**标签页标题**（app-tabs 加 renderTabTitleHtml 链路，renderInlineMathHtml 字符串渲染；toast 暂不做——瞬时组件且调用点分散）
+- [x] **~~ 误删线修复**：论文里 ~~ 是"约"的意思——rehype-del-tilde 插件把 <del> 还原为字面 ~~，remarkGfm 关 singleTilde（单 ~ 同样误伤 ~25 μm 类写法）
+- [x] **对话区横向滑块**：chat-container 加 overflow-x-hidden、消息气泡补 min-w-0、index.css 加 prose 换行（overflow-wrap:break-word）+ table/katex-display 各自独立横向滚动（不再连累整列）；**二轮根因**：两个空状态（论文助手/阅读助手）的 max-w-md(448px) 超出窄面板宽度，改 max-w-full + 容器 overflow-x-hidden
 - [x] **标注面板滑块与缩放手柄重叠**：handleStyles right 0px → -6px（手柄感应区移到面板外侧间隙，不再盖住内容滚动条）
-- [x] **导入 PDF 交互重构**：模态进度窗 → 选择弹窗（点击选择/拖入 PDF，Tauri onDragDropEvent 取路径）→ 后台运行 + 右下角浮动进度卡（阶段点/进度条/可取消，成功 6s 自消失）+ 完成 toast；长题目一律 truncate（修原弹窗撑破问题）
+- [x] **导入 PDF 交互重构**：模态进度窗 → 选择弹窗（点击选择/拖入 PDF，Tauri onDragDropEvent 取路径）→ 后台运行 + 右下角浮动进度卡（阶段点/进度条/可取消，成功 6s 自消失）+ 完成 toast；长题目一律 truncate（修原弹窗撑破问题）；**拖入冲突修复**：home-layout 书籍拖入导入与论文拖入双消费——lib/drop-suppress.ts 抑制标记，弹窗开启期间书籍导入静默
 - [x] **设置页 PDF 转换重排**：解析引擎配置（三 Token 常驻）/ 书籍转换 / 论文解析三区域；选中未配 Token 的引擎时该区域显示 amber 警告条
 - [x] **converter QC 自检**（qc_paper.py，转换末尾 stderr WARN 不阻断）：图/表编号断号（Fig.5 无 Fig.4 类）、References 结构顺序异常（文首 References/后随正文节）、References 未分段迹象；laine 篇实测唯一 WARN 正确命中排序异常
-- [x] 遗留：laine 篇 References 文首/Experimental 文末属 stage1/2 排序根因（QC 可探测，未修）；存量论文需重转获得图注/refs 修复（exe 已重打包）
+- [x] 遗留：laine 篇 References 文首/Experimental 文末属 stage1/2 排序根因（QC 可探测，未修）；refs 标题公式缺 $ 定界属 converter 提取质量项（逐条粒度，挂 converter 后续）；存量论文需重转获得图注/refs 修复（exe 已重打包）
 
 ### 2026-08-04 多引擎适配 + 单篇 PDF 导入解析入库（E 批前两项）
 - [x] **Books_Converter v1.3 接入**：sidecar 换 v1.3（12 条结构重建病例修复全量带入；协议零变化；exe 在 gitignore 不入库）
