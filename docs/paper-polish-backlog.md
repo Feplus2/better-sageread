@@ -7,7 +7,7 @@
 ### E 批：功能与愿景（2026-08-02 用户输入，按优先级排产见当轮结论）
 - ~~**论文导出**~~（✅ 2026-08-03 已消化，见下"论文整篇导出"批；遗留：frontmatter 中文化，见 D 批）
 - ~~**MCP 开放向量库语义查询**~~（✅ 2026-08-03 已消化，见下"sageread-mcp 论文适配 + 语义查询"批）
-- **多引擎解析适配**：不绑死单一解析引擎——MinerU / paddleOCR 可选（用户实测 paddleOCR 质量更好），设置页选择，书籍转换与论文解析两侧都适配；等 Converter 侧 paddleOCR 适配验证完成后排产。**2026-08-02 产出审查实测（126 MinerU + 125 paddle 全量）**：两者互补——paddle 段落顺序/图注绑定/引文保留/错字优，MinerU 公式/表格优；基线已定 paddle + MinerU 表格备选。**数据质量门已修复（2026-08-03，Converter 七轮 e756771）**：paddle 断裂公式 unexpected eof 1001→20（残留 7 篇高定形态挂账）、References heading 缺失 32→0、引文 `$^{[n]}$` 全形态归一 `[n]`（残留仅作者单位脚注）、stage1 伪包裹源头封堵；125 篇 staging 零配额重跑复扫达标（详见 Converter docs/ocr-providers.md 五之六）。**遗留**：lamb2020 等 7 篇 20 处 eof 长尾、LLM slug 漂移需 zotero_key 锚定、Zotero 库 8 组重复条目待治理、MinerU 输出未重跑（修复已进共享 Stage 2/3，重跑自动生效）
+- ~~**多引擎解析适配**~~（✅ 2026-08-04 已消化，见下"多引擎 + 单篇 PDF 导入"批；设置页引擎选择落地，MinerU 输出重跑属 Converter 侧操作）
 - **Zotero 批量导入**：优先利用 Zotero 直接可得的元数据，缺失时回退 PDF 内提取；支持按 Collection 复选导入（前端复选框小改动）；与路线图 §3.4 的 Zotero 联动（批注回写）是两条独立线。**slug 与元数据确定性（2026-08-03 定论）**：slug 必须由确定性输入生成——有 Zotero 时用 CSL（author 姓 + year + title 首词）；无 Zotero 的裸 PDF 场景把 LLM 提取结果缓存进 staging（metadata.json），重跑复用而非重新提取（Converter 七轮暴露 LLM 年份判定跨轮翻转致 slug 漂移 wang2018↔wang2013）；不统一走 LLM（非确定性反而加重）。**实质重复条目识别（用户提出的设计题，导入批次实现）**：元数据不同（机构/日期差异）但内容实质一致的文献判定重复——分层策略：① DOI 精确匹配；② 标题归一化模糊匹配 + 第一作者姓 + 年份容忍（±1）；③ 内容指纹（PDF 首页文本 simhash 汉明距离阈值）；④ 向量库近邻（嵌入已就绪， cosine 阈值辅助判定）。命中后：保留新条目并保留双方 zotero_key 链（Zotero 库治理在 Zotero 侧，SageRead 侧只标记重复关系不物理删除；Collection 分组对不上的条目进"未分组"虚拟集合人工归并）
 - ~~**动态术语表学术翻译**~~（✅ 2026-08-03 已消化，见下"动态术语表"批；跨论文/文件夹沉淀复用仍待做）
 - **主题 CSS 上限探索（低优先，视觉向）**：图片/视频为底 + 毛玻璃等示例，探索全局主题系统能力边界（THEMING.md）；排在技术优化之后
@@ -31,6 +31,14 @@
 - Tooltip 统一扫尾（✅ 2026-08-04 已全部消化，见下批；statistics 页实证无需改动）
 
 ## 已消化
+
+### 2026-08-04 多引擎适配 + 单篇 PDF 导入解析入库（E 批前两项）
+- [x] **Books_Converter v1.3 接入**：sidecar 换 v1.3（12 条结构重建病例修复全量带入；协议零变化；exe 在 gitignore 不入库）
+- [x] **书籍引擎选择**：converter-store 加 `engine`（mineru 默认/paddleocr）+ `paddleocrToken`；Rust ConvertParams 加 engine/paddleocrToken（非默认引擎才传 `--engine`，Token 按引擎进 env）；设置页引擎下拉 + 条件 Token 字段；转换页阶段名按引擎动态化；Agent convert 工具错误文案跟进
+- [x] **Papers_Converter headless 化**（converter 侧）：`--headless` JSON 进度协议（与 Books 同构，stage 1-4 编号、percent 单调、done 带 slug/paper_dir/title）；config.py frozen 锚定修复（_MEIPASS 输出目录被删坑）；PyInstaller spec 打包 56MB exe（hiddenimports 补 stage1 懒加载四模块 + pypinyin 数据）；真实 PDF 冒烟（逐行 JSON 校验/error 路径/exe 一致）
+- [x] **SageRead 单篇 PDF 导入全流程**：`core/paper_converter.rs`（convert_paper_pdf/cancel/state，事件 paper-convert://progress 逐行转发）；sidecar 注册（tauri.conf externalBin + capabilities spawn/kill）；paper-service（startPaperPdfImport/listen/cancel + paperEngineTokenError）；设置页论文引擎区（paddleocr 基线/mineru 表格备选/glm 第二备选 + glmApiKey；MinerU/Paddle Token 与书籍共享）；papers 页「导入 PDF」主按钮 + 四阶段进度对话框（关闭即取消；done 后复用 importPapers 入库，选中文件夹自动挂载）
+- [x] **E2E 验证**：CDP（9223，dev 实例以 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 启动）+ vite 模块注入走真实 startPaperPdfImport，事件流 → done → scan_papers_dir 产物可入库（scripts/cdp-test-paper-pdf-import.mjs）
+- [x] 文档：docs/papers-converter-integration.md 新建（架构/协议/两侧落地/遗留）
 
 ### 2026-08-04 文献库布局与 hover 细节批 + Tooltip 扫尾（D 批 Tooltip 项关闭）
 - [x] **New 判定修复**：论文此前 status 永远停留 unread（书籍靠自动保存标 reading，论文无此链路）——PaperReaderView 挂载时 unread → reading（startedAt 只填一次，lastReadAt 每次刷新），打开过标签页即不再显示 New
