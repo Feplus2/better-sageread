@@ -138,7 +138,8 @@
     ],
     "externalBin": [
       "binaries/woff2_compress",
-      "binaries/books_converter"
+      "binaries/books_converter",
+      "binaries/papers_converter"
     ],
     "resources": [
       "resources/fonts/*"

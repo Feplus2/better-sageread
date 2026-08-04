@@ -32,6 +32,7 @@ use crate::core::{
     },
     database,
     converter::{cancel_convert, convert_pdf_to_epub, ConverterState},
+    paper_converter::{cancel_paper_convert, convert_paper_pdf, PaperConverterState},
     fonts::commands::{upload_and_convert_font, upload_font_data},
     llama::commands::{
         delete_local_model, download_llama_server, download_model_file,
@@ -80,6 +81,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::default())
         .manage(ConverterState::default())
+        .manage(PaperConverterState::default())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
@@ -270,6 +272,9 @@ pub fn run() {
             // converter (PDF → EPUB)
             convert_pdf_to_epub,
             cancel_convert,
+            // paper converter (单篇 PDF → paper.md)
+            convert_paper_pdf,
+            cancel_paper_convert,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

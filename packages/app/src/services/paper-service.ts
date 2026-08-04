@@ -5,9 +5,12 @@ import {
   getBooksWithStatus,
   updateBookVectorizationMeta,
 } from "@/services/book-service";
+import { resolveLlmParams } from "@/services/converter-service";
+import { useConverterStore } from "@/store/converter-store";
 import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { invoke } from "@tauri-apps/api/core";
+import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 
 /** Rust scan_papers_dir 返回的扫描结果（字段与 Rust 侧 snake_case 保持一致） */
 export interface ScannedPaper {
@@ -163,6 +166,78 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
 export async function listPapers(): Promise<BookWithStatus[]> {
   const books = await getBooksWithStatus();
   return books.filter((book) => book.format === "MARKDOWN");
+}
+
+// ==================== 单篇 PDF 解析导入（Papers_Converter sidecar） ====================
+
+/** 论文解析进度事件（对应 Papers_Converter headless JSON 协议 + Rust 补发的 terminated） */
+export interface PaperConvertProgress {
+  type: "start" | "progress" | "stage_done" | "done" | "error" | "terminated";
+  title?: string;
+  engine?: string;
+  stage?: number;
+  stage_name?: string;
+  detail?: string;
+  fraction?: number | null;
+  percent?: number;
+  elapsed?: number;
+  slug?: string;
+  paper_dir?: string;
+  paper_md?: string;
+  message?: string;
+  success?: boolean;
+}
+
+interface PaperConvertParams {
+  pdfPath: string;
+  engine?: string;
+  mineruToken?: string;
+  paddleocrToken?: string;
+  glmApiKey?: string;
+  llmBaseUrl: string;
+  llmApiKey: string;
+  llmModel: string;
+}
+
+/** 引擎对应的 Token 检查（返回 null 通过，否则为引导文案） */
+export function paperEngineTokenError(engine: string): string | null {
+  const { mineruToken, paddleocrToken, glmApiKey } = useConverterStore.getState();
+  if (engine === "mineru" && !mineruToken) return "尚未配置 MinerU Token，请先在 设置 → PDF 转换 中填写";
+  if (engine === "paddleocr" && !paddleocrToken) return "尚未配置 PaddleOCR Token，请先在 设置 → PDF 转换 中填写";
+  if (engine === "glm" && !glmApiKey) return "尚未配置 GLM API Key，请先在 设置 → PDF 转换 中填写";
+  return null;
+}
+
+/** 启动单篇 PDF→paper.md 解析（异步；进度经 listenPaperConvertProgress 回传） */
+export async function startPaperPdfImport(pdfPath: string): Promise<void> {
+  const { paperEngine, mineruToken, paddleocrToken, glmApiKey } = useConverterStore.getState();
+  const tokenError = paperEngineTokenError(paperEngine);
+  if (tokenError) throw new Error(tokenError);
+  const params: PaperConvertParams = {
+    pdfPath,
+    engine: paperEngine,
+    mineruToken: mineruToken || undefined,
+    paddleocrToken: paddleocrToken || undefined,
+    glmApiKey: glmApiKey || undefined,
+    ...resolveLlmParams(),
+  };
+  await invoke("convert_paper_pdf", { params });
+}
+
+export async function cancelPaperPdfImport(): Promise<void> {
+  await invoke("cancel_paper_convert");
+}
+
+export async function listenPaperConvertProgress(
+  callback: (progress: PaperConvertProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("paper-convert://progress", (event) => {
+    try {
+      callback(JSON.parse(event.payload) as PaperConvertProgress);
+    } catch (e) {
+      console.warn("无法解析论文解析进度事件:", event.payload, e);
+    }
+  });
 }
 
 /** 删除论文：复用书籍软删除（进回收站，可恢复） */

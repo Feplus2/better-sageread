@@ -1,29 +1,36 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
 import { updateBookStatus } from "@/services/book-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
+import { useConverterStore } from "@/store/converter-store";
 import type { PapersSortByType } from "@/types/settings";
 import {
   type Folder,
   type FolderTreeNode,
+  type PaperConvertProgress,
   type PaperFolderEntry,
   buildFolderTree,
+  cancelPaperPdfImport,
   createFolder,
   deleteFolder,
   getPaperFolderMap,
   importPapers,
   listFolders,
   listPapers,
+  listenPaperConvertProgress,
+  paperEngineTokenError,
   renameFolder,
   setPaperFolders,
+  startPaperPdfImport,
   trashPaper,
   vectorizePaper,
 } from "@/services/paper-service";
+import { Progress } from "@/components/ui/progress";
 import { useLayoutStore } from "@/store/layout-store";
 import type { BookWithStatus } from "@/types/simple-book";
 import { listen } from "@tauri-apps/api/event";
@@ -35,7 +42,9 @@ import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   BookOpenText,
+  Check,
   ChevronRight,
+  FileDown,
   FileText,
   Folder as FolderIcon,
   FolderInput,
@@ -52,6 +61,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  X,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -310,6 +320,33 @@ function FolderTreeItem({
   );
 }
 
+/** 单篇 PDF 解析导入的阶段与状态（编号对齐 Papers_Converter headless 协议 1-4） */
+type PdfStageStatus = "pending" | "active" | "done" | "error";
+interface PdfImportState {
+  status: "running" | "success" | "error";
+  fileName: string;
+  percent: number;
+  detail: string;
+  stages: { n: number; name: string; status: PdfStageStatus }[];
+  error?: string;
+  title?: string;
+}
+
+const PDF_STAGE_NAMES = ["OCR 解析", "元数据提取", "内容处理", "渲染装订"];
+
+function buildPdfStages(): PdfImportState["stages"] {
+  return PDF_STAGE_NAMES.map((name, i) => ({ n: i + 1, name, status: "pending" as PdfStageStatus }));
+}
+
+/** 更新某阶段状态（active 时把之前阶段全部置 done） */
+function markStages(stages: PdfImportState["stages"], n: number | undefined, status: PdfStageStatus) {
+  if (!n) return stages;
+  return stages.map((s) => ({
+    ...s,
+    status: s.n < n ? "done" : s.n === n ? status : s.status,
+  }));
+}
+
 /** 文献库：MARKDOWN 论文的管理页（列表 + 文件夹侧栏，§3.2 文件夹模型）；点击论文行打开阅读标签页 */
 export default function PapersPage() {
   const [papers, setPapers] = useState<BookWithStatus[]>([]);
@@ -337,6 +374,10 @@ export default function PapersPage() {
   const [movePaper, setMovePaper] = useState<BookWithStatus | null>(null);
   const [moveChecked, setMoveChecked] = useState<Set<string>>(new Set());
   const [moveSubmitting, setMoveSubmitting] = useState(false);
+  // 单篇 PDF 解析导入（Papers_Converter sidecar）进度状态
+  const [pdfImport, setPdfImport] = useState<PdfImportState | null>(null);
+  const pdfImportUnlistenRef = useRef<(() => void) | null>(null);
+  const { paperEngine } = useConverterStore();
 
   // metadata.json 缓存：入库后内容不可变，避免每次刷新列表都重读磁盘
   const metaCacheRef = useRef<Map<string, PaperMetadata>>(new Map());
@@ -684,6 +725,131 @@ export default function PapersPage() {
     }
   };
 
+  /** 单篇 PDF 解析入库：Papers_Converter sidecar 解析 → 复用 save_paper 链路入库（进度对话框展示） */
+  const handleImportPdf = async () => {
+    const tokenError = paperEngineTokenError(paperEngine);
+    if (tokenError) {
+      toast.error(tokenError);
+      return;
+    }
+    let selected: string | null = null;
+    try {
+      selected = await open({
+        multiple: false,
+        directory: false,
+        title: "选择论文 PDF",
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+      });
+    } catch (error) {
+      console.error("选择 PDF 失败:", error);
+      return;
+    }
+    if (typeof selected !== "string" || !selected) return;
+
+    const fileName = selected.split(/[\\/]/).pop() ?? selected;
+    setPdfImport({ status: "running", fileName, percent: 0, detail: "启动解析…", stages: buildPdfStages() });
+
+    try {
+      const unlisten = await listenPaperConvertProgress(async (progress: PaperConvertProgress) => {
+        if (progress.type === "progress" || progress.type === "stage_done") {
+          setPdfImport((prev) =>
+            prev && prev.status === "running"
+              ? {
+                  ...prev,
+                  percent: progress.percent ?? prev.percent,
+                  detail: progress.detail ?? prev.detail,
+                  stages: markStages(
+                    prev.stages,
+                    progress.stage,
+                    progress.type === "stage_done" ? "done" : "active",
+                  ),
+                }
+              : prev,
+          );
+          return;
+        }
+        if (progress.type === "done" && progress.paper_dir) {
+          try {
+            const folderId = selection.kind === "folder" ? selection.id : undefined;
+            const result = await importPapers(progress.paper_dir, folderId);
+            setPdfImport((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: "success",
+                    percent: 100,
+                    title: progress.title,
+                    detail: `已入库《${progress.title ?? progress.slug}》`,
+                    stages: prev.stages.map((s) => ({ ...s, status: "done" as const })),
+                  }
+                : prev,
+            );
+            if (result.skipped > 0 && result.imported === 0) {
+              toast.info("该论文已入库过（内容未变化）");
+            } else {
+              toast.success(`论文解析入库完成：${progress.title ?? progress.slug}`);
+            }
+            await loadAll();
+          } catch (error) {
+            setPdfImport((prev) =>
+              prev
+                ? { ...prev, status: "error", error: `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}` }
+                : prev,
+            );
+          }
+          unlisten();
+          return;
+        }
+        if (progress.type === "error") {
+          setPdfImport((prev) =>
+            prev ? { ...prev, status: "error", error: progress.message ?? "解析失败" } : prev,
+          );
+          unlisten();
+          return;
+        }
+        if (progress.type === "terminated") {
+          setPdfImport((prev) =>
+            prev && prev.status === "running"
+              ? { ...prev, status: "error", error: progress.success === false ? "解析进程异常退出" : "解析已取消" }
+              : prev,
+          );
+          unlisten();
+        }
+      });
+      pdfImportUnlistenRef.current = unlisten;
+      await startPaperPdfImport(selected);
+    } catch (error) {
+      setPdfImport((prev) =>
+        prev ? { ...prev, status: "error", error: error instanceof Error ? error.message : String(error) } : prev,
+      );
+    }
+  };
+
+  /** 取消解析：kill 子进程并立即收尾（terminated 事件会兜底一次，幂等） */
+  const handleCancelPdfImport = async () => {
+    try {
+      await cancelPaperPdfImport();
+    } catch (error) {
+      console.warn("取消论文解析失败:", error);
+    }
+    pdfImportUnlistenRef.current?.();
+    pdfImportUnlistenRef.current = null;
+    setPdfImport((prev) => (prev ? { ...prev, status: "error", error: "已取消解析" } : prev));
+  };
+
+  /** 关闭进度对话框：running 状态先取消解析 */
+  const handlePdfImportDialogChange = (openState: boolean) => {
+    if (!openState && pdfImport?.status === "running") {
+      handleCancelPdfImport();
+      return; // 保持对话框开着，等取消态呈现
+    }
+    if (!openState) {
+      pdfImportUnlistenRef.current?.();
+      pdfImportUnlistenRef.current = null;
+      setPdfImport(null);
+    }
+  };
+
   /** 列表行点击 = 打开论文标签页（阅读视图在标签页三段布局中，正文由 PaperReaderView 自行加载） */
   const handleOpen = (paper: BookWithStatus) => {
     openPaper(paper.id, paper.title);
@@ -735,11 +901,15 @@ export default function PapersPage() {
           <span className="text-neutral-500 text-sm dark:text-neutral-400">共 {visiblePapers.length} 篇</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button onClick={handleImportPdf} disabled={importing || pdfImport?.status === "running"}>
+            <FileDown className="size-4" />
+            导入 PDF
+          </Button>
           <Button variant="outline" onClick={() => handleImport("选择包含多篇论文的父目录")} disabled={importing}>
             {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
             批量导入
           </Button>
-          <Button onClick={() => handleImport("选择论文目录（含 paper.md）")} disabled={importing}>
+          <Button variant="outline" onClick={() => handleImport("选择论文目录（含 paper.md）")} disabled={importing}>
             {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
             {importing ? "正在导入..." : "导入论文目录"}
           </Button>
@@ -1068,6 +1238,81 @@ export default function PapersPage() {
           )}
         </div>
       </div>
+
+      {/* 单篇 PDF 解析导入进度对话框（关闭即取消） */}
+      <Dialog open={pdfImport !== null} onOpenChange={handlePdfImportDialogChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="px-5">
+            <DialogTitle>导入 PDF 论文</DialogTitle>
+            <DialogDescription className="truncate px-0">{pdfImport?.fileName}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 px-5 py-4">
+            {/* 阶段列表（编号对齐 headless 协议 1-4） */}
+            <div className="space-y-2">
+              {pdfImport?.stages.map((stage) => (
+                <div key={stage.n} className="flex items-center gap-2.5 text-sm">
+                  {stage.status === "done" ? (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                      <Check className="size-3" />
+                    </span>
+                  ) : stage.status === "active" ? (
+                    <Loader2 className="size-5 animate-spin text-primary" />
+                  ) : stage.status === "error" ? (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
+                      <X className="size-3" />
+                    </span>
+                  ) : (
+                    <span className="flex size-5 items-center justify-center rounded-full border text-muted-foreground text-xs">
+                      {stage.n}
+                    </span>
+                  )}
+                  <span
+                    className={clsx(
+                      stage.status === "active"
+                        ? "text-foreground"
+                        : stage.status === "done"
+                          ? "text-muted-foreground"
+                          : "text-muted-foreground/70",
+                    )}
+                  >
+                    {stage.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {pdfImport?.status === "running" && (
+              <>
+                <Progress value={pdfImport.percent} className="h-1.5" />
+                <div className="flex items-center justify-between text-muted-foreground text-xs">
+                  <span className="min-w-0 flex-1 truncate">{pdfImport.detail}</span>
+                  <span className="shrink-0">{pdfImport.percent}%</span>
+                </div>
+              </>
+            )}
+
+            {pdfImport?.status === "success" && (
+              <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-green-700 text-sm dark:border-green-900 dark:bg-green-950/40 dark:text-green-400">
+                {pdfImport.detail}
+              </p>
+            )}
+            {pdfImport?.status === "error" && (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700 text-sm dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
+                {pdfImport.error}
+              </p>
+            )}
+          </div>
+          <DialogFooter className="px-5 pt-0 pb-4">
+            {pdfImport?.status === "running" ? (
+              <Button variant="outline" onClick={handleCancelPdfImport}>
+                取消解析
+              </Button>
+            ) : (
+              <Button onClick={() => handlePdfImportDialogChange(false)}>完成</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 新建/重命名文件夹对话框 */}
       <Dialog

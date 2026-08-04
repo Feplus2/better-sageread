@@ -3,6 +3,7 @@ pub mod converter;
 pub mod database;
 pub mod fonts;
 pub mod llama;
+pub mod paper_converter;
 pub mod papers;
 pub mod prompts;
 pub mod skills;

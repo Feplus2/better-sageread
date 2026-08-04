@@ -6,17 +6,24 @@ import { createJSONStorage, persist } from "zustand/middleware";
 /** 书籍转换解析引擎（Books_Converter --engine；表格密集默认 mineru 更稳） */
 export type BookConvertEngine = "mineru" | "paddleocr";
 
+/** 论文解析引擎（Papers_Converter --provider；基线 paddleocr，MinerU 表格备选，GLM 第二备选） */
+export type PaperConvertEngine = "paddleocr" | "mineru" | "glm";
+
 interface ConverterState {
   mineruToken: string;
   paddleocrToken: string;
+  glmApiKey: string;
   engine: BookConvertEngine;
+  paperEngine: PaperConvertEngine;
   setMineruToken: (token: string) => void;
   setPaddleocrToken: (token: string) => void;
+  setGlmApiKey: (key: string) => void;
   setEngine: (engine: BookConvertEngine) => void;
+  setPaperEngine: (engine: PaperConvertEngine) => void;
 }
 
 /**
- * PDF 转换设置。MinerU/PaddleOCR Token 与引擎选择存于本机 converter-store.json；
+ * PDF 转换设置。MinerU/PaddleOCR/GLM Token 与引擎选择存于本机 converter-store.json；
  * L1 备份白名单（backup.rs JSON_FILES）与同步通道均不含此文件，密钥不会外传。
  */
 export const useConverterStore = create<ConverterState>()(
@@ -24,10 +31,14 @@ export const useConverterStore = create<ConverterState>()(
     (set) => ({
       mineruToken: "",
       paddleocrToken: "",
+      glmApiKey: "",
       engine: "mineru",
+      paperEngine: "paddleocr",
       setMineruToken: (mineruToken: string) => set({ mineruToken }),
       setPaddleocrToken: (paddleocrToken: string) => set({ paddleocrToken }),
+      setGlmApiKey: (glmApiKey: string) => set({ glmApiKey }),
       setEngine: (engine: BookConvertEngine) => set({ engine }),
+      setPaperEngine: (paperEngine: PaperConvertEngine) => set({ paperEngine }),
     }),
     {
       name: tauriStorageKey.converterStore,
@@ -35,7 +46,9 @@ export const useConverterStore = create<ConverterState>()(
       partialize: (state) => ({
         mineruToken: state.mineruToken,
         paddleocrToken: state.paddleocrToken,
+        glmApiKey: state.glmApiKey,
         engine: state.engine,
+        paperEngine: state.paperEngine,
       }),
     },
   ),

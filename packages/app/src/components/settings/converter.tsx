@@ -1,7 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { type BookConvertEngine, useConverterStore } from "@/store/converter-store";
+import { type BookConvertEngine, type PaperConvertEngine, useConverterStore } from "@/store/converter-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink } from "lucide-react";
 
@@ -10,9 +10,27 @@ const ENGINE_OPTIONS: { value: BookConvertEngine; label: string; hint: string }[
   { value: "paddleocr", label: "PaddleOCR", hint: "速度更快、图注绑定准，免费 3000 页/日" },
 ];
 
+const PAPER_ENGINE_OPTIONS: { value: PaperConvertEngine; label: string; hint: string }[] = [
+  { value: "paddleocr", label: "PaddleOCR", hint: "论文基线：段落顺序/图注绑定/引文保留最优" },
+  { value: "mineru", label: "MinerU", hint: "表格密集论文备选（跨页表合并最稳）" },
+  { value: "glm", label: "GLM（智谱）", hint: "第二备选，需智谱 API Key" },
+];
+
 export default function ConverterSettings() {
-  const { mineruToken, paddleocrToken, engine, setMineruToken, setPaddleocrToken, setEngine } = useConverterStore();
+  const {
+    mineruToken,
+    paddleocrToken,
+    glmApiKey,
+    engine,
+    paperEngine,
+    setMineruToken,
+    setPaddleocrToken,
+    setGlmApiKey,
+    setEngine,
+    setPaperEngine,
+  } = useConverterStore();
   const activeEngine = ENGINE_OPTIONS.find((o) => o.value === engine) ?? ENGINE_OPTIONS[0];
+  const activePaperEngine = PAPER_ENGINE_OPTIONS.find((o) => o.value === paperEngine) ?? PAPER_ENGINE_OPTIONS[0];
 
   return (
     <div className="space-y-6 p-4">
@@ -24,7 +42,7 @@ export default function ConverterSettings() {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="convert-engine">解析引擎</Label>
+        <Label htmlFor="convert-engine">解析引擎（书籍转换）</Label>
         <Select value={engine} onValueChange={(value) => setEngine(value as BookConvertEngine)}>
           <SelectTrigger id="convert-engine" className="w-full">
             <SelectValue />
@@ -78,6 +96,57 @@ export default function ConverterSettings() {
             <ExternalLink className="size-3" />去百度 AI Studio 申请 Token
           </button>
         </div>
+      )}
+
+      <div className="space-y-2 border-t pt-4 dark:border-neutral-700">
+        <h3 className="font-medium text-base dark:text-neutral-100">论文解析</h3>
+        <p className="text-neutral-600 text-sm dark:text-neutral-400">
+          文献库「导入 PDF」由 Papers_Converter 引擎驱动，产物为 Markdown 论文（paper.md + 图片）。
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="paper-engine">解析引擎（论文）</Label>
+        <Select value={paperEngine} onValueChange={(value) => setPaperEngine(value as PaperConvertEngine)}>
+          <SelectTrigger id="paper-engine" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAPER_ENGINE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-neutral-500 text-xs dark:text-neutral-500">{activePaperEngine.hint}</p>
+      </div>
+
+      {paperEngine === "glm" && (
+        <div className="space-y-2">
+          <Label htmlFor="glm-api-key">GLM API Key</Label>
+          <Input
+            id="glm-api-key"
+            type="password"
+            value={glmApiKey}
+            onChange={(e) => setGlmApiKey(e.target.value)}
+            placeholder="在 bigmodel.cn 申请"
+          />
+          <button
+            type="button"
+            onClick={() => openUrl("https://open.bigmodel.cn")}
+            className="inline-flex cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
+          >
+            <ExternalLink className="size-3" />去智谱开放平台申请 Key
+          </button>
+        </div>
+      )}
+
+      {(paperEngine === "mineru" || paperEngine === "paddleocr") && (
+        <p className="text-neutral-500 text-xs dark:text-neutral-500">
+          论文解析复用上方{paperEngine === "mineru" ? " MinerU " : " PaddleOCR "}Token
+          {paperEngine === "mineru" && engine !== "mineru" ? "（与书籍引擎独立选择，Token 共享）" : ""}。
+        </p>
       )}
 
       <p className="text-neutral-500 text-xs dark:text-neutral-500">
