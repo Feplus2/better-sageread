@@ -131,44 +131,23 @@ function PaperStars({ rating, onRate }: { rating: number; onRate: (rating: numbe
   );
 }
 
-/** 右侧状态区：打星 + 阅读状态（New/进度/已读完）+ 向量化圆环 */
-function PaperStatusArea({
-  paper,
-  vectorizePercent,
-  onRate,
-}: {
-  paper: BookWithStatus;
-  vectorizePercent?: number;
-  onRate: (rating: number) => void;
-}) {
-  const status = paper.status;
-
-  let statusBadge: React.ReactNode;
+/** 阅读状态徽标（New 主题色 / 进度琥珀 / 已读完绿） */
+function PaperStatusBadge({ status }: { status: BookWithStatus["status"] }) {
   if (!status || status.status === "unread") {
-    statusBadge = (
-      <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary text-xs">New</span>
-    );
-  } else if (status.status === "completed") {
-    statusBadge = (
+    return <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary text-xs">New</span>;
+  }
+  if (status.status === "completed") {
+    return (
       <span className="rounded-full bg-green-50 px-2 py-0.5 font-medium text-green-600 text-xs dark:bg-green-950/50 dark:text-green-400">
         已读完
       </span>
     );
-  } else {
-    const percent = status.progressTotal > 0 ? Math.round((status.progressCurrent / status.progressTotal) * 100) : 0;
-    statusBadge = (
-      <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-600 text-xs dark:bg-amber-950/50 dark:text-amber-400">
-        {percent > 0 ? `${percent}%` : "阅读中"}
-      </span>
-    );
   }
-
+  const percent = status.progressTotal > 0 ? Math.round((status.progressCurrent / status.progressTotal) * 100) : 0;
   return (
-    <div className="flex shrink-0 flex-col items-end gap-1.5">
-      <PaperStars rating={status?.rating ?? 0} onRate={onRate} />
-      {statusBadge}
-      <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
-    </div>
+    <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-600 text-xs dark:bg-amber-950/50 dark:text-amber-400">
+      {percent > 0 ? `${percent}%` : "阅读中"}
+    </span>
   );
 }
 
@@ -1015,67 +994,69 @@ export default function PapersPage() {
                         )}
                       </div>
 
-                      <PaperStatusArea
-                        paper={paper}
-                        vectorizePercent={vectorizePercent}
-                        onRate={(rating) => handleRate(paper, rating)}
-                      />
+                      {/* 右侧统一一行：打星 / 状态徽标 / 向量化圆环 ｜ 动作（向量化/移动/删除） */}
+                      <div className="flex shrink-0 items-center gap-1">
+                        <PaperStars rating={paper.status?.rating ?? 0} onRate={(rating) => handleRate(paper, rating)} />
+                        <PaperStatusBadge status={paper.status} />
+                        <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
+                        <div className="mx-1 h-4 w-px bg-neutral-200 dark:bg-neutral-700" />
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={vectorizePercent != null}
-                            className="mt-0.5 shrink-0 text-neutral-400 hover:text-indigo-500 dark:text-neutral-500 dark:hover:text-indigo-400"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleVectorize(paper);
-                            }}
-                          >
-                            {vectorizePercent != null ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="size-4" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{isVectorized ? "重新向量化" : "向量化"}</TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={vectorizePercent != null}
+                              className="size-8 text-neutral-400 hover:text-primary dark:text-neutral-500"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleVectorize(paper);
+                              }}
+                            >
+                              {vectorizePercent != null ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{isVectorized ? "重新向量化" : "向量化"}</TooltipContent>
+                        </Tooltip>
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="mt-0.5 shrink-0 text-neutral-400 hover:text-indigo-500 dark:text-neutral-500 dark:hover:text-indigo-400"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openMoveDialog(paper);
-                            }}
-                          >
-                            <FolderPen className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">移动到…</TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-neutral-400 hover:text-primary dark:text-neutral-500"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openMoveDialog(paper);
+                              }}
+                            >
+                              <FolderPen className="size-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">移动到…</TooltipContent>
+                        </Tooltip>
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="mt-0.5 shrink-0 text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleTrash(paper);
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">移到回收站</TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleTrash(paper);
+                              }}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">移到回收站</TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
                   );
                 })}
