@@ -73,7 +73,7 @@ function DialogHeader({
       )}
       {...props}
     >
-      <div className="flex flex-1 flex-col gap-2 text-left">{props.children}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 text-left">{props.children}</div>
       {showCloseButton && (
         <DialogPrimitive.Close
           data-slot="dialog-close"

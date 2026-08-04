@@ -1330,7 +1330,7 @@ export default function PapersPage() {
             <DialogTitle>导入 PDF 论文</DialogTitle>
             <DialogDescription className="px-0">解析为 Markdown 论文并入库（后台运行，完成时提醒）</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 px-5 py-4">
+          <div className="min-w-0 space-y-4 px-5 py-4">
             <button
               type="button"
               onClick={handlePickPdfFile}
@@ -1354,7 +1354,7 @@ export default function PapersPage() {
               )}
             </button>
             {pdfCandidate && (
-              <p className="truncate text-muted-foreground text-xs" title={pdfCandidate}>
+              <p className="min-w-0 max-w-full truncate text-muted-foreground text-xs" title={pdfCandidate}>
                 {pdfCandidate}
               </p>
             )}
