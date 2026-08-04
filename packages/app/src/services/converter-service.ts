@@ -27,7 +27,9 @@ interface ConvertParams {
   pdfPath: string;
   ocr: boolean;
   translate?: string;
+  engine?: string;
   mineruToken: string;
+  paddleocrToken?: string;
   llmBaseUrl: string;
   llmApiKey: string;
   llmModel: string;
@@ -56,15 +58,20 @@ export function resolveLlmParams(): { llmBaseUrl: string; llmApiKey: string; llm
 
 /** 启动转换（异步；进度经 listenConvertProgress 回传） */
 export async function startConvert(pdfPath: string, ocr: boolean, translate?: string): Promise<void> {
-  const { mineruToken } = useConverterStore.getState();
-  if (!mineruToken) {
+  const { mineruToken, paddleocrToken, engine } = useConverterStore.getState();
+  if (engine === "mineru" && !mineruToken) {
     throw new Error("尚未配置 MinerU Token，请先在 设置 → PDF 转换 中填写");
+  }
+  if (engine === "paddleocr" && !paddleocrToken) {
+    throw new Error("尚未配置 PaddleOCR Token，请先在 设置 → PDF 转换 中填写");
   }
   const params: ConvertParams = {
     pdfPath,
     ocr,
     translate: translate || undefined,
+    engine,
     mineruToken,
+    paddleocrToken: paddleocrToken || undefined,
     ...resolveLlmParams(),
   };
   await invoke("convert_pdf_to_epub", { params });

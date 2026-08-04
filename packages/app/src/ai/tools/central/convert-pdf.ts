@@ -96,8 +96,8 @@ export const convertPdfTool = tool({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "未知错误";
       // 提供更友好的错误提示
-      if (errorMessage.includes("MinerU Token")) {
-        throw new Error("请先在 设置 → PDF 转换 中配置 MinerU Token");
+      if (errorMessage.includes("MinerU Token") || errorMessage.includes("PaddleOCR Token")) {
+        throw new Error("请先在 设置 → PDF 转换 中配置当前引擎的 Token");
       }
       if (errorMessage.includes("辅助模型")) {
         throw new Error("请先在 设置 → 模型提供商 中配置辅助模型");

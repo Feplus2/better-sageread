@@ -12,7 +12,7 @@ import {
   listenConvertProgress,
   startConvert,
 } from "@/services/converter-service";
-import { useConverterStore } from "@/store/converter-store";
+import { type BookConvertEngine, useConverterStore } from "@/store/converter-store";
 import { useLibraryStore } from "@/store/library-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BookUp, Check, FileDown, FileText, Loader2, X } from "lucide-react";
@@ -40,10 +40,10 @@ const TRANSLATE_OPTIONS = [
   { value: "ko", label: "译为韩文" },
 ];
 
-/** 按是否翻译构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4） */
-function buildStages(withTranslate: boolean): StageState[] {
+/** 按是否翻译与引擎构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4） */
+function buildStages(withTranslate: boolean, engine: BookConvertEngine): StageState[] {
   const stages = [
-    { n: 1, name: "MinerU 解析" },
+    { n: 1, name: engine === "paddleocr" ? "PaddleOCR 解析" : "MinerU 解析" },
     { n: 2, name: "Hybrid 结构重建" },
   ];
   if (withTranslate) stages.push({ n: 3, name: "全书翻译" });
@@ -98,7 +98,8 @@ export default function ConverterPage() {
   const statusRef = useRef<ConvertStatus>("idle");
   const unlistenRef = useRef<(() => void) | null>(null);
   const { refreshBooks } = useLibraryStore();
-  const { mineruToken } = useConverterStore();
+  const { mineruToken, paddleocrToken, engine } = useConverterStore();
+  const hasEngineToken = engine === "paddleocr" ? !!paddleocrToken : !!mineruToken;
 
   const updateStatus = (s: ConvertStatus) => {
     statusRef.current = s;
@@ -183,7 +184,7 @@ export default function ConverterPage() {
   const handleStart = async () => {
     if (!pdfPath) return;
     resetResult();
-    setStages(buildStages(translate !== "none"));
+    setStages(buildStages(translate !== "none", engine));
     updateStatus("converting");
     try {
       unlistenRef.current?.();
@@ -309,9 +310,10 @@ export default function ConverterPage() {
           </div>
 
           <div className="border-t px-4 py-4 dark:border-neutral-700">
-            {!mineruToken && (
+            {!hasEngineToken && (
               <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-700 text-sm dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
-                尚未配置 MinerU Token，请前往 设置 → PDF 转换 填写后再开始转换。
+                尚未配置 {engine === "paddleocr" ? "PaddleOCR" : "MinerU"} Token，请前往 设置 → PDF 转换
+                填写后再开始转换。
               </p>
             )}
             {converting ? (
@@ -319,7 +321,7 @@ export default function ConverterPage() {
                 取消转换
               </Button>
             ) : (
-              <Button onClick={handleStart} disabled={!pdfPath || !mineruToken} className="w-full">
+              <Button onClick={handleStart} disabled={!pdfPath || !hasEngineToken} className="w-full">
                 <FileDown className="size-4" />
                 开始转换
               </Button>

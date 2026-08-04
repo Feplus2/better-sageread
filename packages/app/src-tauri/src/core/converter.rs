@@ -27,9 +27,13 @@ impl Default for ConverterState {
 pub struct ConvertParams {
     pub pdf_path: String,
     pub ocr: bool,
-    /// 目标语言（None=不翻译，Some("zh"/"en"/"ja"/...)）
+    /// 目标语言（None=不翻译，Some("zh"/"en"/"ja"/...））
     pub translate: Option<String>,
+    /// 解析引擎（None=默认 mineru；"mineru"|"paddleocr"，书籍表格密集默认 mineru 更稳）
+    pub engine: Option<String>,
     pub mineru_token: String,
+    /// PaddleOCR Token（engine=paddleocr 时使用；百度 AI Studio 异步 job API）
+    pub paddleocr_token: Option<String>,
     pub llm_base_url: String,
     pub llm_api_key: String,
     pub llm_model: String,
@@ -57,6 +61,12 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
     if !params.ocr {
         args.push("--no-ocr".to_string());
     }
+    let engine = params.engine.as_deref().unwrap_or("mineru");
+    if engine != "mineru" {
+        // mineru 是 sidecar 默认引擎，显式参数只在非默认时传（保持旧行为面不变）
+        args.push("--engine".to_string());
+        args.push(engine.to_string());
+    }
     if let Some(lang) = &params.translate {
         if !lang.is_empty() {
             args.push("--translate".to_string());
@@ -64,7 +74,7 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
         }
     }
 
-    log::info!("[Converter] 启动转换: {}", params.pdf_path);
+    log::info!("[Converter] 启动转换: {} (engine={})", params.pdf_path, engine);
 
     let command = app
         .shell()
@@ -72,6 +82,7 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
         .map_err(|e| format!("无法创建转换命令: {}", e))?
         .args(args)
         .env("MINERU_TOKEN", &params.mineru_token)
+        .env("PADDLEOCR_TOKEN", params.paddleocr_token.as_deref().unwrap_or(""))
         .env("DEEPSEEK_BASE_URL", &params.llm_base_url)
         .env("DEEPSEEK_API_KEY", &params.llm_api_key)
         .env("DEEPSEEK_MODEL", &params.llm_model);
