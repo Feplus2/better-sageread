@@ -79,6 +79,9 @@ pub struct BookStatus {
     /// 当前位置的累计活跃阅读秒数（位置变化时清零，参与同步）
     #[serde(rename = "dwellSeconds")]
     pub dwell_seconds: i64,
+    /// 重要度打星（0-3，0=未打星，参与同步）
+    #[serde(rename = "rating")]
+    pub rating: i64,
     #[serde(rename = "startedAt")]
     pub started_at: Option<i64>,
     #[serde(rename = "completedAt")]
@@ -102,6 +105,7 @@ pub struct BookStatusUpdateData {
     pub last_read_at: Option<i64>,
     #[serde(rename = "dwellSeconds")]
     pub dwell_seconds: Option<i64>,
+    pub rating: Option<i64>,
     #[serde(rename = "startedAt")]
     pub started_at: Option<i64>,
     #[serde(rename = "completedAt")]
@@ -180,6 +184,7 @@ impl BookStatus {
             last_read_at: None,
             position_changed_at: None,
             dwell_seconds: 0,
+            rating: 0,
             started_at: None,
             completed_at: None,
             metadata: None,
@@ -200,6 +205,7 @@ impl BookStatus {
             last_read_at: row.try_get("last_read_at")?,
             position_changed_at: row.try_get("position_changed_at")?,
             dwell_seconds: row.try_get("dwell_seconds")?,
+            rating: row.try_get("rating")?,
             started_at: row.try_get("started_at")?,
             completed_at: row.try_get("completed_at")?,
             metadata: row

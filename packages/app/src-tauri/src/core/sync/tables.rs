@@ -56,6 +56,7 @@ pub const TABLES: &[SyncTable] = &[
             ("last_read_at", ColType::Int),
             ("position_changed_at", ColType::Int),
             ("dwell_seconds", ColType::Int),
+            ("rating", ColType::Int),
             ("started_at", ColType::Int),
             ("completed_at", ColType::Int),
             ("metadata", ColType::Text),

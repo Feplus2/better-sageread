@@ -297,6 +297,17 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         Err(e) => return Err(e.into()),
     }
 
+    // book_status.rating（重要度打星 0-3，0=未打星）
+    let result = sqlx::query("ALTER TABLE book_status ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: book_status.rating added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) => return Err(e.into()),
+    }
+
     Ok(())
 }
 

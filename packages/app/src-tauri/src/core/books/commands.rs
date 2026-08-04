@@ -501,6 +501,7 @@ pub async fn update_book_status(
     let new_location = update_data.location.unwrap_or(current_status.location);
     let new_last_read_at = update_data.last_read_at.or(current_status.last_read_at);
     let new_dwell_seconds = update_data.dwell_seconds.unwrap_or(current_status.dwell_seconds);
+    let new_rating = update_data.rating.unwrap_or(current_status.rating);
     let new_started_at = update_data.started_at.or(current_status.started_at);
     let new_completed_at = update_data.completed_at.or(current_status.completed_at);
     let new_metadata = update_data.metadata.or(current_status.metadata);
@@ -509,7 +510,7 @@ pub async fn update_book_status(
         r#"
         UPDATE book_status SET
             status = ?, progress_current = ?, progress_total = ?, location = ?,
-            last_read_at = ?, position_changed_at = ?, dwell_seconds = ?,
+            last_read_at = ?, position_changed_at = ?, dwell_seconds = ?, rating = ?,
             started_at = ?, completed_at = ?, metadata = ?, updated_at = ?
         WHERE book_id = ?
         "#,
@@ -521,6 +522,7 @@ pub async fn update_book_status(
     .bind(new_last_read_at)
     .bind(new_position_changed_at)
     .bind(new_dwell_seconds)
+    .bind(new_rating)
     .bind(new_started_at)
     .bind(new_completed_at)
     .bind(
@@ -553,7 +555,7 @@ pub async fn get_books_with_status(
 
     let mut query = String::from(
         "SELECT b.*, s.book_id as status_book_id, s.status, s.progress_current, s.progress_total, 
-         s.last_read_at, s.started_at, 
+         s.last_read_at, s.rating, s.started_at, 
          s.completed_at, s.metadata, s.created_at as status_created_at, s.updated_at as status_updated_at 
          FROM books b LEFT JOIN book_status s ON b.id = s.book_id"
     );
@@ -655,6 +657,7 @@ pub async fn get_books_with_status(
                 last_read_at: row.try_get("last_read_at").unwrap_or_default(),
                 position_changed_at: row.try_get("position_changed_at").unwrap_or_default(),
                 dwell_seconds: row.try_get("dwell_seconds").unwrap_or_default(),
+                rating: row.try_get("rating").unwrap_or_default(),
                 started_at: row.try_get("started_at").unwrap_or_default(),
                 completed_at: row.try_get("completed_at").unwrap_or_default(),
                 metadata: {
@@ -682,7 +685,7 @@ pub async fn get_book_with_status_by_id(
     let db_pool = get_db_pool(&app_handle).await?;
 
     let query = "SELECT b.*, s.book_id as status_book_id, s.status, s.progress_current, s.progress_total, 
-         s.location, s.last_read_at, s.started_at, 
+         s.location, s.last_read_at, s.rating, s.started_at, 
          s.completed_at, s.metadata, s.created_at as status_created_at, s.updated_at as status_updated_at 
          FROM books b LEFT JOIN book_status s ON b.id = s.book_id
          WHERE b.id = ?";
@@ -712,6 +715,7 @@ pub async fn get_book_with_status_by_id(
                     last_read_at: row.try_get("last_read_at").unwrap_or_default(),
                     position_changed_at: row.try_get("position_changed_at").unwrap_or_default(),
                     dwell_seconds: row.try_get("dwell_seconds").unwrap_or_default(),
+                    rating: row.try_get("rating").unwrap_or_default(),
                     started_at: row.try_get("started_at").unwrap_or_default(),
                     completed_at: row.try_get("completed_at").unwrap_or_default(),
                     metadata: {

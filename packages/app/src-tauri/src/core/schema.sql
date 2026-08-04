@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS book_status (
     progress_current INTEGER DEFAULT 0,
     progress_total INTEGER DEFAULT 0,
     location TEXT,                           -- CFI 位置信息
+    rating INTEGER NOT NULL DEFAULT 0,       -- 重要度打星（0-3，0=未打星）
     last_read_at INTEGER,
     started_at INTEGER,
     completed_at INTEGER,

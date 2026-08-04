@@ -22,6 +22,9 @@ export interface PaperMetadata {
   page?: string;
   keywords?: string[];
   lang?: string;
+  /** metadata.json 附加字段（翻译服务写入；frontmatter 没有，仅列表中文化显示用） */
+  title_zh?: string;
+  abstract_zh?: string;
 }
 
 /** 匹配 `---` 包裹的 YAML frontmatter（兼容 \n / \r\n / \r 行尾） */

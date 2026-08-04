@@ -58,6 +58,8 @@ export interface BookStatus {
   dwellSeconds?: number;
   startedAt?: number;
   completedAt?: number;
+  /** 重要度打星（0-3，0=未打星） */
+  rating?: number;
   metadata?: {
     vectorization?: BookVectorizationMeta;
     [k: string]: any;
@@ -75,6 +77,8 @@ export interface BookStatusUpdateData {
   dwellSeconds?: number;
   startedAt?: number;
   completedAt?: number;
+  /** 重要度打星（0-3） */
+  rating?: number;
   metadata?: {
     vectorization?: BookVectorizationMeta;
     [k: string]: any;

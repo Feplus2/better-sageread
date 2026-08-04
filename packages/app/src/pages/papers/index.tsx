@@ -2,8 +2,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
+import { updateBookStatus } from "@/services/book-service";
+import { useAppSettingsStore } from "@/store/app-settings-store";
+import type { PapersSortByType } from "@/types/settings";
 import {
   type Folder,
   type FolderTreeNode,
@@ -28,6 +32,8 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
 import {
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   BookOpenText,
   ChevronRight,
   FileText,
@@ -37,11 +43,14 @@ import {
   FolderPen,
   FolderPlus,
   Inbox,
+  Languages,
   Library,
   Loader2,
   Pencil,
   Plus,
+  Search,
   Sparkles,
+  Star,
   Trash2,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -53,37 +62,91 @@ type Selection = { kind: "all" } | { kind: "unfiled" } | { kind: "folder"; id: s
 /** 文件夹名称对话框：新建（可带父节点）或重命名 */
 type NameDialogState = { mode: "create"; parentId: string | null } | { mode: "rename"; id: string };
 
-/** 向量化状态徽标文案（book_status.metadata.vectorization.status） */
-const VECTORIZATION_LABELS: Record<string, string> = {
-  idle: "待向量化",
-  processing: "向量化中",
-  success: "已向量化",
-  failed: "向量化失败",
-};
-
-const sidebarItemClass = (active: boolean) =>
-  clsx(
-    "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
-    active
-      ? "bg-neutral-200/70 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
-      : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800/60",
+/** 向量化状态指示：与图书馆 book-item 同款圆环（绿=已向量化/红=失败/灰=未向量化；进行中为扇形环+百分比） */
+function VectorizationRing({ paper, vectorizePercent }: { paper: BookWithStatus; vectorizePercent?: number }) {
+  const statusFromMeta = paper.status?.metadata?.vectorization?.status ?? "idle";
+  if (vectorizePercent != null) {
+    const pct = Math.max(0, Math.min(100, vectorizePercent));
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1">
+            <div className="relative h-4 w-4">
+              <div
+                className="absolute inset-0 rounded-full"
+                style={{ background: `conic-gradient(#eab308 ${pct}%, rgba(229,231,235,0.6) 0)` }}
+              />
+              <div className="absolute inset-[2px] rounded-full bg-white dark:bg-neutral-900" />
+            </div>
+            <span className="text-[10px] text-neutral-500 leading-none dark:text-neutral-400">{pct}%</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">向量化中 {pct}%</TooltipContent>
+      </Tooltip>
+    );
+  }
+  const colorClass =
+    statusFromMeta === "success"
+      ? "border-green-500"
+      : statusFromMeta === "failed"
+        ? "border-red-500"
+        : "border-neutral-400 dark:border-neutral-500";
+  const label =
+    statusFromMeta === "success" ? "已向量化" : statusFromMeta === "failed" ? "向量化失败" : "未向量化";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1">
+          <div className={`h-3.5 w-3.5 rounded-full border-2 ${colorClass}`} />
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
+}
 
-/** 树形铺平（移动到对话框用，全部展开，带缩进深度） */
-const flattenTree = (nodes: FolderTreeNode[], depth = 0): { node: FolderTreeNode; depth: number }[] =>
-  nodes.flatMap((node) => [{ node, depth }, ...flattenTree(node.children, depth + 1)]);
+/** 重要度打星（0-3）：点击第 n 颗设 n 星，再点当前档取消；整行一个 Tooltip */
+function PaperStars({ rating, onRate }: { rating: number; onRate: (rating: number) => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-0.5">
+          {[1, 2, 3].map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="rounded p-0.5 text-neutral-300 transition-colors hover:text-amber-400 dark:text-neutral-600"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRate(rating === n ? 0 : n);
+              }}
+            >
+              <Star className={clsx("size-3.5", n <= rating && "fill-amber-400 text-amber-400")} />
+            </button>
+          ))}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{rating > 0 ? `重要度 ${rating}/3 星（点击调整）` : "打星标记重要度（最多 3 星）"}</TooltipContent>
+    </Tooltip>
+  );
+}
 
-/** 右侧状态区：阅读状态（New/进度/已读完）+ 向量化状态（有才显示） */
-function PaperStatusArea({ paper, vectorizePercent }: { paper: BookWithStatus; vectorizePercent?: number }) {
+/** 右侧状态区：打星 + 阅读状态（New/进度/已读完）+ 向量化圆环 */
+function PaperStatusArea({
+  paper,
+  vectorizePercent,
+  onRate,
+}: {
+  paper: BookWithStatus;
+  vectorizePercent?: number;
+  onRate: (rating: number) => void;
+}) {
   const status = paper.status;
-  const vectorization = status?.metadata?.vectorization;
 
   let statusBadge: React.ReactNode;
   if (!status || status.status === "unread") {
     statusBadge = (
-      <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-600 text-xs dark:bg-blue-950/50 dark:text-blue-400">
-        New
-      </span>
+      <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary text-xs">New</span>
     );
   } else if (status.status === "completed") {
     statusBadge = (
@@ -102,19 +165,24 @@ function PaperStatusArea({ paper, vectorizePercent }: { paper: BookWithStatus; v
 
   return (
     <div className="flex shrink-0 flex-col items-end gap-1.5">
+      <PaperStars rating={status?.rating ?? 0} onRate={onRate} />
       {statusBadge}
-      {vectorizePercent != null ? (
-        <span className="text-neutral-400 text-xs dark:text-neutral-500">向量化中 {vectorizePercent}%</span>
-      ) : (
-        vectorization && (
-          <span className="text-neutral-400 text-xs dark:text-neutral-500">
-            {VECTORIZATION_LABELS[vectorization.status] ?? vectorization.status}
-          </span>
-        )
-      )}
+      <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
     </div>
   );
 }
+
+const sidebarItemClass = (active: boolean) =>
+  clsx(
+    "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+    active
+      ? "bg-neutral-200/70 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
+      : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800/60",
+  );
+
+/** 树形铺平（移动到对话框用，全部展开，带缩进深度） */
+const flattenTree = (nodes: FolderTreeNode[], depth = 0): { node: FolderTreeNode; depth: number }[] =>
+  nodes.flatMap((node) => [{ node, depth }, ...flattenTree(node.children, depth + 1)]);
 
 interface FolderTreeItemProps {
   node: FolderTreeNode;
@@ -272,6 +340,12 @@ export default function PapersPage() {
   const [importing, setImporting] = useState(false);
   const [metaMap, setMetaMap] = useState<Record<string, PaperMetadata>>({});
   const openPaper = useLayoutStore((state) => state.openPaper);
+  // 检索关键词（列表工具栏；排序与元数据语言持久化在 app-settings）
+  const [searchQuery, setSearchQuery] = useState("");
+  const { settings, setSettings } = useAppSettingsStore();
+  const sortBy: PapersSortByType = settings.papersSortBy ?? "updated";
+  const sortAscending = settings.papersSortAscending ?? false;
+  const metaLang = settings.papersMetaLang ?? "original";
   // 向量化进行中：paper_id -> 进度百分比（0-100）
   const [vectorizing, setVectorizing] = useState<Record<string, number>>({});
   // 文件夹侧栏状态
@@ -399,6 +473,88 @@ export default function PapersPage() {
     if (selection.kind === "unfiled") return papers.filter((p) => !memberMap.get(p.id)?.size);
     return papers.filter((p) => memberMap.get(p.id)?.has(selection.id));
   }, [papers, selection, memberMap]);
+
+  const renderAuthorLine = (paper: BookWithStatus) => {
+    const authors = normalizeAuthors(metaMap[paper.id]?.author);
+    if (authors.length > 0) {
+      return authors.slice(0, 3).join(", ") + (authors.length > 3 ? " et al." : "");
+    }
+    return paper.author;
+  };
+
+  const renderVenueLine = (paper: BookWithStatus) => {
+    const meta = metaMap[paper.id];
+    return [meta?.date, meta?.["container-title"]].filter(Boolean).join(" · ");
+  };
+
+  /** 检索 + 排序后的可见列表：关键词（空白分词 AND）匹配标题/作者/期刊/摘要/中英文/关键词；排序持久化在 app-settings */
+  const visiblePapers = useMemo(() => {
+    let list = filteredPapers;
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      const terms = query.split(/\s+/);
+      list = list.filter((paper) => {
+        const meta = metaMap[paper.id];
+        const haystack = [
+          paper.title,
+          renderAuthorLine(paper),
+          renderVenueLine(paper),
+          meta?.abstract,
+          meta?.title_zh,
+          meta?.abstract_zh,
+          ...(meta?.keywords ?? []),
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+      });
+    }
+    const dir = sortAscending ? 1 : -1;
+    const sorted = [...list];
+    switch (sortBy) {
+      case "title":
+        sorted.sort((a, b) => dir * a.title.localeCompare(b.title));
+        break;
+      case "rating":
+        // 重要度恒按星数降序为主键，方向键只作用于次序的时间次键
+        sorted.sort((a, b) => (b.status?.rating ?? 0) - (a.status?.rating ?? 0) || dir * (b.updatedAt - a.updatedAt));
+        break;
+      case "created":
+        sorted.sort((a, b) => dir * (b.createdAt - a.createdAt));
+        break;
+      default:
+        sorted.sort((a, b) => dir * (b.updatedAt - a.updatedAt));
+    }
+    return sorted;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- renderAuthorLine/renderVenueLine 只读 metaMap
+  }, [filteredPapers, searchQuery, metaMap, sortBy, sortAscending]);
+
+  /** 打星（0-3）：乐观更新本地状态，失败提示并整体重载回滚 */
+  const handleRate = async (paper: BookWithStatus, rating: number) => {
+    setPapers((prev) =>
+      prev.map((p) => (p.id === paper.id ? { ...p, status: p.status ? { ...p.status, rating } : p.status } : p)),
+    );
+    try {
+      await updateBookStatus(paper.id, { rating });
+    } catch (error) {
+      console.error("更新重要度失败:", error);
+      toast.error("更新重要度失败");
+      loadAll();
+    }
+  };
+
+  const handleSortByChange = (value: string) => {
+    const next = value as PapersSortByType;
+    // 标题默认升序，其余默认降序
+    setSettings({ ...settings, papersSortBy: next, papersSortAscending: next === "title" });
+  };
+  const handleSortDirectionToggle = () => {
+    setSettings({ ...settings, papersSortAscending: !sortAscending });
+  };
+  const handleMetaLangToggle = () => {
+    setSettings({ ...settings, papersMetaLang: metaLang === "zh" ? "original" : "zh" });
+  };
 
   // ---- 文件夹操作 ----
   const handleSelect = (next: Selection) => {
@@ -591,26 +747,13 @@ export default function PapersPage() {
     }
   };
 
-  const renderAuthorLine = (paper: BookWithStatus) => {
-    const authors = normalizeAuthors(metaMap[paper.id]?.author);
-    if (authors.length > 0) {
-      return authors.slice(0, 3).join(", ") + (authors.length > 3 ? " et al." : "");
-    }
-    return paper.author;
-  };
-
-  const renderVenueLine = (paper: BookWithStatus) => {
-    const meta = metaMap[paper.id];
-    return [meta?.date, meta?.["container-title"]].filter(Boolean).join(" · ");
-  };
-
   // ---- 列表视图 ----
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between gap-4 px-4 pt-4 pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="font-bold text-2xl text-neutral-900 dark:text-neutral-100">文献库</h1>
-          <span className="text-neutral-500 text-sm dark:text-neutral-400">共 {filteredPapers.length} 篇</span>
+          <span className="text-neutral-500 text-sm dark:text-neutral-400">共 {visiblePapers.length} 篇</span>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => handleImport("选择包含多篇论文的父目录")} disabled={importing}>
@@ -678,8 +821,59 @@ export default function PapersPage() {
           ))}
         </aside>
 
-        {/* 主区：面包屑（文件夹语境）+ 内容列表 */}
+        {/* 主区：工具栏（检索/排序/中文化）+ 面包屑（文件夹语境）+ 内容列表 */}
         <div className="flex min-w-0 flex-1 flex-col">
+          {!loading && papers.length > 0 && (
+            <div className="flex shrink-0 items-center gap-2 border-neutral-200 border-b px-4 py-2 dark:border-neutral-800">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-400" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="检索标题 / 作者 / 期刊 / 摘要（空格分隔多词）"
+                  className="h-8 pl-8 text-sm"
+                />
+              </div>
+              <Select value={sortBy} onValueChange={handleSortByChange}>
+                <SelectTrigger className="h-8 w-28 shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="updated">更新时间</SelectItem>
+                  <SelectItem value="created">导入时间</SelectItem>
+                  <SelectItem value="rating">重要度</SelectItem>
+                  <SelectItem value="title">标题</SelectItem>
+                </SelectContent>
+              </Select>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={handleSortDirectionToggle}>
+                    {sortAscending ? (
+                      <ArrowUpNarrowWide className="size-4" />
+                    ) : (
+                      <ArrowDownWideNarrow className="size-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{sortAscending ? "升序（点击切换）" : "降序（点击切换）"}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={clsx("size-8 shrink-0", metaLang === "zh" && "bg-primary/10 text-primary")}
+                    onClick={handleMetaLangToggle}
+                  >
+                    <Languages className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {metaLang === "zh" ? "标题/摘要显示中文（点击切回原文）" : "标题/摘要中文化显示（用已有翻译）"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
           {selection.kind === "folder" && !loading && papers.length > 0 && (
             <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-neutral-200 border-b px-4 py-2 text-sm dark:border-neutral-800">
               <button
@@ -732,10 +926,14 @@ export default function PapersPage() {
                 导入论文目录
               </Button>
             </div>
-          ) : filteredPapers.length === 0 && currentSubfolders.length === 0 ? (
+          ) : visiblePapers.length === 0 && currentSubfolders.length === 0 ? (
             <div className="flex flex-1 items-center justify-center">
               <p className="text-neutral-400 text-sm">
-                {selection.kind === "folder" ? "该文件夹还是空的" : "当前范围内暂无论文"}
+                {searchQuery.trim()
+                  ? "没有匹配的论文"
+                  : selection.kind === "folder"
+                    ? "该文件夹还是空的"
+                    : "当前范围内暂无论文"}
               </p>
             </div>
           ) : (
@@ -770,11 +968,14 @@ export default function PapersPage() {
                     <ChevronRight className="size-4 shrink-0 text-neutral-400" />
                   </div>
                 ))}
-                {filteredPapers.map((paper) => {
+                {visiblePapers.map((paper) => {
                   const meta = metaMap[paper.id];
                   const venueLine = renderVenueLine(paper);
                   const vectorizePercent = vectorizing[paper.id];
                   const isVectorized = paper.status?.metadata?.vectorization?.status === "success";
+                  // 元数据中文化：用翻译服务已落盘的 title_zh/abstract_zh，缺省回退原文
+                  const displayTitle = metaLang === "zh" ? meta?.title_zh || paper.title : paper.title;
+                  const displayAbstract = metaLang === "zh" ? meta?.abstract_zh || meta?.abstract : meta?.abstract;
                   return (
                     <div
                       key={paper.id}
@@ -795,7 +996,7 @@ export default function PapersPage() {
 
                       <div className="min-w-0 flex-1">
                         <h3 className="line-clamp-2 font-semibold text-neutral-900 leading-snug dark:text-neutral-100">
-                          {paper.title}
+                          {displayTitle}
                         </h3>
                         {renderAuthorLine(paper) && (
                           <p className="mt-1 line-clamp-1 text-neutral-600 text-sm dark:text-neutral-400">
@@ -807,14 +1008,18 @@ export default function PapersPage() {
                             {venueLine}
                           </p>
                         )}
-                        {meta?.abstract && (
+                        {displayAbstract && (
                           <p className="mt-2 line-clamp-2 text-neutral-600 text-sm leading-relaxed dark:text-neutral-400">
-                            {meta.abstract}
+                            {displayAbstract}
                           </p>
                         )}
                       </div>
 
-                      <PaperStatusArea paper={paper} vectorizePercent={vectorizePercent} />
+                      <PaperStatusArea
+                        paper={paper}
+                        vectorizePercent={vectorizePercent}
+                        onRate={(rating) => handleRate(paper, rating)}
+                      />
 
                       <Tooltip>
                         <TooltipTrigger asChild>
