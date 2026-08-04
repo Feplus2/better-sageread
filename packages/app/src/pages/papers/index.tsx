@@ -1,6 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -989,14 +995,30 @@ export default function PapersPage() {
             <FileDown className="size-4" />
             导入 PDF
           </Button>
-          <Button variant="outline" onClick={() => handleImport("选择包含多篇论文的父目录")} disabled={importing}>
-            {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
-            批量导入
-          </Button>
-          <Button variant="outline" onClick={() => handleImport("选择论文目录（含 paper.md）")} disabled={importing}>
-            {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderOpen className="size-4" />}
-            {importing ? "正在导入..." : "导入论文目录"}
-          </Button>
+          {/* 高级导入：面向开发者/转换器用户——期望的是 Papers_Converter 产物目录（含 paper.md 与 images/） */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={importing}>
+                {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
+                高级
+                <ChevronDown className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72 p-2">
+              <div className="px-2 py-1.5 text-muted-foreground text-xs leading-relaxed">
+                适用于已用 Papers_Converter 转换好的目录（含 paper.md 与
+                images/）。普通用户请直接用「导入 PDF」，无需关心此处。
+              </div>
+              <DropdownMenuItem onSelect={() => handleImport("选择论文目录（含 paper.md）")}>
+                <FolderOpen className="size-4" />
+                导入论文目录（单篇）
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleImport("选择包含多篇论文的父目录")}>
+                <FolderInput className="size-4" />
+                批量导入（父目录，一级子目录逐篇）
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -1150,13 +1172,13 @@ export default function PapersPage() {
               <div className="max-w-lg space-y-3 text-center">
                 <h2 className="font-bold text-neutral-900 text-xl dark:text-neutral-100">文献库还是空的</h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
-                  导入 Pandoc Markdown 论文目录（包含 paper.md 与
-                  images/），即可入库管理并阅读。选择单个论文目录导入一篇，或选择其父目录批量导入。
+                  把论文 PDF 拖进本页，或点下方按钮选择文件，即可自动解析、入库管理并阅读。
+                  已有 Papers_Converter 转换产物（含 paper.md 与 images/ 的目录）可走右上角「高级」导入。
                 </p>
               </div>
-              <Button onClick={() => handleImport("选择论文目录（含 paper.md）")} disabled={importing}>
-                <FolderOpen className="size-4" />
-                导入论文目录
+              <Button onClick={handleImportPdf} disabled={importing || pdfImport?.status === "running"}>
+                <FileDown className="size-4" />
+                导入 PDF
               </Button>
             </div>
           ) : visiblePapers.length === 0 && currentSubfolders.length === 0 ? (
