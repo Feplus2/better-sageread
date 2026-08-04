@@ -37,6 +37,14 @@
 
 ## 已消化
 
+### 2026-08-03 文献库使用细节批（打星/检索/中文化/标识统一）
+- [x] **重要度打星（0-3）**：book_status.rating 列（迁移 + sync 注册 + BookStatus/UpdateData/命令全链，cargo 34 绿）；列表项三颗星（点击设档/再点取消，乐观更新失败回滚）
+- [x] **标识统一**：向量化状态改图书馆同款圆环（绿=已向量化/红=失败/灰=未向量化，进行中扇形环+百分比，替代原 sparkle+文字）；New 徽标硬编码蓝 → bg-primary/10 text-primary 主题色
+- [x] **检索/排序基础设施**：工具栏关键词检索（空白分词 AND，匹配标题/作者/期刊/摘要/中英文/关键词）+ 排序（更新时间/导入时间/重要度/标题 + 方向切换，persist papersSortBy/papersSortAscending）
+- [x] **元数据一键中文化**：Languages 切换按钮（persist papersMetaLang），标题/摘要用翻译服务已落盘的 title_zh/abstract_zh 显示，缺省回退原文；PaperMetadata 类型补两字段
+- [x] tsc --noEmit 零错误；dev 实例迁移已应用（book_status.rating added）
+- [x] 后续批量化导入后：全局 Agent 一键全部向量化/翻译/整理归类（用户排期，待批量导入落地后排产）
+
 ### 2026-08-03 笔记概念清除收尾（D 批）
 - [x] **Agent 工具迁移标注**：`notesTool` 数据源从 notes 表改为 book_notes（type='annotation'，经新 Rust 命令 `get_all_book_notes` 跨书查询，JOIN books 带书名/作者；days/bookId/bookTitle/limit 参数不变）；`exportNotesTool` 剥离独立笔记（只导出书内标注，文件名改"-划线标注.md"）
 - [x] **服务与类型残留**：删除 `services/note-service.ts`、`types/note.ts`（grep 零引用）
