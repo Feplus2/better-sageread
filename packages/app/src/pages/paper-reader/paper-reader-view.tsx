@@ -15,6 +15,7 @@ import {
   alignPaperTranslation,
   inspectPaperAlignment,
 } from "@/services/paper-alignment-service";
+import { getBookStatus, updateBookStatus } from "@/services/book-service";
 import { type Folder, type PaperFolderEntry, getPaperFolderMap, listFolders } from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
@@ -283,6 +284,23 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
     return () => {
       cancelled = true;
     };
+  }, [paperId]);
+
+  // New 判定：打开即已阅——unread 首次打开时标记 reading（startedAt 只填一次；lastReadAt 每次刷新）
+  useEffect(() => {
+    (async () => {
+      try {
+        const status = await getBookStatus(paperId);
+        const now = Date.now();
+        if (!status || status.status === "unread") {
+          await updateBookStatus(paperId, { status: "reading", startedAt: status?.startedAt ?? now, lastReadAt: now });
+        } else {
+          await updateBookStatus(paperId, { lastReadAt: now });
+        }
+      } catch (error) {
+        console.warn("更新论文阅读状态失败:", error);
+      }
+    })();
   }, [paperId]);
 
   // 论文助手的作用域选择器需要文件夹与成员关系（加载失败时降级为仅"本篇论文/全部文献"）
