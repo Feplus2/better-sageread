@@ -42,7 +42,7 @@
           "state": "active",
           "radius": 8
         },
-        "dragDropEnabled": false
+        "dragDropEnabled": true
       }
     ],
     "security": {
