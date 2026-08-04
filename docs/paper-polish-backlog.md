@@ -28,14 +28,16 @@
   - ~~query 改写/关键词扩展~~（**归 Agent 侧**：检索词由聊天模型生成，改写/扩写是它本来就会做的事；已补工具描述引导——paperSearch/ragSearch 注明"英文论文用英文术语查询 + 复杂问题拆 2-3 个不同措辞分次检索"（2026-08-03），此前只有"支持自然语言表达"）
   - ~~译文 chunks 入库~~（**不做**：论文正文为英文，译文入库徒增索引体积与同步陈旧问题；中文查询由 Agent 侧翻译后检索即可覆盖）
   - 仍暂不做：动态召回数量、FTS5 迁移与空间压缩
-- Tooltip 统一扫尾（E 批只覆盖了阅读区/论文区 chrome 与文献库页，其余页面的原生 `title=` 待改项目 Tooltip）：
-  - 图书馆页：`pages/library/components/status-bar.tsx`、`book-item.tsx`、`data-cleanup-button.tsx`、`embedding-dialog.tsx`
-  - 设置弹窗：`components/settings/general.tsx`、`llama.tsx`、`sync.tsx`、`vector-model-manager.tsx`、`web-search-settings.tsx`
-  - 其他页面：`pages/statistics/index.tsx`、`pages/converter/index.tsx`
-  - 共享组件：`components/prompt-kit/code-block.tsx`、`prompt-kit/tool.tsx`、`preview/*`、`markdown/annotation-popover.tsx`、`ui/sidebar.tsx`
-  - `components/notepad/notepad-header.tsx` 的搜索图标按钮无任何提示（且目前无功能，需一并确认去留）
+- Tooltip 统一扫尾（✅ 2026-08-04 已全部消化，见下批；statistics 页实证无需改动）
 
 ## 已消化
+
+### 2026-08-04 文献库布局与 hover 细节批 + Tooltip 扫尾（D 批 Tooltip 项关闭）
+- [x] **New 判定修复**：论文此前 status 永远停留 unread（书籍靠自动保存标 reading，论文无此链路）——PaperReaderView 挂载时 unread → reading（startedAt 只填一次，lastReadAt 每次刷新），打开过标签页即不再显示 New
+- [x] **列表项右侧布局重排**：星标/New/圆环与三个动作按钮从两列悬浮断裂改为一行统排（打星 → 状态徽标 → 向量化圆环 → 分隔线 → 向量化/移动/删除）
+- [x] **hover 色硬编码清理**：向量化/移动按钮 hover 色 indigo → hover:text-primary（跟主题色底纹匹配；删除按钮保留红色语义）
+- [x] **全局 hover 缓动**：index.css @layer base 新增交互元件统一过渡（button/[role=button]/a/input/combobox/tab/switch/checkbox/radix-collection-item，颜色/背景/边框/透明度 150ms ease-out；只覆盖绘制属性，动画与 transform 不受影响；组件自带 transition 类优先级更高自然胜出）
+- [x] **Tooltip 统一扫尾（D 批关闭）**：图书馆 4 文件/设置 5 文件/converter/prompt-kit/preview/annotation-popover/sidebar 共 ~20 处原生 title= 改项目 Tooltip + ~10 个无提示图标按钮补齐；iframe title 属 a11y 语义回滚保留；notepad-header 死搜索按钮实证已不存在（早前 UI 批已删），该子项同步关闭
 
 ### 2026-08-03 文献库使用细节批（打星/检索/中文化/标识统一）
 - [x] **重要度打星（0-3）**：book_status.rating 列（迁移 + sync 注册 + BookStatus/UpdateData/命令全链，cargo 34 绿）；列表项三颗星（点击设档/再点取消，乐观更新失败回滚）
