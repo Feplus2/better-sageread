@@ -111,7 +111,7 @@ function ChatContent({ bookId }: ChatContentProps) {
   ] as const;
 
   const EmptyState = () => (
-    <div className="flex h-full w-full flex-col overflow-y-auto p-2 pb-8">
+    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2 pb-8">
       <div className="flex flex-1 flex-col justify-center gap-3">
         <div className="flex flex-col items-start gap-4 pl-2">
           <div className="rounded-full bg-muted/70 p-3 shadow-md dark:bg-neutral-800/90">
@@ -119,7 +119,8 @@ function ChatContent({ bookId }: ChatContentProps) {
           </div>
           <div className="space-y-2">
             <h3 className="font-semibold text-neutral-900 text-xl dark:text-neutral-50">AI 阅读助手</h3>
-            <p className="max-w-md text-sm dark:text-neutral-400">
+            {/* max-w-md(448px) 会超出窄面板宽度引起横向滑块 */}
+            <p className="max-w-full text-sm dark:text-neutral-400">
               智能分析文本内容，提供深度理解和个性化解答，帮助你快速掌握书籍要点。你可以：
             </p>
           </div>

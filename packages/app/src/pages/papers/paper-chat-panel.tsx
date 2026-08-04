@@ -1,5 +1,6 @@
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
 import { ScrollButton } from "@/components/prompt-kit/scroll-button";
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
@@ -208,7 +209,7 @@ export function PaperChatPanel({
   };
 
   const EmptyState = () => (
-    <div className="flex h-full w-full flex-col overflow-y-auto p-2 pb-8">
+    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2 pb-8">
       <div className="flex flex-1 flex-col justify-center gap-3">
         <div className="flex flex-col items-start gap-4 pl-2">
           <div className="rounded-full bg-muted/70 p-3 shadow-md dark:bg-neutral-800/90">
@@ -216,8 +217,10 @@ export function PaperChatPanel({
           </div>
           <div className="space-y-2">
             <h3 className="font-semibold text-neutral-900 text-xl dark:text-neutral-50">论文助手</h3>
-            <p className="max-w-md text-sm dark:text-neutral-400">
-              正在共读《{paperTitle}》。可以问我论文的任何细节，我看到的"当前小节"会随你的阅读位置更新。
+            {/* max-w-md(448px) 会超出面板宽度引起横向滑块；标题公式经 InlineMathText 渲染 */}
+            <p className="max-w-full text-sm dark:text-neutral-400">
+              正在共读《<InlineMathText text={paperTitle} />
+              》。可以问我论文的任何细节，我看到的"当前小节"会随你的阅读位置更新。
             </p>
           </div>
         </div>

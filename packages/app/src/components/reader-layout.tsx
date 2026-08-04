@@ -28,6 +28,7 @@ import { useThemeStore } from "@/store/theme-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
+import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
 import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { useEffect, useRef, useState } from "react";
@@ -322,6 +323,7 @@ export default function ReaderLayout() {
             className="h-7"
             enableDragRegion={true}
             marginLeft={isWindows ? 0 : 60}
+            renderTabTitleHtml={renderInlineMathHtml}
             pinnedLeft={
               <div className="mx-2 flex items-center gap-2">
                 <Tooltip>

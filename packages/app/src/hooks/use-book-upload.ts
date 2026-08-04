@@ -2,6 +2,7 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
+import { isBookDropSuppressed } from "@/lib/drop-suppress";
 import { uploadBook } from "@/services/book-service";
 import { FILE_ACCEPT_FORMATS } from "@/services/constants";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
@@ -16,6 +17,8 @@ export function useBookUpload() {
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    // 论文 PDF 选择弹窗开启期间，全局书籍拖入导入静默（防双重导入）
+    if (isBookDropSuppressed()) return;
     setIsDragOver(true);
   }, []);
 
@@ -27,6 +30,8 @@ export function useBookUpload() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    // 论文 PDF 选择弹窗开启期间，全局书籍拖入导入静默（防双重导入）
+    if (isBookDropSuppressed()) return;
 
     const files = Array.from(e.dataTransfer.files);
     handleDropedFiles(files);

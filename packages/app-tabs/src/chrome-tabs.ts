@@ -60,6 +60,8 @@ let instanceId = 0;
 
 export interface ChromeTabsOptions {
   draggable?: boolean;
+  /** 可选：把标签标题渲染为 HTML（如公式 KaTeX 渲染）；缺省用 textContent 纯文本 */
+  renderTabTitleHtml?: (title: string) => string;
 }
 
 class ChromeTabs {
@@ -73,11 +75,13 @@ class ChromeTabs {
   mouseEnterLayoutResolve: null | (() => void) = null;
   scrollBtnLeft: HTMLDivElement | null = null;
   scrollBtnRight: HTMLDivElement | null = null;
+  private renderTabTitleHtml?: (title: string) => string;
 
   private draggable = true;
-  constructor({ draggable = true }: ChromeTabsOptions = {}) {
+  constructor({ draggable = true, renderTabTitleHtml }: ChromeTabsOptions = {}) {
     this.draggabillies = [];
     this.draggable = draggable;
+    this.renderTabTitleHtml = renderTabTitleHtml;
   }
 
   setDraggable(draggable: boolean) {
@@ -470,7 +474,13 @@ class ChromeTabs {
   }
 
   updateTab(tabEl: HTMLElement, tabProperties: TabProperties) {
-    tabEl.querySelector(".chrome-tab-title")!.textContent = tabProperties.title;
+    const titleEl = tabEl.querySelector(".chrome-tab-title")!;
+    // renderTabTitleHtml（可选）：标题渲染为 HTML（公式等）；缺省 textContent 纯文本（自带转义）
+    if (this.renderTabTitleHtml) {
+      titleEl.innerHTML = this.renderTabTitleHtml(tabProperties.title);
+    } else {
+      titleEl.textContent = tabProperties.title;
+    }
 
     const faviconEl = tabEl.querySelector(".chrome-tab-favicon") as HTMLElement;
     const { favicon, faviconClass } = tabProperties;

@@ -15,6 +15,8 @@ export type TabsProps = Listeners & {
   draggable?: boolean;
   enableDragRegion?: boolean;
   marginLeft?: number;
+  /** 可选：标签标题渲染为 HTML（如公式 KaTeX 渲染）；缺省纯文本 */
+  renderTabTitleHtml?: (title: string) => string;
 };
 
 export function Tabs({
@@ -32,6 +34,7 @@ export function Tabs({
   pinnedLeft,
   enableDragRegion,
   marginLeft,
+  renderTabTitleHtml,
 }: TabsProps) {
   const previousTabs = usePrevious(tabs);
 
@@ -70,7 +73,7 @@ export function Tabs({
       onTabReorder: handleTabReorder,
       onDragBegin,
     },
-    { draggable },
+    { draggable, renderTabTitleHtml },
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>

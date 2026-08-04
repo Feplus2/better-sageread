@@ -32,6 +32,7 @@ import {
   vectorizePaper,
 } from "@/services/paper-service";
 import { Progress } from "@/components/ui/progress";
+import { setBookDropSuppressed } from "@/lib/drop-suppress";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useLayoutStore } from "@/store/layout-store";
 import type { BookWithStatus } from "@/types/simple-book";
@@ -384,9 +385,11 @@ export default function PapersPage() {
   const pdfImportUnlistenRef = useRef<(() => void) | null>(null);
   const { paperEngine } = useConverterStore();
 
-  // 拖拽导入：弹窗开启期间注册 Tauri 拖放事件（窗口级，HTML5 drop 拿不到文件路径，sidecar 需要路径）
+  // 拖拽导入：弹窗开启期间注册 Tauri 拖放事件（窗口级，HTML5 drop 拿不到文件路径，sidecar 需要路径）；
+  // 同时抑制 home-layout 的书籍拖入导入（防 PDF 被双消费）
   useEffect(() => {
     if (!pdfPickerOpen) return;
+    setBookDropSuppressed(true);
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     getCurrentWebviewWindow()
@@ -413,6 +416,7 @@ export default function PapersPage() {
     return () => {
       cancelled = true;
       unlisten?.();
+      setBookDropSuppressed(false);
     };
   }, [pdfPickerOpen]);
 
@@ -1313,7 +1317,7 @@ export default function PapersPage() {
             >
               <FileDown className={clsx("size-8", pdfDragOver ? "text-primary" : "text-neutral-400")} />
               {pdfCandidate ? (
-                <span className="w-full truncate font-medium text-foreground text-sm">
+                <span className="w-full min-w-0 max-w-full truncate font-medium text-foreground text-sm">
                   {pdfCandidate.split(/[\\/]/).pop()}
                 </span>
               ) : (

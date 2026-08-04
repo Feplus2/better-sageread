@@ -23,6 +23,16 @@ interface MathPart {
   display: boolean;
 }
 
+const escapeHtml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** 纯文本（含 $...$）→ HTML 字符串（文本段转义 + KaTeX 段）；供 imperative DOM 场景（chrome-tabs 标题等）使用 */
+export function renderInlineMathHtml(text: string): string {
+  return splitMathParts(text)
+    .map((part) => (part.type === "text" ? escapeHtml(part.value) : renderKaTeX(part.value, part.display)))
+    .join("");
+}
+
 function splitMathParts(text: string): MathPart[] {
   const parts: MathPart[] = [];
   let last = 0;

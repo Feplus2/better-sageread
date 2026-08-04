@@ -11,6 +11,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSlug from "rehype-slug";
+import { rehypeDelTilde } from "./rehype-del-tilde";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { toast } from "sonner";
@@ -1535,8 +1536,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         >
           {hasMetadata && <MetadataBlock metadata={metadata} viewMode={viewMode} translatedMeta={translatedMeta} />}
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeRaw, rehypeKatex, rehypeSlug]}
+            remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+            rehypePlugins={[rehypeRaw, rehypeKatex, rehypeSlug, rehypeDelTilde]}
             components={components}
           >
             {body}
