@@ -4,6 +4,12 @@
 
 ## 待办
 
+### F 批：Agent 与生态（2026-08-04 用户输入）
+- **Agent 能力大升级（"给它双手"）**：让 Agent 拥有读取/创建/写入/修改本地文件的能力 + 运行命令行（Python 指令等）的能力。定位共识：不做专业科研 Agent，但必须能完成基础任务（写报告、跑脚本）。现状盘点：已有 `readLocalFile`/`downloadFile`/`httpRequest`/`extractZip` 等 central 工具（ai/tools/central/），缺**写文件/编辑文件**与**执行命令**两大类；执行命令的安全模型需设计（白名单？沙盒目录？确认制？）
+- **Zotero brain MCP 精简版（默认 MCP 夹带）**：只做 ① 搜数据库 ② 下载 PDF ③ 导入 Zotero ④ 导入 SageRead 解析放进文件夹；剪除解析与向量化（与 SageRead 已实现部分重叠）。作为 SageRead 默认 MCP 存在（用户自述"夹带私货"，但对外不承认与 SageRead 的绑定关系——灰色通道捞 PDF 的版权敏感性，文档与宣传口径注意）
+- **记忆系统（2026-08-04 讨论结论：暂不引入）**：SageRead 的 Agent 目前是任务域助手（阅读/论文/全局），专职记忆系统（mem0 类）复杂度不值当。便宜路径优先：① 文件即记忆——Agent 大升级落地写文件能力后，让它把工作笔记/报告草稿写入指定目录，天然形成可检索的"记忆"；② 对话与标注已经在库（list_threads/get_thread/list_book_notes 已对 MCP 开放，语义检索可查）。等多会话长任务（跨天写报告）成为真实场景后再评估。
+- **全局 Agent 批处理工具（早前记录，批量导入落地后排产）**：一键全部向量化、全部翻译、整理文献归类（依赖 Agent 能力升级与文献库规模上来）
+
 ### E 批：功能与愿景（2026-08-02 用户输入，按优先级排产见当轮结论）
 - ~~**论文导出**~~（✅ 2026-08-03 已消化，见下"论文整篇导出"批；遗留：frontmatter 中文化，见 D 批）
 - ~~**MCP 开放向量库语义查询**~~（✅ 2026-08-03 已消化，见下"sageread-mcp 论文适配 + 语义查询"批）
@@ -33,6 +39,7 @@
 ## 已消化
 
 ### 2026-08-04 阅读体验修复 + 导入后台化批（用户反馈轮）
+- [x] **"高级"导入收纳（2026-08-04 用户拍板）**：目录导入（批量导入/导入论文目录）是普通用户用不上的开发者路径——头部两个按钮收进「高级」下拉（附说明"适用于 Papers_Converter 转换好的目录；普通用户用导入 PDF"）；空状态主按钮改为「导入 PDF」并注明高级路径
 - [x] **图注可见化（两层）**：SageRead 侧 img 组件把 alt 图注渲染为可见 caption（InlineMathText 渲染含公式图注，对存量产物立即生效）；converter 侧根治——renderer 改为「图片行（短 alt）+ 图注正文行（同段软换行）」，图注进 sourceText/RAG/翻译（见下 converter 批）
 - [x] **References 堆叠根治（converter 侧）**：renderer 每条引用前插空行各自成段（此前裸行被 CommonMark 软换行合并成巨型单段）；附带修 paragraph 前驱集合补 image/table_image（图注行与后段粘连隐患）
 - [x] **公式渲染**：新组件 `components/markdown/inline-math-text.tsx`（纯文本+KaTeX 混合，MATH_SEGMENT_RE 切段，失败保留 $ 源码）；应用于论文元数据标题/摘要、papers 列表标题/摘要、标注面板 quote（人工+AI）、图片 caption、论文助手空状态标题、**标签页标题**（app-tabs 加 renderTabTitleHtml 链路，renderInlineMathHtml 字符串渲染；toast 暂不做——瞬时组件且调用点分散）
