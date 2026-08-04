@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getTags } from "@/services/tag-service";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
 import { Trash2 } from "lucide-react";
@@ -71,13 +72,17 @@ export default function DataCleanupButton({ books, onBookUpdate, onRefresh }: Da
   }, [books, onBookUpdate, onRefresh, isCleaningUp]);
 
   return (
-    <button
-      onClick={handleDataCleanup}
-      disabled={isCleaningUp}
-      className="flex items-center justify-center rounded-full p-1 text-neutral-600 transition-colors hover:bg-red-100 hover:text-red-600 dark:text-neutral-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-      title="清理无效标签数据"
-    >
-      <Trash2 size={14} className={isCleaningUp ? "animate-pulse" : ""} />
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={handleDataCleanup}
+          disabled={isCleaningUp}
+          className="flex items-center justify-center rounded-full p-1 text-neutral-600 transition-colors hover:bg-red-100 hover:text-red-600 dark:text-neutral-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+        >
+          <Trash2 size={14} className={isCleaningUp ? "animate-pulse" : ""} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">清理无效标签数据</TooltipContent>
+    </Tooltip>
   );
 }

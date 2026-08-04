@@ -1,5 +1,6 @@
 "use client"
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { exportCodeBlock } from "@/lib/export-code-block";
 import { detectPreviewFormat, getPreviewTitle, isPreviewable } from "@/lib/preview-utils";
 import { cn } from "@/lib/utils";
@@ -61,31 +62,43 @@ function CodeBlock({ children, className, code, language = "plaintext", ...props
         <span className="font-mono text-muted-foreground text-xs">{language}</span>
         <div className="flex items-center gap-0.5">
           {previewable && (
-            <button
-              type="button"
-              onClick={handlePreview}
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="预览"
-            >
-              <Eye className="size-3.5" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handlePreview}
+                  className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Eye className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">预览</TooltipContent>
+            </Tooltip>
           )}
-          <button
-            type="button"
-            onClick={handleExport}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="导出"
-          >
-            <Download className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="复制"
-          >
-            {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleExport}
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Download className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">导出</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">复制</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       {children}

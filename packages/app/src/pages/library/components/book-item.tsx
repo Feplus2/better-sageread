@@ -19,6 +19,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDownloadImage } from "@/hooks/use-download-image";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { BookTag } from "@/pages/library/hooks/use-tags-management";
@@ -404,16 +405,21 @@ export default function BookItem({
     if (effectiveStatus === "processing") {
       const pct = Math.max(0, Math.min(100, vectorizeProgress ?? 0));
       return (
-        <div className="flex items-center gap-1" title={`向量化: processing ${pct}%`}>
-          <div className="relative h-4 w-4" aria-label={`processing ${pct}%`}>
-            <div
-              className="absolute inset-0 rounded-full"
-              style={{ background: `conic-gradient(#eab308 ${pct}%, rgba(229,231,235,0.6) 0)` }}
-            />
-            <div className="absolute inset-[2px] rounded-full bg-white dark:bg-neutral-900" />
-          </div>
-          <span className="text-[10px] text-neutral-500 leading-none dark:text-neutral-400">{pct}%</span>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1">
+              <div className="relative h-4 w-4" aria-label={`processing ${pct}%`}>
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{ background: `conic-gradient(#eab308 ${pct}%, rgba(229,231,235,0.6) 0)` }}
+                />
+                <div className="absolute inset-[2px] rounded-full bg-white dark:bg-neutral-900" />
+              </div>
+              <span className="text-[10px] text-neutral-500 leading-none dark:text-neutral-400">{pct}%</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{`向量化: processing ${pct}%`}</TooltipContent>
+        </Tooltip>
       );
     }
 
@@ -424,9 +430,14 @@ export default function BookItem({
           ? "border-red-500"
           : "border-neutral-400 dark:border-neutral-500";
     return (
-      <div className="flex items-center gap-1" title={`向量化: ${effectiveStatus}`}>
-        <div className={`h-3.5 w-3.5 rounded-full border-2 ${colorClass}`} />
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1">
+            <div className={`h-3.5 w-3.5 rounded-full border-2 ${colorClass}`} />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{`向量化: ${effectiveStatus}`}</TooltipContent>
+      </Tooltip>
     );
   };
 
@@ -519,9 +530,14 @@ export default function BookItem({
                     </div>
                   )}
                   {isCloudOnly && (
-                    <div className="absolute top-1 right-1 rounded-full bg-black/60 p-1" title="仅在云端，点击打开时自动下载">
-                      <Cloud size={12} className="text-white" />
-                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="absolute top-1 right-1 rounded-full bg-black/60 p-1">
+                          <Cloud size={12} className="text-white" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">仅在云端，点击打开时自动下载</TooltipContent>
+                    </Tooltip>
                   )}
                   {isDownloading && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40">
@@ -547,15 +563,20 @@ export default function BookItem({
                 <div className="flex items-center gap-2">
                   {renderVectorizationStatus()}
                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => e.stopPropagation()}
-                        className="rounded p-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-600"
-                      >
-                        <MoreHorizontal className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
-                      </button>
-                    </DropdownMenuTrigger>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded p-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-600"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">更多操作</TooltipContent>
+                    </Tooltip>
                     <DropdownMenuContent align="end" className="w-48">
                       <DropdownMenuItem onClick={() => handleClick()}>打开</DropdownMenuItem>
                       <DropdownMenuSub>

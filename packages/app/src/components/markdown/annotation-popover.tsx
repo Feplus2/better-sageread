@@ -1,6 +1,7 @@
 import { Markdown } from "@/components/prompt-kit/markdown";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsChatPage } from "@/hooks/use-is-chat-page";
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
 import { useChatReaderStore } from "@/store/chat-reader-store";
@@ -123,31 +124,37 @@ export function AnnotationPopover({ chunkId, children }: { chunkId: string; chil
           <div className="flex max-h-[320px] flex-col overflow-hidden bg-muted/80">
             <div className="border-b px-3 py-1 pr-2">
               <div className="flex items-center justify-between">
-                <div
-                  title={chunkData.related_chapter_titles}
-                  className="mr-2 flex-1 truncate font-medium text-foreground"
-                >
-                  {chunkData.related_chapter_titles}
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="mr-2 flex-1 truncate font-medium text-foreground">
+                      {chunkData.related_chapter_titles}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{chunkData.related_chapter_titles}</TooltipContent>
+                </Tooltip>
                 {!isChatPage && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleSearchInReader}
-                    disabled={searching}
-                    className="size-7 flex-shrink-0 rounded-full px-2 text-xs"
-                    title="查看原文"
-                  >
-                    {searching ? (
-                      <>
-                        <Loader className="h-3 w-3 animate-spin" />
-                      </>
-                    ) : (
-                      <>
-                        <SquareArrowOutUpRight className="h-3 w-3" />
-                      </>
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleSearchInReader}
+                        disabled={searching}
+                        className="size-7 flex-shrink-0 rounded-full px-2 text-xs"
+                      >
+                        {searching ? (
+                          <>
+                            <Loader className="h-3 w-3 animate-spin" />
+                          </>
+                        ) : (
+                          <>
+                            <SquareArrowOutUpRight className="h-3 w-3" />
+                          </>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">查看原文</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             </div>

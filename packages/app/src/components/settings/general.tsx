@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getUserThemesDir } from "@/services/global-theme-service";
 import { useThemeStore } from "@/store/theme-store";
 import type { ThemeMode } from "@/styles/themes";
@@ -233,24 +234,32 @@ export default function GeneralSettings() {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button
-                size="sm"
-                variant="outline"
-                className="size-8 p-0"
-                title="打开主题文件夹"
-                onClick={handleOpenThemesFolder}
-              >
-                <FolderOpen className="size-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="size-8 p-0"
-                title="刷新主题列表"
-                onClick={handleRefreshThemes}
-              >
-                <RefreshCw className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="size-8 p-0"
+                    onClick={handleOpenThemesFolder}
+                  >
+                    <FolderOpen className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">打开主题文件夹</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="size-8 p-0"
+                    onClick={handleRefreshThemes}
+                  >
+                    <RefreshCw className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">刷新主题列表</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
@@ -291,12 +300,22 @@ export default function GeneralSettings() {
                 <span className="rounded bg-background px-2 py-1 text-sm dark:bg-neutral-700 dark:text-neutral-300">
                   {dataPath}
                 </span>
-                <Button size="sm" variant="soft" onClick={handleCopyPath} className="size-6 p-0">
-                  {isCopied ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
-                </Button>
-                <Button size="sm" variant="soft" onClick={handleShowInFinder} className="size-6 p-0">
-                  <FolderOpen className="size-3" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="soft" onClick={handleCopyPath} className="size-6 p-0">
+                      {isCopied ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">复制路径</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="soft" onClick={handleShowInFinder} className="size-6 p-0">
+                      <FolderOpen className="size-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">打开数据文件夹</TooltipContent>
+                </Tooltip>
               </div>
             </div>
           </div>

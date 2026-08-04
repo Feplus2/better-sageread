@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DocumentChunk, SearchItem } from "@/types/document";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { invoke } from "@tauri-apps/api/core";
@@ -193,12 +194,14 @@ export default function EmbeddingDialog({ isOpen, onClose, bookId }: EmbeddingDi
                   searchResults.map((r, idx) => (
                     <div key={idx} className="p-3">
                       <div className="mb-2 flex items-center justify-between">
-                        <div
-                          title={r.related_chapter_titles}
-                          className="line-clamp-1 flex-1 overflow-hidden font-medium text-neutral-800 text-sm dark:text-neutral-100"
-                        >
-                          {r.related_chapter_titles || "未知章节"}
-                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="line-clamp-1 flex-1 overflow-hidden font-medium text-neutral-800 text-sm dark:text-neutral-100">
+                              {r.related_chapter_titles || "未知章节"}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{r.related_chapter_titles}</TooltipContent>
+                        </Tooltip>
                         <div className="flex-nowrap text-neutral-500 text-xs dark:text-neutral-400">
                           相似度 {(r.similarity * 100).toFixed(1)}%
                         </div>
@@ -332,7 +335,12 @@ function ChunkDisplay({ chunk }: { chunk: DocumentChunk }) {
           文件内: {chunk.chunk_order_in_file + 1}/{chunk.total_chunks_in_file}
         </span>
         <span>文件地址:</span>
-        <FolderOpen onClick={handleOpenFolder} className="size-3" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <FolderOpen onClick={handleOpenFolder} className="size-3" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">打开所在文件夹</TooltipContent>
+        </Tooltip>
       </div>
 
       <div className="text-neutral-600 text-sm dark:text-neutral-300">{chunk.chunk_text}</div>

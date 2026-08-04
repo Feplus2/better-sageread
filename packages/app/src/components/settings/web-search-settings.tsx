@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type SearchProvider, useWebSearchStore } from "@/store/web-search-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink } from "lucide-react";
@@ -115,12 +116,26 @@ export default function WebSearchSettings() {
               {/* 标题行：名称 + 启用开关 */}
               <div className="flex items-center justify-between">
                 <span className="font-medium text-sm dark:text-neutral-200">{meta.label}</span>
-                <Switch
-                  checked={isEnabled}
-                  onCheckedChange={() => toggleProvider(meta.id)}
-                  disabled={!hasConfig}
-                  title={!hasConfig ? "请先填写配置" : undefined}
-                />
+                {!hasConfig ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Switch
+                          checked={isEnabled}
+                          onCheckedChange={() => toggleProvider(meta.id)}
+                          disabled={!hasConfig}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">请先填写配置</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={() => toggleProvider(meta.id)}
+                    disabled={!hasConfig}
+                  />
+                )}
               </div>
               <p className="mt-1.5 text-neutral-500 text-xs dark:text-neutral-400">{meta.desc}</p>
 

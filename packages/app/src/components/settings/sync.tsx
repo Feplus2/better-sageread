@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   type AssetsStatus,
   type BackupInfo,
@@ -484,10 +485,15 @@ export default function SyncSettings() {
         <div className="flex items-center justify-between pb-2">
           <h2 className="text dark:text-neutral-200">恢复</h2>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={handleRollback} title="撤销最近一次恢复">
-              <RotateCcw className="h-4 w-4" />
-              回滚
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="outline" onClick={handleRollback}>
+                  <RotateCcw className="h-4 w-4" />
+                  回滚
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">撤销最近一次恢复</TooltipContent>
+            </Tooltip>
             <Button size="sm" variant="outline" onClick={refreshBackups} disabled={isLoadingBackups}>
               <RefreshCw className={`h-4 w-4 ${isLoadingBackups ? "animate-spin" : ""}`} />
               刷新
@@ -518,15 +524,20 @@ export default function SyncSettings() {
                   >
                     {restoringName === backup.name ? "恢复中..." : "恢复"}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
-                    disabled={restoringName !== null || deletingName !== null}
-                    onClick={() => handleDeleteBackup(backup)}
-                  >
-                    {deletingName === backup.name ? "删除中..." : <Trash2 className="h-4 w-4" />}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
+                        disabled={restoringName !== null || deletingName !== null}
+                        onClick={() => handleDeleteBackup(backup)}
+                      >
+                        {deletingName === backup.name ? "删除中..." : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">删除备份</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             ))}

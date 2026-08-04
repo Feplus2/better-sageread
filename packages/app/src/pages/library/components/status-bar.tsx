@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Grid3X3, List } from "lucide-react";
 
 interface StatusBarProps {
@@ -18,27 +19,35 @@ export default function StatusBar({ totalBooks, viewMode, onViewModeChange }: St
         <div className="h-4 w-px bg-base-300" />
 
         <div className="flex items-center space-x-1">
-          <button
-            type="button"
-            onClick={() => onViewModeChange("grid")}
-            className={`rounded-lg p-2 transition-colors ${
-              viewMode === "grid" ? "bg-primary text-primary-content" : "text-base-content hover:bg-base-200"
-            }`}
-            title="网格视图"
-          >
-            <Grid3X3 className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onViewModeChange("grid")}
+                className={`rounded-lg p-2 transition-colors ${
+                  viewMode === "grid" ? "bg-primary text-primary-content" : "text-base-content hover:bg-base-200"
+                }`}
+              >
+                <Grid3X3 className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">网格视图</TooltipContent>
+          </Tooltip>
 
-          <button
-            type="button"
-            onClick={() => onViewModeChange("list")}
-            className={`rounded-lg p-2 transition-colors ${
-              viewMode === "list" ? "bg-primary text-primary-content" : "text-base-content hover:bg-base-200"
-            }`}
-            title="列表视图"
-          >
-            <List className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onViewModeChange("list")}
+                className={`rounded-lg p-2 transition-colors ${
+                  viewMode === "list" ? "bg-primary text-primary-content" : "text-base-content hover:bg-base-200"
+                }`}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">列表视图</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

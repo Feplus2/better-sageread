@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   type ConvertProgress,
@@ -250,9 +251,12 @@ export default function ConverterPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-sm dark:text-neutral-100">{pdfName}</p>
-                  <p className="truncate text-muted-foreground text-xs" title={pdfPath}>
-                    {pdfPath}
-                  </p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="truncate text-muted-foreground text-xs">{pdfPath}</p>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{pdfPath}</TooltipContent>
+                  </Tooltip>
                 </div>
                 {!converting && (
                   <Button variant="ghost" size="sm" onClick={handleSelectPdf}>
@@ -334,9 +338,12 @@ export default function ConverterPage() {
             <div className="flex items-baseline justify-between gap-4 px-5 pt-4">
               <div className="min-w-0">
                 <p className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.25em]">转换进度</p>
-                <p className="truncate font-medium dark:text-neutral-100" title={pdfName}>
-                  {pdfName}
-                </p>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className="truncate font-medium dark:text-neutral-100">{pdfName}</p>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{pdfName}</TooltipContent>
+                </Tooltip>
               </div>
               <span className="flex-shrink-0 font-serif text-3xl tabular-nums dark:text-neutral-100">
                 {Math.round(percent)}
@@ -375,9 +382,12 @@ export default function ConverterPage() {
                       )}
                     </div>
                     {s.status === "active" && (
-                      <p className="mt-0.5 truncate text-muted-foreground text-xs" title={detail}>
-                        {detail || "处理中..."}
-                      </p>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="mt-0.5 truncate text-muted-foreground text-xs">{detail || "处理中..."}</p>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{detail}</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                 </li>
@@ -389,9 +399,12 @@ export default function ConverterPage() {
                 <Check className="size-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-emerald-800 text-sm dark:text-emerald-300">转换完成</p>
-                  <p className="truncate text-emerald-600 text-xs dark:text-emerald-500" title={epubPath ?? ""}>
-                    {epubName}
-                  </p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="truncate text-emerald-600 text-xs dark:text-emerald-500">{epubName}</p>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{epubPath ?? ""}</TooltipContent>
+                  </Tooltip>
                 </div>
                 <Button size="sm" onClick={handleImport} disabled={importing}>
                   {importing ? <Loader2 className="size-4 animate-spin" /> : <BookUp className="size-4" />}

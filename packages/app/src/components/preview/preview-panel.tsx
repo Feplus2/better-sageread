@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { exportCodeBlock } from "@/lib/export-code-block";
 import { usePreviewStore } from "@/store/preview-store";
 import { Download, X } from "lucide-react";
@@ -66,18 +67,27 @@ export function PreviewPanel() {
             </span>
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 rounded-full"
-              onClick={() => void exportCodeBlock(item.content, item.language)}
-              title="导出文件"
-            >
-              <Download className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon" className="size-7 rounded-full" onClick={closePreview}>
-              <X className="size-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 rounded-full"
+                  onClick={() => void exportCodeBlock(item.content, item.language)}
+                >
+                  <Download className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">导出文件</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-7 rounded-full" onClick={closePreview}>
+                  <X className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">关闭</TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <div className="flex-1 overflow-hidden">{renderContent()}</div>

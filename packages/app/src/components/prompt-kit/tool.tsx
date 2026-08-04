@@ -1,4 +1,5 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { CheckCircle, ChevronDown, Eye, Loader2, Settings, XCircle } from "lucide-react";
 import { useState } from "react";
@@ -118,36 +119,48 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
                   </span>
                 )}
                 {isMindmap && (output?.results as any)?.title && (
-                  <span
-                    title={(output?.results as any)?.title}
-                    className="flex-1 overflow-hidden truncate font-medium text-sm"
-                  >
-                    {String((output?.results as any)?.title)}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex-1 overflow-hidden truncate font-medium text-sm">
+                        {String((output?.results as any)?.title)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{String((output?.results as any)?.title)}</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 {isMindmap && state === "output-available" && onViewDetail && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      stopScroll();
-                      onViewDetail(toolPart);
-                    }}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          stopScroll();
+                          onViewDetail(toolPart);
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">查看详情</TooltipContent>
+                  </Tooltip>
                 )}
                 {isRagTool && isChatPage && state === "output-available" && onViewDetail && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      stopScroll();
-                      onViewDetail(toolPart);
-                    }}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          stopScroll();
+                          onViewDetail(toolPart);
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">查看详情</TooltipContent>
+                  </Tooltip>
                 )}
                 {!isMindmap && !isRagTool && !isGetSkillsTool && state === "output-available" && (
                   <span className="text-muted-foreground text-sm">

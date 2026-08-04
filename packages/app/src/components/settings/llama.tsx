@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PresetModel } from "@/constants/preset-models";
 import { deleteLocalModel, downloadModelFile, getAppDataDir } from "@/services/model-service";
 import { useLlamaStore } from "@/store/llama-store";
@@ -323,15 +324,19 @@ export default function LlamaSettings() {
                                   <Check size={12} />
                                   已下载
                                 </span>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={(e) => handleDeleteModel(model.filename, e)}
-                                  className="size-5 p-0 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
-                                  title="删除模型"
-                                >
-                                  <Trash2 className="size-3" />
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={(e) => handleDeleteModel(model.filename, e)}
+                                      className="size-5 p-0 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
+                                    >
+                                      <Trash2 className="size-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">删除模型</TooltipContent>
+                                </Tooltip>
                               </>
                             )}
                             {isDownloading && downloadState && (

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type VectorModelConfig, useLlamaStore } from "@/store/llama-store";
 import { normalizeEmbeddingsUrl } from "@/utils/model";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -219,20 +220,28 @@ export default function VectorModelManager() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-3">
                         <span className="font-medium text-neutral-900 text-sm dark:text-neutral-100">{model.name}</span>
-                        <button
-                          onClick={() => handleDelete(model.id, model.name)}
-                          className="p-0 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
-                          title="删除模型"
-                        >
-                          <Trash2 className="size-3" />
-                        </button>
-                        <button
-                          onClick={() => startEdit(model)}
-                          className="p-0 text-neutral-500 hover:text-blue-600 dark:text-neutral-400 dark:hover:text-blue-400"
-                          title="编辑模型"
-                        >
-                          <Edit2 className="size-3" />
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => handleDelete(model.id, model.name)}
+                              className="p-0 text-neutral-500 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400"
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">删除模型</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => startEdit(model)}
+                              className="p-0 text-neutral-500 hover:text-blue-600 dark:text-neutral-400 dark:hover:text-blue-400"
+                            >
+                              <Edit2 className="size-3" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">编辑模型</TooltipContent>
+                        </Tooltip>
                         <button
                           onClick={() => testModel(model)}
                           disabled={testingId === model.id}
@@ -275,9 +284,14 @@ export default function VectorModelManager() {
                   <h4 className="font-medium text-neutral-900 dark:text-neutral-100">
                     {editingId ? "编辑模型配置" : "添加新模型"}
                   </h4>
-                  <Button size="sm" variant="ghost" onClick={resetForm} className="h-8 px-2">
-                    <X size={14} />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="ghost" onClick={resetForm} className="h-8 px-2">
+                        <X size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">关闭</TooltipContent>
+                  </Tooltip>
                 </div>
 
                 <div className="grid gap-4">
