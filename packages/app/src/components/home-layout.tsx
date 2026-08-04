@@ -14,7 +14,7 @@ import { useLlamaStore } from "@/store/llama-store";
 import clsx from "clsx";
 import { Upload as UploadIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Route, Routes } from "react-router";
+import { Route, Routes, useLocation } from "react-router";
 import Sidebar from "./sidebar";
 
 const HomeLayout = () => {
@@ -22,6 +22,9 @@ const HomeLayout = () => {
   const { isSettingsDialogOpen, toggleSettingsDialog } = useAppSettingsStore();
   const insets = useSafeAreaInsets();
   const { isDragOver, handleDragOver, handleDragLeave, handleDrop } = useBookUpload();
+  // 书籍拖入导入只在图书馆相关页生效（其他页面各自接管拖放，如文献库的 PDF 解析导入）
+  const location = useLocation();
+  const bookDropEnabled = location.pathname === "/" || location.pathname === "/trash";
 
   const isInitiating = useRef(false);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
@@ -65,9 +68,9 @@ const HomeLayout = () => {
         "flex h-dvh w-full rounded-xl bg-transparent p-1 py-0 transition-all duration-200",
         isDragOver && "bg-neutral-50 dark:bg-neutral-900/20",
       )}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDragOver={bookDropEnabled ? handleDragOver : undefined}
+      onDragLeave={bookDropEnabled ? handleDragLeave : undefined}
+      onDrop={bookDropEnabled ? handleDrop : undefined}
     >
       <div className="flex h-[calc(100vh-40px)] w-full rounded-xl border bg-background shadow-around">
         {isDragOver && (

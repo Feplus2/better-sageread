@@ -32,7 +32,6 @@ import {
   vectorizePaper,
 } from "@/services/paper-service";
 import { Progress } from "@/components/ui/progress";
-import { setBookDropSuppressed } from "@/lib/drop-suppress";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useLayoutStore } from "@/store/layout-store";
 import type { BookWithStatus } from "@/types/simple-book";
@@ -384,12 +383,17 @@ export default function PapersPage() {
   const [pdfImport, setPdfImport] = useState<PdfImportState | null>(null);
   const pdfImportUnlistenRef = useRef<(() => void) | null>(null);
   const { paperEngine } = useConverterStore();
+  // 事件回调里读取最新 selection（拖放监听挂载一次，闭包不能捕获渲染期状态）
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const pdfPickerOpenRef = useRef(pdfPickerOpen);
+  pdfPickerOpenRef.current = pdfPickerOpen;
+  const runPdfImportRef = useRef<(path: string) => void>(() => {});
 
-  // 拖拽导入：弹窗开启期间注册 Tauri 拖放事件（窗口级，HTML5 drop 拿不到文件路径，sidecar 需要路径）；
-  // 同时抑制 home-layout 的书籍拖入导入（防 PDF 被双消费）
+  // 页面级拖放导入：拖 PDF 到文献库页任意位置直接开始解析（弹窗开启时落入候选区）。
+  // 用 Tauri onDragDropEvent（HTML5 drop 拿不到文件路径，sidecar 需要路径）；
+  // 书籍拖入已由 home-layout 限定在图书馆页，本页无冲突。
   useEffect(() => {
-    if (!pdfPickerOpen) return;
-    setBookDropSuppressed(true);
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     getCurrentWebviewWindow()
@@ -402,11 +406,16 @@ export default function PapersPage() {
         } else if (payload.type === "drop") {
           setPdfDragOver(false);
           const path = payload.paths[0];
-          if (path?.toLowerCase().endsWith(".pdf")) {
-            setPdfCandidate(path);
-          } else {
-            toast.error("请拖入 PDF 文件");
+          if (!path) return;
+          if (!path.toLowerCase().endsWith(".pdf")) {
+            toast.error("文献库只支持导入 PDF（书籍请去图书馆页拖入）");
+            return;
           }
+          if (pdfPickerOpenRef.current) {
+            setPdfCandidate(path);
+            return;
+          }
+          runPdfImportRef.current(path);
         }
       })
       .then((off) => {
@@ -416,9 +425,9 @@ export default function PapersPage() {
     return () => {
       cancelled = true;
       unlisten?.();
-      setBookDropSuppressed(false);
     };
-  }, [pdfPickerOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 监听只挂一次，状态经 ref 读取
+  }, []);
 
   // 成功态进度卡 6 秒后自动消失（失败/取消态保留待手动关闭）
   useEffect(() => {
@@ -799,12 +808,17 @@ export default function PapersPage() {
     }
   };
 
-  /** 开始解析：关闭选择弹窗，任务转入后台（右下角进度卡呈现），完成后 toast 提醒 */
-  const handleStartPdfImport = async () => {
-    if (!pdfCandidate) return;
-    const pdfPath = pdfCandidate;
-    setPdfPickerOpen(false);
-    setPdfCandidate(null);
+  /** 统一的解析启动入口（弹窗确认与页面拖入共用）：Token 检查 + 进行中守卫 + 后台进度卡 */
+  const runPdfImport = async (pdfPath: string) => {
+    const tokenError = paperEngineTokenError(paperEngine);
+    if (tokenError) {
+      toast.error(tokenError);
+      return;
+    }
+    if (pdfImport?.status === "running") {
+      toast.info("已有解析任务进行中");
+      return;
+    }
 
     const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
     setPdfImport({ status: "running", fileName, percent: 0, detail: "启动解析…", stages: buildPdfStages() });
@@ -830,7 +844,7 @@ export default function PapersPage() {
         }
         if (progress.type === "done" && progress.paper_dir) {
           try {
-            const folderId = selection.kind === "folder" ? selection.id : undefined;
+            const folderId = selectionRef.current.kind === "folder" ? selectionRef.current.id : undefined;
             const result = await importPapers(progress.paper_dir, folderId);
             setPdfImport((prev) =>
               prev
@@ -883,6 +897,18 @@ export default function PapersPage() {
         prev ? { ...prev, status: "error", error: error instanceof Error ? error.message : String(error) } : prev,
       );
     }
+  };
+  runPdfImportRef.current = (path) => {
+    void runPdfImport(path);
+  };
+
+  /** 开始解析：关闭选择弹窗，任务转入后台（右下角进度卡呈现），完成后 toast 提醒 */
+  const handleStartPdfImport = async () => {
+    if (!pdfCandidate) return;
+    const pdfPath = pdfCandidate;
+    setPdfPickerOpen(false);
+    setPdfCandidate(null);
+    await runPdfImport(pdfPath);
   };
 
   /** 取消解析：kill 子进程并立即收尾（terminated 事件会兜底一次，幂等） */
@@ -1393,6 +1419,16 @@ export default function PapersPage() {
             <p className="truncate text-green-600 text-xs dark:text-green-400">{pdfImport.detail}</p>
           )}
           {pdfImport.status === "error" && <p className="text-red-600 text-xs dark:text-red-400">{pdfImport.error}</p>}
+        </div>
+      )}
+
+      {/* 页面级拖入感应遮罩（拖 PDF 到文献库页任意位置直接解析） */}
+      {pdfDragOver && !pdfPickerOpen && (
+        <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-2xl border-2 border-primary border-dashed bg-primary/5">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <FileDown className="size-10" />
+            <span className="font-medium text-sm">松开导入 PDF 并解析</span>
+          </div>
         </div>
       )}
 
