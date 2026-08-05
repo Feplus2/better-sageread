@@ -8,8 +8,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures-util",
+ "globset",
  "jan-utils",
  "log",
+ "regex",
  "reqwest 0.12.23",
  "rusqlite",
  "serde",

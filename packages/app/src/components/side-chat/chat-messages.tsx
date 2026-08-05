@@ -37,6 +37,7 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   ragToc: "章节内容",
   ragContext: "扩展上下文",
   ragRange: "范围检索",
+  readBookSection: "章节原文",
   notes: "笔记查询",
   getBooks: "书籍列表",
   getReadingStats: "阅读统计",
@@ -52,6 +53,15 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   getCitations: "参考文献",
   getFigures: "图片清单",
   managePaperFolders: "文件夹管理",
+  manageBook: "书籍管理",
+  manageSync: "备份同步",
+  managePreferences: "偏好设置",
+  manageThreads: "对话管理",
+  manageSkill: "技能管理",
+  writeFile: "写入文件",
+  editFile: "编辑文件",
+  runCommand: "执行命令",
+  searchFiles: "搜索文件",
 };
 
 interface ChatMessagesProps {

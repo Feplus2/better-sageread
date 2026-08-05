@@ -2,6 +2,7 @@ export { ragSearchTool, createRagSearchTool } from "./rag-search";
 export { ragRangeTool, createRagRangeTool } from "./rag-range";
 export { ragTocTool, createRagTocTool } from "./rag-toc";
 export { ragContextTool, createRagContextTool } from "./rag-context";
+export { createReadBookSectionTool } from "./read-book-section";
 export { getSkillsTool } from "./get-skills";
 export { getBooksTool } from "./book";
 export { getReadingStatsTool } from "./reading-stats";

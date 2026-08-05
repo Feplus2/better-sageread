@@ -39,7 +39,7 @@ export const managePaperFoldersTool = tool({
 结构化操作结果 + 一句话 message
 
 ⚠️ **什么时候别用**：
-• 删除论文本身——请用 deleteBook；本工具只管文件夹与归属关系
+• 删除论文本身——请用 manageBook(action=delete)；本工具只管文件夹与归属关系
 • 书籍（EPUB）没有文件夹概念，本工具仅适用于文献库`,
 
   inputSchema: z.object({

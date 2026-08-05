@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useProviderStore } from "@/store/provider-store";
 import { ChevronRight, Server } from "lucide-react";
 import { useState } from "react";
+import AgentSettings from "./agent-settings";
 import ConverterSettings from "./converter";
 import FontManager from "./font-manager";
 import GeneralSettings from "./general";
@@ -41,6 +42,7 @@ type SettingsKey =
   | "sync"
   | "converter"
   | "web-search"
+  | "agent"
   | "model-providers"
   | "shortcuts"
   | "provider-openai"
@@ -98,6 +100,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     { key: "llama", label: "向量模型" },
     { key: "tts", label: "语音模型" },
     { key: "web-search", label: "网络搜索" },
+    { key: "agent", label: "Agent" },
     { key: "sync", label: "数据同步" },
     { key: "converter", label: "PDF 转换" },
     {
@@ -140,6 +143,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         return <ConverterSettings />;
       case "web-search":
         return <WebSearchSettings />;
+      case "agent":
+        return <AgentSettings />;
       case "model-providers":
         return (
           <ProvidersSettings onProviderSelect={(providerId) => setActiveKey(`provider-${providerId}` as SettingsKey)} />

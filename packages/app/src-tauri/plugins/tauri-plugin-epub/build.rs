@@ -4,6 +4,7 @@ const COMMANDS: &[&str] = &[
     "search_db",
     "convert_to_mdbook",
     "parse_toc",
+    "read_book_section",
     "get_chunk_with_context",
     "get_toc_chunks",
     "get_chunks_by_range",

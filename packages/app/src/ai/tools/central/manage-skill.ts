@@ -1,9 +1,17 @@
 /**
- * 全局助手工具：创建/更新技能
+ * 全局助手工具：创建/更新/启用停用技能
  *
  * 使 Agent 能够自主安装技能（如从下载的 skill 包中读取内容并注册）。
+ * 合并自原 toggleSkill 工具，toggle 动作执行逻辑原样搬入
  */
-import { createSkill, getSkills, parseSkillScopes, serializeSkillScopes, updateSkill } from "@/services/skill-service";
+import {
+  createSkill,
+  getSkills,
+  parseSkillScopes,
+  serializeSkillScopes,
+  toggleSkillActive,
+  updateSkill,
+} from "@/services/skill-service";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -16,25 +24,29 @@ function normalizeScope(input: string[] | string | undefined): string {
 }
 
 export const manageSkillTool = tool({
-  description: `创建或更新 AI 技能（Skill）。
+  description: `创建、更新或启用/停用 AI 技能（Skill）。
 
 🎯 **核心功能**：
 • create：注册新技能（名称 + 内容 + 生效范围）
 • update：更新已有技能的内容或名称
+• toggle：启用/停用某个技能（按名称模糊匹配；不传 skillName 时列出全部技能及其启用状态）
 • 技能 = 标准操作流程（SOP），Agent 在匹配场景时按技能内容执行
 
 📋 **典型场景**：
 • 用户发来 skill 文件内容 → 读取后调用 create 注册
 • 用户要求修改某个技能 → 调用 update
+• 用户要求启用/停用某个技能 → 调用 toggle
 
 📊 **返回内容**：
-操作结果（技能 ID、名称）`,
+操作结果（技能 ID、名称）；toggle 返回切换后的技能状态或技能清单`,
 
   inputSchema: z.object({
     reasoning: z.string().min(1).describe("调用此工具的原因"),
-    action: z.enum(["create", "update"]).describe("create=新建技能, update=更新已有技能"),
-    name: z.string().min(1).describe("技能名称"),
-    content: z.string().min(1).describe("技能内容（Markdown 格式的 SOP）"),
+    action: z
+      .enum(["create", "update", "toggle"])
+      .describe("create=新建技能, update=更新已有技能, toggle=启用/停用技能"),
+    name: z.string().optional().describe("技能名称（create/update 时必填）"),
+    content: z.string().optional().describe("技能内容（Markdown 格式的 SOP；create/update 时必填）"),
     scope: z
       .union([z.array(skillScopeEnum), z.string()])
       .optional()
@@ -42,6 +54,7 @@ export const manageSkillTool = tool({
         '生效范围：数组（如 ["reader","paper"]）或逗号分隔串；可选值 reader/central/paper，缺省 reader,central',
       ),
     skillId: z.string().optional().describe("update 时必填：要更新的技能 ID"),
+    skillName: z.string().optional().describe("toggle 时用：技能名称（模糊匹配；不传则列出全部技能）"),
   }),
 
   execute: async ({
@@ -51,14 +64,65 @@ export const manageSkillTool = tool({
     content,
     scope,
     skillId,
+    skillName,
   }: {
     reasoning: string;
-    action: "create" | "update";
-    name: string;
-    content: string;
+    action: "create" | "update" | "toggle";
+    name?: string;
+    content?: string;
     scope?: ("reader" | "central" | "paper")[] | string;
     skillId?: string;
+    skillName?: string;
   }) => {
+    // ==================== 启用/停用技能（原 toggleSkill） ====================
+    if (action === "toggle") {
+      try {
+        const skills = await getSkills();
+
+        if (!skillName?.trim()) {
+          return {
+            results: {
+              success: true,
+              skills: skills.map((s) => ({ id: s.id, name: s.name, active: s.isActive, scope: s.scope })),
+            },
+            meta: { reasoning },
+          };
+        }
+
+        const q = skillName.trim().toLowerCase();
+        const hit =
+          skills.find((s) => s.name.toLowerCase() === q) ?? skills.find((s) => s.name.toLowerCase().includes(q));
+        if (!hit) {
+          return {
+            results: {
+              success: false,
+              message: `没有找到技能「${skillName}」。现有技能：${skills.map((s) => s.name).join("、") || "无"}`,
+            },
+            meta: { reasoning },
+          };
+        }
+
+        const updated = await toggleSkillActive(hit.id);
+        return {
+          results: {
+            success: true,
+            message: `技能「${updated.name}」已${updated.isActive ? "启用" : "停用"}`,
+            skill: { id: updated.id, name: updated.name, active: updated.isActive },
+          },
+          meta: { reasoning },
+        };
+      } catch (error) {
+        throw new Error(`切换技能状态失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (!name?.trim() || !content?.trim()) {
+      return {
+        results: { success: false, message: `action=${action} 需要提供 name 和 content` },
+        meta: { reasoning, action },
+      };
+    }
+
     const scopeStr = normalizeScope(scope);
     try {
       if (action === "create") {

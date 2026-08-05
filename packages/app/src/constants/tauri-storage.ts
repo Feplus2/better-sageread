@@ -6,4 +6,6 @@ export const tauriStorageKey = {
   converterStore: "converter-store",
   quickCommands: "quick-commands",
   mcpServers: "mcp-servers",
+  agentSettings: "agent-settings",
+  chatSettings: "chat-settings",
 } as const;

@@ -23,6 +23,7 @@ import { useState } from "react";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
+import { AgentConfirmCard } from "./agent-confirm-card";
 import { ChatInputArea } from "./chat-input-area";
 import { ChatMessages } from "./chat-messages";
 import { ChatThreads } from "./chat-threads";
@@ -259,17 +260,20 @@ function ChatContent({ bookId }: ChatContentProps) {
       )}
 
       {!showThreads && bookId && (
-        <ChatInputArea
-          input={input}
-          setInput={setInput}
-          references={references}
-          onRemoveReference={handleRemoveReference}
-          onSubmit={handleSubmit}
-          onStop={stop}
-          status={status}
-          activeBookId={bookId}
-          setActiveBookId={() => {}}
-        />
+        <>
+          <AgentConfirmCard />
+          <ChatInputArea
+            input={input}
+            setInput={setInput}
+            references={references}
+            onRemoveReference={handleRemoveReference}
+            onSubmit={handleSubmit}
+            onStop={stop}
+            status={status}
+            activeBookId={bookId}
+            setActiveBookId={() => {}}
+          />
+        </>
       )}
 
       <MindmapDialog open={showMindmapDialog} onOpenChange={setShowMindmapDialog} toolPart={toolDetail} />

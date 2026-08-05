@@ -2,12 +2,15 @@ import { processTextWithAnnotations } from "@/components/markdown";
 import { cn } from "@/lib/utils";
 import { getFullPathFromAppData } from "@/utils/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import "katex/dist/katex.min.css";
 import { marked } from "marked";
 import { memo, useEffect, useId, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { CodeBlock, CodeBlockCode } from "./code-block";
 
 export type MarkdownProps = {
@@ -19,7 +22,16 @@ export type MarkdownProps = {
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
   const tokens = marked.lexer(markdown);
-  return tokens.map((token) => token.raw);
+  return tokens.map((token) => {
+    // remark-math 只把多行 $$…$$ 识别为行间公式，整段一行的 $$…$$ 会被当行内公式。
+    // 对"整段只有一行 $$…$$"的段落改写成多行形式，让行间公式正确出 .katex-display。
+    if (token.type === "paragraph") {
+      const raw = token.raw.replace(/\n+$/, "");
+      const m = raw.match(/^\$\$([^\n]+)\$\$$/);
+      if (m) return `$$\n${m[1]}\n$$`;
+    }
+    return token.raw;
+  });
 }
 
 function extractLanguage(className?: string): string {
@@ -116,7 +128,11 @@ const MemoizedMarkdownBlock = memo(
     components?: Partial<Components>;
   }) {
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={components}
+      >
         {content}
       </ReactMarkdown>
     );

@@ -6,6 +6,7 @@ permissions = [
     "allow-search-db",
     "allow-convert-to-mdbook",
     "allow-parse-toc",
+    "allow-read-book-section",
     "allow-get-chunk-with-context",
     "allow-get-toc-chunks",
     "allow-get-chunks-by-range",

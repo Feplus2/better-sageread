@@ -13,6 +13,28 @@ use crate::models::{
 };
 use epub2mdbook::convert_epub_to_mdbook;
 
+/// 按章节标题直读 EPUB 小节原文（P3 兜底：未向量化的书也给阅读助手真实正文通道）。
+/// 不依赖向量索引与 mdbook 产物，随读随解析。
+#[tauri::command]
+pub async fn read_book_section<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    book_id: String,
+    chapter_title: String,
+    max_chars: Option<usize>,
+) -> Result<crate::epub::SectionReadResult, String> {
+    if book_id.trim().is_empty() || chapter_title.trim().is_empty() {
+        return Err("book_id / chapter_title is empty".into());
+    }
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let epub_path = app_data_dir.join("books").join(&book_id).join("book.epub");
+    if !epub_path.exists() {
+        return Err(format!("未找到书籍文件: {}", book_id));
+    }
+    let reader = EpubReader::new().map_err(|e| e.to_string())?;
+    reader.read_section(&epub_path, chapter_title.trim(), max_chars.unwrap_or(8000).clamp(500, 30000))
+}
+
 /// Parse an EPUB under $AppData/books/{book_id} and return basic metadata.
 #[tauri::command]
 pub async fn parse_epub<R: Runtime>(

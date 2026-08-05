@@ -7,7 +7,9 @@ import { ArrowUp, Paperclip, Quote, X } from "lucide-react";
 import { useRef } from "react";
 import { getCommandIcon } from "./command-icons";
 import { ContextPopover } from "./context-popover";
+import { ReasoningLevelSelector } from "./reasoning-level-selector";
 import { SearchEngineSelector } from "./search-engine-selector";
+import { WorkspaceChip } from "./workspace-chip";
 
 interface ChatInputAreaProps {
   references: ChatReference[];
@@ -91,7 +93,10 @@ export function ChatInputArea({
         >
           {isChatPage && (
             <div className="flex items-center justify-between gap-2 py-2">
-              <ContextPopover activeBookId={activeBookId} setActiveBookId={setActiveBookId} />
+              <div className="flex items-center gap-2">
+                <ContextPopover activeBookId={activeBookId} setActiveBookId={setActiveBookId} />
+                <WorkspaceChip />
+              </div>
               <div className="flex flex-wrap items-center gap-2 ">
                 {quickActions.map(({ id, label, prompt, icon }) => {
                   const Icon = getCommandIcon(icon);
@@ -158,6 +163,7 @@ export function ChatInputArea({
                 </Button>
               </PromptInputAction>
               <SearchEngineSelector />
+              <ReasoningLevelSelector />
             </div>
 
             <PromptInputAction tooltip={status === "ready" ? "发送" : "停止"} side="top">

@@ -5,6 +5,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
+import { type ReasoningLevel, chatReasoningBodyPatch } from "./reasoning-map";
 
 export interface ProviderConfig {
   providerId: string;
@@ -14,6 +15,8 @@ export interface ProviderConfig {
   disableThinking?: boolean;
   /** 模型 ID（关闭思考参数按模型分档时用，如 Kimi K3 用 reasoning_effort、思考专用模型不下发） */
   modelId?: string;
+  /** 聊天模型：按请求时刻的用户档位动态打思考强度补丁（P3，分档表见 reasoning-map.ts） */
+  reasoningLevelRef?: () => ReasoningLevel;
 }
 
 /** 按端点/模型求"关闭思考"请求体补丁；不认识或关不掉的返回 null（不乱发防 400） */
@@ -24,18 +27,32 @@ function thinkingOffPatch(
 ): ((body: Record<string, unknown>) => void) | null {
   const id = (modelId ?? "").toLowerCase();
   // DeepSeek V4：thinking 默认开启，thinking:{type:"disabled"} 关闭（官方文档）
-  if (providerId === "deepseek") return (body) => void (body.thinking = { type: "disabled" });
+  if (providerId === "deepseek")
+    return (body) => {
+      body.thinking = { type: "disabled" };
+    };
   const host = (baseUrl ?? "").toLowerCase();
   // GLM（智谱 bigmodel）：thinking:{type:"disabled"}
-  if (host.includes("bigmodel.cn")) return (body) => void (body.thinking = { type: "disabled" });
+  if (host.includes("bigmodel.cn"))
+    return (body) => {
+      body.thinking = { type: "disabled" };
+    };
   // Qwen（阿里 dashscope）：enable_thinking:false
-  if (host.includes("dashscope")) return (body) => void (body.enable_thinking = false);
+  if (host.includes("dashscope"))
+    return (body) => {
+      body.enable_thinking = false;
+    };
   // Kimi（Moonshot）：K3 系列用顶层 reasoning_effort（low/high/max），K2.x 混合模型用 thinking disabled；
   // 思考专用型号（kimi-k2-thinking 等）关不掉，不下发
   if (host.includes("moonshot") || host.includes("kimi.com") || host.includes("kimi.ai")) {
-    if (/^(kimi-)?k3/.test(id)) return (body) => void (body.reasoning_effort = "low");
+    if (/^(kimi-)?k3/.test(id))
+      return (body) => {
+        body.reasoning_effort = "low";
+      };
     if (id.includes("thinking")) return null;
-    return (body) => void (body.thinking = { type: "disabled" });
+    return (body) => {
+      body.thinking = { type: "disabled" };
+    };
   }
   return null;
 }
@@ -69,14 +86,61 @@ function wrapThinkingOffFetch(
 }
 
 /**
+ * 聊天模型的动态思考强度包装（P3）：每次请求时读取当前档位，按端点分档表打请求体补丁
+ * （DeepSeek/GLM/Qwen/Kimi；AI SDK 原生参数族走 transport 的 providerOptions，不经这里）。
+ * 端点 400 报思考参数相关错误时去掉补丁重放一次（防端点变更击穿聊天）。
+ */
+function wrapChatReasoningFetch(
+  base: typeof fetch | undefined,
+  providerId: string,
+  baseUrl: string | undefined,
+  modelId: string | undefined,
+  levelRef: () => ReasoningLevel,
+): typeof fetch {
+  const inner = base ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
+  return async (input, init) => {
+    if (!init?.body || typeof init.body !== "string") return inner(input, init);
+    let patched: RequestInit;
+    let didPatch = false;
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      const patch = chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
+      if (patch) {
+        patch(body);
+        didPatch = true;
+      }
+      patched = { ...init, body: JSON.stringify(body) };
+    } catch {
+      return inner(input, init); // 非 JSON 请求体原样透传
+    }
+    const res = await inner(input, patched);
+    if (didPatch && res.status === 400) {
+      const text = await res
+        .clone()
+        .text()
+        .catch(() => "");
+      if (/thinking|reasoning|enable_thinking/i.test(text)) return inner(input, init);
+    }
+    return res;
+  };
+}
+
+/**
  * 动态创建AI提供商实例
  */
 export function createProviderInstance(config: ProviderConfig) {
-  const { providerId, apiKey, baseUrl, disableThinking, modelId } = config;
+  const { providerId, apiKey, baseUrl, disableThinking, modelId, reasoningLevelRef } = config;
   // 关闭思考补丁：仅轻量任务（disableThinking）且端点认识时生效
   const patch = disableThinking ? thinkingOffPatch(providerId, baseUrl, modelId) : null;
-  const wrappedDefault = patch ? wrapThinkingOffFetch(undefined, patch) : undefined;
-  const maybeWrap = (base?: typeof fetch) => (patch ? wrapThinkingOffFetch(base, patch) : base);
+  // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
+  const wrapFetch = (base?: typeof fetch): typeof fetch | undefined => {
+    let f = base;
+    if (patch) f = wrapThinkingOffFetch(f, patch);
+    if (reasoningLevelRef) f = wrapChatReasoningFetch(f, providerId, baseUrl, modelId, reasoningLevelRef);
+    return f;
+  };
+  const wrappedDefault = patch || reasoningLevelRef ? wrapFetch(undefined) : undefined;
+  const maybeWrap = (base?: typeof fetch) => wrapFetch(base) ?? base;
 
   switch (providerId) {
     case "deepseek":
@@ -135,7 +199,11 @@ export function createProviderInstance(config: ProviderConfig) {
 /**
  * 根据提供商ID和模型ID创建模型实例
  */
-export function createModelInstance(providerId: string, modelId: string, opts?: { disableThinking?: boolean }) {
+export function createModelInstance(
+  providerId: string,
+  modelId: string,
+  opts?: { disableThinking?: boolean; reasoningLevelRef?: () => ReasoningLevel },
+) {
   // 从store获取提供商配置
   const { modelProviders } = useProviderStore.getState();
   const provider = modelProviders.find((p) => p.provider === providerId);
@@ -160,6 +228,7 @@ export function createModelInstance(providerId: string, modelId: string, opts?: 
     baseUrl: provider.baseUrl,
     disableThinking: opts?.disableThinking,
     modelId,
+    reasoningLevelRef: opts?.reasoningLevelRef,
   });
 
   // 返回模型实例

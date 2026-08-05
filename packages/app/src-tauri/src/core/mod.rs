@@ -1,3 +1,4 @@
+pub mod agent_ws;
 pub mod books;
 pub mod converter;
 pub mod database;

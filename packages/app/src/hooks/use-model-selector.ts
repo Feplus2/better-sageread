@@ -1,4 +1,5 @@
 import { createModelInstance } from "@/ai/providers/factory";
+import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { useCallback, useEffect, useMemo } from "react";
 
@@ -51,7 +52,10 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
     if (!selectedModel) return null;
 
     try {
-      return createModelInstance(selectedModel.providerId, selectedModel.modelId);
+      // 聊天模型：挂动态思考强度包装（P3；按请求时刻档位打补丁，映射表不认的端透传）
+      return createModelInstance(selectedModel.providerId, selectedModel.modelId, {
+        reasoningLevelRef: () => useChatSettingsStore.getState().reasoningLevel,
+      });
     } catch (error) {
       console.error("Failed to create model instance:", error);
       return null;

@@ -312,6 +312,63 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         }
     }
 
+    // 阅读助手系统提示词 v2.2（2026-08-05）：P1 写工具下放 shared（reader/paper 整理笔记落盘），
+    // 追加「文件工具 + 长期记忆」两节。追加式手术：只在仍是官方文案（含思维导图收尾句）时执行，
+    // 用户自定义过的不动；第二次运行因已含锚点自然幂等。与 default-skills.json 同文案。
+    let result = sqlx::query(
+        "UPDATE skills SET content = content || ?, updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%生成思维导图一定不要输出图片%'
+           AND content NOT LIKE '%文件工具（笔记整理落盘）%'",
+    )
+    .bind("\n\n—— 文件工具（笔记整理落盘） ——\n你可以把整理好的阅读笔记/摘要写入本地文件（Agent 工作区，根目录见系统注入的「—— 当前工作区 ——」段）：\n• **writeFile** - 写入文件（整文件创建/覆盖，自动建父目录）\n• **editFile** - 精确修改文件局部（oldString 精确匹配，唯一命中）\n• **readLocalFile** - 读取本地文件（带行号，offset/limit 分页）\n• **searchFiles** - 搜索工作区文件（glob 按名 / grep 按内容）\n• **runCommand** - 在工作区执行命令行（数据处理/画图脚本等；执行前会弹确认卡等用户裁决）\n• **exportNotes** - 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）\n界内操作直接执行，界外写入会弹确认卡由用户决定。\n\n—— 长期记忆 ——\n工作区根目录下的 memory.md 是你的持久记忆文件（内容见【长期记忆】段，如有）。用户分享偏好、做出决定、给出长期事实，或明确要求「记住」时，用 writeFile/editFile 更新它（不存在则创建）；按主题分节、保持精炼（200 行内），只记跨对话有价值的信息。")
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.2 (file tools + memory).");
+        }
+    }
+
+    // 阅读助手系统提示词 v2.3（2026-08-05）：RAG 提示词侧收口（backlog D 批「RAG 精度增强」结论）——
+    // RAG 小节补「查询构造」条目（英文书用英文术语、复杂问题拆 2-3 个措辞分次检索）。
+    // 手术式插入（锚点 = 基本原则行首），只在仍是官方文案时执行；已含锚点自然幂等。
+    let result = sqlx::query(
+        "UPDATE skills SET content = REPLACE(content, '• **基本原则**：ragSearch 快速定位', ? || '• **基本原则**：ragSearch 快速定位'), updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%• **基本原则**：ragSearch 快速定位%'
+           AND content NOT LIKE '%查询构造%'",
+    )
+    .bind("• **查询构造** - 检索词即查询质量：英文书籍用英文术语检索（中文问题先把核心概念译成英文术语）；复杂问题拆 2-3 个不同措辞分次检索，比一次长查询召回更全\n\n")
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.3 (query construction).");
+        }
+    }
+
+    // 阅读助手系统提示词 v2.4（2026-08-05）：readBookSection 常驻注册后，
+    // 「未向量化就直接基于知识回答」的旧指引会误导——改为「RAG 无结果时改用 readBookSection 直读原文」。
+    // 手术式替换，只在仍是官方文案时执行；已含新文案自然幂等。
+    let result = sqlx::query(
+        "UPDATE skills SET content = REPLACE(content, '以及**当前书未向量化时**（RAG 工具不可用，直接基于元信息和你的知识回答，并说明原因）', ?), updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%当前书未向量化时**（RAG 工具不可用%'
+           AND content NOT LIKE '%readBookSection 按目录标题直读原文%'",
+    )
+    .bind("以及**本书未建索引时**（RAG 检索不到内容属正常——改用 readBookSection 按目录标题直读原文再作答，不要凭印象编造）")
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.4 (readBookSection fallback guidance).");
+        }
+    }
+
     // book_notes.category（C2 AI 重点标注的类别 id，如 goal/methods；NULL=人工标注）
     let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN category TEXT")
         .execute(pool)

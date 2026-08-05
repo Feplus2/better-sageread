@@ -2,7 +2,7 @@
  * 全局助手工具：从本地路径导入阅读字体（.woff2/.ttf，ttf 自动转 woff2）
  *
  * 导入的是书籍正文可用的自定义字体（设置 → 字体管理同款），
- * 导入后可通过 readerPreferences 的 fontName 直接启用
+ * 导入后可通过 managePreferences(action=reader) 的 fontName 直接启用
  */
 import { uploadFontByPath } from "@/services/font-service";
 import { useFontStore } from "@/store/font-store";
@@ -14,7 +14,7 @@ export const importFontTool = tool({
 
 🎯 **核心功能**：
 • 支持 .woff2 和 .ttf 文件（ttf 自动转换为 woff2）
-• 导入后即可在阅读设置中选用（也可让我用 readerPreferences 直接切换）
+• 导入后即可在阅读设置中选用（也可让我用 managePreferences(action=reader) 直接切换）
 
 📋 **前提条件**：需要字体文件的绝对路径（如 D:\\Fonts\\LXGW.woff2）
 

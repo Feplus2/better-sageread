@@ -1,6 +1,7 @@
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import { ScrollButton } from "@/components/prompt-kit/scroll-button";
+import { AgentConfirmCard } from "@/components/side-chat/agent-confirm-card";
 import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages, TOOL_NAME_MAP } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
@@ -325,6 +326,7 @@ function ChatPage() {
 
                 <div className="py-2">
                   <div id="chat-sidebar" className="mx-auto max-w-4xl">
+                    <AgentConfirmCard />
                     <ChatInputArea
                       input={input}
                       setInput={setInput}

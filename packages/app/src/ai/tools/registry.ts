@@ -10,34 +10,28 @@ import { useLlamaStore } from "@/store/llama-store";
 import type { CoreTool } from "ai";
 import {
   askAppHelpTool,
-  backupNowTool,
-  backupRestoreTool,
   convertPdfTool,
-  deleteBookTool,
   downloadFileTool,
+  editFileTool,
   exportNotesTool,
-  exportThreadsTool,
   extractZipTool,
-  getThreadsTool,
   httpRequestTool,
   importBookTool,
   importFontTool,
+  manageBookTool,
   managePaperFoldersTool,
+  managePreferencesTool,
   manageSkillTool,
+  manageSyncTool,
   manageTagsTool,
   manageThreadsTool,
-  openBookTool,
   readLocalFileTool,
-  readerPreferencesTool,
-  resetProgressTool,
-  setThemeTool,
+  runCommandTool,
+  searchFilesTool,
   switchModelTool,
-  syncNowTool,
-  syncPreferencesTool,
-  toggleSkillTool,
   trashManagerTool,
-  uiPreferencesTool,
   vectorizeBookTool,
+  writeFileTool,
 } from "./central";
 import {
   createGetCitationsTool,
@@ -52,6 +46,7 @@ import {
   createRagRangeTool,
   createRagSearchTool,
   createRagTocTool,
+  createReadBookSectionTool,
   getBooksTool,
   getReadingStatsTool,
   getSkillsTool,
@@ -139,22 +134,60 @@ registerTools([
     tool: webSearchTool as CoreTool,
     description: "网络搜索",
   },
+  // P1 · 工作区文件/执行工具（2026-08-05 拍板下放：reader/paper 读着读着整理笔记落盘是直觉场景；
+  // 安全分档由 transport 的 tool-guard 统一包装，三 scope 一致生效；网络外发类仍锁 central）
+  {
+    name: "readLocalFile",
+    scope: "shared",
+    tool: readLocalFileTool as CoreTool,
+    description: "读取本地文件（行号分页）/列出目录",
+  },
+  {
+    name: "writeFile",
+    scope: "shared",
+    tool: writeFileTool as CoreTool,
+    description: "写入本地文件（工作区内静默，界外确认）",
+  },
+  {
+    name: "editFile",
+    scope: "shared",
+    tool: editFileTool as CoreTool,
+    description: "精确编辑本地文件局部内容（oldString 唯一性校验）",
+  },
+  {
+    name: "searchFiles",
+    scope: "shared",
+    tool: searchFilesTool as CoreTool,
+    description: "工作区内搜索文件（glob 按名 / grep 按内容）",
+  },
+  {
+    name: "runCommand",
+    scope: "shared",
+    tool: runCommandTool as CoreTool,
+    description: "在工作区执行命令行（超时/截断/审计日志）",
+  },
+  {
+    name: "exportNotes",
+    scope: "shared",
+    tool: exportNotesTool as CoreTool,
+    description: "导出书籍划线与笔记为 Markdown",
+  },
+  {
+    name: "askAppHelp",
+    scope: "shared",
+    tool: askAppHelpTool as CoreTool,
+    description: "SageRead 使用帮助问答（检索内置使用手册）",
+  },
 ]);
 
 // ==================== 全局助手专属工具 ====================
 
 registerTools([
   {
-    name: "setTheme",
+    name: "manageBook",
     scope: "central",
-    tool: setThemeTool as CoreTool,
-    description: "切换明暗模式或更换全局主题",
-  },
-  {
-    name: "deleteBook",
-    scope: "central",
-    tool: deleteBookTool as CoreTool,
-    description: "删除书籍（移入回收站）",
+    tool: manageBookTool as CoreTool,
+    description: "书籍管理（删除入回收站/打开/重置进度）",
   },
   {
     name: "convertPdf",
@@ -163,46 +196,16 @@ registerTools([
     description: "PDF 转 EPUB 并入库",
   },
   {
-    name: "exportThreads",
-    scope: "central",
-    tool: exportThreadsTool as CoreTool,
-    description: "导出对话记录为 Markdown",
-  },
-  {
-    name: "resetProgress",
-    scope: "central",
-    tool: resetProgressTool as CoreTool,
-    description: "重置阅读进度",
-  },
-  {
-    name: "getThreads",
-    scope: "central",
-    tool: getThreadsTool as CoreTool,
-    description: "查询/搜索对话记录",
-  },
-  {
     name: "importBook",
     scope: "central",
     tool: importBookTool as CoreTool,
     description: "从本地路径导入书籍",
   },
   {
-    name: "openBook",
+    name: "manageSync",
     scope: "central",
-    tool: openBookTool as CoreTool,
-    description: "在阅读器中打开书籍",
-  },
-  {
-    name: "backupNow",
-    scope: "central",
-    tool: backupNowTool as CoreTool,
-    description: "立即备份到云端",
-  },
-  {
-    name: "syncNow",
-    scope: "central",
-    tool: syncNowTool as CoreTool,
-    description: "立即执行多设备同步",
+    tool: manageSyncTool as CoreTool,
+    description: "备份与同步（立即备份/备份列表/恢复/立即同步/同步偏好）",
   },
   {
     name: "vectorizeBook",
@@ -223,16 +226,10 @@ registerTools([
     description: "恢复或彻底删除回收站书籍",
   },
   {
-    name: "exportNotes",
+    name: "managePreferences",
     scope: "central",
-    tool: exportNotesTool as CoreTool,
-    description: "导出书籍划线与笔记为 Markdown",
-  },
-  {
-    name: "readerPreferences",
-    scope: "central",
-    tool: readerPreferencesTool as CoreTool,
-    description: "调整阅读偏好（字号/字体/行高/背景）",
+    tool: managePreferencesTool as CoreTool,
+    description: "偏好设置（主题/明暗模式、阅读偏好、界面偏好）",
   },
   {
     name: "switchModel",
@@ -244,43 +241,13 @@ registerTools([
     name: "manageThreads",
     scope: "central",
     tool: manageThreadsTool as CoreTool,
-    description: "对话管理（标星/改名/删除）",
-  },
-  {
-    name: "syncPreferences",
-    scope: "central",
-    tool: syncPreferencesTool as CoreTool,
-    description: "同步与备份偏好设置",
-  },
-  {
-    name: "backupRestore",
-    scope: "central",
-    tool: backupRestoreTool as CoreTool,
-    description: "查看/恢复云端备份",
-  },
-  {
-    name: "uiPreferences",
-    scope: "central",
-    tool: uiPreferencesTool as CoreTool,
-    description: "界面偏好（竖排标签/自动滚动/侧栏互换）",
-  },
-  {
-    name: "toggleSkill",
-    scope: "central",
-    tool: toggleSkillTool as CoreTool,
-    description: "启用/停用 AI 技能",
+    description: "对话管理（列表/搜索/标星/改名/删除/导出）",
   },
   {
     name: "importFont",
     scope: "central",
     tool: importFontTool as CoreTool,
     description: "从本地路径导入阅读字体",
-  },
-  {
-    name: "askAppHelp",
-    scope: "central",
-    tool: askAppHelpTool as CoreTool,
-    description: "SageRead 使用帮助问答（检索内置使用手册）",
   },
   {
     name: "httpRequest",
@@ -301,16 +268,10 @@ registerTools([
     description: "解压 ZIP 文件到目录",
   },
   {
-    name: "readLocalFile",
-    scope: "central",
-    tool: readLocalFileTool as CoreTool,
-    description: "读取本地文件/目录",
-  },
-  {
     name: "manageSkill",
     scope: "central",
     tool: manageSkillTool as CoreTool,
-    description: "创建/更新 AI 技能",
+    description: "创建/更新/启用停用 AI 技能",
   },
   {
     name: "managePaperFolders",
@@ -342,7 +303,8 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     }
   }
 
-  // 3. 阅读助手专属：RAG 工具（需要 bookId + 向量能力）
+  // 3. 阅读助手专属：RAG 工具（需要 bookId + 向量能力）+ 章节直读兜底（常驻；
+  // 全局有向量能力 ≠ 本书已建索引——未建索引时 ragSearch 无结果，直读是唯一的正文通道）
   if (agentScope === "reader" && context?.bookId) {
     const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
     if (hasVectorCapability) {
@@ -351,6 +313,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
       tools.ragContext = createRagContextTool(context.bookId) as CoreTool;
       tools.ragRange = createRagRangeTool(context.bookId) as CoreTool;
     }
+    tools.readBookSection = createReadBookSectionTool(context.bookId) as CoreTool;
   }
 
   // 4. 论文助手专属：基础层结构工具（始终可用，直接读 paper.md）+ 增强层语义检索（向量能力门控）

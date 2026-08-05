@@ -77,6 +77,13 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     base = base.replace(/—— RAG 工具使用策略 ——[\s\S]*?—— 引用标注规范 ——/m, "");
     base = base.replace(/—— 引用标注规范 ——[\s\S]*?—— 图片输出规范 ——/m, "");
     base = base.replace(/—— 图片输出规范 ——[\s\S]*?—— 书籍与笔记管理工具 ——/m, "—— 书籍与笔记管理工具 ——");
+    // P3 兜底：无向量能力时注入原文直读通道说明（readBookSection 对 reader 常驻注册）
+    base +=
+      "\n\n—— 章节原文直读（当前书未建立索引） ——\n当前书籍未建立向量索引，RAG 检索不可用。回答书中内容问题前，用 readBookSection 按目录章节标题读取小节原文（目录见【当前阅读图书元信息与目录】，标题支持模糊匹配）；未读到原文前不得凭印象编造书中内容。元数据问题（书名/作者/目录）直接回答，不调用工具。";
+  } else {
+    // 有向量能力 ≠ 本书已建索引：补充直读兜底的使用时机（工具常驻注册）
+    base +=
+      "\n\n—— 补充工具：章节原文直读 ——\nreadBookSection：按目录章节标题直读小节原文。RAG 检索命中为空时（通常是本书未建索引），立即改用它读取原文再作答，不要凭印象编造。";
   }
 
   let prompt = base;

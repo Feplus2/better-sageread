@@ -68,6 +68,8 @@ export interface ChatContext {
   agentScope?: "central" | "reader" | "paper";
   /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合；仅 agentScope="paper" 时有效） */
   paperScopeIds?: string[] | null;
+  /** 当前对话 id（滚动压缩摘要按对话持久化用，useChatState 注入，调用方无需传） */
+  threadId?: string;
 }
 
 interface UseChatStateOptions {
@@ -115,7 +117,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     {
       experimental_throttle: 50,
       messages: [],
-      chatContext,
+      chatContext: { ...chatContext, threadId: currentThread?.id },
       onError: (error) => {
         console.error("Error:", error);
       },

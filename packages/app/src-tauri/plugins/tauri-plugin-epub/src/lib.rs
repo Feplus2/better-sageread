@@ -34,6 +34,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::search_db,
             commands::convert_to_mdbook,
             commands::parse_toc,
+            commands::read_book_section,
             commands::get_chunk_with_context,
             commands::get_toc_chunks,
             commands::get_chunks_by_range,

@@ -1,6 +1,7 @@
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
 import { ScrollButton } from "@/components/prompt-kit/scroll-button";
-import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { AgentConfirmCard } from "@/components/side-chat/agent-confirm-card";
 import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
@@ -371,18 +372,21 @@ export function PaperChatPanel({
       )}
 
       {!showThreads && (
-        <ChatInputArea
-          input={input}
-          setInput={setInput}
-          references={references}
-          onRemoveReference={handleRemoveReference}
-          onSubmit={handleSubmit}
-          onStop={stop}
-          status={status}
-          activeBookId={paperId}
-          setActiveBookId={() => {}}
-          agentScope="paper"
-        />
+        <>
+          <AgentConfirmCard />
+          <ChatInputArea
+            input={input}
+            setInput={setInput}
+            references={references}
+            onRemoveReference={handleRemoveReference}
+            onSubmit={handleSubmit}
+            onStop={stop}
+            status={status}
+            activeBookId={paperId}
+            setActiveBookId={() => {}}
+            agentScope="paper"
+          />
+        </>
       )}
 
       {/* 自定义文件夹对话框（复选，含后代文件夹） */}

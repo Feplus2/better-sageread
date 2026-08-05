@@ -2,6 +2,10 @@
 
 mod core;
 use crate::core::{
+    agent_ws::commands::{
+        agent_edit_file, agent_read_file, agent_resolve_path, agent_run_command, agent_search_files,
+        agent_write_file,
+    },
     books::commands::{
         create_book_note,
         create_reading_session,
@@ -290,6 +294,13 @@ pub fn run() {
             // paper converter (单篇 PDF → paper.md)
             convert_paper_pdf,
             cancel_paper_convert,
+            // agent workspace (P1：写工具/执行命令，路径守卫 + 审计)
+            agent_resolve_path,
+            agent_read_file,
+            agent_write_file,
+            agent_edit_file,
+            agent_search_files,
+            agent_run_command,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
