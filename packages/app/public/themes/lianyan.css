@@ -6,10 +6,11 @@
 
 :root {
   --bg-video: url("/themes/lianyan/light.mp4");
+  --bg-frost: blur(15px) saturate(1.15);
 
   --background: rgba(243, 240, 234, 0.30);
   --foreground: #2b2624;
-  --card: rgba(248, 246, 241, 0.32);
+  --card: rgba(248, 246, 241, 0.46);
   --card-foreground: #2b2624;
   --popover: rgba(250, 248, 244, 0.60);
   --popover-foreground: #2b2624;
@@ -54,10 +55,11 @@
 
 html.dark {
   --bg-video: url("/themes/lianyan/dark.mp4");
+  --bg-frost: blur(15px) saturate(1.15);
 
   --background: rgba(26, 19, 22, 0.42);
   --foreground: #efe3d0;
-  --card: rgba(38, 28, 32, 0.38);
+  --card: rgba(38, 28, 32, 0.52);
   --card-foreground: #efe3d0;
   --popover: rgba(44, 33, 38, 0.62);
   --popover-foreground: #efe3d0;
@@ -106,24 +108,10 @@ body,
   background: transparent;
 }
 
-/* 嵌套同面色去重：内层 bg-background 透明，防双层叠加成实色 */
+/* 嵌套同面色统一为 card 色：防双层叠加成实色，同时保住内容列的遮罩（单磨砂层下文字可读性的关键） */
 .bg-background .bg-background {
-  background: transparent;
+  background: var(--card);
 }
 
-/* 毛玻璃遮罩：主承力面。亮色宣纸浓度低、暗色紫檀浓度高（变量透明度已分档） */
-.bg-background,
-.bg-card,
-.bg-popover,
-.bg-secondary,
-.bg-muted {
-  backdrop-filter: blur(18px) saturate(1.28);
-  -webkit-backdrop-filter: blur(18px) saturate(1.28);
-}
-
-/* 对话框/弹层要更实一点，保证可读性 */
-.bg-popover,
-[role="dialog"] {
-  backdrop-filter: blur(26px) saturate(1.35);
-  -webkit-backdrop-filter: blur(26px) saturate(1.35);
-}
+/* 毛玻璃由整屏磨砂层统一提供（theme-background-video.tsx 的 --bg-frost 层）。
+   不做逐面 backdrop-filter：拖拽布局时残留合成块（不可选中、不随 resize 更新的"幽灵色块"），且性能差。 */
