@@ -1,0 +1,96 @@
+/* @name 蒙德里安 */
+/* SageRead 全局主题 · 蒙德里安（mondrian）— 荷兰风格派撞色：画布白 × 黑网格 × 红蓝黄原色块
+   硬朗描边 + 硬投影（无模糊），扁平色块的秩序感 */
+
+:root {
+  --background: #f5f1e8;
+  --foreground: #141414;
+  --card: #fcfaf4;
+  --card-foreground: #141414;
+  --popover: #ffffff;
+  --popover-foreground: #141414;
+  --primary: #c93a2e;
+  --primary-foreground: #fff8ee;
+  --secondary: #eae4d6;
+  --secondary-foreground: #1a1a1a;
+  --muted: #ece7d9;
+  --muted-foreground: #5c5546;
+  --accent: #f2c230;
+  --accent-foreground: #141414;
+  --border: #1c1c1c;
+  --input: #8a8272;
+  --ring: #c93a2e;
+  --sidebar: #efe9db;
+  --sidebar-foreground: #141414;
+  --sidebar-primary: #2c5f9e;
+  --sidebar-primary-foreground: #f4f7fc;
+  --sidebar-accent: #f2c230;
+  --sidebar-accent-foreground: #141414;
+  --sidebar-border: #1c1c1c;
+  --sidebar-ring: #2c5f9e;
+  --content: #141414;
+  --layout: #f5f1e8;
+
+  --color-neutral-50: #faf7ef;
+  --color-neutral-100: #f2eee1;
+  --color-neutral-200: #e4ddc9;
+  --color-neutral-300: #cfc6ac;
+  --color-neutral-400: #ada488;
+  --color-neutral-500: #8d8468;
+  --color-neutral-600: #6e6752;
+  --color-neutral-700: #554f3f;
+  --color-neutral-800: #403b30;
+  --color-neutral-900: #2e2b23;
+  --color-neutral-950: #1c1a15;
+
+  /* 风格派硬投影：无模糊的黑偏移 */
+  --shadow-warm-sm: 2px 2px 0 rgba(26, 26, 26, 0.85);
+  --shadow-warm-md: 3px 3px 0 rgba(26, 26, 26, 0.85);
+  --shadow-warm-lg: 5px 5px 0 rgba(26, 26, 26, 0.8);
+}
+
+html.dark {
+  --background: #12161d;
+  --foreground: #f0ede2;
+  --card: #1a2029;
+  --card-foreground: #f0ede2;
+  --popover: #202732;
+  --popover-foreground: #f0ede2;
+  --primary: #e2543f;
+  --primary-foreground: #1c0f0b;
+  --secondary: #2a3442;
+  --secondary-foreground: #e8e4d8;
+  --muted: #232b37;
+  --muted-foreground: #9aa3b2;
+  --accent: #f2c230;
+  --accent-foreground: #1c1505;
+  --border: #465060;
+  --input: #4c5666;
+  --ring: #e2543f;
+  --sidebar: #171d26;
+  --sidebar-foreground: #f0ede2;
+  --sidebar-primary: #5b8bd0;
+  --sidebar-primary-foreground: #0e1520;
+  --sidebar-accent: #d9ae2e;
+  --sidebar-accent-foreground: #1c1505;
+  --sidebar-border: #465060;
+  --sidebar-ring: #5b8bd0;
+  --content: #f0ede2;
+  --layout: #12161d;
+
+  --color-neutral-50: #f0ede2;
+  --color-neutral-100: #e2ddce;
+  --color-neutral-200: #c9c3b2;
+  --color-neutral-300: #aaa390;
+  --color-neutral-400: #8b8572;
+  --color-neutral-500: #6f6a5a;
+  --color-neutral-600: #585449;
+  --color-neutral-700: #454240;
+  --color-neutral-800: #343a46;
+  --color-neutral-900: #262c37;
+  --color-neutral-950: #161b23;
+
+  --shadow-warm-sm: 2px 2px 0 rgba(0, 0, 0, 0.6);
+  --shadow-warm-md: 3px 3px 0 rgba(0, 0, 0, 0.6);
+  --shadow-warm-lg: 5px 5px 0 rgba(0, 0, 0, 0.65);
+}

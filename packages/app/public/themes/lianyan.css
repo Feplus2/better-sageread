@@ -55,7 +55,7 @@
 
 html.dark {
   --bg-video: url("/themes/lianyan/dark.mp4");
-  --bg-frost: blur(15px) saturate(1.15);
+  --bg-frost: blur(16px) saturate(1.20);
 
   --background: rgba(26, 19, 22, 0.42);
   --foreground: #efe3d0;

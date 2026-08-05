@@ -1,0 +1,95 @@
+/* @name 莫兰迪 */
+/* SageRead 全局主题 · 莫兰迪（morandi）— 冷调灰阶撞色：雾灰绿 × 尘青 × 鼠尾草
+   低饱和、柔阴影，安静的高级灰 */
+
+:root {
+  --background: #e9ecea;
+  --foreground: #3a4045;
+  --card: #f2f4f1;
+  --card-foreground: #3a4045;
+  --popover: #f7f8f6;
+  --popover-foreground: #3a4045;
+  --primary: #6e838c;
+  --primary-foreground: #f4f6f5;
+  --secondary: #dce1dd;
+  --secondary-foreground: #3f4641;
+  --muted: #e4e7e3;
+  --muted-foreground: #75807c;
+  --accent: #c4cfc8;
+  --accent-foreground: #4a5a50;
+  --border: #c6ccc7;
+  --input: #b8c0ba;
+  --ring: #6e838c;
+  --sidebar: #e3e7e3;
+  --sidebar-foreground: #3a4045;
+  --sidebar-primary: #6e838c;
+  --sidebar-primary-foreground: #f4f6f5;
+  --sidebar-accent: #cdd8d0;
+  --sidebar-accent-foreground: #43544a;
+  --sidebar-border: #c2c9c3;
+  --sidebar-ring: #6e838c;
+  --content: #3a4045;
+  --layout: #e9ecea;
+
+  --color-neutral-50: #f4f6f3;
+  --color-neutral-100: #eaeeeb;
+  --color-neutral-200: #d9dedb;
+  --color-neutral-300: #c0c8c2;
+  --color-neutral-400: #9ca79f;
+  --color-neutral-500: #7d8880;
+  --color-neutral-600: #636e67;
+  --color-neutral-700: #4f5952;
+  --color-neutral-800: #3f4842;
+  --color-neutral-900: #333b36;
+  --color-neutral-950: #202623;
+
+  --shadow-warm-sm: 0 1px 2px rgba(58, 64, 69, 0.05), 0 2px 8px rgba(58, 64, 69, 0.06);
+  --shadow-warm-md: 0 2px 4px rgba(58, 64, 69, 0.07), 0 8px 20px rgba(58, 64, 69, 0.09);
+  --shadow-warm-lg: 0 2px 6px rgba(58, 64, 69, 0.08), 0 16px 48px rgba(58, 64, 69, 0.12);
+}
+
+html.dark {
+  --background: #212629;
+  --foreground: #d9dcd8;
+  --card: #282e31;
+  --card-foreground: #d9dcd8;
+  --popover: #2e3538;
+  --popover-foreground: #d9dcd8;
+  --primary: #8ca3ac;
+  --primary-foreground: #1d2225;
+  --secondary: #343c40;
+  --secondary-foreground: #d5d9d4;
+  --muted: #2c3336;
+  --muted-foreground: #8d9893;
+  --accent: #3a4a44;
+  --accent-foreground: #a8c4b4;
+  --border: #454f52;
+  --input: #4a5457;
+  --ring: #8ca3ac;
+  --sidebar: #252b2e;
+  --sidebar-foreground: #d9dcd8;
+  --sidebar-primary: #8ca3ac;
+  --sidebar-primary-foreground: #1d2225;
+  --sidebar-accent: #33423c;
+  --sidebar-accent-foreground: #a8c4b4;
+  --sidebar-border: #424c4f;
+  --sidebar-ring: #8ca3ac;
+  --content: #d9dcd8;
+  --layout: #212629;
+
+  --color-neutral-50: #eef1ed;
+  --color-neutral-100: #dfe4de;
+  --color-neutral-200: #c6cdc5;
+  --color-neutral-300: #a8b2a9;
+  --color-neutral-400: #8b968d;
+  --color-neutral-500: #727d74;
+  --color-neutral-600: #5c6660;
+  --color-neutral-700: #49524d;
+  --color-neutral-800: #3a423d;
+  --color-neutral-900: #2e3530;
+  --color-neutral-950: #1d2320;
+
+  --shadow-warm-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.26);
+  --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.26), 0 8px 20px rgba(0, 0, 0, 0.3);
+  --shadow-warm-lg: 0 2px 6px rgba(0, 0, 0, 0.28), 0 16px 48px rgba(0, 0, 0, 0.36);
+}
