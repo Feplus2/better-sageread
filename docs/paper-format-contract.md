@@ -40,6 +40,7 @@ issue: "..."                  # 可选，CSL 直传
 page: "..."                   # 可选，CSL 直传
 arxiv: "..."                  # 本地扩展：arXiv id
 zotero_key: "..."             # 本地扩展：经 Zotero 导入时填
+zotero_pdf_path: '...'        # 本地扩展：Zotero 侧源 PDF 绝对路径（重解析回链；单引号防 Windows 反斜杠转义）
 lang: "en"                    # pandoc 标准
 ---
 ```

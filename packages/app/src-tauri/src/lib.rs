@@ -20,7 +20,9 @@ use crate::core::{
         get_reading_session,
         get_reading_sessions_by_book,
         get_trashed_books,
+        path_exists,
         purge_book,
+        replace_paper_content,
         restore_book,
         save_book,
         save_paper,
@@ -69,6 +71,10 @@ use crate::core::{
         get_latest_thread_by_book_id, get_thread_by_id, get_threads_by_book_id,
     },
     web_search::web_search,
+    zotero::{
+        inject_zotero_key, list_paper_dedup_keys, zotero_get_state, zotero_scan_library,
+        zotero_upsert_collection, zotero_upsert_paper_state,
+    },
 };
 use tauri::Manager;
 
@@ -180,6 +186,8 @@ pub fn run() {
             // papers (MARKDOWN 论文入库)
             scan_papers_dir,
             save_paper,
+            replace_paper_content,
+            path_exists,
             // papers (文献库文件夹)
             list_folders,
             list_trashed_folders,
@@ -191,6 +199,13 @@ pub fn run() {
             move_folder,
             set_paper_folders,
             get_paper_folder_map,
+            // zotero (Zotero 批量导入)
+            zotero_scan_library,
+            list_paper_dedup_keys,
+            inject_zotero_key,
+            zotero_get_state,
+            zotero_upsert_collection,
+            zotero_upsert_paper_state,
             get_book_status,
             update_book_status,
             get_books_with_status,

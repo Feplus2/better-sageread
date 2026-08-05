@@ -25,6 +25,10 @@ export interface PaperMetadata {
   /** metadata.json 附加字段（翻译服务写入；frontmatter 没有，仅列表中文化显示用） */
   title_zh?: string;
   abstract_zh?: string;
+  /** 本地扩展（契约 §三）：经 Zotero 导入的条目 key，去重链主键 */
+  zotero_key?: string;
+  /** 本地扩展：Zotero 侧源 PDF 绝对路径（重解析回链；拖入导入无此字段，PDF 拷在书库目录） */
+  zotero_pdf_path?: string;
 }
 
 /** 匹配 `---` 包裹的 YAML frontmatter（兼容 \n / \r\n / \r 行尾） */

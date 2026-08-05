@@ -294,6 +294,12 @@ function collectEdits(
     index += 1;
     return text?.trim() ? text : null;
   };
+  // 对照模式顶层块的译文 div 前后都必须有空行：MinerU 产物常见"标题/引用与下一段无空行分隔"
+  // （# H\nP 在 CommonMark 中是两个块），若只在 div 前补空行，</div> 与后续块粘连（单 \n），
+  // HTML 块（<div> 起始）遇空行才终止，会把紧随的段落/标题吞成裸文本——DOM 块枚举少于
+  // cutPaperBlocks，块索引自此整体错位（联动 hover/词对齐静默失效的根因）。div 尾部补 \n
+  // 保证 </div> 后必为空行；后续块本就有空行时多一个换行对 markdown 无影响。
+  const trailingDiv = (text: string) => `\n\n${translationDiv(text)}\n`;
   for (const node of children) {
     const nodeStart = offsetOf(node.position?.start, node);
     const nodeEnd = offsetOf(node.position?.end, node);
@@ -307,7 +313,7 @@ function collectEdits(
         if (mode === "translated") {
           edits.push({ ...span, text: oneLine(restoreImageRefs(body.slice(nodeStart, nodeEnd), text)) });
         } else {
-          edits.push({ start: nodeEnd, end: nodeEnd, text: `\n\n${translationDiv(text)}` });
+          edits.push({ start: nodeEnd, end: nodeEnd, text: trailingDiv(text) });
         }
         break;
       }
@@ -337,7 +343,7 @@ function collectEdits(
             .join("\n");
           edits.push({ start: nodeStart, end: nodeEnd, text: quoted });
         } else {
-          edits.push({ start: nodeEnd, end: nodeEnd, text: `\n\n${translationDiv(text)}` });
+          edits.push({ start: nodeEnd, end: nodeEnd, text: trailingDiv(text) });
         }
         break;
       }

@@ -1,7 +1,7 @@
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { InlineMathText } from "@/components/markdown/inline-math-text";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -391,6 +391,8 @@ export function PaperNotepadPanel({
   };
 
   const aiAnnotations = useMemo(() => annotations.filter((a) => a.source === "ai"), [annotations]);
+  // C2 重点标注恒带 category；对话创建的 AI 标注无 category，重新生成/清除时不受影响
+  const aiHighlightCount = aiAnnotations.filter((a) => a.category).length;
 
   // AI 重点分组：组序按跨类型固定类别顺序，组内按文档位置
   const aiGroups = useMemo(() => {
@@ -425,7 +427,8 @@ export function PaperNotepadPanel({
     setEditing(null);
   };
 
-  // 生成/重新生成：已有 AI 标注时先 ask 确认并清空（仅 source='ai'，人工标注不受影响）
+  // 生成/重新生成：已有 AI 重点标注（带 category）时先 ask 确认并清空
+  // （SQL 侧仅删 source='ai' AND category IS NOT NULL，人工与对话创建的标注不受影响）
   const handleGenerate = async () => {
     if (!hasAiModel) {
       toast.error("请先在设置中配置辅助模型或聊天模型");
@@ -435,9 +438,9 @@ export function PaperNotepadPanel({
       toast.error("论文内容尚未加载完成，请稍后再试");
       return;
     }
-    if (aiAnnotations.length > 0) {
+    if (aiHighlightCount > 0) {
       const confirmed = await ask(
-        `重新生成会先删除现有的 ${aiAnnotations.length} 条 AI 重点标注（人工标注不受影响），是否继续？`,
+        `重新生成会先删除现有的 ${aiHighlightCount} 条 AI 重点标注（人工与对话创建的标注不受影响），是否继续？`,
         { title: "重新生成 AI 重点", kind: "warning" },
       );
       if (!confirmed) return;
@@ -445,7 +448,7 @@ export function PaperNotepadPanel({
 
     setGenerating(true);
     try {
-      if (aiAnnotations.length > 0) await onClearAiAnnotations();
+      if (aiHighlightCount > 0) await onClearAiAnnotations();
       const result = await generatePaperHighlights({ markdown, kind: kindSelect, locateQuotes: onLocateQuotes });
       if (kindSelect === "auto") setDetectedKind(result.kind);
       if (result.located.length === 0) {
@@ -480,11 +483,11 @@ export function PaperNotepadPanel({
     }
   };
 
-  // 清除全部 AI 重点：ask 确认（文案明确只删 AI 标注）→ clearAiAnnotations → toast 删除条数
+  // 清除全部 AI 重点：ask 确认（只数带 category 的重点标注；对话创建的无 category AI 标注不受影响）→ clearAiAnnotations → toast 删除条数
   const handleClearAi = async () => {
-    if (aiAnnotations.length === 0) return;
+    if (aiHighlightCount === 0) return;
     const confirmed = await ask(
-      `确定要清除全部 ${aiAnnotations.length} 条 AI 重点标注吗？\n\n只会删除 AI 生成的标注，人工标注不受影响。此操作无法撤销。`,
+      `确定要清除全部 ${aiHighlightCount} 条 AI 重点标注吗？\n\n人工与对话创建的标注不受影响。此操作无法撤销。`,
       { title: "清除 AI 重点", kind: "warning" },
     );
     if (!confirmed) return;
@@ -506,7 +509,7 @@ export function PaperNotepadPanel({
       className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-primary-foreground text-xs hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {generating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-      {generating ? "生成中…" : aiAnnotations.length > 0 ? "重新生成" : "生成重点标注"}
+      {generating ? "生成中…" : aiHighlightCount > 0 ? "重新生成" : "生成重点标注"}
     </button>
   );
 
@@ -668,8 +671,8 @@ export function PaperNotepadPanel({
             <button
               type="button"
               onClick={handleClearAi}
-              disabled={generating || aiAnnotations.length === 0}
-              title="清除全部 AI 重点标注（人工标注不受影响）"
+              disabled={generating || aiHighlightCount === 0}
+              title="清除全部 AI 重点标注（人工与对话创建的标注不受影响）"
               className="flex items-center gap-1 rounded-md px-2 py-1 text-neutral-500 text-xs hover:bg-neutral-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-red-400"
             >
               <Trash2 className="size-3.5" />

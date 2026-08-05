@@ -8,7 +8,12 @@
  * 元数据（title/abstract）顺带翻译，读改写 metadata.json 的 title_zh/abstract_zh（不动其他字段）。
  */
 
-import { createModelInstance, getUtilityModel } from "@/ai/providers/factory";
+import {
+  type createModelInstance,
+  createUtilityModelInstance,
+  getUtilityModel,
+  utilityTaskProviderOptions,
+} from "@/ai/providers/factory";
 import { cutPaperBlocks } from "@/pages/paper-reader/paper-blocks";
 import type { PaperAlignPair } from "@/pages/paper-reader/paper-cross-anchor";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
@@ -171,6 +176,7 @@ async function extractGlossary(
   markdown: string,
   model: ReturnType<typeof createModelInstance>,
   signal?: AbortSignal,
+  providerOptions?: Record<string, Record<string, unknown>>,
 ): Promise<PaperGlossaryItem[] | null> {
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   const parts: string[] = [];
@@ -194,7 +200,7 @@ async function extractGlossary(
 论文内容：
 ${parts.join("\n\n")}`;
 
-  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal });
+  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -265,6 +271,7 @@ async function translateMetadata(
   force: boolean,
   signal?: AbortSignal,
   glossary?: PaperGlossaryItem[] | null,
+  providerOptions?: Record<string, Record<string, unknown>>,
 ): Promise<void> {
   const metaPath = await join(dir, "metadata.json");
   if (!(await exists(metaPath))) return;
@@ -286,7 +293,7 @@ async function translateMetadata(
   const prompt = `你是专业的学术论文翻译引擎。把给定论文的标题和摘要翻译为简体中文（术语与正文译法一致，人名不译，$...$ 数学与化学式原样保留）。${glossaryNote}
 只输出 JSON 对象 {"title_zh":"...","abstract_zh":"..."}，缺省字段输出空字符串，不要输出任何其他文字。
 输入：${JSON.stringify({ title: source.title ?? "", abstract: source.abstract ?? "" })}`;
-  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal });
+  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -325,7 +332,9 @@ export async function translatePaper(options: {
   if (!utilityModel) {
     throw new Error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
   }
-  const model = createModelInstance(utilityModel.providerId, utilityModel.modelId);
+  const model = createUtilityModelInstance(utilityModel.providerId, utilityModel.modelId);
+  // 简单任务压思考强度（混合推理模型先想几十秒再输出，是翻译慢的主因之一）
+  const taskOptions = utilityTaskProviderOptions(utilityModel.providerId, utilityModel.modelId);
 
   const dir = await paperDirOf(paperId);
   const blocks = cutPaperBlocks(markdown);
@@ -353,7 +362,7 @@ export async function translatePaper(options: {
   let glossary = existing?.glossary ?? null;
   if (pending.length > 0 && (!glossary || force)) {
     try {
-      const extracted = await extractGlossary(markdown, model, signal);
+      const extracted = await extractGlossary(markdown, model, signal, taskOptions);
       if (extracted) glossary = extracted;
     } catch (error) {
       if (signal?.aborted) throw error; // 取消优先
@@ -379,6 +388,7 @@ export async function translatePaper(options: {
       prompt: buildBatchPrompt(batch, strict, glossary),
       temperature: 0.2,
       abortSignal: signal,
+      providerOptions: taskOptions,
     });
     return parseBatchResponse(text);
   };
@@ -391,44 +401,63 @@ export async function translatePaper(options: {
     cancelled,
   });
 
-  for (const batch of makeBatches(pending)) {
-    if (signal?.aborted) {
-      await save();
-      return result(true);
-    }
-    let translated: { index: number; text: string }[] | null = null;
-    try {
-      translated = await generateBatch(batch, false);
-    } catch (error) {
-      if (signal?.aborted) throw error; // 取消优先：保持整体中止语义（调用方按取消处理）
-      console.warn("论文翻译批次失败，以严格 JSON 措辞重试一次:", error);
+  // 3 路并发处理批次（各批写入按块索引互不相交；save 全量快照幂等），墙钟时间约为串行的 1/3
+  const TRANSLATE_CONCURRENCY = 3;
+  const batches = makeBatches(pending);
+  let nextBatch = 0;
+  const runWorker = async () => {
+    for (;;) {
+      if (signal?.aborted) return;
+      const batch = batches[nextBatch];
+      nextBatch += 1;
+      if (!batch) return;
+      let translated: { index: number; text: string }[] | null = null;
       try {
-        translated = await generateBatch(batch, true);
-      } catch (retryError) {
-        if (signal?.aborted) throw retryError;
-        // 重试仍失败：跳过该批并计数，继续后续批次（不整体中止；这些块不落盘，续翻可补）
-        console.warn(`论文翻译批次重试仍失败，跳过该批 ${batch.length} 块:`, retryError);
-        failedBatches += 1;
+        translated = await generateBatch(batch, false);
+      } catch (error) {
+        if (signal?.aborted) throw error; // 取消优先：保持整体中止语义（调用方按取消处理）
+        console.warn("论文翻译批次失败，以严格 JSON 措辞重试一次:", error);
+        try {
+          translated = await generateBatch(batch, true);
+        } catch (retryError) {
+          if (signal?.aborted) throw retryError;
+          // 重试仍失败：跳过该批并计数，继续后续批次（不整体中止；这些块不落盘，续翻可补）
+          console.warn(`论文翻译批次重试仍失败，跳过该批 ${batch.length} 块:`, retryError);
+          failedBatches += 1;
+        }
+      }
+      if (translated) {
+        const batchIndexes = new Set(batch.map((block) => block.index));
+        for (const item of translated) {
+          if (!batchIndexes.has(item.index)) continue; // 模型多给的条目直接丢弃
+          const hash = hashes.get(item.index);
+          if (!hash) continue;
+          working[String(item.index)] = { hash, text: item.text.trim() };
+          done += 1;
+        }
+        await save(); // 每批落盘一次，崩溃/取消可续
+        onProgress?.({ done, total });
       }
     }
-    if (translated) {
-      const batchIndexes = new Set(batch.map((block) => block.index));
-      for (const item of translated) {
-        if (!batchIndexes.has(item.index)) continue; // 模型多给的条目直接丢弃
-        const hash = hashes.get(item.index);
-        if (!hash) continue;
-        working[String(item.index)] = { hash, text: item.text.trim() };
-        done += 1;
-      }
-      await save(); // 每批落盘一次，崩溃/取消可续
-      onProgress?.({ done, total });
-    }
+  };
+  await Promise.all(Array.from({ length: Math.min(TRANSLATE_CONCURRENCY, batches.length) }, () => runWorker()));
+  if (signal?.aborted) {
+    await save();
+    return result(true);
   }
 
   // 元数据（title/abstract）顺带翻译；失败不影响正文译本
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   try {
-    await translateMetadata(dir, { title: metadata.title, abstract: metadata.abstract }, model, force, signal, glossary);
+    await translateMetadata(
+      dir,
+      { title: metadata.title, abstract: metadata.abstract },
+      model,
+      force,
+      signal,
+      glossary,
+      taskOptions,
+    );
   } catch (error) {
     if (signal?.aborted) return result(true);
     console.warn("论文元数据翻译失败（正文译本不受影响）:", error);

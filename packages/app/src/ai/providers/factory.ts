@@ -10,19 +10,80 @@ export interface ProviderConfig {
   providerId: string;
   apiKey?: string;
   baseUrl?: string;
+  /** 轻量任务：注入"关闭思考"请求体参数（DeepSeek V4 默认开思考，轻量任务会慢一个数量级） */
+  disableThinking?: boolean;
+  /** 模型 ID（关闭思考参数按模型分档时用，如 Kimi K3 用 reasoning_effort、思考专用模型不下发） */
+  modelId?: string;
+}
+
+/** 按端点/模型求"关闭思考"请求体补丁；不认识或关不掉的返回 null（不乱发防 400） */
+function thinkingOffPatch(
+  providerId: string,
+  baseUrl?: string,
+  modelId?: string,
+): ((body: Record<string, unknown>) => void) | null {
+  const id = (modelId ?? "").toLowerCase();
+  // DeepSeek V4：thinking 默认开启，thinking:{type:"disabled"} 关闭（官方文档）
+  if (providerId === "deepseek") return (body) => void (body.thinking = { type: "disabled" });
+  const host = (baseUrl ?? "").toLowerCase();
+  // GLM（智谱 bigmodel）：thinking:{type:"disabled"}
+  if (host.includes("bigmodel.cn")) return (body) => void (body.thinking = { type: "disabled" });
+  // Qwen（阿里 dashscope）：enable_thinking:false
+  if (host.includes("dashscope")) return (body) => void (body.enable_thinking = false);
+  // Kimi（Moonshot）：K3 系列用顶层 reasoning_effort（low/high/max），K2.x 混合模型用 thinking disabled；
+  // 思考专用型号（kimi-k2-thinking 等）关不掉，不下发
+  if (host.includes("moonshot") || host.includes("kimi.com") || host.includes("kimi.ai")) {
+    if (/^(kimi-)?k3/.test(id)) return (body) => void (body.reasoning_effort = "low");
+    if (id.includes("thinking")) return null;
+    return (body) => void (body.thinking = { type: "disabled" });
+  }
+  return null;
+}
+
+/** 包装 fetch：把补丁写进 JSON 请求体；若端点 400 报思考参数相关错误，去掉补丁重放一次（防未来端点变更击穿轻量任务） */
+function wrapThinkingOffFetch(
+  base: typeof fetch | undefined,
+  patch: (body: Record<string, unknown>) => void,
+): typeof fetch {
+  const inner = base ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
+  return async (input, init) => {
+    if (!init?.body || typeof init.body !== "string") return inner(input, init);
+    let patched: RequestInit;
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      patch(body);
+      patched = { ...init, body: JSON.stringify(body) };
+    } catch {
+      return inner(input, init); // 非 JSON 请求体原样透传
+    }
+    const res = await inner(input, patched);
+    if (res.status === 400) {
+      const text = await res
+        .clone()
+        .text()
+        .catch(() => "");
+      if (/thinking|reasoning|enable_thinking/i.test(text)) return inner(input, init);
+    }
+    return res;
+  };
 }
 
 /**
  * 动态创建AI提供商实例
  */
 export function createProviderInstance(config: ProviderConfig) {
-  const { providerId, apiKey, baseUrl } = config;
+  const { providerId, apiKey, baseUrl, disableThinking, modelId } = config;
+  // 关闭思考补丁：仅轻量任务（disableThinking）且端点认识时生效
+  const patch = disableThinking ? thinkingOffPatch(providerId, baseUrl, modelId) : null;
+  const wrappedDefault = patch ? wrapThinkingOffFetch(undefined, patch) : undefined;
+  const maybeWrap = (base?: typeof fetch) => (patch ? wrapThinkingOffFetch(base, patch) : base);
 
   switch (providerId) {
     case "deepseek":
       return createDeepSeek({
         apiKey: apiKey || "",
         baseURL: baseUrl,
+        ...(wrappedDefault ? { fetch: wrappedDefault } : {}),
       });
 
     case "openrouter":
@@ -66,7 +127,7 @@ export function createProviderInstance(config: ProviderConfig) {
         baseURL: baseUrl || "https://api.openai.com/v1",
         includeUsage: true,
         name: "OpenAI Compatible",
-        fetch: fetchTauri,
+        fetch: maybeWrap(fetchTauri) ?? fetchTauri,
       });
   }
 }
@@ -74,7 +135,7 @@ export function createProviderInstance(config: ProviderConfig) {
 /**
  * 根据提供商ID和模型ID创建模型实例
  */
-export function createModelInstance(providerId: string, modelId: string) {
+export function createModelInstance(providerId: string, modelId: string, opts?: { disableThinking?: boolean }) {
   // 从store获取提供商配置
   const { modelProviders } = useProviderStore.getState();
   const provider = modelProviders.find((p) => p.provider === providerId);
@@ -97,10 +158,20 @@ export function createModelInstance(providerId: string, modelId: string) {
     providerId,
     apiKey: provider.apiKey,
     baseUrl: provider.baseUrl,
+    disableThinking: opts?.disableThinking,
+    modelId,
   });
 
   // 返回模型实例
   return providerInstance(modelId);
+}
+
+/**
+ * 轻量任务（翻译/标题/标签等）的模型实例：对支持的端点注入"关闭思考"请求体参数。
+ * 与 utilityTaskProviderOptions（AI SDK 原生支持的 provider）互补，二合一使用。
+ */
+export function createUtilityModelInstance(providerId: string, modelId: string) {
+  return createModelInstance(providerId, modelId, { disableThinking: true });
 }
 
 /**
@@ -111,6 +182,40 @@ export function createModelInstance(providerId: string, modelId: string) {
 export function getUtilityModel(_task?: string): SelectedModel | null {
   const { utilityModel, selectedModel } = useProviderStore.getState();
   return utilityModel ?? selectedModel;
+}
+
+/**
+ * 轻量任务（翻译/标题/标签等辅助模型调用）的思考强度控制：混合推理模型在简单任务上
+ * 先思考数十秒再输出，是辅助任务慢的主因。按 provider+model 返回"低档/关闭思考"的 providerOptions。
+ * 只下发对端明确兼容的参数（OpenAI 对不支持的模型会 400，故按模型前缀门控）；不支持的一律不下发。
+ * DeepSeek：deepseek-chat 默认非思考、deepseek-reasoner 恒思考（建议辅助模型选 chat 版），无可下开关；
+ * anthropic 走 OpenAI 兼容通道无思考开关；GLM/Qwen 自定义端点参数不统一，不下发防 400。
+ */
+export function utilityTaskProviderOptions(
+  providerId: string,
+  modelId: string,
+): Record<string, Record<string, unknown>> | undefined {
+  const id = modelId.toLowerCase();
+  switch (providerId) {
+    case "openai":
+      // reasoning_effort 仅 o 系列 / gpt-5 系列支持
+      if (/^(o\d|gpt-5)/.test(id)) return { openai: { reasoningEffort: "low" } };
+      return undefined;
+    case "google":
+    case "gemini":
+      // thinkingConfig 仅 Gemini 2.5+ 支持
+      if (/gemini-(2\.5|3)/.test(id)) return { google: { thinkingConfig: { thinkingBudget: 0 } } };
+      return undefined;
+    case "openrouter":
+      // OpenRouter 对不支持推理的模型自动忽略 reasoning 参数，可安全下发
+      return { openrouter: { reasoning: { effort: "low" } } };
+    case "grok":
+      // 仅 grok-3-mini 系列支持 reasoning_effort（grok-4 恒思考）
+      if (id.includes("grok-3-mini")) return { openai: { reasoningEffort: "low" } };
+      return undefined;
+    default:
+      return undefined;
+  }
 }
 
 /**

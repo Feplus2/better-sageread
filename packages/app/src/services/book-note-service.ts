@@ -87,8 +87,9 @@ export async function deleteBookNote(id: string): Promise<void> {
 }
 
 /**
- * 清空指定书籍的全部 AI 标注（C2"重新生成"前置步骤）。
- * 删除条件在 Rust 侧显式带 source='ai'，人工标注不受影响。返回删除条数。
+ * 清空指定书籍的 C2 AI 重点标注（"重新生成"前置步骤）。
+ * 删除条件在 Rust 侧显式带 source='ai' AND category IS NOT NULL：
+ * 仅清 C2 重点标注（恒带 category），对话创建的无 category AI 标注与人工标注均不受影响。返回删除条数。
  */
 export async function deleteAiBookNotes(bookId: string): Promise<number> {
   const result = await invoke<number>("delete_ai_book_notes", { bookId });

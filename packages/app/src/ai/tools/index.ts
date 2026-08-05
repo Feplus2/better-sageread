@@ -9,6 +9,8 @@ export { notesTool } from "./notes";
 export { mindmapTool } from "./mindmap";
 export { webSearchTool } from "./web-search";
 export {
+  createGetCitationsTool,
+  createGetFiguresTool,
   createPaperContextTool,
   createPaperFullTool,
   createPaperInfoTool,

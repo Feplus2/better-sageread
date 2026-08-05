@@ -53,6 +53,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 SageRead 的全局助手，一个拥
 • extractZip: 解压 ZIP 压缩文件到指定目录
 • readLocalFile: 读取本地文件内容或列出目录结构
 • manageSkill: 创建/更新 AI 技能（安装外部 skill 包时用）
+• managePaperFolders: 文献库文件夹管理（查看树/论文清单、创建、重命名、删除、移动、归档论文）
 • mindmap: 生成思维导图
 • webSearch: 网络搜索
 

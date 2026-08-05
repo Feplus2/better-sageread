@@ -1,4 +1,16 @@
-import { Anthropic, ChatGLM, DeepSeek, Doubao, Gemini, Grok, Moonshot, OpenAI, OpenRouter, Qwen, XiaomiMiMo } from "@/components/icons";
+import {
+  Anthropic,
+  ChatGLM,
+  DeepSeek,
+  Doubao,
+  Gemini,
+  Grok,
+  Moonshot,
+  OpenAI,
+  OpenRouter,
+  Qwen,
+  XiaomiMiMo,
+} from "@/components/icons";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -76,7 +88,8 @@ export function ProviderIcons({ providerId }: { providerId: string }): React.Rea
 
 export default function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeKey, setActiveKey] = useState<SettingsKey>("general");
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(["model-providers"]));
+  // 侧栏分组默认折叠（含「模型提供商」），点开才展开，保持清爽
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const { modelProviders } = useProviderStore();
 
   const settingsItems: SettingsItem[] = [

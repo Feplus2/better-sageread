@@ -109,15 +109,59 @@ export default function TrashPage() {
     }
   };
 
+  /** 清空回收站：逐项走既有 purge 通道（书籍含文件与数据、文件夹级联子文件夹），失败计数不中断 */
+  const [purgingAll, setPurgingAll] = useState(false);
+  const handlePurgeAll = async () => {
+    const confirmed = await ask(
+      `确定要清空回收站吗？\n\n将永久删除 ${trashedBooks.length} 本书籍/论文与 ${trashedFolders.length} 个文件夹（书籍文件、阅读进度、笔记、对话一并移除；文件夹下论文仅失去归属）。\n\n此操作无法撤销。`,
+      { title: "清空回收站", kind: "warning" },
+    );
+    if (!confirmed) return;
+    setPurgingAll(true);
+    let failed = 0;
+    try {
+      for (const book of trashedBooks) {
+        try {
+          await purgeBook(book.id);
+        } catch (error) {
+          failed += 1;
+          console.error(`彻底删除失败: ${book.title}`, error);
+        }
+      }
+      for (const folder of trashedFolders) {
+        try {
+          await purgeFolder(folder.id);
+        } catch (error) {
+          failed += 1;
+          console.error(`彻底删除文件夹失败: ${folder.name}`, error);
+        }
+      }
+      if (failed > 0) toast.error(`清空完成，但有 ${failed} 项删除失败（详见控制台）`);
+      else toast.success("回收站已清空");
+      await loadTrash();
+      await refreshBooks();
+    } finally {
+      setPurgingAll(false);
+    }
+  };
+
   const isEmpty = trashedBooks.length === 0 && trashedFolders.length === 0;
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between px-3 pt-3">
         <h3 className="font-bold text-3xl dark:border-neutral-700">回收站</h3>
-        <span className="text-neutral-500 text-xs dark:text-neutral-500">
-          删除的书籍保留 {RETENTION_DAYS} 天后自动彻底清除；文件夹需手动彻底清除
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-neutral-500 text-xs dark:text-neutral-500">
+            删除的书籍保留 {RETENTION_DAYS} 天后自动彻底清除；文件夹需手动彻底清除
+          </span>
+          {!isEmpty && (
+            <Button size="sm" variant="destructive" disabled={purgingAll} onClick={handlePurgeAll}>
+              <Trash2 className="size-4" />
+              {purgingAll ? "清空中…" : "清空回收站"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (

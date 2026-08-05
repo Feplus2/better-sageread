@@ -220,6 +220,35 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         Err(e) => return Err(e.into()),
     }
 
+    // Zotero 批量导入：collection key → 文件夹映射缓存 + 论文 zotero_key 去重状态（IF NOT EXISTS 幂等）
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS zotero_collections (
+            collection_key TEXT PRIMARY KEY,
+            folder_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            parent_key TEXT,
+            updated_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS zotero_paper_state (
+            paper_id TEXT PRIMARY KEY,
+            zotero_key TEXT NOT NULL UNIQUE,
+            collection_keys TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_zotero_paper_state_key ON zotero_paper_state(zotero_key)")
+        .execute(pool)
+        .await?;
+    println!("Migration applied: zotero_collections + zotero_paper_state.");
+
     // 提示词预设（B 批）：阅读/论文助手的命名系统提示词，同 scope 内 is_active 互斥，
     // 无激活行 = 使用内置默认提示词（IF NOT EXISTS 幂等）。
     sqlx::query(
@@ -261,6 +290,25 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
                     println!("Migration applied: reader system prompt upgraded to v2 ({} row(s)).", done.rows_affected());
                 }
             }
+        }
+    }
+
+    // 阅读助手系统提示词 v2.1（2026-08-04）：P0 注册 ragRange 工具后，RAG 小节补对应条目。
+    // 手术式插入（锚点 = ragToc 条目行首），只在仍是官方文案（含锚点、不含 ragRange）时执行，
+    // 用户自定义过的不动；第二次运行因已含 ragRange 自然幂等。
+    let result = sqlx::query(
+        "UPDATE skills SET content = REPLACE(content, '• **ragToc** - 获取完整章节内容', ? || '• **ragToc** - 获取完整章节内容'), updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%• **ragToc** - 获取完整章节内容%'
+           AND content NOT LIKE '%ragRange%'",
+    )
+    .bind("• **ragRange** - 按全局索引范围连续取块\n  - 使用场景：已知大致索引范围，需要跨章节的连续内容\n  - 策略：范围来自 ragSearch/ragContext 返回的全局索引，单次不超过 20 块\n\n")
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.1 (ragRange).");
         }
     }
 

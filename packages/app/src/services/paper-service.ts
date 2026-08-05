@@ -186,6 +186,8 @@ export interface PaperConvertProgress {
   paper_md?: string;
   message?: string;
   success?: boolean;
+  /** converter 侧质量守卫：重试后仍检测到退化循环时 done 携带 true（见 Papers_Converter quality_guard） */
+  degenerate?: boolean;
 }
 
 interface PaperConvertParams {

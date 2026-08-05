@@ -157,7 +157,8 @@ export function usePaperAnnotations(paperId: string) {
     [paperId, invalidate],
   );
 
-  // C2：清空本篇论文的全部 AI 标注（SQL 侧显式 source='ai'，人工标注不受影响）。返回删除条数
+  // C2：清空本篇论文的 AI 重点标注（SQL 侧显式 source='ai' AND category IS NOT NULL，
+  // 对话创建的无 category AI 标注与人工标注均不受影响）。返回删除条数
   const clearAiAnnotations = useCallback(async (): Promise<number> => {
     const removed = await deleteAiBookNotes(paperId);
     invalidate();

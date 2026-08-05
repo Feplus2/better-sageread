@@ -1207,18 +1207,19 @@ pub async fn delete_book_note(app_handle: AppHandle, id: String) -> Result<(), S
     Ok(())
 }
 
-/// 清空某本书的全部 AI 标注（C2"重新生成"前置步骤）。
-/// 删除条件显式带 source = 'ai'：人工标注（'user'）绝不受此命令影响。
+/// 清空某本书的 C2 AI 重点标注（"重新生成"前置步骤）。
+/// 删除条件显式带 source = 'ai' AND category IS NOT NULL：
+/// 仅清 C2 重点标注（恒带 category）；对话创建的无 category AI 标注与人工标注（'user'）均保留。
 /// 返回删除的行数。
 #[tauri::command]
 pub async fn delete_ai_book_notes(app_handle: AppHandle, book_id: String) -> Result<u64, String> {
     let db_pool = get_db_pool(&app_handle).await?;
 
-    let result = sqlx::query("DELETE FROM book_notes WHERE book_id = ?1 AND source = 'ai'")
+    let result = sqlx::query("DELETE FROM book_notes WHERE book_id = ?1 AND source = 'ai' AND category IS NOT NULL")
         .bind(&book_id)
         .execute(&db_pool)
         .await
-        .map_err(|e| format!("清空 AI 标注失败: {}", e))?;
+        .map_err(|e| format!("清空 AI 重点标注失败: {}", e))?;
 
     Ok(result.rows_affected())
 }
@@ -1327,6 +1328,8 @@ pub async fn save_paper(
     title: String,
     author: String,
     language: String,
+    // 是否把 source.pdf 拷入书库（None=拷；Zotero 导入传 Some(false)，以 zotero_pdf_path 回链代替）
+    retain_source_pdf: Option<bool>,
 ) -> Result<SimpleBook, String> {
     let db_pool = get_db_pool(&app_handle).await?;
 
@@ -1358,6 +1361,17 @@ pub async fn save_paper(
     let source_images = source.join("images");
     if source_images.is_dir() {
         copy_dir_recursive(&source_images, &book_dir.join("images"))?;
+    }
+
+    // 源 PDF 留存（重解析用）：Zotero 导入走 zotero_pdf_path 回链不拷贝（用户偏好轻便），
+    // 其余导入把 source.pdf 拷进书库目录自包含；拷贝失败仅告警不阻断入库
+    if retain_source_pdf.unwrap_or(true) {
+        let source_pdf = source.join("source.pdf");
+        if source_pdf.is_file() {
+            if let Err(e) = fs::copy(&source_pdf, book_dir.join("source.pdf")) {
+                log::warn!("拷贝 source.pdf 失败（{}）: {}", source_pdf.display(), e);
+            }
+        }
     }
 
     let metadata_json = serde_json::to_string_pretty(&metadata)
@@ -1431,6 +1445,72 @@ pub async fn save_paper(
         file_size,
         language,
     ))
+}
+
+/// 文件/目录存在性检查（前端 plugin-fs 有作用域限制，Zotero storage 等库外路径必须走 Rust）
+#[tauri::command]
+pub async fn path_exists(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).exists())
+}
+
+/// 重解析入库：用新的解析产物整体替换在库论文的 paper.md / images / metadata.json，
+/// **保留论文 id**（文件夹归属、对话线程、标注全部随之存活；文内高亮靠 text 兜底重锚定）。
+/// 调用方负责：source_dir 为新解析输出目录（含 paper.md），metadata 为新 frontmatter 解析结果。
+#[tauri::command]
+pub async fn replace_paper_content(
+    app_handle: AppHandle,
+    paper_id: String,
+    source_dir: String,
+    metadata: serde_json::Value,
+) -> Result<(), String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+
+    // 论文必须存在（回收站中的也允许重解析，与 save_paper 判存口径一致）
+    let Some(book) = get_book_by_id(app_handle.clone(), paper_id.clone()).await? else {
+        return Err(format!("论文不存在: {}", paper_id));
+    };
+
+    let source = std::path::PathBuf::from(&source_dir);
+    let source_paper = source.join("paper.md");
+    if !source_paper.is_file() {
+        return Err(format!("paper.md 不存在: {}", source_dir));
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用目录失败: {}", e))?;
+    let book_dir = app_data_dir.join("books").join(&paper_id);
+
+    fs::copy(&source_paper, book_dir.join("paper.md")).map_err(|e| format!("替换 paper.md 失败: {}", e))?;
+    let file_size = fs::metadata(book_dir.join("paper.md"))
+        .map_err(|e| format!("读取文件信息失败: {}", e))?
+        .len() as i64;
+
+    // images 整体换新（先清后拷，避免残留旧图）
+    let images_dir = book_dir.join("images");
+    if images_dir.is_dir() {
+        fs::remove_dir_all(&images_dir).map_err(|e| format!("清理旧 images 失败: {}", e))?;
+    }
+    let source_images = source.join("images");
+    if source_images.is_dir() {
+        copy_dir_recursive(&source_images, &images_dir)?;
+    }
+
+    let metadata_json = serde_json::to_string_pretty(&metadata)
+        .map_err(|e| format!("序列化元数据失败: {}", e))?;
+    fs::write(book_dir.join("metadata.json"), metadata_json)
+        .map_err(|e| format!("保存元数据失败: {}", e))?;
+
+    sqlx::query("UPDATE books SET file_size = ?, updated_at = ? WHERE id = ?")
+        .bind(file_size)
+        .bind(chrono::Utc::now().timestamp_millis())
+        .bind(&book.id)
+        .execute(&db_pool)
+        .await
+        .map_err(|e| format!("更新书籍记录失败: {}", e))?;
+
+    Ok(())
 }
 
 #[cfg(test)]

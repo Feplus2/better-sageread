@@ -22,6 +22,7 @@ import {
   httpRequestTool,
   importBookTool,
   importFontTool,
+  managePaperFoldersTool,
   manageSkillTool,
   manageTagsTool,
   manageThreadsTool,
@@ -39,6 +40,8 @@ import {
   vectorizeBookTool,
 } from "./central";
 import {
+  createGetCitationsTool,
+  createGetFiguresTool,
   createPaperContextTool,
   createPaperFullTool,
   createPaperInfoTool,
@@ -46,6 +49,7 @@ import {
   createPaperSectionTool,
   createPaperTocTool,
   createRagContextTool,
+  createRagRangeTool,
   createRagSearchTool,
   createRagTocTool,
   getBooksTool,
@@ -308,6 +312,12 @@ registerTools([
     tool: manageSkillTool as CoreTool,
     description: "创建/更新 AI 技能",
   },
+  {
+    name: "managePaperFolders",
+    scope: "central",
+    tool: managePaperFoldersTool as CoreTool,
+    description: "文献库文件夹管理（查看/创建/重命名/删除/移动/归档论文）",
+  },
 ]);
 
 // ==================== 工具组装 ====================
@@ -339,6 +349,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
       tools.ragSearch = createRagSearchTool(context.bookId) as CoreTool;
       tools.ragToc = createRagTocTool(context.bookId) as CoreTool;
       tools.ragContext = createRagContextTool(context.bookId) as CoreTool;
+      tools.ragRange = createRagRangeTool(context.bookId) as CoreTool;
     }
   }
 
@@ -348,6 +359,8 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.readPaperSection = createPaperSectionTool(context.paperId) as CoreTool;
     tools.readPaperFull = createPaperFullTool(context.paperId) as CoreTool;
     tools.getPaperInfo = createPaperInfoTool(context.paperId) as CoreTool;
+    tools.getCitations = createGetCitationsTool(context.paperId) as CoreTool;
+    tools.getFigures = createGetFiguresTool(context.paperId) as CoreTool;
 
     const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
     if (hasVectorCapability) {
@@ -385,6 +398,8 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
       "- readPaperSection: 按标题读取当前论文小节正文",
       "- readPaperFull: 通读当前论文全文",
       "- getPaperInfo: 获取当前论文元数据",
+      "- getCitations: 提取当前论文的参考文献列表",
+      "- getFigures: 提取当前论文的图片清单（图注与所在小节）",
     );
     if (useLlamaStore.getState().hasVectorCapability()) {
       descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");

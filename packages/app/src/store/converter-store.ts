@@ -15,11 +15,14 @@ interface ConverterState {
   glmApiKey: string;
   engine: BookConvertEngine;
   paperEngine: PaperConvertEngine;
+  /** Zotero 数据目录（含 zotero.sqlite 与 storage/），默认 %USERPROFILE%\Zotero */
+  zoteroDataDir: string;
   setMineruToken: (token: string) => void;
   setPaddleocrToken: (token: string) => void;
   setGlmApiKey: (key: string) => void;
   setEngine: (engine: BookConvertEngine) => void;
   setPaperEngine: (engine: PaperConvertEngine) => void;
+  setZoteroDataDir: (dir: string) => void;
 }
 
 /**
@@ -34,11 +37,13 @@ export const useConverterStore = create<ConverterState>()(
       glmApiKey: "",
       engine: "mineru",
       paperEngine: "paddleocr",
+      zoteroDataDir: "",
       setMineruToken: (mineruToken: string) => set({ mineruToken }),
       setPaddleocrToken: (paddleocrToken: string) => set({ paddleocrToken }),
       setGlmApiKey: (glmApiKey: string) => set({ glmApiKey }),
       setEngine: (engine: BookConvertEngine) => set({ engine }),
       setPaperEngine: (paperEngine: PaperConvertEngine) => set({ paperEngine }),
+      setZoteroDataDir: (zoteroDataDir: string) => set({ zoteroDataDir }),
     }),
     {
       name: tauriStorageKey.converterStore,
@@ -49,6 +54,7 @@ export const useConverterStore = create<ConverterState>()(
         glmApiKey: state.glmApiKey,
         engine: state.engine,
         paperEngine: state.paperEngine,
+        zoteroDataDir: state.zoteroDataDir,
       }),
     },
   ),

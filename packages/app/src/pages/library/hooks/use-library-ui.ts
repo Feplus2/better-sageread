@@ -4,7 +4,8 @@ export type ViewMode = "grid" | "list";
 
 export const useLibraryUI = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [isLibraryExpanded, setIsLibraryExpanded] = useState(true);
+  // 标签列表默认折叠（点开才展开），保持侧栏清爽
+  const [isLibraryExpanded, setIsLibraryExpanded] = useState(false);
   const [showNewTagDialog, setShowNewTagDialog] = useState(false);
 
   const toggleLibraryExpanded = useCallback(() => {

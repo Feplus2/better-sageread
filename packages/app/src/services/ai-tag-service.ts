@@ -1,4 +1,9 @@
-import { createModelInstance, getUtilityModel } from "@/ai/providers/factory";
+import {
+  createModelInstance,
+  createUtilityModelInstance,
+  getUtilityModel,
+  utilityTaskProviderOptions,
+} from "@/ai/providers/factory";
 import type { SimpleBook } from "@/types/simple-book";
 import { generateText } from "ai";
 import type { Tag } from "./tag-service";
@@ -38,7 +43,7 @@ export async function generateTagsWithAI(
     }
 
     // 创建模型实例
-    const modelInstance = createModelInstance(modelConfig.providerId, modelConfig.modelId);
+    const modelInstance = createUtilityModelInstance(modelConfig.providerId, modelConfig.modelId);
 
     // 构建提示词
     const existingTagsText =
@@ -83,11 +88,12 @@ ${existingTagsText}
 
 请直接输出标签列表，不要添加其他说明文字：`;
 
-    // 发送请求
+    // 发送请求（简单任务压思考强度）
     const { text } = await generateText({
       model: modelInstance,
       prompt: prompt,
       temperature: 0.7,
+      providerOptions: utilityTaskProviderOptions(modelConfig.providerId, modelConfig.modelId),
     });
 
     // 解析AI响应（管道符分割格式）

@@ -9,13 +9,13 @@ import PaperReader, {
 } from "@/pages/paper-reader/paper-reader";
 import { usePaperAnnotations } from "@/pages/paper-reader/use-paper-annotations";
 import { PaperChatPanel } from "@/pages/papers/paper-chat-panel";
+import { getBookStatus, updateBookStatus } from "@/services/book-service";
 import { iframeService } from "@/services/iframe-service";
 import {
   type PaperAlignmentInfo,
   alignPaperTranslation,
   inspectPaperAlignment,
 } from "@/services/paper-alignment-service";
-import { getBookStatus, updateBookStatus } from "@/services/book-service";
 import { type Folder, type PaperFolderEntry, getPaperFolderMap, listFolders } from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
@@ -430,7 +430,8 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
   );
 
   return (
-    <div className="flex min-h-0 flex-1">
+    // min-w-0：宽 HTML 表格的 min-content 会把本行撑出视口、把右侧栏挤没（2026-08-05 实测）
+    <div className="flex min-h-0 min-w-0 flex-1">
       {swapSidebars ? chatSidebar : notepadSidebar}
 
       {/* 中：PaperHeaderBar + PaperReader（书籍 ReaderViewer 同款容器） */}

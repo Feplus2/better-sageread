@@ -12,3 +12,4 @@ pub mod sync;
 pub mod tags;
 pub mod threads;
 pub mod web_search;
+pub mod zotero;

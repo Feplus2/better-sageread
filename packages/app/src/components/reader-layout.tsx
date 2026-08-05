@@ -1,4 +1,5 @@
 import HomeLayout from "@/components/home-layout";
+import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
 import { NotepadContainer } from "@/components/notepad";
 import NotificationDropdown from "@/components/notification-dropdown";
 import { PreviewPanel } from "@/components/preview/preview-panel";
@@ -28,7 +29,6 @@ import { useThemeStore } from "@/store/theme-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
-import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
 import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { useEffect, useRef, useState } from "react";
@@ -501,7 +501,7 @@ export default function ReaderLayout() {
                   {swapSidebars && <PreviewPanel />}
                   {swapSidebars ? chatSidebar : notepadSidebar}
 
-                  <div className="relative flex-1 rounded-md border shadow-around">
+                  <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
                     <ReaderViewer />
 
                     {showOverlay && (

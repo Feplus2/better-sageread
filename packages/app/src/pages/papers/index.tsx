@@ -1,6 +1,15 @@
+import { getUtilityModel } from "@/ai/providers/factory";
+import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,14 +17,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { InlineMathText } from "@/components/markdown/inline-math-text";
-import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
+import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
 import { updateBookStatus } from "@/services/book-service";
-import { useAppSettingsStore } from "@/store/app-settings-store";
-import { useConverterStore } from "@/store/converter-store";
-import type { PapersSortByType } from "@/types/settings";
+import { reparsePapers } from "@/services/paper-reparse-service";
 import {
   type Folder,
   type FolderTreeNode,
@@ -37,12 +45,16 @@ import {
   trashPaper,
   vectorizePaper,
 } from "@/services/paper-service";
-import { Progress } from "@/components/ui/progress";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { translatePaper } from "@/services/paper-translation-service";
+import { useAppSettingsStore } from "@/store/app-settings-store";
+import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
+import type { PapersSortByType } from "@/types/settings";
 import type { BookWithStatus } from "@/types/simple-book";
+import { findDegenerateLoop } from "@/utils/degenerate";
 import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
@@ -63,9 +75,11 @@ import {
   Inbox,
   Languages,
   Library,
+  ListChecks,
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   Star,
@@ -110,8 +124,7 @@ function VectorizationRing({ paper, vectorizePercent }: { paper: BookWithStatus;
       : statusFromMeta === "failed"
         ? "border-red-500"
         : "border-neutral-400 dark:border-neutral-500";
-  const label =
-    statusFromMeta === "success" ? "已向量化" : statusFromMeta === "failed" ? "向量化失败" : "未向量化";
+  const label = statusFromMeta === "success" ? "已向量化" : statusFromMeta === "failed" ? "向量化失败" : "未向量化";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -145,7 +158,9 @@ function PaperStars({ rating, onRate }: { rating: number; onRate: (rating: numbe
           ))}
         </div>
       </TooltipTrigger>
-      <TooltipContent side="bottom">{rating > 0 ? `重要度 ${rating}/3 星（点击调整）` : "打星标记重要度（最多 3 星）"}</TooltipContent>
+      <TooltipContent side="bottom">
+        {rating > 0 ? `重要度 ${rating}/3 星（点击调整）` : "打星标记重要度（最多 3 星）"}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -329,16 +344,29 @@ function FolderTreeItem({
   );
 }
 
-/** 单篇 PDF 解析导入的阶段与状态（编号对齐 Papers_Converter headless 协议 1-4） */
+/** PDF 解析导入的阶段与状态（编号对齐 Papers_Converter headless 协议 1-4）；支持多篇串行队列 */
 type PdfStageStatus = "pending" | "active" | "done" | "error";
+/** 单篇结算结果：队列据此计数并推进（skipped = 已入库过内容未变化） */
+type PdfOutcome = "imported" | "skipped" | "failed" | "cancelled";
 interface PdfImportState {
   status: "running" | "success" | "error";
   fileName: string;
+  /** 总进度：按篇数加权（(k-1+当前篇percent/100)/N） */
   percent: number;
   detail: string;
+  /** 当前篇的四阶段 */
   stages: { n: number; name: string; status: PdfStageStatus }[];
   error?: string;
   title?: string;
+  /** 队列位置：当前第几篇 / 共几篇（单篇时均为 1，卡片不显示批次信息） */
+  index: number;
+  total: number;
+  /** 已结算计数（成功入库 / 跳过 / 失败） */
+  importedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  /** 失败文件名（收尾卡列出） */
+  failedNames: string[];
 }
 
 const PDF_STAGE_NAMES = ["OCR 解析", "元数据提取", "内容处理", "渲染装订"];
@@ -354,6 +382,42 @@ function markStages(stages: PdfImportState["stages"], n: number | undefined, sta
     ...s,
     status: s.n < n ? "done" : s.n === n ? status : s.status,
   }));
+}
+
+/** 候选列表去重追加（点选/拖拽可多次累加） */
+function mergePdfCandidates(prev: string[], incoming: string[]): string[] {
+  const seen = new Set(prev);
+  return [...prev, ...incoming.filter((p) => !seen.has(p))];
+}
+
+/** 批量任务种类：向量化 / 翻译 / 重新解析（共用 LLM 或转换资源，同一时刻只跑一种） */
+type BatchKind = "vectorize" | "translate" | "reparse";
+
+const BATCH_KIND_LABELS: Record<BatchKind, string> = {
+  vectorize: "批量向量化",
+  translate: "批量翻译",
+  reparse: "批量重新解析",
+};
+
+/** 批量任务右下角进度卡状态（样式对齐 pdfImport 卡与 Zotero 卡） */
+interface BatchProgressState {
+  kind: BatchKind;
+  status: "running" | "success" | "error";
+  /** 当前篇序号（0 基） */
+  index: number;
+  total: number;
+  /** 当前篇标题 */
+  title: string;
+  /** 当前篇细节（阶段/块进度） */
+  detail: string;
+  /** 总进度百分比 */
+  percent: number;
+  doneCount: number;
+  failedCount: number;
+  skippedCount: number;
+  failedNames: string[];
+  /** 收尾汇总（status 非 running 时展示） */
+  summary?: string;
 }
 
 /** 文献库：MARKDOWN 论文的管理页（列表 + 文件夹侧栏，§3.2 文件夹模型）；点击论文行打开阅读标签页 */
@@ -383,19 +447,34 @@ export default function PapersPage() {
   const [movePaper, setMovePaper] = useState<BookWithStatus | null>(null);
   const [moveChecked, setMoveChecked] = useState<Set<string>>(new Set());
   const [moveSubmitting, setMoveSubmitting] = useState(false);
-  // 单篇 PDF 解析导入：选择弹窗（点选/拖拽）+ 后台任务（右下角进度卡）
+  // PDF 解析导入：选择弹窗（点选/拖拽，可多选累加候选）+ 后台串行队列（右下角进度卡）
   const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
-  const [pdfCandidate, setPdfCandidate] = useState<string | null>(null);
+  const [pdfCandidates, setPdfCandidates] = useState<string[]>([]);
   const [pdfDragOver, setPdfDragOver] = useState(false);
   const [pdfImport, setPdfImport] = useState<PdfImportState | null>(null);
   const pdfImportUnlistenRef = useRef<(() => void) | null>(null);
+  // 取消标记（kill 当前篇后队列不再推进）与当前篇的取消结算回调（handleCancel 直接触发，不等 terminated）
+  const pdfCancelRequestedRef = useRef(false);
+  const pdfCurrentSettleRef = useRef<(() => void) | null>(null);
+  // Zotero 批量导入对话框（批量运行中禁用其他导入入口）
+  const [zoteroOpen, setZoteroOpen] = useState(false);
+  const [zoteroRunning, setZoteroRunning] = useState(false);
+  // 批量管理：管理模式开关（点「管理」才出现复选框）/ 多选集合 / 批量移动对话框 / 批量任务守卫与进度卡
+  const [manageMode, setManageMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchMoveOpen, setBatchMoveOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState<BatchKind | null>(null);
+  const [batchProgress, setBatchProgress] = useState<BatchProgressState | null>(null);
+  const [batchCancelling, setBatchCancelling] = useState(false);
+  const batchCancelRef = useRef(false);
+  const batchTranslateAbortRef = useRef<AbortController | null>(null);
   const { paperEngine } = useConverterStore();
   // 事件回调里读取最新 selection（拖放监听挂载一次，闭包不能捕获渲染期状态）
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const pdfPickerOpenRef = useRef(pdfPickerOpen);
   pdfPickerOpenRef.current = pdfPickerOpen;
-  const runPdfImportRef = useRef<(path: string) => void>(() => {});
+  const runPdfImportRef = useRef<(paths: string[]) => void>(() => {});
 
   // 页面级拖放导入：拖 PDF 到文献库页任意位置直接开始解析（弹窗开启时落入候选区）。
   // 用 Tauri onDragDropEvent（HTML5 drop 拿不到文件路径，sidecar 需要路径）；
@@ -412,17 +491,22 @@ export default function PapersPage() {
           setPdfDragOver(false);
         } else if (payload.type === "drop") {
           setPdfDragOver(false);
-          const path = payload.paths[0];
-          if (!path) return;
-          if (!path.toLowerCase().endsWith(".pdf")) {
-            toast.error("文献库只支持导入 PDF（书籍请去图书馆页拖入）");
+          const pdfs = payload.paths.filter((p) => p.toLowerCase().endsWith(".pdf"));
+          if (pdfs.length === 0) {
+            if (payload.paths.length > 0) {
+              toast.error("文献库只支持导入 PDF（书籍请去图书馆页拖入）");
+            }
             return;
+          }
+          const ignored = payload.paths.length - pdfs.length;
+          if (ignored > 0) {
+            toast.info(`已忽略 ${ignored} 个非 PDF 文件`);
           }
           if (pdfPickerOpenRef.current) {
-            setPdfCandidate(path);
+            setPdfCandidates((prev) => mergePdfCandidates(prev, pdfs));
             return;
           }
-          runPdfImportRef.current(path);
+          runPdfImportRef.current(pdfs);
         }
       })
       .then((off) => {
@@ -436,12 +520,21 @@ export default function PapersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 监听只挂一次，状态经 ref 读取
   }, []);
 
-  // 成功态进度卡 6 秒后自动消失（失败/取消态保留待手动关闭）
+  // 成功态进度卡 6 秒后自动消失（批量有失败、失败/取消态保留待手动关闭）
   useEffect(() => {
     if (pdfImport?.status !== "success") return;
+    if (pdfImport.failedCount > 0) return;
     const timer = setTimeout(() => setPdfImport(null), 6000);
     return () => clearTimeout(timer);
-  }, [pdfImport?.status]);
+  }, [pdfImport?.status, pdfImport?.failedCount]);
+
+  // 批量任务卡同款收尾：干净成功 6 秒自动消失，有失败/取消保留待手动关闭
+  useEffect(() => {
+    if (batchProgress?.status !== "success") return;
+    if (batchProgress.failedCount > 0) return;
+    const timer = setTimeout(() => setBatchProgress(null), 6000);
+    return () => clearTimeout(timer);
+  }, [batchProgress?.status, batchProgress?.failedCount]);
 
   // metadata.json 缓存：入库后内容不可变，避免每次刷新列表都重读磁盘
   const metaCacheRef = useRef<Map<string, PaperMetadata>>(new Map());
@@ -468,6 +561,12 @@ export default function PapersPage() {
       setPapers(list);
       setFolders(folderList);
       setMembers(memberList);
+      // 多选集合剔除已不在库的论文（删除/外部变更后不留幽灵选中）
+      const aliveIds = new Set(list.map((p) => p.id));
+      setSelectedIds((prev) => {
+        const next = new Set([...prev].filter((id) => aliveIds.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
 
       const base = await appDataDir();
       const cache = metaCacheRef.current;
@@ -789,61 +888,65 @@ export default function PapersPage() {
     }
   };
 
-  /** 点「导入 PDF」：先做引擎 Token 检查，再开选择弹窗（点选/拖拽二选一后开始解析） */
+  /** 点「导入 PDF」：先做引擎 Token 检查，再开选择弹窗（点选/拖拽可多选累加，确认后开始解析） */
   const handleImportPdf = () => {
     const tokenError = paperEngineTokenError(paperEngine);
     if (tokenError) {
       toast.error(tokenError);
       return;
     }
-    setPdfCandidate(null);
+    setPdfCandidates([]);
     setPdfPickerOpen(true);
   };
 
-  /** 弹窗内"点击选择文件" */
+  /** 弹窗内"点击选择文件"（多选，去重追加进候选列表） */
   const handlePickPdfFile = async () => {
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         directory: false,
-        title: "选择论文 PDF",
+        title: "选择论文 PDF（可多选）",
         filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
-      if (typeof selected === "string" && selected) setPdfCandidate(selected);
+      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      if (paths.length > 0) setPdfCandidates((prev) => mergePdfCandidates(prev, paths));
     } catch (error) {
       console.error("选择 PDF 失败:", error);
     }
   };
 
-  /** 统一的解析启动入口（弹窗确认与页面拖入共用）：Token 检查 + 进行中守卫 + 后台进度卡 */
-  const runPdfImport = async (pdfPath: string) => {
-    const tokenError = paperEngineTokenError(paperEngine);
-    if (tokenError) {
-      toast.error(tokenError);
-      return;
-    }
-    if (pdfImport?.status === "running") {
-      toast.info("已有解析任务进行中");
-      return;
-    }
-
+  /** 解析单篇并等待结算：注册进度监听 → 启动转换 → done 后入库；失败/取消也正常结算（队列据此推进） */
+  const runOnePdf = async (pdfPath: string, index: number, total: number): Promise<PdfOutcome> => {
     const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
-    setPdfImport({ status: "running", fileName, percent: 0, detail: "启动解析…", stages: buildPdfStages() });
+    let filePercent = 0;
+    const weighted = (p: number) => Math.round(((index - 1 + p / 100) / total) * 100);
+    let settled = false;
+    let unlisten: (() => void) | null = null;
+    let resolveOutcome: (outcome: PdfOutcome) => void = () => {};
+    const outcomePromise = new Promise<PdfOutcome>((resolve) => {
+      resolveOutcome = resolve;
+    });
+    const settle = (outcome: PdfOutcome) => {
+      if (settled) return;
+      settled = true;
+      unlisten?.();
+      if (pdfImportUnlistenRef.current === unlisten) pdfImportUnlistenRef.current = null;
+      pdfCurrentSettleRef.current = null;
+      resolveOutcome(outcome);
+    };
+    pdfCurrentSettleRef.current = () => settle("cancelled");
 
     try {
-      const unlisten = await listenPaperConvertProgress(async (progress: PaperConvertProgress) => {
+      unlisten = await listenPaperConvertProgress(async (progress: PaperConvertProgress) => {
         if (progress.type === "progress" || progress.type === "stage_done") {
+          if (progress.percent != null) filePercent = progress.percent;
           setPdfImport((prev) =>
             prev && prev.status === "running"
               ? {
                   ...prev,
-                  percent: progress.percent ?? prev.percent,
+                  percent: weighted(filePercent),
                   detail: progress.detail ?? prev.detail,
-                  stages: markStages(
-                    prev.stages,
-                    progress.stage,
-                    progress.type === "stage_done" ? "done" : "active",
-                  ),
+                  stages: markStages(prev.stages, progress.stage, progress.type === "stage_done" ? "done" : "active"),
                 }
               : prev,
           );
@@ -858,7 +961,7 @@ export default function PapersPage() {
                 ? {
                     ...prev,
                     status: "success",
-                    percent: 100,
+                    percent: weighted(100),
                     title: progress.title,
                     detail: `已入库《${progress.title ?? progress.slug}》`,
                     stages: prev.stages.map((s) => ({ ...s, status: "done" as const })),
@@ -866,26 +969,37 @@ export default function PapersPage() {
                 : prev,
             );
             if (result.skipped > 0 && result.imported === 0) {
-              toast.info("该论文已入库过（内容未变化）");
+              toast.info(total > 1 ? `「${fileName}」已入库过（内容未变化）` : "该论文已入库过（内容未变化）");
+              settle("skipped");
             } else {
               toast.success(`论文解析入库完成：${progress.title ?? progress.slug}`);
+              // 退化循环检测（引擎 VLM 偶发模式延续失控）：本地检测 + converter 质量守卫双通道
+              try {
+                const raw = await readTextFile(await join(progress.paper_dir, "paper.md"));
+                if (progress.degenerate === true || findDegenerateLoop(parsePaperMarkdown(raw).body)) {
+                  toast.warning(`《${progress.title ?? progress.slug}》检测到异常重复内容（解析引擎失控）`, {
+                    description: "建议在 设置 → PDF 转换 中更换解析引擎后重新解析",
+                    duration: 8000,
+                  });
+                }
+              } catch {
+                // 检测失败不影响入库
+              }
+              settle("imported");
             }
-            await loadAll();
           } catch (error) {
-            setPdfImport((prev) =>
-              prev
-                ? { ...prev, status: "error", error: `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}` }
-                : prev,
-            );
+            const message = `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}`;
+            setPdfImport((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+            if (total > 1) toast.error(`「${fileName}」${message}`);
+            settle("failed");
           }
-          unlisten();
           return;
         }
         if (progress.type === "error") {
-          setPdfImport((prev) =>
-            prev ? { ...prev, status: "error", error: progress.message ?? "解析失败" } : prev,
-          );
-          unlisten();
+          const message = progress.message ?? "解析失败";
+          setPdfImport((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+          if (total > 1) toast.error(`「${fileName}」解析失败：${message}`);
+          settle("failed");
           return;
         }
         if (progress.type === "terminated") {
@@ -894,40 +1008,146 @@ export default function PapersPage() {
               ? { ...prev, status: "error", error: progress.success === false ? "解析进程异常退出" : "解析已取消" }
               : prev,
           );
-          unlisten();
+          settle(progress.success === false ? "failed" : "cancelled");
         }
       });
       pdfImportUnlistenRef.current = unlisten;
       await startPaperPdfImport(pdfPath);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setPdfImport((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+      if (total > 1) toast.error(`「${fileName}」${message}`);
+      settle("failed");
+    }
+    return outcomePromise;
+  };
+
+  /** 统一的解析启动入口（弹窗确认与页面拖入共用）：Token 检查 + 进行中守卫 + 串行队列 */
+  const runPdfImportBatch = async (paths: string[]) => {
+    const tokenError = paperEngineTokenError(paperEngine);
+    if (tokenError) {
+      toast.error(tokenError);
+      return;
+    }
+    if (paths.length === 0) return;
+    if (pdfImport?.status === "running") {
+      toast.info("已有解析任务进行中");
+      return;
+    }
+    if (batchRunning) {
+      toast.info("已有批量任务进行中");
+      return;
+    }
+
+    pdfCancelRequestedRef.current = false;
+    const total = paths.length;
+    let imported = 0;
+    let skipped = 0;
+    let failed = 0;
+    const failedNames: string[] = [];
+
+    // Rust 侧 convert_paper_pdf 是单子进程：逐篇串行，等当前篇结算再下一篇（单篇失败不中断队列）
+    for (let i = 0; i < total; i++) {
+      if (pdfCancelRequestedRef.current) break;
+      const pdfPath = paths[i];
+      const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
+      setPdfImport({
+        status: "running",
+        fileName,
+        percent: Math.round((i / total) * 100),
+        detail: "启动解析…",
+        stages: buildPdfStages(),
+        index: i + 1,
+        total,
+        importedCount: imported,
+        skippedCount: skipped,
+        failedCount: failed,
+        failedNames: [...failedNames],
+      });
+      const outcome = await runOnePdf(pdfPath, i + 1, total);
+      if (outcome === "imported") imported += 1;
+      else if (outcome === "skipped") skipped += 1;
+      else if (outcome === "failed") {
+        failed += 1;
+        failedNames.push(fileName);
+      } else {
+        pdfCancelRequestedRef.current = true;
+      }
+    }
+
+    // 全部（或取消前已完成部分）结算后统一刷新列表一次
+    await loadAll();
+
+    if (pdfCancelRequestedRef.current) {
+      const remaining = total - imported - skipped - failed;
       setPdfImport((prev) =>
-        prev ? { ...prev, status: "error", error: error instanceof Error ? error.message : String(error) } : prev,
+        prev
+          ? {
+              ...prev,
+              status: "error",
+              error:
+                total === 1
+                  ? "已取消解析"
+                  : `已取消：完成 ${imported} 篇${skipped > 0 ? ` · 跳过 ${skipped}` : ""}${failed > 0 ? ` · 失败 ${failed}` : ""}，剩余 ${remaining} 篇未解析`,
+              importedCount: imported,
+              skippedCount: skipped,
+              failedCount: failed,
+              failedNames: [...failedNames],
+            }
+          : prev,
       );
+      return;
+    }
+    // 批量收尾卡：汇总完成/跳过/失败（单篇保持 runOnePdf 写好的原收尾文案）
+    if (total > 1) {
+      const extras: string[] = [];
+      if (skipped > 0) extras.push(`跳过 ${skipped}`);
+      if (failed > 0) extras.push(`失败 ${failed}`);
+      const summary = `完成 ${imported} 篇${extras.length > 0 ? `（${extras.join(" · ")}）` : ""}`;
+      setPdfImport((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "success",
+              percent: 100,
+              detail: summary,
+              stages: prev.stages.map((s) => ({ ...s, status: "done" as const })),
+              importedCount: imported,
+              skippedCount: skipped,
+              failedCount: failed,
+              failedNames: [...failedNames],
+            }
+          : prev,
+      );
+      if (failed > 0) toast.error(`批量解析结束：${failed} 篇失败`);
+      else toast.success(`批量解析完成：${summary}`);
     }
   };
-  runPdfImportRef.current = (path) => {
-    void runPdfImport(path);
+  runPdfImportRef.current = (paths) => {
+    void runPdfImportBatch(paths);
   };
 
-  /** 开始解析：关闭选择弹窗，任务转入后台（右下角进度卡呈现），完成后 toast 提醒 */
+  /** 开始解析：关闭选择弹窗，候选列表转入后台串行队列（右下角进度卡呈现），完成时 toast 提醒 */
   const handleStartPdfImport = async () => {
-    if (!pdfCandidate) return;
-    const pdfPath = pdfCandidate;
+    if (pdfCandidates.length === 0) return;
+    const paths = pdfCandidates;
     setPdfPickerOpen(false);
-    setPdfCandidate(null);
-    await runPdfImport(pdfPath);
+    setPdfCandidates([]);
+    await runPdfImportBatch(paths);
   };
 
-  /** 取消解析：kill 子进程并立即收尾（terminated 事件会兜底一次，幂等） */
+  /** 取消解析：kill 当前篇子进程并立即结算当前篇（队列不再推进，卡片显示部分结果；幂等） */
   const handleCancelPdfImport = async () => {
+    pdfCancelRequestedRef.current = true;
     try {
       await cancelPaperPdfImport();
     } catch (error) {
       console.warn("取消论文解析失败:", error);
     }
-    pdfImportUnlistenRef.current?.();
-    pdfImportUnlistenRef.current = null;
-    setPdfImport((prev) => (prev ? { ...prev, status: "error", error: "已取消解析" } : prev));
+    pdfCurrentSettleRef.current?.();
+    setPdfImport((prev) =>
+      prev && prev.status === "running" ? { ...prev, status: "error", error: "已取消解析" } : prev,
+    );
   };
 
   /** 关闭后台进度卡（running 时等同取消） */
@@ -983,6 +1203,393 @@ export default function PapersPage() {
     }
   };
 
+  // ---- 批量管理 ----
+  /** 选中集合对应的论文（按列表顺序；过滤掉已不在库的幽灵 id） */
+  const selectedPapers = useMemo(() => papers.filter((p) => selectedIds.has(p.id)), [papers, selectedIds]);
+  /** 批量任务或导入进行中：占用转换/LLM 资源的批量操作（向量化/翻译/重新解析）禁用 */
+  const batchLocked = batchRunning != null || importing || pdfImport?.status === "running" || zoteroRunning;
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  /** 全选三态：当前可见（文件夹过滤 + 检索过滤后）全部选中→全选；部分→indeterminate；点击在全选可见/清空可见间切换 */
+  const visibleCheckState: boolean | "indeterminate" = useMemo(() => {
+    if (visiblePapers.length === 0) return false;
+    const hit = visiblePapers.filter((p) => selectedIds.has(p.id)).length;
+    if (hit === 0) return false;
+    return hit === visiblePapers.length ? true : "indeterminate";
+  }, [visiblePapers, selectedIds]);
+
+  const handleToggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (visiblePapers.length > 0 && visiblePapers.every((p) => next.has(p.id))) {
+        for (const p of visiblePapers) next.delete(p.id);
+      } else {
+        for (const p of visiblePapers) next.add(p.id);
+      }
+      return next;
+    });
+  };
+
+  /** 批量移动确认：对每篇整体替换文件夹归属（初始为空 = 默认全部移出文件夹） */
+  const handleBatchMoveConfirm = async () => {
+    if (moveSubmitting || selectedPapers.length === 0) return;
+    setMoveSubmitting(true);
+    try {
+      for (const paper of selectedPapers) {
+        await setPaperFolders(paper.id, [...moveChecked]);
+      }
+      toast.success(`已替换 ${selectedPapers.length} 篇论文的文件夹归属`);
+      setBatchMoveOpen(false);
+      setSelectedIds(new Set());
+      await loadAll();
+    } catch (error) {
+      console.error("批量移动论文失败:", error);
+      toast.error(`批量移动失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setMoveSubmitting(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (batchRunning || selectedPapers.length === 0) return;
+    try {
+      const confirmed = await ask(
+        `确定把选中的 ${selectedPapers.length} 篇论文移到回收站吗？\n\n回收站中的论文可以随时恢复。`,
+        { title: "批量删除论文", kind: "warning" },
+      );
+      if (!confirmed) return;
+      let failed = 0;
+      for (const paper of selectedPapers) {
+        try {
+          await trashPaper(paper.id);
+          metaCacheRef.current.delete(paper.id);
+        } catch (error) {
+          failed += 1;
+          console.error(`删除论文失败: ${paper.id}`, error);
+        }
+      }
+      setSelectedIds(new Set());
+      if (failed > 0) toast.error(`完成 ${selectedPapers.length - failed} 篇 · 失败 ${failed} 篇`);
+      else toast.success(`已把 ${selectedPapers.length} 篇论文移到回收站`);
+      await loadAll();
+    } catch (error) {
+      console.error("批量删除论文失败:", error);
+      toast.error(`批量删除失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  /** 批量任务通用收尾：写收尾卡 + 清选择 + 刷新列表 */
+  const finishBatch = (summary: string, failedNames: string[], cancelled: boolean) => {
+    setBatchProgress((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: cancelled || failedNames.length > 0 ? "error" : "success",
+            percent: 100,
+            summary,
+            failedNames,
+            failedCount: failedNames.length,
+          }
+        : prev,
+    );
+    setBatchCancelling(false);
+    setSelectedIds(new Set());
+  };
+
+  /** 批量向量化：跳过已成功的，逐篇顺序执行；进度复用 vectorizing map（行内圆环同步展示） */
+  const handleBatchVectorize = async () => {
+    if (batchLocked || selectedPapers.length === 0) return;
+    const { useLlamaStore } = await import("@/store/llama-store");
+    if (!useLlamaStore.getState().hasVectorCapability()) {
+      toast.error("没有可用的嵌入模型，请先在设置中下载本地嵌入模型或配置外部嵌入服务");
+      return;
+    }
+    const queue = selectedPapers.filter((p) => p.status?.metadata?.vectorization?.status !== "success");
+    const skippedCount = selectedPapers.length - queue.length;
+    if (queue.length === 0) {
+      toast.info("所选论文均已完成向量化");
+      return;
+    }
+    batchCancelRef.current = false;
+    setBatchCancelling(false);
+    setBatchRunning("vectorize");
+    const total = queue.length;
+    let done = 0;
+    const failedNames: string[] = [];
+    setBatchProgress({
+      kind: "vectorize",
+      status: "running",
+      index: 0,
+      total,
+      title: "",
+      detail: "准备向量化…",
+      percent: 0,
+      doneCount: 0,
+      failedCount: 0,
+      skippedCount,
+      failedNames: [],
+    });
+    try {
+      for (let i = 0; i < total; i++) {
+        if (batchCancelRef.current) break;
+        const paper = queue[i];
+        setBatchProgress((prev) =>
+          prev
+            ? { ...prev, index: i, title: paper.title, detail: "向量化中…", percent: Math.round((i / total) * 100) }
+            : prev,
+        );
+        setVectorizing((prev) => ({ ...prev, [paper.id]: 0 }));
+        try {
+          await vectorizePaper({ id: paper.id, title: paper.title, author: paper.author });
+          done += 1;
+        } catch (error) {
+          failedNames.push(paper.title);
+          console.error(`向量化论文失败: ${paper.id}`, error);
+        } finally {
+          setVectorizing((prev) => {
+            const next = { ...prev };
+            delete next[paper.id];
+            return next;
+          });
+          setBatchProgress((prev) =>
+            prev ? { ...prev, doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] } : prev,
+          );
+        }
+      }
+    } finally {
+      setBatchRunning(null);
+    }
+    const cancelled = batchCancelRef.current;
+    const remaining = total - done - failedNames.length;
+    finishBatch(
+      cancelled
+        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理`
+        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}${skippedCount > 0 ? ` · 跳过已向量化 ${skippedCount}` : ""}`,
+      failedNames,
+      cancelled,
+    );
+    await loadAll();
+  };
+
+  /** 批量翻译：复用单篇入口 translatePaper（幂等续翻），逐篇顺序执行，AbortController 可取消 */
+  const handleBatchTranslate = async (papers?: BookWithStatus[]) => {
+    const queue = papers ?? selectedPapers;
+    if (batchLocked || queue.length === 0) return;
+    if (!getUtilityModel()) {
+      toast.error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
+      return;
+    }
+    batchCancelRef.current = false;
+    setBatchCancelling(false);
+    const controller = new AbortController();
+    batchTranslateAbortRef.current = controller;
+    setBatchRunning("translate");
+    const total = queue.length;
+    let done = 0;
+    const failedNames: string[] = [];
+    let cancelled = false;
+    const base = await appDataDir();
+    setBatchProgress({
+      kind: "translate",
+      status: "running",
+      index: 0,
+      total,
+      title: "",
+      detail: "准备翻译…",
+      percent: 0,
+      doneCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      failedNames: [],
+    });
+    try {
+      for (let i = 0; i < total; i++) {
+        if (batchCancelRef.current) break;
+        const paper = queue[i];
+        setBatchProgress((prev) =>
+          prev
+            ? { ...prev, index: i, title: paper.title, detail: "读取正文…", percent: Math.round((i / total) * 100) }
+            : prev,
+        );
+        try {
+          const markdown = await readTextFile(await join(base, "books", paper.id, "paper.md"));
+          const result = await translatePaper({
+            paperId: paper.id,
+            markdown,
+            force: false,
+            signal: controller.signal,
+            onProgress: ({ done: d, total: t }) =>
+              setBatchProgress((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      detail: t > 0 ? `翻译块 ${d}/${t}` : prev.detail,
+                      percent: Math.round(((i + (t > 0 ? d / t : 0)) / total) * 100),
+                    }
+                  : prev,
+              ),
+          });
+          if (result.cancelled) {
+            cancelled = true;
+            break;
+          }
+          done += 1;
+          // 元数据译文（title_zh/abstract_zh）写入 metadata.json，清缓存让列表中文化立即生效
+          metaCacheRef.current.delete(paper.id);
+        } catch (error) {
+          if (controller.signal.aborted || batchCancelRef.current) {
+            cancelled = true;
+            break;
+          }
+          failedNames.push(paper.title);
+          console.error(`翻译论文失败: ${paper.id}`, error);
+        }
+        setBatchProgress((prev) =>
+          prev ? { ...prev, doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] } : prev,
+        );
+      }
+    } finally {
+      batchTranslateAbortRef.current = null;
+      setBatchRunning(null);
+    }
+    const remaining = total - done - failedNames.length;
+    finishBatch(
+      cancelled
+        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理（已翻部分已落盘，可续翻）`
+        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}`,
+      failedNames,
+      cancelled,
+    );
+    await loadAll();
+  };
+
+  /** 批量重新解析：源 PDF 重走 Papers_Converter 并整体替换产物（保留 id/归属/对话/标注，高亮可能漂移） */
+  const handleBatchReparse = async (papers?: BookWithStatus[]) => {
+    const queue = papers ?? selectedPapers;
+    if (batchLocked || queue.length === 0) return;
+    const tokenError = paperEngineTokenError(paperEngine);
+    if (tokenError) {
+      toast.error(tokenError);
+      return;
+    }
+    let confirmed = false;
+    try {
+      confirmed = await ask(
+        `将用最新解析引擎重新解析选中的 ${queue.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
+        { title: queue.length > 1 ? "批量重新解析" : "重新解析", kind: "warning" },
+      );
+    } catch (error) {
+      console.error("确认对话框失败:", error);
+    }
+    if (!confirmed) return;
+    batchCancelRef.current = false;
+    setBatchCancelling(false);
+    setBatchRunning("reparse");
+    const total = queue.length;
+    let filePercent = 0;
+    setBatchProgress({
+      kind: "reparse",
+      status: "running",
+      index: 0,
+      total,
+      title: "",
+      detail: "准备解析…",
+      percent: 0,
+      doneCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      failedNames: [],
+    });
+    let cancelled = false;
+    const failedNames: string[] = [];
+    let done = 0;
+    let suspectCount = 0;
+    try {
+      const report = await reparsePapers(
+        queue.map((p) => ({ id: p.id, title: p.title })),
+        metaMap,
+        {
+          onItemStart: (index, _total, item) => {
+            filePercent = 0;
+            setBatchProgress((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    index,
+                    title: item.title,
+                    detail: "等待解析…",
+                    percent: Math.round((index / prev.total) * 100),
+                  }
+                : prev,
+            );
+          },
+          onItemProgress: (p) => {
+            if (p.percent != null) filePercent = p.percent;
+            setBatchProgress((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    detail: p.detail ?? p.stage_name ?? prev.detail,
+                    percent: Math.min(100, Math.round(((prev.index + filePercent / 100) / prev.total) * 100)),
+                  }
+                : prev,
+            );
+          },
+          isCancelled: () => batchCancelRef.current,
+        },
+      );
+      cancelled = report.cancelled;
+      done = report.done.length;
+      failedNames.push(...report.failed.map((f) => f.title));
+      suspectCount = report.suspect.length;
+      for (const item of report.done) metaCacheRef.current.delete(item.id);
+    } catch (error) {
+      console.error("批量重新解析失败:", error);
+      failedNames.push(...queue.slice(done).map((p) => p.title));
+    } finally {
+      setBatchRunning(null);
+    }
+    const remaining = total - done - failedNames.length;
+    const suspectNote = suspectCount > 0 ? `；${suspectCount} 篇仍疑似解析异常（建议换引擎再试）` : "";
+    finishBatch(
+      cancelled
+        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理${suspectNote}`
+        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}${suspectNote}`,
+      failedNames,
+      cancelled,
+    );
+    await loadAll();
+  };
+
+  /** 批量任务取消：向量化当前篇跑完即停；翻译 abort；重新解析 kill 当前篇子进程（terminated 事件结算） */
+  const handleCancelBatch = () => {
+    batchCancelRef.current = true;
+    setBatchCancelling(true);
+    setBatchProgress((prev) => (prev ? { ...prev, detail: "正在取消…" } : prev));
+    if (batchRunning === "translate") batchTranslateAbortRef.current?.abort();
+    if (batchRunning === "reparse") cancelPaperPdfImport().catch(() => {});
+  };
+
+  /** 关闭批量进度卡（running 时等同取消） */
+  const handleDismissBatchProgress = () => {
+    if (batchProgress?.status === "running") {
+      handleCancelBatch();
+      return;
+    }
+    setBatchProgress(null);
+  };
+
   // ---- 列表视图 ----
   return (
     <div className="relative flex h-full flex-col">
@@ -992,14 +1599,25 @@ export default function PapersPage() {
           <span className="text-neutral-500 text-sm dark:text-neutral-400">共 {visiblePapers.length} 篇</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleImportPdf} disabled={importing || pdfImport?.status === "running"}>
+          <Button
+            onClick={handleImportPdf}
+            disabled={importing || pdfImport?.status === "running" || batchRunning != null}
+          >
             <FileDown className="size-4" />
             导入 PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setZoteroOpen(true)}
+            disabled={importing || pdfImport?.status === "running" || zoteroRunning || batchRunning != null}
+          >
+            {zoteroRunning ? <Loader2 className="size-4 animate-spin" /> : <Library className="size-4" />}
+            Zotero 导入
           </Button>
           {/* 高级导入：面向开发者/转换器用户——期望的是 Papers_Converter 产物目录（含 paper.md 与 images/） */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={importing}>
+              <Button variant="outline" disabled={importing || batchRunning != null}>
                 {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
                 高级
                 <ChevronDown className="size-3.5" />
@@ -1007,8 +1625,8 @@ export default function PapersPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72 p-2">
               <div className="px-2 py-1.5 text-muted-foreground text-xs leading-relaxed">
-                适用于已用 Papers_Converter 转换好的目录（含 paper.md 与
-                images/）。普通用户请直接用「导入 PDF」，无需关心此处。
+                适用于已用 Papers_Converter 转换好的目录（含 paper.md 与 images/）。普通用户请直接用「导入
+                PDF」，无需关心此处。
               </div>
               <DropdownMenuItem onSelect={() => handleImport("选择论文目录（含 paper.md）")}>
                 <FolderOpen className="size-4" />
@@ -1081,53 +1699,157 @@ export default function PapersPage() {
         <div className="flex min-w-0 flex-1 flex-col">
           {!loading && papers.length > 0 && (
             <div className="flex shrink-0 items-center gap-2 border-neutral-200 border-b px-4 py-2 dark:border-neutral-800">
-              <div className="relative min-w-0 flex-1">
-                <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-400" />
-                <Input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="检索标题 / 作者 / 期刊 / 摘要（空格分隔多词）"
-                  className="h-8 pl-8 text-sm"
-                />
-              </div>
-              <Select value={sortBy} onValueChange={handleSortByChange}>
-                <SelectTrigger className="h-8 w-28 shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="updated">更新时间</SelectItem>
-                  <SelectItem value="created">导入时间</SelectItem>
-                  <SelectItem value="rating">重要度</SelectItem>
-                  <SelectItem value="title">标题</SelectItem>
-                </SelectContent>
-              </Select>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={handleSortDirectionToggle}>
-                    {sortAscending ? (
-                      <ArrowUpNarrowWide className="size-4" />
-                    ) : (
-                      <ArrowDownWideNarrow className="size-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{sortAscending ? "升序（点击切换）" : "降序（点击切换）"}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
+              {manageMode ? (
+                <>
+                  {/* 批量操作条：全选三态 + 已选计数 + 操作组 + 取消选择/完成 */}
+                  <Checkbox
+                    checked={visibleCheckState}
+                    onCheckedChange={handleToggleSelectAll}
+                    aria-label="全选当前列表"
+                    className="ml-1"
+                  />
+                  <span className="shrink-0 text-neutral-600 text-sm dark:text-neutral-400">
+                    已选 {selectedIds.size} 篇
+                  </span>
+                  <div className="min-w-0 flex-1" />
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className={clsx("size-8 shrink-0", metaLang === "zh" && "bg-primary/10 text-primary")}
-                    onClick={handleMetaLangToggle}
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={batchRunning != null || selectedIds.size === 0}
+                    onClick={() => {
+                      // 批量移动初始为空：确认即整体替换所选论文的文件夹归属
+                      setMoveChecked(new Set());
+                      setBatchMoveOpen(true);
+                    }}
+                  >
+                    <FolderPen className="size-4" />
+                    移动到…
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={batchLocked || selectedIds.size === 0}
+                    onClick={handleBatchVectorize}
+                  >
+                    <Sparkles className="size-4" />
+                    向量化
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={batchLocked || selectedIds.size === 0}
+                    onClick={handleBatchTranslate}
                   >
                     <Languages className="size-4" />
+                    翻译
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {metaLang === "zh" ? "标题/摘要显示中文（点击切回原文）" : "标题/摘要中文化显示（用已有翻译）"}
-                </TooltipContent>
-              </Tooltip>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={batchLocked || selectedIds.size === 0}
+                    onClick={handleBatchReparse}
+                  >
+                    <RefreshCw className="size-4" />
+                    重新解析
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 text-red-500 hover:text-red-600 dark:hover:text-red-400"
+                    disabled={batchRunning != null || selectedIds.size === 0}
+                    onClick={handleBatchDelete}
+                  >
+                    <Trash2 className="size-4" />
+                    删除
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setSelectedIds(new Set())}>
+                    <X className="size-4" />
+                    取消选择
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    onClick={() => {
+                      setManageMode(false);
+                      setSelectedIds(new Set());
+                    }}
+                  >
+                    <Check className="size-4" />
+                    完成
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-3.5 text-neutral-400" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="检索标题 / 作者 / 期刊 / 摘要（空格分隔多词）"
+                      className="h-8 pl-8 text-sm"
+                    />
+                  </div>
+                  <Select value={sortBy} onValueChange={handleSortByChange}>
+                    <SelectTrigger className="h-8 w-28 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="updated">更新时间</SelectItem>
+                      <SelectItem value="created">导入时间</SelectItem>
+                      <SelectItem value="rating">重要度</SelectItem>
+                      <SelectItem value="title">标题</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 shrink-0"
+                        onClick={handleSortDirectionToggle}
+                      >
+                        {sortAscending ? (
+                          <ArrowUpNarrowWide className="size-4" />
+                        ) : (
+                          <ArrowDownWideNarrow className="size-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {sortAscending ? "升序（点击切换）" : "降序（点击切换）"}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={clsx("size-8 shrink-0", metaLang === "zh" && "bg-primary/10 text-primary")}
+                        onClick={handleMetaLangToggle}
+                      >
+                        <Languages className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {metaLang === "zh" ? "标题/摘要显示中文（点击切回原文）" : "标题/摘要中文化显示（用已有翻译）"}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setManageMode(true)}>
+                        <ListChecks className="size-4" />
+                        管理
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">批量管理（多选后移动/删除/向量化/翻译/重新解析）</TooltipContent>
+                  </Tooltip>
+                </>
+              )}
             </div>
           )}
           {selection.kind === "folder" && !loading && papers.length > 0 && (
@@ -1173,13 +1895,24 @@ export default function PapersPage() {
               <div className="max-w-lg space-y-3 text-center">
                 <h2 className="font-bold text-neutral-900 text-xl dark:text-neutral-100">文献库还是空的</h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
-                  把论文 PDF 拖进本页，或点下方按钮选择文件，即可自动解析、入库管理并阅读。
-                  已有 Papers_Converter 转换产物（含 paper.md 与 images/ 的目录）可走右上角「高级」导入。
+                  把论文 PDF 拖进本页，或点下方按钮选择文件，即可自动解析、入库管理并阅读。 已有 Papers_Converter
+                  转换产物（含 paper.md 与 images/ 的目录）可走右上角「高级」导入。
                 </p>
               </div>
-              <Button onClick={handleImportPdf} disabled={importing || pdfImport?.status === "running"}>
+              <Button
+                onClick={handleImportPdf}
+                disabled={importing || pdfImport?.status === "running" || batchRunning != null}
+              >
                 <FileDown className="size-4" />
                 导入 PDF
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setZoteroOpen(true)}
+                disabled={importing || pdfImport?.status === "running" || zoteroRunning || batchRunning != null}
+              >
+                <Library className="size-4" />
+                Zotero 导入
               </Button>
             </div>
           ) : visiblePapers.length === 0 && currentSubfolders.length === 0 ? (
@@ -1237,7 +1970,7 @@ export default function PapersPage() {
                       key={paper.id}
                       role="button"
                       tabIndex={0}
-                      className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
+                      className="group flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
                       onClick={() => handleOpen(paper)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -1246,6 +1979,20 @@ export default function PapersPage() {
                         }
                       }}
                     >
+                      {/* 多选 checkbox：仅管理模式出现；点击不触发行打开 */}
+                      {manageMode && (
+                        <div
+                          className="mt-0.5 flex h-9 shrink-0 items-center"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(paper.id)}
+                            onCheckedChange={() => toggleSelected(paper.id)}
+                            aria-label={`选择《${paper.title}》`}
+                          />
+                        </div>
+                      )}
                       <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
                         <FileText className="size-4 text-neutral-500 dark:text-neutral-400" />
                       </div>
@@ -1274,7 +2021,10 @@ export default function PapersPage() {
                       {/* 右侧两行纵向：上行 打星/状态徽标/向量化圆环，分隔线，下行 动作（向量化/移动/删除） */}
                       <div className="flex shrink-0 flex-col items-end gap-1.5">
                         <div className="flex items-center gap-1.5">
-                          <PaperStars rating={paper.status?.rating ?? 0} onRate={(rating) => handleRate(paper, rating)} />
+                          <PaperStars
+                            rating={paper.status?.rating ?? 0}
+                            onRate={(rating) => handleRate(paper, rating)}
+                          />
                           <PaperStatusBadge status={paper.status} />
                           <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
                         </div>
@@ -1300,6 +2050,42 @@ export default function PapersPage() {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom">{isVectorized ? "重新向量化" : "向量化"}</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={batchLocked}
+                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleBatchTranslate([paper]);
+                                }}
+                              >
+                                <Languages className="size-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">翻译</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={batchLocked}
+                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleBatchReparse([paper]);
+                                }}
+                              >
+                                <RefreshCw className="size-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">重新解析（用源 PDF 重走解析管线）</TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -1346,12 +2132,14 @@ export default function PapersPage() {
         </div>
       </div>
 
-      {/* 导入 PDF 选择弹窗：点击选择 / 拖入文件，确认后任务转后台 */}
+      {/* 导入 PDF 选择弹窗：点击选择 / 拖入文件（可多选累加候选），确认后任务转后台串行队列 */}
       <Dialog open={pdfPickerOpen} onOpenChange={setPdfPickerOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="px-5">
             <DialogTitle>导入 PDF 论文</DialogTitle>
-            <DialogDescription className="px-0">解析为 Markdown 论文并入库（后台运行，完成时提醒）</DialogDescription>
+            <DialogDescription className="px-0">
+              解析为 Markdown 论文并入库（后台串行运行，完成时提醒）
+            </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-4 px-5 py-4">
             <button
@@ -1365,39 +2153,71 @@ export default function PapersPage() {
               )}
             >
               <FileDown className={clsx("size-8", pdfDragOver ? "text-primary" : "text-neutral-400")} />
-              {pdfCandidate ? (
-                <span className="w-full min-w-0 max-w-full truncate font-medium text-foreground text-sm">
-                  {pdfCandidate.split(/[\\/]/).pop()}
-                </span>
-              ) : (
-                <>
-                  <span className="font-medium text-sm">{pdfDragOver ? "松开以选择此 PDF" : "点击选择或拖入 PDF"}</span>
-                  <span className="text-muted-foreground text-xs">单篇论文 PDF，解析约需十几秒到几分钟</span>
-                </>
-              )}
+              <span className="font-medium text-sm">
+                {pdfDragOver ? "松开以添加 PDF" : "点击选择或拖入 PDF（可多选）"}
+              </span>
+              <span className="text-muted-foreground text-xs">多篇将逐篇串行解析，每篇约需十几秒到几分钟</span>
             </button>
-            {pdfCandidate && (
-              <p className="min-w-0 max-w-full truncate text-muted-foreground text-xs" title={pdfCandidate}>
-                {pdfCandidate}
-              </p>
+            {pdfCandidates.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-xs">待解析 {pdfCandidates.length} 篇</span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground text-xs hover:text-foreground"
+                    onClick={() => setPdfCandidates([])}
+                  >
+                    清空
+                  </button>
+                </div>
+                <div className="max-h-44 space-y-1 overflow-y-auto">
+                  {pdfCandidates.map((path) => (
+                    <div key={path} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
+                      <span className="min-w-0 flex-1 truncate text-sm" title={path}>
+                        {path.split(/[\\/]/).pop()}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-red-500"
+                        onClick={() => setPdfCandidates((prev) => prev.filter((p) => p !== path))}
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           <DialogFooter className="px-5 pt-0 pb-4">
             <Button variant="outline" onClick={() => setPdfPickerOpen(false)}>
               取消
             </Button>
-            <Button disabled={!pdfCandidate} onClick={handleStartPdfImport}>
-              开始解析
+            <Button disabled={pdfCandidates.length === 0} onClick={handleStartPdfImport}>
+              {pdfCandidates.length > 0 ? `开始解析（${pdfCandidates.length} 篇）` : "开始解析"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Zotero 批量导入对话框（选择 → 进行 → 报告三态，完成后刷新列表与文件夹树） */}
+      <ZoteroImportDialog
+        open={zoteroOpen}
+        onOpenChange={setZoteroOpen}
+        onCompleted={loadAll}
+        onRunningChange={setZoteroRunning}
+      />
 
       {/* 后台解析进度卡（右下角浮层；成功 6s 自动消失，关闭即取消） */}
       {pdfImport && (
         <div className="absolute right-4 bottom-4 z-40 w-80 rounded-xl border bg-background p-3.5 shadow-lg">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="min-w-0 flex-1 truncate font-medium text-sm">{pdfImport.fileName}</span>
+            {pdfImport.total > 1 && (
+              <span className="shrink-0 text-muted-foreground text-xs">
+                第 {pdfImport.index}/{pdfImport.total} 篇
+              </span>
+            )}
             <button
               type="button"
               className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
@@ -1442,6 +2262,85 @@ export default function PapersPage() {
             <p className="truncate text-green-600 text-xs dark:text-green-400">{pdfImport.detail}</p>
           )}
           {pdfImport.status === "error" && <p className="text-red-600 text-xs dark:text-red-400">{pdfImport.error}</p>}
+          {pdfImport.failedNames.length > 0 && (
+            <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
+              {pdfImport.failedNames.map((name) => (
+                <li key={name} className="truncate" title={name}>
+                  {name}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* 批量任务进度卡（右下角浮层，样式对齐解析卡/Zotero 卡；running 时关闭即取消） */}
+      {batchProgress && (
+        <div className="absolute right-4 bottom-4 z-40 w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate font-medium text-sm">{BATCH_KIND_LABELS[batchProgress.kind]}</span>
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {Math.min(batchProgress.index + 1, batchProgress.total)}/{batchProgress.total}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+              onClick={handleDismissBatchProgress}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          {batchProgress.status === "running" ? (
+            <>
+              <Progress value={batchProgress.percent} className="h-1.5" />
+              <div className="mt-2 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  {batchProgress.title ? `《${batchProgress.title}》 ` : ""}
+                  {batchProgress.detail}
+                </span>
+                <span className="shrink-0">{batchProgress.percent}%</span>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between gap-2">
+                <span className="text-muted-foreground text-xs">
+                  完成 {batchProgress.doneCount}
+                  {batchProgress.failedCount > 0 ? ` · 失败 ${batchProgress.failedCount}` : ""}
+                  {batchProgress.skippedCount > 0 ? ` · 跳过 ${batchProgress.skippedCount}` : ""}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                  onClick={handleCancelBatch}
+                  disabled={batchCancelling}
+                >
+                  {batchCancelling ? "正在取消…" : "取消"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p
+                className={clsx(
+                  "text-xs",
+                  batchProgress.status === "success"
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400",
+                )}
+              >
+                {batchProgress.summary}
+              </p>
+              {batchProgress.failedNames.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
+                  {batchProgress.failedNames.map((name) => (
+                    <li key={name} className="truncate" title={name}>
+                      {name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -1491,19 +2390,24 @@ export default function PapersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 移动到文件夹对话框（回显当前成员关系，可多选——一篇论文可属多个文件夹） */}
+      {/* 移动到文件夹对话框（单篇：回显当前成员关系；批量：初始为空、整体替换归属。可多选——一篇论文可属多个文件夹） */}
       <Dialog
-        open={movePaper != null}
+        open={movePaper != null || batchMoveOpen}
         onOpenChange={(openState) => {
-          if (!openState) setMovePaper(null);
+          if (!openState) {
+            setMovePaper(null);
+            setBatchMoveOpen(false);
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>移动到文件夹</DialogTitle>
+            <DialogTitle>{batchMoveOpen ? "批量移动到文件夹" : "移动到文件夹"}</DialogTitle>
           </DialogHeader>
           <p className="px-4 pt-2 text-neutral-500 text-xs dark:text-neutral-400">
-            《{movePaper?.title}》可同时属于多个文件夹；全部取消勾选则移出所有文件夹（进入"未归档"）
+            {batchMoveOpen
+              ? `将替换 ${selectedIds.size} 篇论文的现有文件夹归属；全部取消勾选则移出所有文件夹（进入"未归档"）`
+              : `《${movePaper?.title}》可同时属于多个文件夹；全部取消勾选则移出所有文件夹（进入"未归档"）`}
           </p>
           <div className="max-h-72 overflow-y-auto px-2 py-2">
             {folderTree.length === 0 ? (
@@ -1536,10 +2440,16 @@ export default function PapersPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMovePaper(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setMovePaper(null);
+                setBatchMoveOpen(false);
+              }}
+            >
               取消
             </Button>
-            <Button onClick={handleMoveConfirm} disabled={moveSubmitting}>
+            <Button onClick={batchMoveOpen ? handleBatchMoveConfirm : handleMoveConfirm} disabled={moveSubmitting}>
               确定
             </Button>
           </DialogFooter>

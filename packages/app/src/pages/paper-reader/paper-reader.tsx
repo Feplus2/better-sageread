@@ -1,17 +1,17 @@
-import { useAppSettingsStore } from "@/store/app-settings-store";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { BookNote, HighlightColor, HighlightStyle } from "@/types/book";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { save } from "@tauri-apps/plugin-dialog";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { ChevronDown, ChevronUp, ImageOff } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, ImageOff, X } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSlug from "rehype-slug";
-import { rehypeDelTilde } from "./rehype-del-tilde";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { toast } from "sonner";
@@ -53,6 +53,7 @@ import { type PaperHighlightLocation, locateQuoteInPaper } from "./paper-highlig
 import { type HoverRect, mergeOverlappingRects } from "./paper-hover-rects";
 import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "./paper-metadata";
 import { type SentenceSpan, findSentenceAt, segmentSentences, snapRangeToSentences } from "./paper-sentences";
+import { rehypeDelTilde } from "./rehype-del-tilde";
 
 export interface TocItem {
   id: string;
@@ -349,8 +350,12 @@ function createPaperLinkComponent(scrollRef: React.RefObject<HTMLDivElement | nu
   };
 }
 
-/** 自定义 img：相对路径经 plugin-fs 读字节 → blob URL（带缓存），加载中占位、失败显示 alt */
-function createPaperImageComponent(paperDir: string, cache: BlobUrlCache): Components["img"] {
+/** 自定义 img：相对路径经 plugin-fs 读字节 → blob URL（带缓存），加载中占位、失败显示 alt；点击进大图预览 */
+function createPaperImageComponent(
+  paperDir: string,
+  cache: BlobUrlCache,
+  onPreview?: (image: { src: string; alt: string }) => void,
+): Components["img"] {
   return function PaperImage({ src, alt, ...props }) {
     const isRemote = typeof src === "string" && REMOTE_SRC_RE.test(src);
     const [status, setStatus] = useState<"loading" | "ready" | "error">(isRemote ? "ready" : "loading");
@@ -405,8 +410,15 @@ function createPaperImageComponent(paperDir: string, cache: BlobUrlCache): Compo
       return <span className="my-4 block h-48 w-full animate-pulse rounded-lg bg-neutral-100 dark:bg-neutral-800" />;
     }
     return (
-      <span className="my-3 block">
-        <img src={resolvedSrc} alt={alt ?? ""} loading="lazy" {...props} />
+      <span className="my-3 block text-center">
+        <img
+          src={resolvedSrc}
+          alt={alt ?? ""}
+          loading="lazy"
+          {...props}
+          className="mx-auto block max-w-full cursor-zoom-in"
+          onClick={() => onPreview?.({ src: resolvedSrc, alt: alt ?? "" })}
+        />
         {/* 图注可见化：Papers_Converter 把图注放在 alt 里（切块/RAG 暂不可见，先视觉上兜底显示） */}
         {alt?.trim() && (
           <InlineMathText
@@ -417,6 +429,94 @@ function createPaperImageComponent(paperDir: string, cache: BlobUrlCache): Compo
       </span>
     );
   };
+}
+
+/** 图片大图预览（点开）：居中放大 + 复制 / 保存 / 关闭；Esc 与点击背板关闭 */
+function PaperImagePreview({ image, onClose }: { image: { src: string; alt: string }; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleCopy = async () => {
+    try {
+      const blob = await (await fetch(image.src)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+      toast.success("图片已复制到剪贴板");
+    } catch (error) {
+      toast.error(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const base =
+        image.alt
+          .replace(/[\\/:*?"<>|]/g, "_")
+          .slice(0, 60)
+          .trim() || "figure";
+      const path = await save({
+        defaultPath: `${base}.png`,
+        filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+      if (!path) return;
+      const bytes = new Uint8Array(await (await fetch(image.src)).arrayBuffer());
+      await writeFile(path, bytes);
+      toast.success(`已保存到 ${path}`);
+    } catch (error) {
+      toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  return (
+    // 背板点击关闭；内容区阻止冒泡
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div className="absolute top-4 right-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+        >
+          <Copy className="size-4" />
+          复制
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+        >
+          <Download className="size-4" />
+          保存
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex items-center rounded-md bg-white/10 p-1.5 text-white hover:bg-white/20"
+          aria-label="关闭预览"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <img
+        src={image.src}
+        alt={image.alt}
+        className="max-h-[86vh] max-w-[92vw] object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+      {image.alt && (
+        <div className="-translate-x-1/2 absolute bottom-4 left-1/2 max-w-[80vw] truncate rounded-md bg-black/60 px-3 py-1.5 text-neutral-200 text-xs">
+          {image.alt}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const AUTHOR_COLLAPSE_COUNT = 6;
@@ -860,9 +960,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     };
   }, []);
 
+  // 图片点开预览（大图 + 复制/保存）
+  const [imagePreview, setImagePreview] = useState<{ src: string; alt: string } | null>(null);
+
   const components = useMemo<Partial<Components>>(
     () => ({
-      img: createPaperImageComponent(paperDir, blobCacheRef.current),
+      img: createPaperImageComponent(paperDir, blobCacheRef.current, setImagePreview),
       a: createPaperLinkComponent(scrollRef),
     }),
     [paperDir],
@@ -1276,8 +1379,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
               liveHead: live.slice(0, 40),
             })}`,
           );
-          const storedRange =
-            live === stored ? { start: s, end: e } : mapOffsetsMathAware(normL, normS, s, e);
+          const storedRange = live === stored ? { start: s, end: e } : mapOffsetsMathAware(normL, normS, s, e);
           if (storedRange) mapped = mapTgtRangeToSrc(align, storedRange.start, storedRange.end, alignW);
           console.debug(`[zh-dbg2] ${JSON.stringify({ blockIndex, storedRange, mapped })}`);
         }
@@ -1571,6 +1673,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
           onClose={closePopup}
         />
       )}
+      {imagePreview && <PaperImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />}
     </>
   );
 });

@@ -165,6 +165,43 @@ check("译文模式：块数与原文一致，不可翻译块（图片）文本�
   }
 });
 
+// ─── 粘连块回归（self-driving labs 实测根因）："# H\nP" 无空行分隔在 CommonMark 中是两个块，
+// 对照模式在标题尾插入译文 div 时若 div 后与下一块粘连（单 \n），HTML 块会把下一块吞成裸文本，
+// DOM 块枚举少于切块器、块索引整体错位。译文 div 尾部补 \n 后两侧枚举必须重新严格一致。
+check("对照模式：标题/段落无空行分隔（粘连块）时块枚举仍与切块器一致", () => {
+  const glued = [
+    "# Glued Title",
+    "Glued abstract paragraph one. Second sentence stays.",
+    "",
+    "Normal paragraph after blank line.",
+    "",
+    "## Glued Section",
+    "Glued intro paragraph under section.",
+    "",
+    "> Glued quote block.",
+    "# Glued heading after quote",
+    "",
+    "Tail paragraph.",
+  ].join("\n");
+  const gluedBlocks = cutPaperBlocks(glued);
+  assert(gluedBlocks.length === 8, `前置假设：粘连用例应切出 8 块，实际 ${gluedBlocks.length}`);
+  const gluedTranslations = new Map(gluedBlocks.filter((b) => b.translatable).map((b) => [b.index, `译文${b.index}`]));
+  const rebuilt = buildPaperViewMarkdown(glued, gluedTranslations, "bilingual");
+  const blocks = enumerateDomBlocks(rebuilt);
+  assert(
+    blocks.length === gluedBlocks.length,
+    `对照模式粘连块场景块数 ${blocks.length} ≠ 切块器 ${gluedBlocks.length}`,
+  );
+  for (let i = 0; i < gluedBlocks.length; i++) {
+    const src = normalizeSrcText(gluedBlocks[i].sourceText);
+    const domText = normalizeDomText(blocks[i]);
+    assert(
+      domText === src || domText.startsWith(src),
+      `块 ${i} 被吞或扰动：\n  源: ${src.slice(0, 60)}\n  DOM: ${domText.slice(0, 60)}`,
+    );
+  }
+});
+
 // ─── T2 句级对齐的 DOM 映射前提 ───
 
 /** 与 paper-reader.tsx 的 buildTranslationDivMap 同算法：取"文档顺序上最后一个起点在 div 之前的块" */

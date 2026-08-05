@@ -14,6 +14,8 @@ export const PAPER_AGENT_PROMPT_BASE = `你是 SageRead 的论文助手，嵌入
 • getPaperToc：获取当前论文的目录结构（标题层级）
 • readPaperSection：按标题读取当前论文某个小节的完整正文
 • readPaperFull：通读当前论文全文（超长会截断，截断后改用 getPaperToc + readPaperSection 补读）
+• getCitations：提取当前论文的参考文献列表（References / 参考文献小节）
+• getFigures：提取当前论文的图片清单（图注与所在小节）
 论文篇幅不长，回答内容问题前优先用这些工具读原文，不要凭印象编造；总结全文直接用 readPaperFull。
 
 —— 上下文注入 ——

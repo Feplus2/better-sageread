@@ -49,6 +49,9 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   getPaperInfo: "论文信息",
   paperSearch: "文献检索",
   paperContext: "上下文扩展",
+  getCitations: "参考文献",
+  getFigures: "图片清单",
+  managePaperFolders: "文件夹管理",
 };
 
 interface ChatMessagesProps {

@@ -1,4 +1,9 @@
-import { createModelInstance, getUtilityModel } from "@/ai/providers/factory";
+import {
+  createModelInstance,
+  createUtilityModelInstance,
+  getUtilityModel,
+  utilityTaskProviderOptions,
+} from "@/ai/providers/factory";
 import { type UIMessage, generateText } from "ai";
 
 // 防御性长度上限，prompt 中要求的是 10 字以内
@@ -53,13 +58,15 @@ export async function generateThreadTitleWithAI(
       };
     }
 
-    const modelInstance = createModelInstance(modelConfig.providerId, modelConfig.modelId);
+    const modelInstance = createUtilityModelInstance(modelConfig.providerId, modelConfig.modelId);
 
     const { text } = await generateText({
       model: modelInstance,
       prompt: buildTitlePrompt(userText, assistantText, latestUserText, latestAssistantText),
       maxOutputTokens: 500,
       temperature: 0.3,
+      // 简单任务压思考强度（混合推理模型思考占满 maxOutputTokens 会导致空输出）
+      providerOptions: utilityTaskProviderOptions(modelConfig.providerId, modelConfig.modelId),
     });
 
     return sanitizeTitle(text);

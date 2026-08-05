@@ -25,7 +25,7 @@ papers 页「导入 PDF」按钮
 {"type":"start","title","engine"}
 {"type":"progress","stage":1-4,"stage_name","detail","fraction","percent"}   # percent 单调不减
 {"type":"stage_done","stage","stage_name","elapsed","percent"}
-{"type":"done","slug","paper_dir","paper_md","title","elapsed","percent":100}
+{"type":"done","slug","paper_dir","paper_md","title","elapsed","percent":100,"degenerate"?}  # degenerate=true：质量守卫重试后仍退化（2026-08-05）
 {"type":"error","message"}                                                    # 退出码非 0
 ```
 
@@ -44,7 +44,7 @@ papers 页「导入 PDF」按钮
 - Rust `core/paper_converter.rs`：`convert_paper_pdf` / `cancel_paper_convert` / `PaperConverterState`（事件转发同 Books 模式）
 - 设置（converter-store，本机不入备份/同步）：`paperEngine`（paddleocr 基线 / mineru 表格备选 / glm 第二备选）+ `glmApiKey`；MinerU/PaddleOCR Token 与书籍转换共享
 - 设置页「PDF 转换」：书籍引擎与论文引擎两个选择区（Token 按引擎条件显示）
-- papers 页：「导入 PDF」主按钮 + 四阶段进度对话框（关闭即取消；成功复用 importPapers 入库，选中文件夹时自动挂载）
+- papers 页：「导入 PDF」主按钮 + 四阶段进度对话框（关闭即取消；成功复用 importPapers 入库，选中文件夹时自动挂载）；导入 PDF 支持多篇批量（点选 multiple + 拖入多文件，前端串行队列逐篇转换）
 - 解析产物：`{appData}/papers-converter/{slug}/{paper.md,images/,source.pdf}`（staging 缓存在 sidecar 输出目录 `_staging/`）
 
 ## 五、验证
@@ -56,5 +56,6 @@ papers 页「导入 PDF」按钮
 ## 六、遗留
 
 - staging 的 LLM 元数据缓存（slug 防漂移，backlog 定论 converter 侧待实现）
-- Zotero 批量导入（下轮；zotero_key 经 convert_pdf 参数透传锚定 slug）
+- **stage1 引擎 VLM 退化循环**（2026-08-05 实测）：长枚举内容触发"模式延续"失控（如 nm 波长列从真实值 1700 一路递增编到 15800；另一篇单词 fire 重复数百次），失控在引擎原始产物即存在。**两侧已闭环**：converter 侧 `quality_guard.py`（签名周期法，阈值与 SageRead 一致）在 stage1 命中即重试（≤2 次）并最终经 done 事件 `degenerate:true` 打标；SageRead 侧本地同款检测 + 协议字段双通道提示"换引擎重新解析"。实测注意：Yang 2021 这篇在 PaddleOCR-VL 三次重跑全复发，重试不自愈的内容以换引擎为准。exe 未随源码重建（见交接文档待办）
+- Zotero 批量导入：已实现（SageRead 侧，见 docs/zotero-batch-import.md）；converter 侧 `--zotero-key` 透传锚定 slug 仍为 converter 遗留（当前方案不依赖，zotero_key 由 SageRead 注入 frontmatter）
 - Books_Converter 同款 _MEIPASS 隐患（SageRead 侧恒传 --output-dir 规避，未修 converter 本体）
