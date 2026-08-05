@@ -1,3 +1,4 @@
+import { ThemeBackgroundVideo } from "@/components/theme-background-video";
 import { Toaster } from "@/components/ui/sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
@@ -21,6 +22,7 @@ window.addEventListener("beforeunload", () => {
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <HashRouter>
+      <ThemeBackgroundVideo />
       <ReaderLayout />
     </HashRouter>
     <Toaster position="top-center" />

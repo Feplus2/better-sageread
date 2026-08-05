@@ -1,0 +1,124 @@
+/* @name 怜烟 */
+/* SageRead 全局主题 · 怜烟（lianyan）— 背景视频循环 + 毛玻璃遮罩
+   亮色：宣纸暖白 × 墨黑 × 鸦金（配哀鸿水墨循环）
+   暗色：紫檀黑 × 昏金 × 淡紫（配苏怜烟暖金循环）
+   视频层由 components/theme-background-video.tsx 读取 --bg-video 挂载 */
+
+:root {
+  --bg-video: url("/themes/lianyan/light.mp4");
+
+  --background: rgba(243, 240, 234, 0.45);
+  --foreground: #2b2624;
+  --card: rgba(248, 246, 241, 0.42);
+  --card-foreground: #2b2624;
+  --popover: rgba(250, 248, 244, 0.68);
+  --popover-foreground: #2b2624;
+  --primary: #3a4346;
+  --primary-foreground: #f5f2eb;
+  --secondary: rgba(229, 224, 216, 0.5);
+  --secondary-foreground: #38322d;
+  --muted: rgba(236, 232, 224, 0.44);
+  --muted-foreground: #6e655c;
+  --accent: rgba(201, 147, 43, 0.18);
+  --accent-foreground: #7a5a18;
+  --border: rgba(90, 80, 70, 0.28);
+  --input: rgba(90, 80, 70, 0.32);
+  --ring: #8a6d3b;
+  --sidebar: rgba(238, 234, 227, 0.46);
+  --sidebar-foreground: #2b2624;
+  --sidebar-primary: #3a4346;
+  --sidebar-primary-foreground: #f5f2eb;
+  --sidebar-accent: rgba(201, 147, 43, 0.16);
+  --sidebar-accent-foreground: #7a5a18;
+  --sidebar-border: rgba(90, 80, 70, 0.26);
+  --sidebar-ring: #8a6d3b;
+  --content: #2b2624;
+  --layout: rgba(243, 240, 234, 0.45);
+
+  --color-neutral-50: #f7f4ee;
+  --color-neutral-100: #efece5;
+  --color-neutral-200: #e2ddd4;
+  --color-neutral-300: #c9c2b6;
+  --color-neutral-400: #a89e90;
+  --color-neutral-500: #877d70;
+  --color-neutral-600: #6b6257;
+  --color-neutral-700: #564e46;
+  --color-neutral-800: #453e38;
+  --color-neutral-900: #38322d;
+  --color-neutral-950: #241f1c;
+
+  --shadow-warm-sm: 0 1px 2px rgba(43, 38, 36, 0.06), 0 2px 8px rgba(43, 38, 36, 0.07);
+  --shadow-warm-md: 0 2px 4px rgba(43, 38, 36, 0.08), 0 8px 20px rgba(43, 38, 36, 0.11);
+  --shadow-warm-lg: 0 2px 6px rgba(43, 38, 36, 0.08), 0 16px 48px rgba(43, 38, 36, 0.15);
+}
+
+html.dark {
+  --bg-video: url("/themes/lianyan/dark.mp4");
+
+  --background: rgba(26, 19, 22, 0.55);
+  --foreground: #efe3d0;
+  --card: rgba(38, 28, 32, 0.5);
+  --card-foreground: #efe3d0;
+  --popover: rgba(44, 33, 38, 0.7);
+  --popover-foreground: #efe3d0;
+  --primary: #d8b56a;
+  --primary-foreground: #2a1e14;
+  --secondary: rgba(74, 56, 60, 0.5);
+  --secondary-foreground: #efe3d0;
+  --muted: rgba(64, 48, 52, 0.45);
+  --muted-foreground: #b49c8e;
+  --accent: rgba(183, 142, 201, 0.2);
+  --accent-foreground: #c9a3d8;
+  --border: rgba(216, 181, 106, 0.22);
+  --input: rgba(216, 181, 106, 0.26);
+  --ring: #d8b56a;
+  --sidebar: rgba(34, 25, 29, 0.52);
+  --sidebar-foreground: #efe3d0;
+  --sidebar-primary: #d8b56a;
+  --sidebar-primary-foreground: #2a1e14;
+  --sidebar-accent: rgba(183, 142, 201, 0.18);
+  --sidebar-accent-foreground: #c9a3d8;
+  --sidebar-border: rgba(216, 181, 106, 0.2);
+  --sidebar-ring: #d8b56a;
+  --content: #efe3d0;
+  --layout: rgba(26, 19, 22, 0.55);
+
+  --color-neutral-50: #f2e9dc;
+  --color-neutral-100: #e5d8c6;
+  --color-neutral-200: #d0bda6;
+  --color-neutral-300: #b39e85;
+  --color-neutral-400: #96816c;
+  --color-neutral-500: #7c6857;
+  --color-neutral-600: #645246;
+  --color-neutral-700: #4e4038;
+  --color-neutral-800: #3c302c;
+  --color-neutral-900: #2e2523;
+  --color-neutral-950: #1c1514;
+
+  --shadow-warm-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.32);
+  --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.32), 0 8px 20px rgba(0, 0, 0, 0.36);
+  --shadow-warm-lg: 0 2px 6px rgba(0, 0, 0, 0.34), 0 16px 48px rgba(0, 0, 0, 0.42);
+}
+
+/* 底层透明，让背景视频透出（承力面靠半透明变量 + 毛玻璃） */
+body,
+#root {
+  background: transparent;
+}
+
+/* 毛玻璃遮罩：主承力面。亮色宣纸浓度低、暗色紫檀浓度高（变量透明度已分档） */
+.bg-background,
+.bg-card,
+.bg-popover,
+.bg-secondary,
+.bg-muted {
+  backdrop-filter: blur(18px) saturate(1.28);
+  -webkit-backdrop-filter: blur(18px) saturate(1.28);
+}
+
+/* 对话框/弹层要更实一点，保证可读性 */
+.bg-popover,
+[role="dialog"] {
+  backdrop-filter: blur(26px) saturate(1.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
+}

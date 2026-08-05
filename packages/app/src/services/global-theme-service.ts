@@ -9,7 +9,7 @@ export interface GlobalThemeInfo {
 }
 
 // 内置主题清单：public/themes 下的文件无法运行时列目录，新增内置主题时在此登记（不含 .css 后缀）
-const BUILTIN_THEMES = ["parchment", "forest", "maple", "ocean", "lavender", "cake"];
+const BUILTIN_THEMES = ["parchment", "forest", "maple", "ocean", "lavender", "cake", "lianyan"];
 
 const USER_THEMES_DIR = "themes";
 

@@ -41,3 +41,4 @@ packages/app/src-tauri/plugins/*/permissions/schemas/
 # Books_Converter / Papers_Converter sidecar（PyInstaller 产物，体积大，不入库）
 packages/app/src-tauri/binaries/books_converter-*
 packages/app/src-tauri/binaries/papers_converter-*
+.tools/
