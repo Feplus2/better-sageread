@@ -115,3 +115,39 @@ body,
 
 /* 毛玻璃由整屏磨砂层统一提供（theme-background-video.tsx 的 --bg-frost 层）。
    不做逐面 backdrop-filter：拖拽布局时残留合成块（不可选中、不随 resize 更新的"幽灵色块"），且性能差。 */
+
+/* 聊天正文微交互（chat-md）：亮=墨青×鸦金，暗=昏金×淡紫 */
+:root {
+  --chat-strong: #3a4346;
+  --chat-strong-hover: #8a6d3b;
+  --chat-em: #6b5a3e;
+  --chat-em-hover: #8a6d3b;
+  --chat-link: #3f5a54;
+  --chat-link-hover: #7a5a18;
+  --chat-code-bg: rgba(201, 147, 43, 0.16);
+  --chat-code-text: #7a5a18;
+  --chat-code-bg-hover: rgba(201, 147, 43, 0.28);
+  --chat-codeblock-border: rgba(138, 109, 59, 0.45);
+  --chat-codeblock-shadow: 0 4px 14px rgba(90, 80, 70, 0.12);
+  --chat-marker: #8a6d3b;
+  --chat-marker-hover: #3a4346;
+  --chat-quote-border: rgba(138, 109, 59, 0.5);
+  --chat-quote-bg-hover: rgba(201, 147, 43, 0.08);
+}
+html.dark {
+  --chat-strong: #f2e6cd;
+  --chat-strong-hover: #d8b56a;
+  --chat-em: #c9a3d8;
+  --chat-em-hover: #dbc2e8;
+  --chat-link: #d8b56a;
+  --chat-link-hover: #efe3d0;
+  --chat-code-bg: rgba(216, 181, 106, 0.16);
+  --chat-code-text: #e8cd9a;
+  --chat-code-bg-hover: rgba(216, 181, 106, 0.28);
+  --chat-codeblock-border: rgba(216, 181, 106, 0.4);
+  --chat-codeblock-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --chat-marker: #d8b56a;
+  --chat-marker-hover: #c9a3d8;
+  --chat-quote-border: rgba(216, 181, 106, 0.4);
+  --chat-quote-bg-hover: rgba(216, 181, 106, 0.08);
+}

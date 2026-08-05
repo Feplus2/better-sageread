@@ -94,3 +94,41 @@ html.dark {
   --shadow-warm-md: 3px 3px 0 rgba(0, 0, 0, 0.6);
   --shadow-warm-lg: 5px 5px 0 rgba(0, 0, 0, 0.65);
 }
+
+/* 聊天正文微交互（chat-md）：风格派撞色——粗体 hover 变红、斜体钴蓝、行内代码黄块 hover 变红 */
+:root {
+  --chat-strong: #141414;
+  --chat-strong-hover: #c93a2e;
+  --chat-em: #2c5f9e;
+  --chat-em-hover: #1a3d6b;
+  --chat-link: #2c5f9e;
+  --chat-link-hover: #c93a2e;
+  --chat-code-bg: #f2c230;
+  --chat-code-text: #141414;
+  --chat-code-bg-hover: #c93a2e;
+  --chat-code-text-hover: #fff8ee;
+  --chat-codeblock-border: #1c1c1c;
+  --chat-codeblock-shadow: 3px 3px 0 rgba(26, 26, 26, 0.85);
+  --chat-marker: #1c1c1c;
+  --chat-marker-hover: #c93a2e;
+  --chat-quote-border: #2c5f9e;
+  --chat-quote-bg-hover: rgba(242, 194, 48, 0.15);
+}
+html.dark {
+  --chat-strong: #f0ede2;
+  --chat-strong-hover: #e2543f;
+  --chat-em: #7fa8e0;
+  --chat-em-hover: #5b8bd0;
+  --chat-link: #7fa8e0;
+  --chat-link-hover: #e2543f;
+  --chat-code-bg: #f2c230;
+  --chat-code-text: #1c1505;
+  --chat-code-bg-hover: #e2543f;
+  --chat-code-text-hover: #1c0f0b;
+  --chat-codeblock-border: #465060;
+  --chat-codeblock-shadow: 3px 3px 0 rgba(0, 0, 0, 0.6);
+  --chat-marker: #d9ae2e;
+  --chat-marker-hover: #e2543f;
+  --chat-quote-border: #5b8bd0;
+  --chat-quote-bg-hover: rgba(242, 194, 48, 0.1);
+}

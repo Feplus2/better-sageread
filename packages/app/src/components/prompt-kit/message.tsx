@@ -39,7 +39,10 @@ export type MessageContentProps = {
   React.HTMLProps<HTMLDivElement>;
 
 const MessageContent = ({ children, markdown = false, className, ...props }: MessageContentProps) => {
-  const classNames = cn("prose whitespace-normal break-words rounded-lg bg-secondary p-2 text-foreground", className);
+  const classNames = cn(
+    "chat-md prose whitespace-normal break-words rounded-lg bg-secondary p-2 text-foreground",
+    className,
+  );
 
   return markdown ? (
     <Markdown className={classNames} {...props}>

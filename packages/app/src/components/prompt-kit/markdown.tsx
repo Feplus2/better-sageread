@@ -52,7 +52,10 @@ const INITIAL_COMPONENTS: Partial<Components> = {
 
     if (isInline) {
       return (
-        <span className={cn("rounded-sm bg-primary-foreground px-1 font-mono text-sm", className)} {...props}>
+        <span
+          className={cn("chat-inline-code rounded-sm bg-primary-foreground px-1 font-mono text-sm", className)}
+          {...props}
+        >
           {children}
         </span>
       );
@@ -61,7 +64,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     const language = extractLanguage(className);
 
     return (
-      <CodeBlock className={className} code={children as string} language={language}>
+      <CodeBlock className={cn("chat-code-block", className)} code={children as string} language={language}>
         <CodeBlockCode code={children as string} language={language} />
       </CodeBlock>
     );

@@ -467,3 +467,33 @@ html.dark [data-region="chat-message-assistant"] .prose code:hover {
 [data-region="chat-message-assistant"] .prose li:hover::marker {
   color: color-mix(in srgb, var(--primary) 75%, var(--foreground));
 }
+
+/* 聊天正文微交互（chat-md）：暖纸棕金 */
+:root {
+  --chat-strong: #5c4632;
+  --chat-strong-hover: #8a5a2e;
+  --chat-em: #7a5a3a;
+  --chat-em-hover: #96683a;
+  --chat-link: #6b4f2a;
+  --chat-link-hover: #8a5a2e;
+  --chat-code-bg: rgba(138, 90, 46, 0.12);
+  --chat-code-text: #7a4a1e;
+  --chat-code-bg-hover: rgba(138, 90, 46, 0.22);
+  --chat-marker: #8a5a2e;
+  --chat-marker-hover: #5c4632;
+  --chat-quote-border: rgba(138, 90, 46, 0.4);
+}
+html.dark {
+  --chat-strong: #e8d8b8;
+  --chat-strong-hover: #d8a860;
+  --chat-em: #c8a070;
+  --chat-em-hover: #dab888;
+  --chat-link: #d8a860;
+  --chat-link-hover: #e8d8b8;
+  --chat-code-bg: rgba(216, 168, 96, 0.14);
+  --chat-code-text: #e0b070;
+  --chat-code-bg-hover: rgba(216, 168, 96, 0.24);
+  --chat-marker: #d8a860;
+  --chat-marker-hover: #e8d8b8;
+  --chat-quote-border: rgba(216, 168, 96, 0.4);
+}

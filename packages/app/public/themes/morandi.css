@@ -93,3 +93,39 @@ html.dark {
   --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.26), 0 8px 20px rgba(0, 0, 0, 0.3);
   --shadow-warm-lg: 0 2px 6px rgba(0, 0, 0, 0.28), 0 16px 48px rgba(0, 0, 0, 0.36);
 }
+
+/* 聊天正文微交互（chat-md）：冷调灰的呼吸感——变化轻、过渡慢 */
+:root {
+  --chat-strong: #46555c;
+  --chat-strong-hover: #6e838c;
+  --chat-em: #647a6e;
+  --chat-em-hover: #4a5a50;
+  --chat-link: #5c7280;
+  --chat-link-hover: #46555c;
+  --chat-code-bg: #dde4df;
+  --chat-code-text: #4a5a50;
+  --chat-code-bg-hover: #c9d4cd;
+  --chat-codeblock-border: #b9c4bc;
+  --chat-codeblock-shadow: 0 4px 14px rgba(58, 64, 69, 0.1);
+  --chat-marker: #8fa29a;
+  --chat-marker-hover: #6e838c;
+  --chat-quote-border: #a9b8b0;
+  --chat-quote-bg-hover: rgba(110, 131, 140, 0.07);
+}
+html.dark {
+  --chat-strong: #e2e7e3;
+  --chat-strong-hover: #a8c4d0;
+  --chat-em: #9db8a8;
+  --chat-em-hover: #b9d2c2;
+  --chat-link: #93aab5;
+  --chat-link-hover: #b3c8d1;
+  --chat-code-bg: #333e42;
+  --chat-code-text: #a8c4b4;
+  --chat-code-bg-hover: #3d4a4e;
+  --chat-codeblock-border: #45525a;
+  --chat-codeblock-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --chat-marker: #6f857c;
+  --chat-marker-hover: #8ca3ac;
+  --chat-quote-border: #4a5a52;
+  --chat-quote-bg-hover: rgba(140, 163, 172, 0.08);
+}

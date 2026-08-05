@@ -675,3 +675,88 @@ foliate-view {
   border-left-color: oklch(0.35 0.02 260);
   color: oklch(0.72 0.02 260);
 }
+
+/* ---------- 聊天正文微交互（chat-md）----------
+ * 三助手对话气泡内的 Markdown 元素动效。颜色全部走 --chat-* 变量：
+ * 未设置变量的主题回落为中性默认（不改变既有观感）；各主题在自身 CSS 里覆盖变量注入个性。 */
+.chat-md strong {
+  color: var(--chat-strong, inherit);
+  transition: color 0.18s ease;
+}
+.chat-md strong:hover {
+  color: var(--chat-strong-hover, var(--chat-strong, inherit));
+}
+
+.chat-md em {
+  color: var(--chat-em, inherit);
+  transition: color 0.18s ease;
+}
+.chat-md em:hover {
+  color: var(--chat-em-hover, var(--chat-em, inherit));
+}
+
+.chat-md a {
+  color: var(--chat-link, inherit);
+  text-decoration: underline;
+  text-decoration-color: var(--chat-link-underline, transparent);
+  text-underline-offset: 2px;
+  transition:
+    color 0.18s ease,
+    text-decoration-color 0.18s ease;
+}
+.chat-md a:hover {
+  color: var(--chat-link-hover, var(--chat-link, inherit));
+  text-decoration-color: var(--chat-link-underline-hover, currentColor);
+}
+
+/* 行内代码 chip（markdown.tsx 的 .chat-inline-code） */
+.chat-md .chat-inline-code {
+  background: var(--chat-code-bg, rgba(127, 127, 127, 0.12));
+  color: var(--chat-code-text, inherit);
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+.chat-md .chat-inline-code:hover {
+  background: var(--chat-code-bg-hover, var(--chat-code-bg, rgba(127, 127, 127, 0.18)));
+  color: var(--chat-code-text-hover, var(--chat-code-text, inherit));
+}
+
+/* 代码块（.chat-code-block）：hover 描边上色 */
+.chat-md .chat-code-block {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.chat-md .chat-code-block:hover {
+  border-color: var(--chat-codeblock-border, transparent);
+  box-shadow: var(--chat-codeblock-shadow, none);
+}
+
+/* 列表：marker 上色 + hover 微移 */
+.chat-md li::marker {
+  color: var(--chat-marker, currentColor);
+  transition: color 0.18s ease;
+}
+.chat-md li {
+  transition: transform 0.18s ease;
+}
+.chat-md li:hover {
+  transform: translateX(2px);
+}
+.chat-md li:hover::marker {
+  color: var(--chat-marker-hover, var(--chat-marker, currentColor));
+}
+
+/* 引用块：竖线上色 + hover 底纹 */
+.chat-md blockquote {
+  border-left-color: var(--chat-quote-border, currentColor);
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+.chat-md blockquote:hover {
+  background: var(--chat-quote-bg-hover, rgba(127, 127, 127, 0.06));
+}
