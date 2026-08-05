@@ -40,6 +40,11 @@
 
 ## 已消化
 
+### 2026-08-05 怜烟主题 + 多标签页堆叠修复批
+- [x] **全局主题「怜烟」**：背景视频循环（亮=哀鸿水墨 / 暗=苏怜烟暖金，1080p30 H.264 faststart，1.0MB/0.7MB）+ 半透明变量 + 毛玻璃。机制：主题 CSS 声明 `--bg-video`/`--bg-frost`，`components/theme-background-video.tsx` 全局挂载（未声明的主题零侵入）。**毛玻璃走整屏磨砂层而非逐面 backdrop-filter**（resize 时残留合成块 + 性能差）；嵌套 `bg-background` 去重为 card 色防多层叠加实色。配色由抽帧决定
+- [x] **多标签页内容堆叠（半透明主题显形的 latent bug）**：reader-layout 用 `visibility:hidden` 隐藏非活跃 tab，但两个 HeaderBar 的 className 里有静态 `visible` 工具类——CSS visibility 允许子元素覆盖父级 hidden，于是 N 个 tab 的顶栏全部同位渲染（文字堆叠 + 遮罩叠深/拖拽错位"幽灵色块"的真正根因）。修复：删掉两个 header-bar 的静态 `visible`（自动隐藏走子组 opacity，不受影响）。CDP 实测：7 个 .header-bar 仅活跃 tab visible
+- [x] **Switch checked 色随主题**：硬编码 bg-blue-500/600 → bg-primary
+
 ### 2026-08-05 聊天区公式渲染 + RAG 提示词收口批
 - [x] **聊天消息公式渲染（用户反馈：侧边栏助手不渲染公式）**：根因——`prompt-kit/markdown.tsx`（三助手 + central 页共用）的 ReactMarkdown 没挂 remark-math/rehype-katex（paper 阅读器有，聊天区漏了）。修复：挂 remarkMath + rehypeKatex + katex.min.css；**二轮根因**：remark-math 只把多行 `$$…$$` 识别为行间公式，整段单行 `$$…$$` 会当行内——`parseMarkdownIntoBlocks` 对整段单行 $$ 段落改写为多行形式（仅 paragraph token，代码块不误伤）；公式内 `[n]` 不会被吞成引用标注（KaTeX 逐符号分片，[n] 凑不成连续文本节点，天然规避）。CDP `scripts/cdp-test-math-render.mjs` 8/8 PASS
 - [x] **RAG 提示词侧收口落实**：见待办区「RAG 精度增强」条目标记（论文助手补检索策略节、阅读助手 v2.3 查询构造迁移）

@@ -107,7 +107,7 @@ export default function PaperHeaderBar({
   return (
     <div className="w-full shrink-0">
       <div
-        className="header-bar pointer-events-auto visible flex h-10 w-full items-center px-2 pl-4 transition-all duration-300"
+        className="header-bar pointer-events-auto flex h-10 w-full items-center px-2 pl-4 transition-all duration-300"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >

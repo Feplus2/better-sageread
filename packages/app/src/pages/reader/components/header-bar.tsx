@@ -108,7 +108,7 @@ const HeaderBar = () => {
     <div className="w-full">
       <div
         ref={headerRef}
-        className="header-bar pointer-events-auto visible flex h-10 w-full items-center px-2 pl-4 transition-all duration-300"
+        className="header-bar pointer-events-auto flex h-10 w-full items-center px-2 pl-4 transition-all duration-300"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
