@@ -473,3 +473,15 @@ html.dark {
   --chat-marker-hover: #f0d8e0;
   --chat-quote-border: rgba(232, 138, 165, 0.4);
 }
+
+/* chat-md 标题：深莓 hover 甜粉 */
+:root {
+  --chat-heading: #6a2f42;
+  --chat-heading-hover: #c2486f;
+  --chat-heading-rule-hover: rgba(194, 72, 111, 0.4);
+}
+html.dark {
+  --chat-heading: #f0d8e0;
+  --chat-heading-hover: #e88aa5;
+  --chat-heading-rule-hover: rgba(232, 138, 165, 0.4);
+}

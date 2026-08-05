@@ -151,3 +151,15 @@ html.dark {
   --chat-quote-border: rgba(216, 181, 106, 0.4);
   --chat-quote-bg-hover: rgba(216, 181, 106, 0.08);
 }
+
+/* chat-md 标题：亮=墨青 hover 鸦金；暗=米金 hover 昏金 */
+:root {
+  --chat-heading: #2b3a38;
+  --chat-heading-hover: #8a6d3b;
+  --chat-heading-rule-hover: rgba(201, 147, 43, 0.5);
+}
+html.dark {
+  --chat-heading: #f2e6cd;
+  --chat-heading-hover: #d8b56a;
+  --chat-heading-rule-hover: rgba(216, 181, 106, 0.45);
+}

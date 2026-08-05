@@ -132,3 +132,15 @@ html.dark {
   --chat-quote-border: #5b8bd0;
   --chat-quote-bg-hover: rgba(242, 194, 48, 0.1);
 }
+
+/* chat-md 标题：黑题 hover 变红，h2/h3 规则线 hover 现黄 */
+:root {
+  --chat-heading: #141414;
+  --chat-heading-hover: #c93a2e;
+  --chat-heading-rule-hover: #f2c230;
+}
+html.dark {
+  --chat-heading: #f0ede2;
+  --chat-heading-hover: #e2543f;
+  --chat-heading-rule-hover: #f2c230;
+}

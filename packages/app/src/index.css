@@ -760,3 +760,33 @@ foliate-view {
 .chat-md blockquote:hover {
   background: var(--chat-quote-bg-hover, rgba(127, 127, 127, 0.06));
 }
+
+/* chat-md 标题：主题色 + hover 变色 + h2/h3 底部规则线淡入（border 预分配，无布局抖动） */
+.chat-md h1,
+.chat-md h2,
+.chat-md h3,
+.chat-md h4,
+.chat-md h5,
+.chat-md h6 {
+  color: var(--chat-heading, inherit);
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+.chat-md h1:hover,
+.chat-md h2:hover,
+.chat-md h3:hover,
+.chat-md h4:hover,
+.chat-md h5:hover,
+.chat-md h6:hover {
+  color: var(--chat-heading-hover, var(--chat-heading, inherit));
+}
+.chat-md h2,
+.chat-md h3 {
+  border-bottom: 1px solid var(--chat-heading-rule, transparent);
+  padding-bottom: 0.15em;
+}
+.chat-md h2:hover,
+.chat-md h3:hover {
+  border-bottom-color: var(--chat-heading-rule-hover, var(--chat-heading-rule, transparent));
+}

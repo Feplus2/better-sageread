@@ -497,3 +497,15 @@ html.dark {
   --chat-marker-hover: #e8d8b8;
   --chat-quote-border: rgba(216, 168, 96, 0.4);
 }
+
+/* chat-md 标题：暖棕 hover 棕金 */
+:root {
+  --chat-heading: #4a3826;
+  --chat-heading-hover: #8a5a2e;
+  --chat-heading-rule-hover: rgba(138, 90, 46, 0.4);
+}
+html.dark {
+  --chat-heading: #e8d8b8;
+  --chat-heading-hover: #d8a860;
+  --chat-heading-rule-hover: rgba(216, 168, 96, 0.4);
+}

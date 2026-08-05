@@ -30,6 +30,9 @@ const expression = `
   const createRoot = ReactDomClientNS.createRoot ?? ReactDomClientNS.default.createRoot;
 
   const sample = [
+    "### 三级标题示例",
+    "#### 四级标题示例",
+    "",
     "**粗体重点** 与 *斜体强调*，行内代码 \`readBookSection\`，以及[一个链接](https://example.com)。",
     "",
     "> 引用块：尽信书不如无书。",

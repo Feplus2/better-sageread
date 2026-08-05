@@ -129,3 +129,15 @@ html.dark {
   --chat-quote-border: #4a5a52;
   --chat-quote-bg-hover: rgba(140, 163, 172, 0.08);
 }
+
+/* chat-md 标题：灰青题 hover 钢青，规则线浅灰绿 */
+:root {
+  --chat-heading: #3f4a50;
+  --chat-heading-hover: #6e838c;
+  --chat-heading-rule-hover: #b9c4bc;
+}
+html.dark {
+  --chat-heading: #e2e7e3;
+  --chat-heading-hover: #a8c4d0;
+  --chat-heading-rule-hover: #45525a;
+}
