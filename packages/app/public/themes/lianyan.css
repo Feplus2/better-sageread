@@ -7,24 +7,24 @@
 :root {
   --bg-video: url("/themes/lianyan/light.mp4");
 
-  --background: rgba(243, 240, 234, 0.45);
+  --background: rgba(243, 240, 234, 0.30);
   --foreground: #2b2624;
-  --card: rgba(248, 246, 241, 0.42);
+  --card: rgba(248, 246, 241, 0.32);
   --card-foreground: #2b2624;
-  --popover: rgba(250, 248, 244, 0.68);
+  --popover: rgba(250, 248, 244, 0.60);
   --popover-foreground: #2b2624;
   --primary: #3a4346;
   --primary-foreground: #f5f2eb;
-  --secondary: rgba(229, 224, 216, 0.5);
+  --secondary: rgba(229, 224, 216, 0.38);
   --secondary-foreground: #38322d;
-  --muted: rgba(236, 232, 224, 0.44);
+  --muted: rgba(236, 232, 224, 0.34);
   --muted-foreground: #6e655c;
   --accent: rgba(201, 147, 43, 0.18);
   --accent-foreground: #7a5a18;
   --border: rgba(90, 80, 70, 0.28);
   --input: rgba(90, 80, 70, 0.32);
   --ring: #8a6d3b;
-  --sidebar: rgba(238, 234, 227, 0.46);
+  --sidebar: rgba(238, 234, 227, 0.34);
   --sidebar-foreground: #2b2624;
   --sidebar-primary: #3a4346;
   --sidebar-primary-foreground: #f5f2eb;
@@ -33,7 +33,7 @@
   --sidebar-border: rgba(90, 80, 70, 0.26);
   --sidebar-ring: #8a6d3b;
   --content: #2b2624;
-  --layout: rgba(243, 240, 234, 0.45);
+  --layout: rgba(243, 240, 234, 0.30);
 
   --color-neutral-50: #f7f4ee;
   --color-neutral-100: #efece5;
@@ -55,24 +55,24 @@
 html.dark {
   --bg-video: url("/themes/lianyan/dark.mp4");
 
-  --background: rgba(26, 19, 22, 0.55);
+  --background: rgba(26, 19, 22, 0.42);
   --foreground: #efe3d0;
-  --card: rgba(38, 28, 32, 0.5);
+  --card: rgba(38, 28, 32, 0.38);
   --card-foreground: #efe3d0;
-  --popover: rgba(44, 33, 38, 0.7);
+  --popover: rgba(44, 33, 38, 0.62);
   --popover-foreground: #efe3d0;
   --primary: #d8b56a;
   --primary-foreground: #2a1e14;
-  --secondary: rgba(74, 56, 60, 0.5);
+  --secondary: rgba(74, 56, 60, 0.40);
   --secondary-foreground: #efe3d0;
-  --muted: rgba(64, 48, 52, 0.45);
+  --muted: rgba(64, 48, 52, 0.36);
   --muted-foreground: #b49c8e;
   --accent: rgba(183, 142, 201, 0.2);
   --accent-foreground: #c9a3d8;
   --border: rgba(216, 181, 106, 0.22);
   --input: rgba(216, 181, 106, 0.26);
   --ring: #d8b56a;
-  --sidebar: rgba(34, 25, 29, 0.52);
+  --sidebar: rgba(34, 25, 29, 0.40);
   --sidebar-foreground: #efe3d0;
   --sidebar-primary: #d8b56a;
   --sidebar-primary-foreground: #2a1e14;
@@ -81,7 +81,7 @@ html.dark {
   --sidebar-border: rgba(216, 181, 106, 0.2);
   --sidebar-ring: #d8b56a;
   --content: #efe3d0;
-  --layout: rgba(26, 19, 22, 0.55);
+  --layout: rgba(26, 19, 22, 0.42);
 
   --color-neutral-50: #f2e9dc;
   --color-neutral-100: #e5d8c6;
@@ -103,6 +103,11 @@ html.dark {
 /* 底层透明，让背景视频透出（承力面靠半透明变量 + 毛玻璃） */
 body,
 #root {
+  background: transparent;
+}
+
+/* 嵌套同面色去重：内层 bg-background 透明，防双层叠加成实色 */
+.bg-background .bg-background {
   background: transparent;
 }
 
