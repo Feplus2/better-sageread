@@ -1,3 +1,4 @@
+import { PreviewPanel } from "@/components/preview/preview-panel";
 import { type PaperViewMode, buildPaperViewMarkdown, cutPaperBlocks } from "@/pages/paper-reader/paper-blocks";
 import PaperExportDialog from "@/pages/paper-reader/paper-export-dialog";
 import PaperHeaderBar from "@/pages/paper-reader/paper-header-bar";
@@ -37,6 +38,8 @@ import { toast } from "sonner";
 interface PaperReaderViewProps {
   paperId: string;
   title: string;
+  /** P2 标签页休眠：为 true 时只卸载重型正文（PaperReader），顶栏/侧栏/聊天保活 */
+  viewSleeping?: boolean;
 }
 
 /**
@@ -47,7 +50,7 @@ interface PaperReaderViewProps {
  * 字号/字体直接消费 settings.globalViewSettings（与书籍阅读器联动，通用设置开箱即用）。
  * 正文从 {appDataDir}/books/{paperId}/paper.md 读取（appdata 已授权 plugin-fs）。
  */
-export default function PaperReaderView({ paperId, title }: PaperReaderViewProps) {
+export default function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderViewProps) {
   const { settings, setSettings } = useAppSettingsStore();
   const globalViewSettings = settings.globalViewSettings;
   // 论文显示模式（persist；旧持久化数据无此字段时回退原文）
@@ -333,6 +336,15 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
     [paperId],
   );
 
+  // 图片预览"引用"（J2 补环）：图片 dataUrl 作为附件注入论文助手输入区；同款展开+延迟派发
+  const handleQuoteImageToChat = useCallback(
+    (image: { dataUrl: string; mediaType: string; name: string }) => {
+      setChatOpen(true);
+      setTimeout(() => iframeService.sendImageReferenceRequest(image, paperId), 50);
+    },
+    [paperId],
+  );
+
   // 笔记面板（位置/宽度边界与书籍 Notepad 一致，可拖拽调宽、可折叠；swap 时换手柄与间隙方向）
   const notepadSidebar = notesOpen && (
     <Resizable
@@ -392,7 +404,7 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
         height: "100%",
       }}
       minWidth={320}
-      maxWidth={580}
+      maxWidth={800}
       enable={{
         top: false,
         right: swapSidebars,
@@ -432,6 +444,8 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
   return (
     // min-w-0：宽 HTML 表格的 min-content 会把本行撑出视口、把右侧栏挤没（2026-08-05 实测）
     <div className="flex min-h-0 min-w-0 flex-1">
+      {/* E5 补挂：预览面板跟随 swapSidebars 互换（与书籍 tab 同款） */}
+      {swapSidebars && <PreviewPanel />}
       {swapSidebars ? chatSidebar : notepadSidebar}
 
       {/* 中：PaperHeaderBar + PaperReader（书籍 ReaderViewer 同款容器） */}
@@ -470,6 +484,11 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
           <div className="flex flex-1 items-center justify-center">
             <div className="text-neutral-600 dark:text-neutral-400">加载中...</div>
           </div>
+        ) : viewSleeping ? (
+          /* P2 休眠态：卸载重型正文 DOM（公式/译文数万元素），切回时重挂载；滚动位置由 PaperReader 记忆还原 */
+          <div className="flex flex-1 items-center justify-center">
+            <div className="text-neutral-500 text-xs dark:text-neutral-500">视图已休眠，切回自动恢复</div>
+          </div>
         ) : (
           <div className="min-h-0 flex-1">
             <PaperReader
@@ -488,6 +507,7 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
               onUpdateAnnotation={updateAnnotation}
               onDeleteAnnotation={deleteAnnotation}
               onQuoteToChat={handleQuoteToChat}
+              onQuoteImageToChat={handleQuoteImageToChat}
               focusAnnotationId={focusAnnotationId}
               onAnnotationFocused={() => setFocusAnnotationId(null)}
               viewMode={viewMode}
@@ -500,6 +520,9 @@ export default function PaperReaderView({ paperId, title }: PaperReaderViewProps
       </div>
 
       {swapSidebars ? notepadSidebar : chatSidebar}
+
+      {/* E5 补挂：论文 tab 的预览面板（与书籍 tab 同款，跟随 swapSidebars 互换；未打开时自动隐藏） */}
+      {!swapSidebars && <PreviewPanel />}
 
       {/* 论文导出对话框（markdown 加载完成才渲染，保证拿到原文） */}
       {markdown !== null && (

@@ -50,6 +50,19 @@ export function normalizeQuoteForMatch(quote: string): string {
     .trim();
 }
 
+/** 宽松层标点集（E1）：常见 ASCII + 中文标点；连字符/下划线保留（有词义） */
+const RELAX_PUNCT_TEST =
+  /[.,;:!?"'()\[\]{}<>/\u2018\u2019\u201C\u201D\u3001\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F\uFF08\uFF09\u3010\u3011\u300A\u300B\u2026\u2014\u2013\u00B7]/;
+
+/** 宽松归一（E1 兜底层）：在 normalizeQuoteForMatch 基础上把标点替换为空格再折叠（避免去标点后词间粘连） */
+export function relaxQuoteForMatch(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    out += RELAX_PUNCT_TEST.test(ch) ? " " : ch;
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
 /**
  * 空白折叠文本 + 折叠下标 → 原始下标的映射表。
  * 折叠出的空格映射到其空白串首字符（句吸附会吸收边界误差，无需精确到空白串末尾）。
@@ -75,18 +88,54 @@ function collapseWithMap(text: string): { collapsed: string; map: number[] } {
 }
 
 /**
+ * 宽松层（E1）：折叠文本标点替空格后的下标 → 折叠文本下标映射。
+ * 标点视为空格（与 quote 侧 relaxQuoteForMatch 同口径），连续空白只补一个空格。
+ */
+function relaxWithMap(collapsed: string): { relaxed: string; map: number[] } {
+  let relaxed = "";
+  const map: number[] = [];
+  for (let i = 0; i < collapsed.length; i++) {
+    const ch = collapsed[i];
+    if (RELAX_PUNCT_TEST.test(ch) || /\s/.test(ch)) {
+      if (relaxed.length > 0 && !relaxed.endsWith(" ")) {
+        relaxed += " ";
+        map.push(i);
+      }
+      continue;
+    }
+    relaxed += ch;
+    map.push(i);
+  }
+  return { relaxed: relaxed.replace(/ +$/, ""), map };
+}
+
+/**
  * 逐块模糊匹配 quote（大小写不敏感、空白折叠、去行内标记）。
- * 返回首个命中的块与还原后的原始字符区间；所有块都不命中返回 null（调用方走整容器兜底）。
+ * 严格层未命中时走宽松层（E1：再去标点后匹配，兼容模型摘录与原文的标点差异）。
+ * 返回首个命中的块与还原后的原始字符区间；全部块不命中返回 null（调用方走整容器兜底）。
  */
 export function findQuoteInBlockTexts(blockTexts: string[], quote: string): BlockQuoteMatch | null {
   const needle = normalizeQuoteForMatch(quote).toLowerCase();
   if (!needle) return null;
+  // 严格层：保留标点
   for (let b = 0; b < blockTexts.length; b++) {
     const { collapsed, map } = collapseWithMap(blockTexts[b]);
     const index = collapsed.toLowerCase().indexOf(needle);
     if (index === -1) continue;
     const start = map[index];
     const end = map[index + needle.length - 1] + 1;
+    if (start < end) return { block: b, start, end };
+  }
+  // 宽松层（兜底）：两侧同去标点后匹配，再两级映射还原原始区间
+  const relaxedNeedle = relaxQuoteForMatch(needle);
+  if (!relaxedNeedle || relaxedNeedle === needle) return null;
+  for (let b = 0; b < blockTexts.length; b++) {
+    const { collapsed, map } = collapseWithMap(blockTexts[b]);
+    const { relaxed, map: relaxMap } = relaxWithMap(collapsed);
+    const index = relaxed.toLowerCase().indexOf(relaxedNeedle);
+    if (index === -1) continue;
+    const start = map[relaxMap[index]];
+    const end = map[relaxMap[index + relaxedNeedle.length - 1]] + 1;
     if (start < end) return { block: b, start, end };
   }
   return null;

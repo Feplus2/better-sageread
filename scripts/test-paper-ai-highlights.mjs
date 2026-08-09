@@ -21,7 +21,7 @@ const outfile = join(outDir, "bundle.mjs");
 await esbuild.build({
   stdin: {
     contents: `
-      export { findQuoteInBlockTexts, snapMatchToSentences, normalizeQuoteForMatch } from "${srcDir}/paper-highlight-locator";
+      export { findQuoteInBlockTexts, snapMatchToSentences, normalizeQuoteForMatch, relaxQuoteForMatch } from "${srcDir}/paper-highlight-locator";
       export { segmentSentences } from "${srcDir}/paper-sentences";
       export { serializeAnchor, parseAnchor } from "${srcDir}/paper-anchors";
       export { parsePaperSections } from "${srcDir}/markdown-sections";
@@ -38,6 +38,7 @@ const {
   findQuoteInBlockTexts,
   snapMatchToSentences,
   normalizeQuoteForMatch,
+  relaxQuoteForMatch,
   segmentSentences,
   serializeAnchor,
   parseAnchor,
@@ -176,6 +177,39 @@ check("短 quote 也能定位（结论句）", () => {
   const hit = locate(quote);
   assert(hit, "未命中");
   assert(hit.slice === quote, `吸附结果不符：${JSON.stringify(hit.slice)}`);
+});
+
+// ─── E1：宽松层（标点归一兜底）fixture ───
+
+check("宽松层：quote 末尾缺句号仍命中（严格层失配走标点归一）", () => {
+  const hit = locate(SENTENCE_A.replace(/\.$/, ""));
+  assert(hit, "未命中");
+  assert(hit.slice === SENTENCE_A, `吸附结果不符：${JSON.stringify(hit.slice)}`);
+});
+
+check("宽松层：弯引号/括号替换为直引号仍命中", () => {
+  const hit = locate(
+    "In search for electrodes with good chemical/dynamic stability and high Na storage performance, various P2- and O3-type Na-ion layered oxides have been synthesized and investigated ‘9, 10’.",
+  );
+  assert(hit, "未命中（标点变体应经宽松层命中）");
+});
+
+check("宽松层：逗号/句号全缺失的纯词串仍命中", () => {
+  const hit = locate("effective guidelines towards the design and preparation of optimal electrode materials are lacking");
+  assert(hit, "未命中");
+  assert(hit.slice === SENTENCE_A, `应吸附为整句：${JSON.stringify(hit.slice)}`);
+});
+
+check("宽松层不引入误报：不存在的 quote 依旧 null", () => {
+  assert(
+    locate("This sentence does not appear anywhere in the paper at all") === null,
+    "应返回 null",
+  );
+});
+
+check("relaxQuoteForMatch 单元：去标点且保留连字符", () => {
+  const out = relaxQuoteForMatch("P2-type, Na-ion layered oxides (‘review’)." );
+  assert(out === "P2-type Na-ion layered oxides review", `归一结果不符：${JSON.stringify(out)}`);
 });
 
 rmSync(outDir, { recursive: true, force: true });

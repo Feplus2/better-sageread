@@ -188,6 +188,8 @@ export interface PaperConvertProgress {
   success?: boolean;
   /** converter 侧质量守卫：重试后仍检测到退化循环时 done 携带 true（见 Papers_Converter quality_guard） */
   degenerate?: boolean;
+  /** 任务归属标识：Rust 侧注入的源 PDF 路径，多任务并发时据此过滤事件（防串台） */
+  pdf_path?: string;
 }
 
 interface PaperConvertParams {

@@ -470,10 +470,17 @@ export function PaperNotepadPanel({
         })),
       );
       const dropped = result.total - result.located.length;
+      // E1：丢弃原因分布（只列非零项）
+      const reasons: string[] = [];
+      if (result.dropReasons.paraphrased > 0) reasons.push(`复述 ${result.dropReasons.paraphrased}`);
+      if (result.dropReasons.formula > 0) reasons.push(`公式句 ${result.dropReasons.formula}`);
+      if (result.dropReasons.badCategory > 0) reasons.push(`未匹配分类 ${result.dropReasons.badCategory}`);
+      if (result.dropReasons.duplicate > 0) reasons.push(`去重 ${result.dropReasons.duplicate}`);
       toast.success(
         `AI 重点标注完成（${PAPER_KIND_LABELS[result.kind]}模板）：命中 ${created}/${result.total} 条${
-          dropped > 0 ? `，丢弃 ${dropped} 条无法定位` : ""
+          dropped > 0 ? `，丢弃 ${dropped} 条（${reasons.join("、") || "无法定位"}）` : ""
         }`,
+        { duration: dropped > 0 ? 6000 : 4000 },
       );
     } catch (error) {
       console.error("生成 AI 重点标注失败:", error);
@@ -551,8 +558,8 @@ export function PaperNotepadPanel({
                       <button
                         type="button"
                         onClick={() => setStarFilter((f) => (f === "all" ? "starred" : "all"))}
-                        className={`flex size-7 items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                          starFilter === "starred" ? "bg-neutral-200 dark:bg-neutral-700" : ""
+                        className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
+                          starFilter === "starred" ? "bg-accent dark:bg-accent" : ""
                         }`}
                       >
                         <Star
@@ -571,7 +578,7 @@ export function PaperNotepadPanel({
                       <button
                         type="button"
                         title="导出全部标注"
-                        className="flex size-7 items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                        className="flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent"
                       >
                         <Download className="size-4 text-neutral-500 dark:text-neutral-400" />
                       </button>
@@ -598,8 +605,8 @@ export function PaperNotepadPanel({
                   <button
                     type="button"
                     onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
-                    className={`flex size-7 items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                      selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
+                    className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
+                      selectionMode ? "bg-accent dark:bg-accent" : ""
                     }`}
                   >
                     <ListChecks className="size-4 text-neutral-500 dark:text-neutral-400" />

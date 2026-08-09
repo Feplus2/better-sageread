@@ -90,10 +90,21 @@ export interface LocatedAiHighlight {
 export interface GenerateHighlightsResult {
   /** 实际使用的论文类型（auto 时为判定结果） */
   kind: PaperKind;
-  /** 模型返回的合法条目数 */
+  /** 模型返回的条目数（含解析阶段丢弃的非法条目，与 dropReasons 总和对齐） */
   total: number;
   /** 成功定位（锚点换算 + 去重后）的条目 */
   located: LocatedAiHighlight[];
+  /** 丢弃原因分布（E1：toast 展示用，只列非零项） */
+  dropReasons: {
+    /** 模型改写/翻译了原文，无法逐字定位 */
+    paraphrased: number;
+    /** 含公式的句子（KaTeX 渲染后 raw tex 不在正文 textContent） */
+    formula: number;
+    /** 类别不在当前模板内（解析阶段丢弃） */
+    badCategory: number;
+    /** 多条 quote 命中同一句（去重） */
+    duplicate: number;
+  };
 }
 
 /** 落库 note 的统一格式：【类别中文名】可选说明（便于任何界面识别 AI 标注类别） */
@@ -223,9 +234,14 @@ ${chunk}
 
 /**
  * 解析模型输出为合法条目：剥离代码围栏、截取首个 JSON 数组；
- * 类别不在当前模板内、quote 缺失/过短/超长的条目丢弃（由调用方计数）。
+ * 类别不在当前模板内的条目计入 stats.badCategory（E1 丢弃原因分布），
+ * quote 缺失/过短/超长的条目丢弃。
  */
-export function parseAiHighlightsJson(text: string, kind: PaperKind): RawAiHighlight[] {
+export function parseAiHighlightsJson(
+  text: string,
+  kind: PaperKind,
+  stats?: { badCategory: number },
+): RawAiHighlight[] {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?/i, "")
@@ -247,7 +263,10 @@ export function parseAiHighlightsJson(text: string, kind: PaperKind): RawAiHighl
   for (const raw of parsed) {
     if (!raw || typeof raw !== "object") continue;
     const { category, quote, note } = raw as Record<string, unknown>;
-    if (typeof category !== "string" || !validIds.has(category)) continue;
+    if (typeof category !== "string" || !validIds.has(category)) {
+      if (stats && (typeof category === "string" || typeof quote === "string")) stats.badCategory += 1;
+      continue;
+    }
     if (typeof quote !== "string") continue;
     const trimmedQuote = quote.trim();
     if (trimmedQuote.length < 10 || trimmedQuote.length > 600) continue;
@@ -257,22 +276,33 @@ export function parseAiHighlightsJson(text: string, kind: PaperKind): RawAiHighl
   return items;
 }
 
-/** 模板抽取：整篇一次调用；超长按 heading 切段分次调用后合并 */
-export async function extractPaperHighlights(markdown: string, kind: PaperKind): Promise<RawAiHighlight[]> {
+/** 模板抽取：整篇一次调用；超长按 heading 切段分次调用后合并（返回条目 + 类别丢弃数） */
+export async function extractPaperHighlights(
+  markdown: string,
+  kind: PaperKind,
+): Promise<{ items: RawAiHighlight[]; badCategory: number }> {
   const parsed = parsePaperSections(markdown);
   const chunks = splitBodyIntoChunks(parsed);
+  const stats = { badCategory: 0 };
   const all: RawAiHighlight[] = [];
   for (const chunk of chunks) {
     const text = await callUtilityModel(buildExtractPrompt(chunk, kind, chunks.length > 1), 0.2);
-    all.push(...parseAiHighlightsJson(text, kind));
+    all.push(...parseAiHighlightsJson(text, kind, stats));
   }
-  return all;
+  return { items: all, badCategory: stats.badCategory };
+}
+
+/** 公式句启发式：含 $...$ 或 LaTeX 命令（定位必失败，归入 formula 桶而非复述） */
+function looksLikeFormula(quote: string): boolean {
+  if (/\$[^$]*\$/.test(quote)) return true;
+  if ((quote.match(/\$/g)?.length ?? 0) >= 2) return true;
+  return /\\(?:frac|sum|int|mathrm|begin|times|approx|leq|geq)\b/.test(quote);
 }
 
 /**
  * 完整管线（不含落库）：类型判定（auto 时）→ 模板抽取 → 本地锚点换算（调用方注入的 locateQuotes，
- * 依赖渲染 DOM）→ 按 cfi 去重。返回 total（模型合法条目数）与 located（成功定位条目），
- * 丢弃数 = total - located.length，由调用方上报。
+ * 依赖渲染 DOM）→ 按 cfi 去重。返回 total（模型条目数，含解析阶段丢弃）、located（成功定位）
+ * 与 dropReasons 丢弃原因分布（E1）。
  */
 export async function generatePaperHighlights(options: {
   markdown: string;
@@ -280,16 +310,25 @@ export async function generatePaperHighlights(options: {
   locateQuotes: (quotes: string[]) => (PaperHighlightLocation | null)[];
 }): Promise<GenerateHighlightsResult> {
   const kind = options.kind === "auto" ? await classifyPaperKind(options.markdown) : options.kind;
-  const items = await extractPaperHighlights(options.markdown, kind);
+  const { items, badCategory } = await extractPaperHighlights(options.markdown, kind);
   const locations = options.locateQuotes(items.map((item) => item.quote));
 
+  const dropReasons = { paraphrased: 0, formula: 0, badCategory, duplicate: 0 };
   const seen = new Set<string>();
   const located: LocatedAiHighlight[] = [];
   items.forEach((item, index) => {
     const location = locations[index];
-    if (!location || seen.has(location.cfi)) return;
+    if (!location) {
+      if (looksLikeFormula(item.quote)) dropReasons.formula += 1;
+      else dropReasons.paraphrased += 1;
+      return;
+    }
+    if (seen.has(location.cfi)) {
+      dropReasons.duplicate += 1;
+      return;
+    }
     seen.add(location.cfi);
     located.push({ category: item.category, note: item.note, location });
   });
-  return { kind, total: items.length, located };
+  return { kind, total: items.length + badCategory, located, dropReasons };
 }

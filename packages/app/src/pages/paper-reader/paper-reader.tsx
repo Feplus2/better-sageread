@@ -6,7 +6,7 @@ import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { ChevronDown, ChevronUp, Copy, Download, ImageOff, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Quote, X } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -119,6 +119,8 @@ export interface PaperReaderProps {
   onDeleteAnnotation?: (id: string) => void;
   /** 弹窗 "Ask AI"：选中文本作为 quote 注入论文助手输入框 */
   onQuoteToChat?: (text: string) => void;
+  /** 图片预览"引用"：图片转 dataUrl 注入论文助手输入区附件（J2 补环） */
+  onQuoteImageToChat?: (image: { dataUrl: string; mediaType: string; name: string }) => void;
   /** 侧栏点击要求定位的标注 id（处理后经 onAnnotationFocused 回执清零，允许重复点击同一项） */
   focusAnnotationId?: string | null;
   onAnnotationFocused?: () => void;
@@ -168,9 +170,102 @@ const readDefaultStyleColor = (): { style: HighlightStyle; color: HighlightColor
 
 const getHighlightRegistry = () => (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
 
+/**
+ * 标注高亮联合注册表（2026-08-08 修复多 tab 互相清空高亮）：
+ * CSS 的 ::highlight() 名是静态的（index.css 固定 15+15 个），多个 PaperReader 实例
+ * （多篇论文 tab 同时挂载）若各自 delete→set 同名条目，后跑的实例会把先跑实例的
+ * Range 清掉——最后挂载的无标注论文会把全部高亮抹空。
+ * 改为每实例维护独立槽位，任何实例更新后把所有存活槽位取并集写入 registry。
+ */
+const annoUnionSlots = new Map<number, Map<string, Range[]>>();
+let annoInstanceSeq = 0;
+
+function applyAnnoHighlightUnion() {
+  const registry = getHighlightRegistry();
+  if (!registry || typeof Highlight === "undefined") return;
+  const union = new Map<string, Range[]>();
+  for (const slot of annoUnionSlots.values()) {
+    for (const [name, ranges] of slot) {
+      if (ranges.length > 0) union.set(name, [...(union.get(name) ?? []), ...ranges]);
+    }
+  }
+  for (const name of [...allAnnoHighlightNames(), ...allAnnoTgtHighlightNames()]) {
+    const ranges = union.get(name);
+    // J1：注册前去重（同容器同偏移只注册一次，-tgt 镜像重复区间防护）
+    if (ranges?.length) registry.set(name, new Highlight(...dedupeRanges(ranges)));
+    else registry.delete(name);
+  }
+}
+
+/** 实例级注册：更新本实例槽位后重算并集；返回的 cleanup 在卸载时移除槽位 */
+function registerAnnoHighlightSlot(byStyleColor: Map<string, Range[]>, tgtByStyleColor: Map<string, Range[]>) {
+  const id = ++annoInstanceSeq;
+  annoUnionSlots.set(id, new Map([...byStyleColor, ...tgtByStyleColor]));
+  applyAnnoHighlightUnion();
+  return () => {
+    annoUnionSlots.delete(id);
+    applyAnnoHighlightUnion();
+  };
+}
+
+/** 搜索高亮同款并集（多 tab 各自带搜索词时不互清） */
+const searchUnionSlots = new Map<number, Range[]>();
+let searchInstanceSeq = 0;
+
+/** J1：Range 去重（同一容器同偏移视为重复）——历史标注曾出现同一中文区间被多来源
+ * 重复推入并集（绿色标注 4 个相同 105 字区间），CSS 高亮重复注册无害但浪费且干扰排查 */
+function dedupeRanges(ranges: Range[]): Range[] {
+  const seen = new Set<string>();
+  const out: Range[] = [];
+  for (const r of ranges) {
+    const key = `${assignNodeSeq(r.startContainer)}:${r.startOffset}->${assignNodeSeq(r.endContainer)}:${r.endOffset}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+let nodeSeqCounter = 0;
+const nodeSeqMap = new WeakMap<Node, number>();
+function assignNodeSeq(node: Node): number {
+  let seq = nodeSeqMap.get(node);
+  if (seq === undefined) {
+    seq = ++nodeSeqCounter;
+    nodeSeqMap.set(node, seq);
+  }
+  return seq;
+}
+
+function applySearchHighlightUnion() {
+  const registry = getHighlightRegistry();
+  if (!registry || typeof Highlight === "undefined") return;
+  const all: Range[] = [];
+  for (const ranges of searchUnionSlots.values()) all.push(...ranges);
+  if (all.length > 0) registry.set(PAPER_SEARCH_HIGHLIGHT, new Highlight(...all));
+  else registry.delete(PAPER_SEARCH_HIGHLIGHT);
+}
+
+function registerSearchHighlightSlot(ranges: Range[]) {
+  const id = ++searchInstanceSeq;
+  searchUnionSlots.set(id, ranges);
+  applySearchHighlightUnion();
+  return () => {
+    searchUnionSlots.delete(id);
+    applySearchHighlightUnion();
+  };
+}
+
 type BlobUrlCache = Map<string, string>;
 
 const REMOTE_SRC_RE = /^(https?:|data:|blob:)/i;
+
+/**
+ * P2 标签页休眠：滚动位置记忆（模块级，按论文目录路径键控）。
+ * 休眠卸载前由 handleScroll 持续写入最新值；重挂载后一次性还原并清除，
+ * 避免污染后续 viewMode 切换等正常流程。
+ */
+const paperScrollMemory = new Map<string, number>();
 
 /** 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移） */
 function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
@@ -431,8 +526,17 @@ function createPaperImageComponent(
   };
 }
 
-/** 图片大图预览（点开）：居中放大 + 复制 / 保存 / 关闭；Esc 与点击背板关闭 */
-function PaperImagePreview({ image, onClose }: { image: { src: string; alt: string }; onClose: () => void }) {
+/** 图片大图预览（点开）：居中放大 + 复制 / 保存 / 引用 / 关闭；Esc 与点击背板关闭 */
+function PaperImagePreview({
+  image,
+  onClose,
+  onQuote,
+}: {
+  image: { src: string; alt: string };
+  onClose: () => void;
+  /** J2 补环：引用到 AI 输入区（转 dataUrl 后上抛，视觉闸在聊天侧判） */
+  onQuote?: (image: { dataUrl: string; mediaType: string; name: string }) => void;
+}) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -448,6 +552,27 @@ function PaperImagePreview({ image, onClose }: { image: { src: string; alt: stri
       toast.success("图片已复制到剪贴板");
     } catch (error) {
       toast.error(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleQuote = async () => {
+    try {
+      const blob = await (await fetch(image.src)).blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.readAsDataURL(blob);
+      });
+      onQuote?.({
+        dataUrl,
+        mediaType: blob.type || "image/png",
+        name: image.alt || "figure",
+      });
+      toast.success("已引用到对话输入区");
+      onClose();
+    } catch (error) {
+      toast.error(`引用失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -495,6 +620,16 @@ function PaperImagePreview({ image, onClose }: { image: { src: string; alt: stri
           <Download className="size-4" />
           保存
         </button>
+        {onQuote && (
+          <button
+            type="button"
+            onClick={handleQuote}
+            className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+          >
+            <Quote className="size-4" />
+            引用
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -673,6 +808,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     onUpdateAnnotation,
     onDeleteAnnotation,
     onQuoteToChat,
+    onQuoteImageToChat,
     focusAnnotationId,
     onAnnotationFocused,
     viewMode = "original",
@@ -1015,6 +1151,16 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     return () => observer.disconnect();
   }, [toc]);
 
+  // P2 标签页休眠还原：重挂载后首次 effect 即恢复记忆位置并清除（一次性消费，
+  // 不影响后续 viewMode/译文切换；markdown 首帧与 effect 同周期提交，内容已就位）
+  useEffect(() => {
+    const saved = paperScrollMemory.get(paperDir);
+    if (saved !== undefined && scrollRef.current) {
+      scrollRef.current.scrollTop = saved;
+      paperScrollMemory.delete(paperDir);
+    }
+  }, [paperDir]);
+
   // 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移）
   const scrollToHeading = useCallback((id: string) => {
     setActiveHeadingId(id);
@@ -1038,10 +1184,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   const matchRangesRef = useRef<Range[]>([]);
   const [matchVersion, setMatchVersion] = useState(0);
 
-  // 计算全部匹配 Range 并注册整体高亮
+  // 计算全部匹配 Range 并注册整体高亮（并集式，多 tab 不互清）
   // biome-ignore lint/correctness/useExhaustiveDependencies: body 变化后正文 DOM 重渲染，需要重新收集匹配
   useEffect(() => {
-    const highlightRegistry = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
     const container = contentRef.current;
     const ranges: Range[] = [];
     if (container && normalizedSearchTerm) {
@@ -1062,16 +1207,11 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       }
     }
     matchRangesRef.current = ranges;
-    if (highlightRegistry && typeof Highlight !== "undefined") {
-      highlightRegistry.delete(PAPER_SEARCH_HIGHLIGHT);
-      if (ranges.length > 0) {
-        highlightRegistry.set(PAPER_SEARCH_HIGHLIGHT, new Highlight(...ranges));
-      }
-    }
+    const disposeSearchSlot = registerSearchHighlightSlot(ranges);
     onSearchMatchesChangeRef.current?.(ranges.length);
     setMatchVersion((v) => v + 1);
     return () => {
-      highlightRegistry?.delete(PAPER_SEARCH_HIGHLIGHT);
+      disposeSearchSlot();
     };
   }, [body, normalizedSearchTerm]);
 
@@ -1113,7 +1253,6 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 映射高亮并入 annotationRangesRef（点击回显/侧栏定位/闪烁两侧同效）；无对齐的块静默跳过。
   // biome-ignore lint/correctness/useExhaustiveDependencies: body 变化后正文 DOM 重渲染，需要重新解析标注锚点
   useEffect(() => {
-    const highlightRegistry = getHighlightRegistry();
     const container = contentRef.current;
     const resolved = new Map<string, Range[]>();
     const byStyleColor = new Map<string, Range[]>();
@@ -1216,21 +1355,10 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       }
     }
     annotationRangesRef.current = resolved;
-    if (highlightRegistry && typeof Highlight !== "undefined") {
-      for (const name of [...allAnnoHighlightNames(), ...allAnnoTgtHighlightNames()]) {
-        highlightRegistry.delete(name);
-      }
-      // 按 笔触×颜色 聚合注册（::highlight 的 text-decoration 规则见 index.css）
-      for (const [name, ranges] of [...byStyleColor, ...tgtByStyleColor]) {
-        highlightRegistry.set(name, new Highlight(...ranges));
-      }
-    }
+    // 联合注册：本实例槽位并入全局并集（不再直接 delete 共享名，避免多 tab 互清）
+    const disposeSlot = registerAnnoHighlightSlot(byStyleColor, tgtByStyleColor);
     return () => {
-      if (highlightRegistry) {
-        for (const name of [...allAnnoHighlightNames(), ...allAnnoTgtHighlightNames()]) {
-          highlightRegistry.delete(name);
-        }
-      }
+      disposeSlot();
     };
   }, [body, annotations, viewMode, translation, sourceBlocks]);
 
@@ -1524,11 +1652,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     ],
   );
 
-  // 滚动：关闭弹窗（原行为）；按缓存的句子 Range 同步覆盖层位置
+  // 滚动：关闭弹窗（原行为）；按缓存的句子 Range 同步覆盖层位置；顺手记滚动位置（P2 休眠还原用）
   const handleScroll = useCallback(() => {
     if (popupRef.current) setPopupState(null);
     if (hoverRangeRef.current) updateHoverRects();
-  }, [setPopupState, updateHoverRects]);
+    if (scrollRef.current) paperScrollMemory.set(paperDir, scrollRef.current.scrollTop);
+  }, [setPopupState, updateHoverRects, paperDir]);
 
   const closePopup = useCallback(() => setPopupState(null), [setPopupState]);
 
@@ -1630,7 +1759,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       >
         <div
           ref={contentRef}
-          className="prose prose-neutral dark:prose-invert mx-auto max-w-3xl prose-headings:scroll-mt-4 prose-img:rounded-lg px-8 py-6"
+          className="paper-content prose prose-neutral dark:prose-invert mx-auto max-w-3xl prose-headings:scroll-mt-4 prose-img:rounded-lg px-8 py-6"
           style={{
             fontSize: fontSize != null ? `${fontSize}px` : undefined,
             fontFamily: fontFamily || undefined,
@@ -1673,7 +1802,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
           onClose={closePopup}
         />
       )}
-      {imagePreview && <PaperImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />}
+      {imagePreview && (
+        <PaperImagePreview image={imagePreview} onClose={() => setImagePreview(null)} onQuote={onQuoteImageToChat} />
+      )}
     </>
   );
 });

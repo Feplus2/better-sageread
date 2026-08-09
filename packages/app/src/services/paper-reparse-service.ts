@@ -25,6 +25,8 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 export interface ReparseItem {
   id: string;
   title: string;
+  /** 可选：显式指定源 PDF 路径（优先于 zotero_pdf_path/source.pdf 解析链；processPaper reparse 用） */
+  sourcePdfPath?: string;
 }
 
 export interface ReparseFailure extends ReparseItem {
@@ -99,12 +101,17 @@ export async function reparsePapers(
       const item = items[i];
       callbacks.onItemStart?.(i, total, item);
 
-      // 1. 解析 PDF 来源
+      // 1. 解析 PDF 来源：显式指定路径优先，其次 zotero_pdf_path → 书库目录 source.pdf
       let pdfPath: string | null = null;
-      try {
-        pdfPath = await resolvePaperSourcePdf(item.id, metaById[item.id]);
-      } catch (error) {
-        console.warn(`解析源 PDF 路径失败: ${item.id}`, error);
+      const explicit = item.sourcePdfPath?.trim();
+      if (explicit && (await invoke<boolean>("path_exists", { path: explicit }).catch(() => false))) {
+        pdfPath = explicit;
+      } else {
+        try {
+          pdfPath = await resolvePaperSourcePdf(item.id, metaById[item.id]);
+        } catch (error) {
+          console.warn(`解析源 PDF 路径失败: ${item.id}`, error);
+        }
       }
       if (!pdfPath) {
         report.failed.push({ ...item, error: "找不到源 PDF" });
