@@ -1,7 +1,8 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CheckCircle, ChevronDown, Eye, Loader2, Settings, XCircle } from "lucide-react";
+import { type PreviewFormat, usePreviewStore } from "@/store/preview-store";
+import { CheckCircle, ChevronDown, Eye, FileText, Loader2, Settings, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { TOOL_NAME_MAP } from "../side-chat/chat-messages";
@@ -30,7 +31,34 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
   const isMindmap = type === TOOL_NAME_MAP.mindmap;
   const isRagTool =
     type === TOOL_NAME_MAP.ragSearch || type === TOOL_NAME_MAP.ragContext || type === TOOL_NAME_MAP.ragToc;
+  const isWebSearch = type === TOOL_NAME_MAP.webSearch;
   const isGetSkillsTool = type === TOOL_NAME_MAP.getSkills;
+  const isWriteFile = type === TOOL_NAME_MAP.writeFile;
+
+  // E5：writeFile 产物可预览格式（按目标路径扩展名；内容取自 input.content，零 IO）
+  const writeFilePreviewFormat: PreviewFormat | null = (() => {
+    if (!isWriteFile || state !== "output-available" || typeof input?.content !== "string") return null;
+    const path = String(input?.path ?? "").toLowerCase();
+    if (path.endsWith(".md") || path.endsWith(".markdown")) return "markdown";
+    if (path.endsWith(".html") || path.endsWith(".htm")) return "html";
+    if (path.endsWith(".svg")) return "svg";
+    if (path.endsWith(".txt") || path.endsWith(".log")) return "text";
+    return null;
+  })();
+
+  const handlePreviewWriteFile = () => {
+    if (!writeFilePreviewFormat) return;
+    stopScroll();
+    const resolved = String((output?.results as Record<string, unknown>)?.resolved ?? input?.path ?? "");
+    const fileName = resolved.split(/[\\/]/).pop() || "预览";
+    usePreviewStore.getState().openPreview({
+      id: `writefile-${toolPart.toolCallId ?? resolved}`,
+      content: String(input?.content ?? ""),
+      language: writeFilePreviewFormat === "markdown" ? "markdown" : writeFilePreviewFormat,
+      format: writeFilePreviewFormat,
+      title: fileName,
+    });
+  };
 
   const handleOpenChange = (open: boolean) => {
     stopScroll();
@@ -86,14 +114,20 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
     }
   };
 
+  // 工具输出展示截断：output/input 主要供模型消费，人工展开面板只看摘要；
+  // 卡片默认折叠时内容不进 DOM，截断主要防展开大卡时的 DOM 爆炸（用户 2026-08-09：500 字都嫌多）
+  const PREVIEW_LIMIT = 500;
   const formatValue = (value: unknown): string => {
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    if (typeof value === "string") return value;
-    if (typeof value === "object") {
-      return JSON.stringify(value, null, 2);
+    let text: string;
+    if (value === null) text = "null";
+    else if (value === undefined) text = "undefined";
+    else if (typeof value === "string") text = value;
+    else if (typeof value === "object") text = JSON.stringify(value, null, 2);
+    else text = String(value);
+    if (text.length > PREVIEW_LIMIT) {
+      return `${text.slice(0, PREVIEW_LIMIT)}\n…[已截断，共 ${text.length} 字符]`;
     }
-    return String(value);
+    return text;
   };
 
   return (
@@ -160,6 +194,37 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
                       </div>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">查看详情</TooltipContent>
+                  </Tooltip>
+                )}
+                {isWebSearch && state === "output-available" && onViewDetail && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          stopScroll();
+                          onViewDetail(toolPart);
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">查看详情</TooltipContent>
+                  </Tooltip>
+                )}
+                {writeFilePreviewFormat && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePreviewWriteFile();
+                        }}
+                      >
+                        <FileText className="h-4 w-4" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">预览产物</TooltipContent>
                   </Tooltip>
                 )}
                 {!isMindmap && !isRagTool && !isGetSkillsTool && state === "output-available" && (

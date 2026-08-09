@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { X } from "lucide-react";
 import { MindmapViewer } from "./mindmap-viewer";
+import { WebSearchViewer } from "./web-search-viewer";
 
 interface MindmapDialogProps {
   open: boolean;
@@ -12,9 +13,10 @@ interface MindmapDialogProps {
 
 export function MindmapDialog({ open, onOpenChange, toolPart }: MindmapDialogProps) {
   const isMindmap = toolPart?.type === TOOL_NAME_MAP.mindmap;
+  const isWebSearch = toolPart?.type === TOOL_NAME_MAP.webSearch;
   const markdown = toolPart?.output?.results?.markdown;
 
-  if (!isMindmap || !markdown) return null;
+  if ((!isMindmap || !markdown) && !isWebSearch) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -28,7 +30,11 @@ export function MindmapDialog({ open, onOpenChange, toolPart }: MindmapDialogPro
           </Button>
         </div>
         <div className="flex-1 overflow-hidden">
-          <MindmapViewer markdown={markdown} />
+          {isWebSearch ? (
+            <WebSearchViewer results={toolPart?.output?.results} />
+          ) : (
+            <MindmapViewer markdown={markdown} />
+          )}
         </div>
       </DialogContent>
     </Dialog>

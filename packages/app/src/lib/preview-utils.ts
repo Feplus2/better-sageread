@@ -22,14 +22,14 @@ export function detectPreviewFormat(language: string, code: string): PreviewForm
     return "react";
   }
 
+  if (lang === "markdown" || lang === "md") {
+    return "markdown";
+  }
+
   // 无语言标记但内容看起来像完整 HTML 文档
   if (!lang || lang === "plaintext") {
     const trimmed = code.trim();
-    if (
-      trimmed.startsWith("<!DOCTYPE") ||
-      trimmed.startsWith("<!doctype") ||
-      trimmed.startsWith("<html")
-    ) {
+    if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
       return "html";
     }
     if (trimmed.startsWith("<svg")) {
@@ -53,9 +53,7 @@ export function isPreviewable(language: string, code: string): boolean {
  */
 export function buildHtmlSrcdoc(code: string, isDark = false): string {
   const trimmed = code.trim();
-  const isFullDocument =
-    trimmed.toLowerCase().includes("<!doctype") ||
-    trimmed.toLowerCase().includes("<html");
+  const isFullDocument = trimmed.toLowerCase().includes("<!doctype") || trimmed.toLowerCase().includes("<html");
 
   if (isFullDocument) {
     return trimmed;
@@ -140,6 +138,8 @@ export function getPreviewTitle(format: PreviewFormat): string {
     svg: "SVG Preview",
     mermaid: "Mermaid Diagram",
     react: "React Preview",
+    markdown: "Markdown Preview",
+    text: "Text Preview",
   };
   return titles[format];
 }

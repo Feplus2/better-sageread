@@ -5,15 +5,19 @@ import { usePreviewStore } from "@/store/preview-store";
 import { Download, X } from "lucide-react";
 import { Resizable } from "re-resizable";
 import { HtmlPreview } from "./html-preview";
+import { MarkdownPreview } from "./markdown-preview";
 import { MermaidPreview } from "./mermaid-preview";
 import { ReactPreview } from "./react-preview";
 import { SvgPreview } from "./svg-preview";
+import { TextPreview } from "./text-preview";
 
 const FORMAT_LABELS: Record<string, string> = {
   html: "HTML",
   svg: "SVG",
   mermaid: "Mermaid",
   react: "React",
+  markdown: "Markdown",
+  text: "Text",
 };
 
 export function PreviewPanel() {
@@ -31,6 +35,10 @@ export function PreviewPanel() {
         return <MermaidPreview content={item.content} />;
       case "react":
         return <ReactPreview content={item.content} language={item.language} />;
+      case "markdown":
+        return <MarkdownPreview content={item.content} />;
+      case "text":
+        return <TextPreview content={item.content} />;
       default:
         return null;
     }

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type PreviewFormat = "html" | "svg" | "mermaid" | "react";
+export type PreviewFormat = "html" | "svg" | "mermaid" | "react" | "markdown" | "text";
 
 export interface PreviewItem {
   id: string;

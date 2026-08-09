@@ -8,6 +8,7 @@ import { ChatThreads } from "@/components/side-chat/chat-threads";
 import ModelSelector from "@/components/side-chat/model-selector";
 import { SelectionExportBar } from "@/components/side-chat/selection-export-bar";
 import { useMessageSelection } from "@/components/side-chat/use-message-selection";
+import { MindmapDialog } from "@/components/tools/mindmap-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,7 +23,7 @@ import { type Folder, type FolderTreeNode, type PaperFolderEntry, buildFolderTre
 import { useThemeStore } from "@/store/theme-store";
 import type { Thread } from "@/types/thread";
 import { FileText, Folder as FolderIcon, History, ListChecks, MessageCirclePlus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 /** 注入提示词的"当前小节正文"上限（字符），超出截断 */
 const MAX_ACTIVE_SECTION_CHARS = 3000;
@@ -92,9 +93,19 @@ export function PaperChatPanel({
   const [scope, setScope] = useState<PaperChatScope>({ kind: "paper" });
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [customChecked, setCustomChecked] = useState<Set<string>>(new Set());
+  // 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款 MindmapDialog）
+  const [toolDetail, setToolDetail] = useState<any>(null);
+  const [showToolDetailDialog, setShowToolDetailDialog] = useState(false);
   // 多选导出：切换对话自动退出
   const { selectionMode, selectedIds, toggleSelectionMode, exitSelectionMode, handleToggleSelect } =
     useMessageSelection(currentThread?.id);
+
+  // 引用稳定（useCallback）：ChatMessages 内的 MemoizedTool 按引用比较跳过重渲染，
+  // 内联函数每次重建会使 memo 全部失效（卡顿修复同款约束）
+  const handleViewToolDetail = useCallback((toolPart: any) => {
+    setToolDetail(toolPart);
+    setShowToolDetailDialog(true);
+  }, []);
 
   /** 当前论文直接所属的文件夹（"所在文件夹"选项；一篇论文可属多个文件夹） */
   const containingFolders = useMemo(() => {
@@ -156,9 +167,14 @@ export function PaperChatPanel({
     setSelectedModel,
     handleAskSelection,
     handleRemoveReference,
+    images,
+    handleRemoveImage,
+    handleAddImageFiles,
+    registerInputEl,
     handleSubmit,
     handleRetry,
     handleNewThread,
+    canRetry,
     handleShowThreads,
     handleSelectThread,
     handleBackFromThreads,
@@ -220,7 +236,8 @@ export function PaperChatPanel({
             <h3 className="font-semibold text-neutral-900 text-xl dark:text-neutral-50">论文助手</h3>
             {/* max-w-md(448px) 会超出面板宽度引起横向滑块；标题公式经 InlineMathText 渲染 */}
             <p className="max-w-full text-sm dark:text-neutral-400">
-              正在共读《<InlineMathText text={paperTitle} />
+              正在共读《
+              <InlineMathText text={paperTitle} />
               》。可以问我论文的任何细节，我看到的"当前小节"会随你的阅读位置更新。
             </p>
           </div>
@@ -285,8 +302,8 @@ export function PaperChatPanel({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`z-40 size-7 shrink-0 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                      selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
+                    className={`z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent ${
+                      selectionMode ? "bg-accent dark:bg-accent" : ""
                     }`}
                     onClick={toggleSelectionMode}
                   >
@@ -301,7 +318,7 @@ export function PaperChatPanel({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="z-40 size-7 shrink-0 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
                   onClick={handleNewThread}
                 >
                   <MessageCirclePlus className="h-5 w-5" />
@@ -314,7 +331,7 @@ export function PaperChatPanel({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="z-40 size-7 shrink-0 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
                   onClick={handleShowThreads}
                 >
                   <History className="h-5 w-5" />
@@ -347,8 +364,9 @@ export function PaperChatPanel({
             scrollKey={currentThread?.id ?? "__init__"}
             onReasoningTimesUpdate={handleReasoningTimesUpdate}
             onRetry={handleRetry}
-            canRetry={status === "ready" && !!displayError}
+            canRetry={canRetry}
             onAskSelection={handleAskSelection}
+            onViewToolDetail={handleViewToolDetail}
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
@@ -379,6 +397,10 @@ export function PaperChatPanel({
             setInput={setInput}
             references={references}
             onRemoveReference={handleRemoveReference}
+            images={images}
+            onRemoveImage={handleRemoveImage}
+            onAddImageFiles={handleAddImageFiles}
+            onInputEl={registerInputEl}
             onSubmit={handleSubmit}
             onStop={stop}
             status={status}
@@ -388,6 +410,9 @@ export function PaperChatPanel({
           />
         </>
       )}
+
+      {/* 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款） */}
+      <MindmapDialog open={showToolDetailDialog} onOpenChange={setShowToolDetailDialog} toolPart={toolDetail} />
 
       {/* 自定义文件夹对话框（复选，含后代文件夹） */}
       <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>

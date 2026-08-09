@@ -9,13 +9,14 @@ import { useEffect, useRef } from "react";
 function extractCodeBlocks(text: string): { language: string; code: string }[] {
   const blocks: { language: string; code: string }[] = [];
   const regex = /```(\w*)\n([\s\S]*?)```/g;
-  let match: RegExpExecArray | null;
+  let match = regex.exec(text);
 
-  while ((match = regex.exec(text)) !== null) {
+  while (match !== null) {
     blocks.push({
       language: match[1] || "plaintext",
       code: match[2].trimEnd(),
     });
+    match = regex.exec(text);
   }
 
   return blocks;
@@ -53,7 +54,8 @@ export function useAutoPreview(messages: UIMessage[], status: string) {
     for (let i = codeBlocks.length - 1; i >= 0; i--) {
       const block = codeBlocks[i];
       const format = detectPreviewFormat(block.language, block.code);
-      if (format) {
+      // markdown 块不自动弹预览（报告类回复高频触发、扰民）；手动点击预览不受影响
+      if (format && format !== "markdown") {
         usePreviewStore.getState().openPreview({
           id: `auto-${lastMessage.id}-${i}`,
           content: block.code,
