@@ -1,9 +1,9 @@
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type BookConvertEngine, type PaperConvertEngine, useConverterStore } from "@/store/converter-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, TriangleAlert } from "lucide-react";
+import SecretInput from "./secret-input";
 
 const ENGINE_OPTIONS: { value: BookConvertEngine; label: string; hint: string }[] = [
   { value: "mineru", label: "MinerU", hint: "表格密集书籍更稳（跨页表合并），免费 1000 页/日" },
@@ -62,19 +62,21 @@ export default function ConverterSettings() {
               MinerU Token
             </Label>
             <div className="flex items-center gap-2">
-              <Input
+              <SecretInput
+                category="converter"
+                secretKey="mineru"
                 id="mineru-token"
-                type="password"
-                value={mineruToken}
-                onChange={(e) => setMineruToken(e.target.value)}
                 placeholder="在 mineru.net 申请"
+                onSaved={setMineruToken}
+                onCleared={() => setMineruToken("")}
               />
               <button
                 type="button"
                 onClick={() => openUrl("https://mineru.net/apiManage/token")}
                 className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
               >
-                <ExternalLink className="size-3" />申请
+                <ExternalLink className="size-3" />
+                申请
               </button>
             </div>
           </div>
@@ -83,19 +85,21 @@ export default function ConverterSettings() {
               PaddleOCR Token
             </Label>
             <div className="flex items-center gap-2">
-              <Input
+              <SecretInput
+                category="converter"
+                secretKey="paddleocr"
                 id="paddleocr-token"
-                type="password"
-                value={paddleocrToken}
-                onChange={(e) => setPaddleocrToken(e.target.value)}
                 placeholder="在百度 AI Studio 申请"
+                onSaved={setPaddleocrToken}
+                onCleared={() => setPaddleocrToken("")}
               />
               <button
                 type="button"
                 onClick={() => openUrl("https://aistudio.baidu.com")}
                 className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
               >
-                <ExternalLink className="size-3" />申请
+                <ExternalLink className="size-3" />
+                申请
               </button>
             </div>
           </div>
@@ -104,19 +108,21 @@ export default function ConverterSettings() {
               GLM API Key
             </Label>
             <div className="flex items-center gap-2">
-              <Input
+              <SecretInput
+                category="converter"
+                secretKey="glm"
                 id="glm-api-key"
-                type="password"
-                value={glmApiKey}
-                onChange={(e) => setGlmApiKey(e.target.value)}
                 placeholder="在 bigmodel.cn 申请（仅论文 GLM 引擎需要）"
+                onSaved={setGlmApiKey}
+                onCleared={() => setGlmApiKey("")}
               />
               <button
                 type="button"
                 onClick={() => openUrl("https://open.bigmodel.cn")}
                 className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
               >
-                <ExternalLink className="size-3" />申请
+                <ExternalLink className="size-3" />
+                申请
               </button>
             </div>
           </div>
@@ -182,7 +188,7 @@ export default function ConverterSettings() {
       </section>
 
       <p className="text-neutral-500 text-xs dark:text-neutral-500">
-        Token 仅保存在本机（converter-store.json），不会随备份/同步上传。 转换所需的 LLM
+        Token 保存在系统凭据管理器（本机 keyring），不会随备份/同步上传。 转换所需的 LLM
         配置自动复用「模型提供商」中的辅助模型（需为 OpenAI 兼容端点，如 DeepSeek / OpenAI / OpenRouter）。
       </p>
     </div>

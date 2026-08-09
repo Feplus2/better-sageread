@@ -37,12 +37,12 @@ export const webSearchTool = tool({
   }) => {
     try {
       const state = useWebSearchStore.getState();
+      // 批次 A：API Key 由 Rust 侧自 keyring 取（web-search:{provider}），前端不再传 key
       const results = await invoke<WebSearchResult[]>("web_search", {
         query: question.trim(),
         maxResults: maxResults || 6,
         engine: state.engine,
         provider: state.activeProvider,
-        apiKey: state.getActiveApiKey() || undefined,
         searxngUrl: state.searxngUrl || undefined,
       });
 

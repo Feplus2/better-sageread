@@ -89,7 +89,8 @@ export const useProviderStore = create<ProviderState>()(
         return persistedState;
       },
       partialize: (state) => ({
-        modelProviders: state.modelProviders,
+        // 安全（批次 A）：apiKey 仅存内存（启动时自 keyring 载入），落盘/备份不含密钥
+        modelProviders: state.modelProviders.map(({ apiKey: _apiKey, ...rest }) => ({ ...rest, apiKey: "" })),
         selectedModel: state.selectedModel,
         utilityModel: state.utilityModel,
       }),

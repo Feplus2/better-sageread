@@ -1,14 +1,10 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTTSStore } from "@/store/tts-store";
-import { Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
+import SecretInput from "./secret-input";
 
 export default function TTSSettings() {
   const { config, setApiKey, setVoice, setLanguageType } = useTTSStore();
-  const [showApiKey, setShowApiKey] = useState(false);
 
   return (
     <div className="space-y-4 p-4 pt-3">
@@ -23,25 +19,16 @@ export default function TTSSettings() {
             <Label htmlFor="tts-api-key" className="text-sm">
               API Key
             </Label>
-            <div className="relative">
-              <Input
-                id="tts-api-key"
-                type={showApiKey ? "text" : "password"}
-                value={config.apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onBlur={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="h-8 pr-10 font-mono"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="-translate-y-1/2 absolute top-1/2 right-2 h-6 w-6"
-                onClick={() => setShowApiKey(!showApiKey)}
-              >
-                {!showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
+            {/* 批次 A：key 由 keyring 保管，不回显真值 */}
+            <SecretInput
+              category="tts"
+              secretKey="dashscope"
+              id="tts-api-key"
+              placeholder="sk-..."
+              className="h-8 font-mono"
+              onSaved={setApiKey}
+              onCleared={() => setApiKey("")}
+            />
             <p className="text-neutral-500 text-xs dark:text-neutral-400">DashScope API Key，用于调用阿里云 TTS 服务</p>
           </div>
 

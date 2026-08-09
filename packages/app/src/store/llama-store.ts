@@ -229,7 +229,9 @@ export const useLlamaStore = create<LlamaState>()(
         return persistedState;
       },
       partialize: (state) => ({
-        vectorModels: state.vectorModels,
+        // 安全：剔除 apiKey，保证持久化/备份不落盘密钥（备份白名单含 llama-store.json，
+        // 批次 A 后 key 由 keyring 保管，此处为衔接保险）
+        vectorModels: state.vectorModels.map(({ apiKey: _apiKey, ...rest }) => ({ ...rest, apiKey: "" })),
         selectedVectorModelId: state.selectedVectorModelId,
         vectorModelEnabled: state.vectorModelEnabled,
         embeddingModels: state.embeddingModels,

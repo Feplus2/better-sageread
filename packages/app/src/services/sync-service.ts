@@ -17,6 +17,14 @@ export interface WebdavConfig {
   l2_root?: string | null;
 }
 
+/** 密码掩码占位（S3）：提交此值表示保留已存密码不变，与 Rust 侧 PASSWORD_MASK 一致 */
+export const WEBDAV_PASSWORD_MASK = "********";
+
+/** sync_get_config 返回视图：password 永远为掩码，has_password 标识是否已存 */
+export interface WebdavConfigView extends WebdavConfig {
+  has_password: boolean;
+}
+
 export interface BackupInfo {
   name: string;
   size: number;
@@ -49,7 +57,7 @@ export interface SyncState {
   last_result: string | null;
 }
 
-export async function syncGetConfig(): Promise<WebdavConfig | null> {
+export async function syncGetConfig(): Promise<WebdavConfigView | null> {
   return invoke("sync_get_config");
 }
 

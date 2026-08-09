@@ -30,13 +30,11 @@ interface WebSearchState {
   setSerperKey: (key: string) => void;
   setSearxngUrl: (url: string) => void;
   toggleProvider: (p: SearchProvider) => void;
-  /** 获取当前活动 provider 对应的 API Key */
-  getActiveApiKey: () => string;
 }
 
 export const useWebSearchStore = create<WebSearchState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       activeProvider: "builtin",
       engine: "auto",
       bochaKey: "",
@@ -60,25 +58,21 @@ export const useWebSearchStore = create<WebSearchState>()(
             enabledProviders: enabled ? state.enabledProviders.filter((x) => x !== p) : [...state.enabledProviders, p],
           };
         }),
-      getActiveApiKey: () => {
-        const state = get();
-        switch (state.activeProvider) {
-          case "bocha":
-            return state.bochaKey;
-          case "zhipu":
-            return state.zhipuKey;
-          case "tavily":
-            return state.tavilyKey;
-          case "serper":
-            return state.serperKey;
-          default:
-            return "";
-        }
-      },
     }),
     {
       name: "web-search-engine",
       storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        // 安全（批次 A）：API Key 由 keyring 保管（启动时载入内存），localStorage 不含密钥
+        activeProvider: state.activeProvider,
+        engine: state.engine,
+        bochaKey: "",
+        zhipuKey: "",
+        tavilyKey: "",
+        serperKey: "",
+        searxngUrl: state.searxngUrl,
+        enabledProviders: state.enabledProviders,
+      }),
     },
   ),
 );

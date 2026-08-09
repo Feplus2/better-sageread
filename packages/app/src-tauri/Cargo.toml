@@ -35,7 +35,7 @@ tauri-plugin-llamacpp = { path = "plugins/tauri-plugin-llamacpp" }
 tauri-plugin-epub = { path = "plugins/tauri-plugin-epub" }
 jan-utils = { path = "utils" }
 tauri-plugin-log = "2"
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "blocking", "json"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 futures-util = "0.3"
@@ -46,10 +46,29 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 globset = "0.4"
 regex = "1.10"
+# 注意：keyring v3 默认 features 为空（不启用任何平台后端，写入会落在 mock 后端导致重启后丢失），
+# 必须按平台显式启用原生后端（见下方 target 段）
+keyring = "3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
+
+[target.'cfg(windows)'.dependencies]
+# MCP stdio 子进程 Job Object 孤儿防护（批次 D1）
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+# keyring 必须启用 Windows Credential Manager 后端，否则密钥不持久化
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native-sync-persistent"] }
 
 
 [profile.release]

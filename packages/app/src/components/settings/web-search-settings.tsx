@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { type SearchProvider, useWebSearchStore } from "@/store/web-search-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink } from "lucide-react";
+import SecretInput from "./secret-input";
 
 interface ProviderMeta {
   id: SearchProvider;
@@ -130,11 +131,7 @@ export default function WebSearchSettings() {
                     <TooltipContent side="bottom">请先填写配置</TooltipContent>
                   </Tooltip>
                 ) : (
-                  <Switch
-                    checked={isEnabled}
-                    onCheckedChange={() => toggleProvider(meta.id)}
-                    disabled={!hasConfig}
-                  />
+                  <Switch checked={isEnabled} onCheckedChange={() => toggleProvider(meta.id)} disabled={!hasConfig} />
                 )}
               </div>
               <p className="mt-1.5 text-neutral-500 text-xs dark:text-neutral-400">{meta.desc}</p>
@@ -160,12 +157,14 @@ export default function WebSearchSettings() {
                 ) : (
                   <div className="space-y-1.5">
                     <Label className="text-xs">API Key</Label>
-                    <Input
-                      type="password"
-                      value={keyValue}
-                      onChange={(e) => keySetters[meta.keyField!]?.(e.target.value)}
+                    {/* 批次 A：key 由 keyring 保管，不回显真值 */}
+                    <SecretInput
+                      category="web-search"
+                      secretKey={meta.id}
                       placeholder={meta.placeholder}
                       className="h-8"
+                      onSaved={(value) => keySetters[meta.keyField!]?.(value)}
+                      onCleared={() => keySetters[meta.keyField!]?.("")}
                     />
                   </div>
                 )}

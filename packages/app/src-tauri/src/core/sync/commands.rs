@@ -14,6 +14,18 @@ async fn clone_db_pool(state: &State<'_, AppState>) -> Result<SqlitePool, String
 
 const CONFIG_FILE: &str = "webdav-config.json";
 
+/// 密码掩码（S3）：返回前端与前端提交均使用此占位；提交掩码时保留已存真密码
+pub const PASSWORD_MASK: &str = "********";
+
+/// 提交配置时解析真实密码：掩码/未变 → 沿用已存密码；新值 → 用新值
+fn resolve_password(submitted: &str, saved: Option<&WebdavConfig>) -> String {
+    if submitted == PASSWORD_MASK {
+        saved.map(|c| c.password.clone()).unwrap_or_default()
+    } else {
+        submitted.to_string()
+    }
+}
+
 /// 云端目录布局：统一收在 sageread/ 下；旧版为两个并列顶层目录
 const CLOUD_HOME: &str = "sageread";
 const L2_ROOT: &str = "sageread/sync";
@@ -32,7 +44,16 @@ fn load_config(app: &AppHandle) -> Result<WebdavConfig, String> {
         return Err("尚未配置 WebDAV".to_string());
     }
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置失败: {e}"))
+    let mut config: WebdavConfig =
+        serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置失败: {e}"))?;
+    // 批次 A：密码由 keyring 保管，JSON 里为空时从凭据管理器补水
+    if config.password.is_empty() {
+        config.password = crate::core::secrets::get_secret(app, "webdav", "password")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+    }
+    Ok(config)
 }
 
 /// 读取 WebDAV 配置（供退出前推送等非命令路径复用）
@@ -126,6 +147,8 @@ async fn migrate_cloud_layout_inner(app: &AppHandle, force: bool) -> Result<(), 
     }
 
     if config_dirty {
+        // 批次 A 口径：密码住 keyring；load_config 已补水，写盘前必须置空，防真密码明文回写
+        config.password = String::new();
         let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
         fs::write(config_path(app)?, content).map_err(|e| e.to_string())?;
     }
@@ -134,27 +157,55 @@ async fn migrate_cloud_layout_inner(app: &AppHandle, force: bool) -> Result<(), 
     backup::write_sync_state(&config_dir, &state)
 }
 
+/// 返回前端的配置视图：密码字段永远掩码，另附 has_password 标记（S3）
+#[derive(serde::Serialize)]
+pub struct WebdavConfigView {
+    #[serde(flatten)]
+    pub config: WebdavConfig,
+    pub has_password: bool,
+}
+
 #[tauri::command]
-pub async fn sync_get_config(app: AppHandle) -> Result<Option<WebdavConfig>, String> {
+pub async fn sync_get_config(app: AppHandle) -> Result<Option<WebdavConfigView>, String> {
     let path = config_path(&app)?;
     if !path.exists() {
         return Ok(None);
     }
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let config = serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置失败: {e}"))?;
-    Ok(Some(config))
+    let mut config: WebdavConfig =
+        serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置失败: {e}"))?;
+    let has_password = !config.password.is_empty();
+    // S3：真密码不返回前端，前端只见掩码
+    config.password = if has_password { PASSWORD_MASK.to_string() } else { String::new() };
+    Ok(Some(WebdavConfigView { config, has_password }))
 }
 
-/// 保存配置到本地 webdav-config.json（只存本地，不进备份包）
+/// 保存配置到本地 webdav-config.json（只存本地，不进备份包）；
+/// 前端提交掩码密码时保留原密码不变（S3）；批次 A 后密码入 keyring，JSON 不存明文
 #[tauri::command]
-pub async fn sync_save_config(app: AppHandle, config: WebdavConfig) -> Result<(), String> {
+pub async fn sync_save_config(app: AppHandle, mut config: WebdavConfig) -> Result<(), String> {
+    let saved = load_config(&app).ok();
+    config.password = resolve_password(&config.password, saved.as_ref());
+    // 批次 A：密码写入凭据管理器，JSON 落盘置空
+    if !config.password.is_empty() {
+        crate::core::secrets::set_secret(&app, "webdav", "password", &config.password)?;
+    } else {
+        let _ = crate::core::secrets::delete_secret(&app, "webdav", "password");
+    }
+    config.password = String::new();
     let path = config_path(&app)?;
     let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
+/// 测试连接：密码用真值（前端提交掩码时 Rust 侧自取已存密码），不经过前端明文回传（S3）
 #[tauri::command]
-pub async fn sync_test_connection(config: WebdavConfig) -> Result<String, String> {
+pub async fn sync_test_connection(app: AppHandle, mut config: WebdavConfig) -> Result<String, String> {
+    let saved = load_config(&app).ok();
+    config.password = resolve_password(&config.password, saved.as_ref());
+    if config.password.is_empty() {
+        return Err("尚未设置密码".to_string());
+    }
     webdav::test_connection(&config).await
 }
 
@@ -424,6 +475,8 @@ pub async fn sync_update_prefs(app: AppHandle, patch: SyncPrefsPatch) -> Result<
     if let Some(v) = patch.l2_enabled {
         config.l2_enabled = v;
     }
+    // 批次 A 口径：密码住 keyring；load_config 已补水，写盘前必须置空，防真密码明文回写
+    config.password = String::new();
     let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(config_path(&app)?, content).map_err(|e| e.to_string())?;
     Ok(SyncPrefsView {

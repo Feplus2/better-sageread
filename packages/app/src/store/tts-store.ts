@@ -42,6 +42,10 @@ export const useTTSStore = create<TTSStore>()(
     }),
     {
       name: "tts-config-storage",
+      partialize: (state) => ({
+        // 安全（批次 A）：apiKey 由 keyring 保管（启动时载入内存），localStorage 不含密钥
+        config: { ...state.config, apiKey: "" },
+      }),
     },
   ),
 );

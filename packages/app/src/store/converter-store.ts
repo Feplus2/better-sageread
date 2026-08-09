@@ -26,7 +26,8 @@ interface ConverterState {
 }
 
 /**
- * PDF 转换设置。MinerU/PaddleOCR/GLM Token 与引擎选择存于本机 converter-store.json；
+ * PDF 转换设置。MinerU/PaddleOCR/GLM Token 由 OS 凭据管理器（keyring）保管（批次 A），
+ * 仅启动时载入内存供请求使用；引擎选择等非密配置存于本机 converter-store.json；
  * L1 备份白名单（backup.rs JSON_FILES）与同步通道均不含此文件，密钥不会外传。
  */
 export const useConverterStore = create<ConverterState>()(
@@ -49,9 +50,10 @@ export const useConverterStore = create<ConverterState>()(
       name: tauriStorageKey.converterStore,
       storage: createJSONStorage(() => tauriStorage),
       partialize: (state) => ({
-        mineruToken: state.mineruToken,
-        paddleocrToken: state.paddleocrToken,
-        glmApiKey: state.glmApiKey,
+        // 安全（批次 A）：token 仅存内存（启动时自 keyring 载入），落盘不含密钥
+        mineruToken: "",
+        paddleocrToken: "",
+        glmApiKey: "",
         engine: state.engine,
         paperEngine: state.paperEngine,
         zoteroDataDir: state.zoteroDataDir,

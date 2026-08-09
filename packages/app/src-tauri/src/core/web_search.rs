@@ -3,6 +3,16 @@
 //! - API Provider（用户配置 Key）：Tavily / Serper / SearXNG（稳定、高质量）
 
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+
+/// 按 provider 从凭据管理器取搜索 API Key（批次 A：前端不再传 key）
+fn provider_key(app: &AppHandle, provider: &str, display: &str) -> Result<String, String> {
+    let key = crate::core::secrets::get_secret(app, "web-search", provider)
+        .map_err(|e| format!("读取密钥失败: {e}"))?
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| format!("{display} 需要 API Key，请在设置 → 网络搜索中配置"))?;
+    Ok(key.trim().to_string())
+}
 
 /// 单条搜索结果
 #[derive(Serialize, Debug, Clone)]
@@ -216,7 +226,7 @@ const USER_AGENT: &str =
 /// 发送 GET 请求：先走默认客户端（系统代理/直连），失败后逐个尝试本地代理
 async fn fetch_with_proxy_fallback(url: &str) -> Result<reqwest::Response, String> {
     // 1. 默认客户端（reqwest 自动识别系统代理与 HTTPS_PROXY 环境变量）
-    if let Ok(client) = reqwest::Client::builder().user_agent(USER_AGENT).build() {
+    if let Ok(client) = crate::core::proxy::builder().user_agent(USER_AGENT).build() {
         if let Ok(resp) = client.get(url).send().await {
             return Ok(resp);
         }
@@ -228,7 +238,7 @@ async fn fetch_with_proxy_fallback(url: &str) -> Result<reqwest::Response, Strin
         let Ok(proxy) = reqwest::Proxy::all(proxy_url) else {
             continue;
         };
-        let Ok(client) = reqwest::Client::builder()
+        let Ok(client) = crate::core::proxy::builder()
             .proxy(proxy)
             .user_agent(USER_AGENT)
             .build()
@@ -312,7 +322,7 @@ fn parse_baidu_html(html: &str, max_results: usize) -> Vec<WebSearchResult> {
 /// 必应搜索（国内可直连，免代理）
 async fn search_bing(query: &str, max: usize) -> Result<Vec<WebSearchResult>, String> {
     let url = format!("https://www.bing.com/search?q={}&setlang=zh-hans", urlencode(query));
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -327,7 +337,7 @@ async fn search_bing(query: &str, max: usize) -> Result<Vec<WebSearchResult>, St
 /// 百度搜索（国内可直连，免代理）
 async fn search_baidu(query: &str, max: usize) -> Result<Vec<WebSearchResult>, String> {
     let url = format!("https://www.baidu.com/s?wd={}&rn={}", urlencode(query), max);
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -453,7 +463,7 @@ struct ZhipuSearchResult {
 
 /// Tavily 搜索（专为 AI Agent 优化的搜索 API）
 async fn search_tavily(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -492,7 +502,7 @@ async fn search_tavily(query: &str, max: usize, api_key: &str) -> Result<Vec<Web
 
 /// Serper 搜索（Google 搜索结果 API）
 async fn search_serper(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -538,7 +548,7 @@ async fn search_searxng(query: &str, max: usize, base_url: &str) -> Result<Vec<W
         urlencode(query)
     );
 
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -569,7 +579,7 @@ async fn search_searxng(query: &str, max: usize, base_url: &str) -> Result<Vec<W
 
 /// 博查搜索（国内 AI 搜索 API，DeepSeek 等 60%+ 国内 AI 应用采用）
 async fn search_bocha(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -613,7 +623,7 @@ async fn search_bocha(query: &str, max: usize, api_key: &str) -> Result<Vec<WebS
 
 /// 智谱 Web Search Pro（国内可靠，支持多引擎）
 async fn search_zhipu(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
-    let client = reqwest::Client::builder()
+    let client = crate::core::proxy::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
@@ -665,17 +675,17 @@ async fn search_zhipu(query: &str, max: usize, api_key: &str) -> Result<Vec<WebS
 
 // ─── Tauri Command ───────────────────────────────────────────────────────────
 
-/// 网络搜索 Tauri command
+/// 网络搜索 Tauri command（批次 A：API Key 由 Rust 侧自 keyring 取，不经前端）
 ///
 /// provider："builtin" | "bocha" | "zhipu" | "tavily" | "serper" | "searxng"
 /// engine：仅 builtin 模式下有效，"auto" | "bing" | "baidu" | "duckduckgo"
 #[tauri::command]
 pub async fn web_search(
+    app: AppHandle,
     query: String,
     max_results: Option<usize>,
     engine: Option<String>,
     provider: Option<String>,
-    api_key: Option<String>,
     searxng_url: Option<String>,
 ) -> Result<Vec<WebSearchResult>, String> {
     let max = max_results.unwrap_or(6).clamp(1, 20);
@@ -684,9 +694,8 @@ pub async fn web_search(
     // ── API Provider 路径 ──
     match provider.as_str() {
         "bocha" => {
-            let key = api_key.filter(|k| !k.trim().is_empty())
-                .ok_or_else(|| "博查需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
-            let results = search_bocha(&query, max, key.trim()).await?;
+            let key = provider_key(&app, "bocha", "博查")?;
+            let results = search_bocha(&query, max, &key).await?;
             if results.is_empty() {
                 return Err("博查未返回搜索结果".to_string());
             }
@@ -694,9 +703,8 @@ pub async fn web_search(
             return Ok(results);
         }
         "zhipu" => {
-            let key = api_key.filter(|k| !k.trim().is_empty())
-                .ok_or_else(|| "智谱需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
-            let results = search_zhipu(&query, max, key.trim()).await?;
+            let key = provider_key(&app, "zhipu", "智谱")?;
+            let results = search_zhipu(&query, max, &key).await?;
             if results.is_empty() {
                 return Err("智谱未返回搜索结果".to_string());
             }
@@ -704,9 +712,8 @@ pub async fn web_search(
             return Ok(results);
         }
         "tavily" => {
-            let key = api_key.filter(|k| !k.trim().is_empty())
-                .ok_or_else(|| "Tavily 需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
-            let results = search_tavily(&query, max, key.trim()).await?;
+            let key = provider_key(&app, "tavily", "Tavily")?;
+            let results = search_tavily(&query, max, &key).await?;
             if results.is_empty() {
                 return Err("Tavily 未返回搜索结果".to_string());
             }
@@ -714,9 +721,8 @@ pub async fn web_search(
             return Ok(results);
         }
         "serper" => {
-            let key = api_key.filter(|k| !k.trim().is_empty())
-                .ok_or_else(|| "Serper 需要 API Key，请在设置 → 网络搜索中配置".to_string())?;
-            let results = search_serper(&query, max, key.trim()).await?;
+            let key = provider_key(&app, "serper", "Serper")?;
+            let results = search_serper(&query, max, &key).await?;
             if results.is_empty() {
                 return Err("Serper 未返回搜索结果".to_string());
             }

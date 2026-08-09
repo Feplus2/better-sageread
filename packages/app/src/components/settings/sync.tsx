@@ -11,6 +11,7 @@ import {
   type SnapshotInfo,
   type SyncState,
   type WebdavConfig,
+  WEBDAV_PASSWORD_MASK,
   syncBackupNow,
   syncDeleteBackup,
   syncGetCloudAssets,
@@ -68,6 +69,9 @@ function formatSize(bytes: number): string {
 
 export default function SyncSettings() {
   const [config, setConfig] = useState<WebdavConfig>(DEFAULT_CONFIG);
+  // S3：密码不回显真值。draft 为空 = 沿用已存密码（提交掩码）；非空 = 用户输入的新密码
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [hasPassword, setHasPassword] = useState(false);
   const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -98,7 +102,10 @@ export default function SyncSettings() {
   useEffect(() => {
     syncGetConfig()
       .then((saved) => {
-        if (saved) setConfig({ ...DEFAULT_CONFIG, ...saved });
+        if (saved) {
+          setConfig({ ...DEFAULT_CONFIG, ...saved });
+          setHasPassword(saved.has_password);
+        }
       })
       .catch((error) => console.error("加载 WebDAV 配置失败:", error));
     syncGetState()
@@ -120,10 +127,18 @@ export default function SyncSettings() {
     }
   }, []);
 
+  /** 组装提交用配置：draft 非空用新密码，否则提交掩码让 Rust 侧保留已存密码（S3） */
+  const withResolvedPassword = (cfg: WebdavConfig): WebdavConfig => ({
+    ...cfg,
+    password: passwordDraft.trim() !== "" ? passwordDraft : WEBDAV_PASSWORD_MASK,
+  });
+
   const handleSaveConfig = async () => {
     setIsSaving(true);
     try {
-      await syncSaveConfig(config);
+      await syncSaveConfig(withResolvedPassword(config));
+      if (passwordDraft.trim() !== "") setHasPassword(true);
+      setPasswordDraft("");
       toast.success("配置已保存");
     } catch (error) {
       console.error("保存配置失败:", error);
@@ -136,7 +151,7 @@ export default function SyncSettings() {
   const handleTestConnection = async () => {
     setIsTesting(true);
     try {
-      const message = await syncTestConnection(config);
+      const message = await syncTestConnection(withResolvedPassword(config));
       toast.success(message);
     } catch (error) {
       console.error("测试连接失败:", error);
@@ -398,8 +413,9 @@ export default function SyncSettings() {
               <span className="text-neutral-600 text-xs dark:text-neutral-400">密码 / 应用密码</span>
               <Input
                 type="password"
-                value={config.password}
-                onChange={(e) => updateConfig({ password: e.target.value })}
+                value={passwordDraft}
+                onChange={(e) => setPasswordDraft(e.target.value)}
+                placeholder={hasPassword ? "已保存 ·•••（输入新密码以更换）" : "应用密码"}
                 className="mt-1"
               />
             </div>

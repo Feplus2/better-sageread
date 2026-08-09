@@ -26,7 +26,7 @@ async function effectiveWorkspaceRoot(scope: Scope): Promise<string> {
 export async function loadWorkspaceSection(scope: Scope): Promise<string> {
   try {
     const root = await effectiveWorkspaceRoot(scope);
-    return `\n\n—— 当前工作区 ——\nAgent 工作区根目录：${root}\nwriteFile/editFile/runCommand/searchFiles 的相对路径以此目录为基准；界内操作静默执行，界外写入与命令执行会弹确认卡由用户裁决。\n长期记忆：本目录下的 memory.md 是你的持久记忆（内容见【长期记忆】段，如有）；用户分享偏好/做出决定/要求“记住”时，用 writeFile/editFile 更新它（不存在则创建），按主题分节、保持精炼（200 行内）。`;
+    return `\n\n—— 当前工作区 ——\nAgent 工作区根目录：${root}\nwriteFile/editFile/runCommand/searchFiles 的相对路径以此目录为基准；界内操作静默执行，界外写入与命令执行会弹确认卡由用户裁决。\n长期记忆：本目录下的 memory.md 是你的持久记忆（内容见【长期记忆】段，如有）；用户分享偏好/做出决定/要求“记住”时，用 writeFile/editFile 更新它（不存在则创建），按主题分节、保持精炼（200 行内）。\n记忆安全硬规则：绝不把 API Key、Token、密码、私钥写入 memory.md 或工作区任何文件；用户主动提供密钥时，引导其通过 设置 → 密钥保管箱 保存，并在 SOP/配置中以 {{secret:名称}} 引用。`;
   } catch (e) {
     console.warn("获取 Agent 工作区配置失败:", e);
     return "";
@@ -50,7 +50,7 @@ export async function loadMemorySection(scope: Scope): Promise<string> {
     if (!text) return "";
     const capped =
       text.length > MEMORY_MAX_CHARS ? `${text.slice(0, MEMORY_MAX_CHARS)}\n…[记忆过长已截断，请精简 memory.md]` : text;
-    return `\n\n【长期记忆 memory.md】\n${capped}\n（以上是你的持久记忆。用户分享偏好/做出决定/给出长期事实，或明确要求"记住"时，用 writeFile/editFile 更新工作区根目录下的 memory.md，不存在则创建；按主题分节、保持精炼，只记跨对话有价值的信息）`;
+    return `\n\n【长期记忆 memory.md】\n${capped}\n（以上是你的持久记忆。用户分享偏好/做出决定/给出长期事实，或明确要求"记住"时，用 writeFile/editFile 更新工作区根目录下的 memory.md，不存在则创建；按主题分节、保持精炼，只记跨对话有价值的信息。安全硬规则：绝不把 API Key、Token、密码、私钥写入记忆或任何文件，命中即被拦截；用户主动提供密钥时引导其通过 设置 → 密钥保管箱 保存，并以 {{secret:名称}} 引用）`;
   } catch {
     return "";
   }
