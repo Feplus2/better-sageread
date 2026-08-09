@@ -7,6 +7,9 @@ pub enum ColType {
 
 pub struct SyncTable {
     pub name: &'static str,
+    /// 主键表达式（直接嵌入 SQL 与触发器）：普通表是列名（如 "id"），
+    /// 复合主键关系表用拼接表达式（如 paper_folders 的 "paper_id || ':' || folder_id"，
+    /// 触发器里展开为 NEW.paper_id || ':' || NEW.folder_id）
     pub pk: &'static str,
     pub columns: &'static [(&'static str, ColType)],
 }
@@ -22,6 +25,7 @@ pub const TABLES: &[SyncTable] = &[
             ("title", ColType::Text),
             ("messages", ColType::Text),
             ("starred", ColType::Int),
+            ("scope", ColType::Text),
             ("created_at", ColType::Int),
             ("updated_at", ColType::Int),
         ],
@@ -118,6 +122,40 @@ pub const TABLES: &[SyncTable] = &[
             ("content", ColType::Text),
             ("is_active", ColType::Int),
             ("is_system", ColType::Int),
+            ("scope", ColType::Text),
+            ("created_at", ColType::Int),
+            ("updated_at", ColType::Int),
+        ],
+    },
+    // ---- ④ 2026-08-10 扩容：文件夹/提示词预设入 L2b ----
+    SyncTable {
+        name: "folders",
+        pk: "id",
+        columns: &[
+            ("id", ColType::Text),
+            ("name", ColType::Text),
+            ("parent_id", ColType::Text),
+            ("trashed_at", ColType::Int),
+            ("created_at", ColType::Int),
+            ("updated_at", ColType::Int),
+        ],
+    },
+    SyncTable {
+        // 复合主键关系表：无 updated_at，INSERT 走 OR IGNORE（同 reading_sessions），
+        // DELETE 按存在性判定（local_updated_at 对无 updated_at 的表退化为存在检查）
+        name: "paper_folders",
+        pk: "paper_id || ':' || folder_id",
+        columns: &[("paper_id", ColType::Text), ("folder_id", ColType::Text)],
+    },
+    SyncTable {
+        name: "prompt_presets",
+        pk: "id",
+        columns: &[
+            ("id", ColType::Text),
+            ("scope", ColType::Text),
+            ("name", ColType::Text),
+            ("content", ColType::Text),
+            ("is_active", ColType::Int),
             ("created_at", ColType::Int),
             ("updated_at", ColType::Int),
         ],

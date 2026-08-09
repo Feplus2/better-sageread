@@ -35,43 +35,69 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ---
 
-## ① L2 增量同步整体禁用（保留代码，锁死开关）
+## ① L2 增量同步：保留 BETA，不锁死（2026-08-10 修订拍板）
 
-用户拍板（2026-08-09）：L2 基本测通但细节不完善（阅读进度等），属移动端配套能力，现阶段用不上。
+~~原决定（2026-08-09）：L2 整体禁用、锁死开关。~~ **已撤销**。新口径：
+- L2 保留 BETA 静默运行——代码已七七八八，禁用反而让存量双设备用户断功能；"增益且无害"
+- **L1 的任何功能不得依赖 L2**（见 ② 的核心原则）；L2 只是让双设备日常更顺畅
+- 503/429 退避、存量回填压测、移动端语义：维持"移动端立项时再做"原决策
+- 进度"不及时"是空闲调度的有意取舍（阅读中不同步防卡顿，静止 10s 后 25s tick 推/拉），不是 bug，不改
 
-- 设置页「增量同步」开关：**强制关闭 + 禁用（用户无法打开）**，附简短声明："增量同步将在移动端版本发布后开放"
-- 具体位置：`components/settings/sync.tsx`（`l2_enabled` Switch，约 L566）
-- 防御性兜底：同步调度器/engine 入口对 `l2_enabled` 做运行期短路（即使配置被手动改为 true 也不跑），防残留定时任务
-- L2 资产通道（字体/背景同步）随 L2 一并停用 → **字体/背景改由 L1 备份覆盖**（见 ②）
-- 代码不删除，移动端启动时可原样复活
+**已完成的小修（2026-08-10，cargo test 37+1 绿）**：
+1. ✅ `tables.rs` 补 threads/skills 的 `scope` 列（H2/技能作用域列此前不进 changeset，对端错位）；threads 的消息级合并链路（`ThreadRowData`/`thread_row_from_data`/`fetch_thread_row`/`thread_row_to_json`）同步补 scope，旧包无此字段回落 'book'
+2. ✅ changeset 线上格式改 **gzip(JSONL)**（魔数嗅探兼容存量裸包；实测结构化 JSON 压缩 10 倍+）+ **单行 20MB 安全阀**（超限跳过并告警，防工具密集巨线程烧坚果云配额）
+3. ✅ `folders` / `paper_folders` / `prompt_presets` 入 L2b：`SyncTable.pk` 语义升级为"主键表达式"（paper_folders 复合键用 `paper_id || ':' || folder_id`）；paper_folders 走 INSERT OR IGNORE；prompt_presets 加 apply 钩子维护同 scope 的 is_active 互斥；`zotero_collections`/`zotero_paper_state` 明确**永不同步**（device-local 链接状态）
 
-## ② L1 全量备份覆盖扩容（含流量安全设计，坚果云月 1G 上传配额约束）
+**L2 已知语义备忘（不是缺陷，换机场景可接受）**：threads 已是消息级并集合并（锚点归并，2026-07-21 定）；整行全量上云但有 gzip+安全阀；同一对话两端同时编辑按消息并集收敛。
 
-**现状**（`backup.rs`）：`app.db` + `app-settings.json` + `layout-store.json` + `llama-store.json` + `themes/*.css`。
-⚠️ 审计新发现：**书籍 EPUB 文件与论文文件（books/ 目录）当前也完全不在备份里**（原来只靠 L2 文件通道，L2 禁用后即零保护），一并纳入。
+## ② L1 完备备份（"完整搬家"）——设计详案，**待用户过目后开工**
 
-**纳入项（数据布局已逐条核实）**：
+**核心原则（用户 2026-08-10 拍板）**：L1 恢复 = **完整搬家**。用户在 A 设备备份、B 设备恢复，只开 L1 不开 L2，也**什么都不缺**——填好各类 key 之后开箱即用（含向量检索立即可用）。L2 是增益，绝不为 L1 补缺。
 
-| 项 | 落盘位置 | 说明 |
+### 纳入清单（落盘位置已逐条核实）
+
+**小包（日常备份 zip，几 MB 级）**：
+| 项 | 位置 | 说明 |
 |---|---|---|
-| 书籍 EPUB 文件 | `{appData}/books/{bookId}/` | 原 L2 通道职责，L2 停用后由 L1 接管 |
-| 论文全部产物 | `{appData}/books/{paperId}/`（与书同目录体系） | paper.md、images/、可选 source.pdf、**翻译 translation-zh.json**；**划线/标注在 app.db 笔记表**；句级对齐结果随翻译/对齐产物落盘同目录，整目录递归备份不遗漏 |
-| 论文向量库 | `{appData}/papers/vectors.sqlite` | 可重建但重建费 embedding API 调用，纳入（哈希不变不重传，零边际流量） |
-| `agent-workspace/` | `{appData}/agent-workspace/` | Agent 产出文件 |
-| `agent-skills/` | 配置目录 | 自定义技能文件 |
-| 字体 + 背景图 | 配置目录 fonts/ + 背景目录 | 用户拍板纳入（L2 停用后唯一通道） |
-| 七个 store 配置 JSON | 配置目录 | mcp/agent-settings/chat-settings/quick-command/web-search/tts/converter；批次 A 后密钥全在 keyring，落盘文件天然无密，直接打包 |
+| app.db | `{appData}/database/app.db` | VACUUM INTO 快照（现状），全表保真（threads 含 scope、folders、prompt_presets 等全在） |
+| 全部配置 JSON | 配置目录 | 现有 3 个 + **model-provider.json（A 批后无密，排除理由已过时）**、converter-store、mcp-servers、agent-settings、chat-settings、quick-command、web-search、tts、webdav-config（密码已置空）、proxy.json、secret-names.json（只有名称无值）。策略由"白名单"改"**全收减排除清单**"（新增配置文件自动纳入） |
+| themes/*.css | 配置目录 | 现状已有 |
+| 资产清单 manifest.json | 包内 | 大包 sha256 索引（见下） |
 
-**明确排除**：
-- `rag-index/`（书籍向量索引）：embedding 向量+分块元数据，"批量向量化"可一键重建——它是**派生数据**不是原始数据，备份只保原始数据
-- 密钥：永不上云（用户已确认）
+**大包（sha256 内容寻址，一次一传，哈希不变永不重传）**：
+| 项 | 位置 | 说明 |
+|---|---|---|
+| 书籍/论文全部文件 | `{appData}/books/{id}/` 整目录递归 | EPUB、paper.md、images/、translation-zh.json、可选 source.pdf、cover.jpg（封面就在 books/ 内，已核实） |
+| 全局向量库 | `{appData}/papers/vectors.sqlite` | books+papers 统一的 chunk/embedding 库（按 paper_id 分片）；远程 embedding 重建要 API 费，**纳入** |
+| 字体 | `{appData}/fonts/`（.woff2） | 与 L2a 同路径（已核实） |
+| 阅读背景 | `{config}/reader-backgrounds/` | 已核实 |
+| Agent 工作区 | `{appData}/agent-workspace/` | 仅默认路径；用户改到外部目录（如 Obsidian 库）的不纳入（不替用户备份第三方目录） |
 
-**流量安全设计（用户核心关切：坚果云月 1G 上传配额）**：
-1. **哈希对比强制跳过**：修正无变化检测——由"只对比 db 哈希"改为"全部打包内容哈希"，无变化零流量
-2. **大包/小包分离**：大而稳定的文件（EPUB、论文 md+images、字体、背景）按 sha256 内容寻址**单独上传一次**（复用 L2 files 通道的成熟实现思路）；日常备份 zip 只含 db + 配置 + 资产清单（几 MB 级）——变更时只重传小包，大文件永不重复上传
-3. 恢复流程：解包 zip → 按清单懒下载缺失资产
+**钉死排除**：`secrets-fallback.json`（keyring 降级时的**明文**密钥，进包即破功）、`sync-state.json`（L2 设备身份，进包致两端撞 device_id）、`mcp-local.json`（运行时令牌）、`sync-staging/`、`l2-snapshots/`、一切 keyring 内容。
 
-**其余实施要点**：manifest.version 升级 + restore.rs 对应恢复 + 端到端测试（备份→恢复→逐项核对：书/论文/翻译/划线/技能/工作区/字体背景）。
+### 流量安全设计（坚果云月 1G 上传配额）
+
+1. **小包哈希门控升级**：现状只对比 db 哈希 → 改为"全部打包内容哈希"（db+全部 JSON+themes+清单），无变化零流量
+2. **大包池**：`sageread/backups/assets/{sha256}` 内容寻址，manifest 记录 `{path, sha256, size, kind}`；本地哈希比对，不变不传；大文件永不重复上传
+3. **小包路径照旧**：`sageread/backups/{timestamp}.zip`，保留轮转（默认 10 份）
+4. **大包 GC**：轮转删除旧小包时，清理不再被任何现存 manifest 引用的 assets（与备份轮转同生命周期；防配额只进不出）
+
+### manifest v2 与恢复流程
+
+- `version: 2`，新增 `assets[]` 清单；恢复端按 version 分流，v1 老备份走原逻辑（向后兼容）
+- 恢复：下载小包 → 解 manifest → 恢复前自动本地备份现状（可回滚，现状已有）→ pending-restore 重启替换 db/JSON/themes（现状流程）→ **大包按清单比对本地 sha256，只下载缺失/不同的文件**到目标路径
+- 大包恢复策略：**后台异步全量下载 + 进度展示**（"开箱即用"原则，不做懒下载分级）；下载期间书籍/论文点开可插队优先
+- 密钥与 {secret:}：keyring 永不上云；用户在 B 端重填同名 key 后，MCP env 的 `{{secret:}}` 引用（含迁移器搬入的 `MCP_*` 名称，secret-names.json 已随包带来名称清单）自然恢复可用
+
+### 实施第 0 步（开工先核实）
+
+1. 枚举配置目录实际 JSON 文件清单，逐一定性（含密/设备相关）后定排除清单终稿
+2. 确认书籍 RAG 是否还有独立 `rag-index/` 目录遗存（当前证据：向量统一在 `papers/vectors.sqlite`，`rag-index` 是 backlog 旧口径，若存在一并纳入）
+3. `agent-skills/` 是否仍有文件形态技能（技能主体现已入 DB skills 表并入 L2b；有文件则纳入小包）
+
+### 端到端验收清单
+
+备份 → 恢复 → 逐项核对：书籍 EPUB / 论文（paper.md+图+译文）/ 对话（含 central scope）/ 划线标注 / **全库向量检索立即可用** / MCP 配置与 stdio server / 字体背景 / 工作区 / 技能与提示词预设 / 设置全量。坚果云后台确认：大包只传一次、日常小包为 MB 级。
 
 ## ③ 更名 Better SageRead（独立维护）——已讨论定调，未动手
 

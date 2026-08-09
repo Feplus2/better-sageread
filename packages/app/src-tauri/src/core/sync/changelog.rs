@@ -176,14 +176,88 @@ pub async fn pack_changes(
     };
 
     let mut jsonl = serde_json::to_string(&serde_json::json!({ "header": header })).map_err(|e| e.to_string())?;
+    let mut skipped_oversize = 0usize;
     for row in &change_rows {
+        let line = serde_json::to_string(row).map_err(|e| e.to_string())?;
+        // 大行安全阀：单行超限（如几十 MB 的工具密集对话线程）直接跳过并告警，防烧掉坚果云配额
+        if line.len() > MAX_ROW_BYTES {
+            log::warn!(
+                "changeset 跳过超大行 {}:{}（{} bytes，阈值 {}）",
+                row.table,
+                row.id,
+                line.len(),
+                MAX_ROW_BYTES
+            );
+            skipped_oversize += 1;
+            continue;
+        }
         jsonl.push('\n');
-        jsonl.push_str(&serde_json::to_string(row).map_err(|e| e.to_string())?);
+        jsonl.push_str(&line);
+    }
+    if skipped_oversize > 0 {
+        log::warn!("本包跳过 {skipped_oversize} 行超大行（这些行不会同步到其他设备）");
     }
 
     Ok(Some(PackedChangeset {
         seq_to,
         jsonl,
-        row_count,
+        row_count: row_count - skipped_oversize,
     }))
+}
+
+
+// ---- changeset 线上编码（gzip）与大行安全阀 ----
+
+/// 单行序列化上限：超过即跳过（防几十 MB 的工具密集对话线程烧掉坚果云配额）
+const MAX_ROW_BYTES: usize = 20 * 1024 * 1024;
+
+/// changeset 线上格式 = gzip(JSONL)。结构化 JSON 实测压缩 10 倍+，坚果云流量敏感。
+/// 旧版裸 JSONL 存量包由 decode 按魔数嗅探兼容；旧版 app 读不了新 gzip 包（自同步场景两端同版本，可接受）。
+pub fn encode_changeset(jsonl: &str) -> Result<Vec<u8>, String> {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(jsonl.as_bytes())
+        .map_err(|e| format!("changeset 压缩失败: {e}"))?;
+    enc.finish().map_err(|e| format!("changeset 压缩失败: {e}"))
+}
+
+/// 解码 changeset：gzip 魔数嗅探，非 gzip 按裸 JSONL 原样通过（兼容压缩前的存量包）
+pub fn decode_changeset(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut dec = GzDecoder::new(bytes);
+        let mut out = Vec::new();
+        dec.read_to_end(&mut out)
+            .map_err(|e| format!("changeset 解压失败: {e}"))?;
+        Ok(out)
+    } else {
+        Ok(bytes.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use super::*;
+
+    #[test]
+    fn test_changeset_codec_roundtrip() {
+        // 重复结构负载（真实 changeset 行形态）：gzip 应显著压缩；小负载盖不住 gzip 头开销属正常
+        let line = "{\"table\":\"threads\",\"id\":\"t1\",\"op\":\"UPDATE\",\"updated_at\":1,\"data\":{\"messages\":\"[{\\\"id\\\":\\\"m1\\\"}]\"}}\n";
+        let jsonl = format!("{{\"header\":{{}}}}\n{}", line.repeat(200));
+        let encoded = encode_changeset(&jsonl).unwrap();
+        assert!(encoded.starts_with(&[0x1f, 0x8b]));
+        assert!(encoded.len() < jsonl.len() / 5, "结构化 JSON 应至少压缩 5 倍");
+        let decoded = decode_changeset(&encoded).unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), jsonl);
+    }
+
+    #[test]
+    fn test_decode_raw_passthrough() {
+        // 压缩前的裸 JSONL 存量包：原样通过
+        let raw = b"{\"header\":{}}\n{\"table\":\"tags\"}";
+        let decoded = decode_changeset(raw).unwrap();
+        assert_eq!(decoded, raw);
+    }
 }

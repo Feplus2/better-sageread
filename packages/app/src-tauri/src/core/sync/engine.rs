@@ -335,6 +335,16 @@ async fn local_updated_at(
     table: &tables::SyncTable,
     id: &str,
 ) -> Result<Option<i64>, String> {
+    // 无 updated_at 的关系表（paper_folders）：退化为存在检查（存在视作 0，任何远端时间戳都更"新"）
+    if !table.columns.iter().any(|(n, _)| *n == "updated_at") {
+        let sql = format!("SELECT 1 FROM {} WHERE {} = ? LIMIT 1", table.name, table.pk);
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| format!("读取本地行失败: {e}"))?;
+        return Ok(row.map(|_| 0));
+    }
     let sql = format!("SELECT updated_at FROM {} WHERE {} = ?", table.name, table.pk);
     let row = sqlx::query(&sql)
         .bind(id)
@@ -573,6 +583,8 @@ fn thread_row_from_data(data: &Value) -> ThreadRowData {
         title: data_string(data, "title").unwrap_or_default(),
         messages: data_string(data, "messages").unwrap_or_else(|| "[]".to_string()),
         starred: data.get("starred").and_then(value_to_i64).unwrap_or(0),
+        // 旧 changeset 无 scope 字段：回落 'book'（H2 前的对话实际都是阅读助手作用域）
+        scope: data_string(data, "scope").unwrap_or_else(|| "book".to_string()),
         created_at: data.get("created_at").and_then(value_to_i64).unwrap_or(0),
         updated_at: data.get("updated_at").and_then(value_to_i64).unwrap_or(0),
     }
@@ -583,7 +595,7 @@ async fn fetch_thread_row(
     id: &str,
 ) -> Result<Option<ThreadRowData>, String> {
     let row = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, created_at, updated_at FROM threads WHERE id = ?",
+        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(&mut **tx)
@@ -597,6 +609,7 @@ async fn fetch_thread_row(
         title: r.get("title"),
         messages: r.get("messages"),
         starred: r.get::<i64, _>("starred"),
+        scope: r.try_get("scope").unwrap_or_else(|_| "book".to_string()),
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     }))
@@ -638,9 +651,50 @@ fn thread_row_to_json(row: &ThreadRowData) -> Value {
         "title": row.title,
         "messages": row.messages,
         "starred": row.starred,
+        "scope": row.scope,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     })
+}
+
+/// prompt_presets：标准 LWW + is_active 互斥维护——远端行以 is_active=1 胜出时，
+/// 同 scope 其他预设置 0（否则两端各自激活不同预设，合并后出现同 scope 双激活）。
+/// 附带的去活写入会进 _sync_log 随下轮推送（防回环只清 applied 行），各端收敛于同一激活行。
+async fn apply_prompt_preset_upsert(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    row: &ChangeRow,
+    applied: &mut AppliedOps,
+) -> Result<(), String> {
+    let table = tables::find_table("prompt_presets").unwrap();
+    let data = row.data.as_ref().ok_or("UPSERT 行缺少 data")?;
+    let local = local_updated_at(tx, table, &row.id).await?;
+
+    let mut won = false;
+    match local {
+        None => {
+            insert_row(tx, table, data).await?;
+            applied.push((row.table.clone(), row.id.clone(), "INSERT".to_string()));
+            won = true;
+        }
+        Some(local_at) if merge::remote_wins(Some(local_at), row.updated_at) => {
+            update_row(tx, table, &row.id, data).await?;
+            applied.push((row.table.clone(), row.id.clone(), "UPDATE".to_string()));
+            won = true;
+        }
+        _ => {}
+    }
+
+    if won && data.get("is_active").and_then(value_to_i64) == Some(1) {
+        let scope = data.get("scope").and_then(Value::as_str).unwrap_or("");
+        sqlx::query("UPDATE prompt_presets SET is_active = 0, updated_at = ? WHERE scope = ? AND id != ? AND is_active = 1")
+            .bind(row.updated_at)
+            .bind(scope)
+            .bind(&row.id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| format!("维护预设互斥失败: {e}"))?;
+    }
+    Ok(())
 }
 
 async fn apply_change_row(
@@ -661,8 +715,11 @@ async fn apply_change_row(
         "threads" => apply_thread_upsert(tx, row, applied).await,
         "book_status" => apply_book_status_upsert(tx, row, applied).await,
         "reading_sessions" => apply_session_insert(tx, row, applied).await,
+        // paper_folders 与 sessions 同构：关系行 INSERT OR IGNORE 去重（无 updated_at）
+        "paper_folders" => apply_session_insert(tx, row, applied).await,
         "skills" => apply_skill_upsert(tx, row, applied).await,
         "tags" => apply_tag_upsert(tx, row, applied).await,
+        "prompt_presets" => apply_prompt_preset_upsert(tx, row, applied).await,
         _ => apply_lww_upsert(tx, row, applied).await,
     }
 }
@@ -952,7 +1009,12 @@ async fn pull_from_devices(
                 snapshot_done = true;
             }
 
-            match apply_changeset(pool, &bytes).await {
+            // 解压（gzip 魔数嗅探，兼容压缩前的裸 JSONL 存量包）；解压失败按应用失败处理（计次/重试）
+            let apply_result = match changelog::decode_changeset(&bytes) {
+                Ok(raw) => apply_changeset(pool, &raw).await,
+                Err(e) => Err(e),
+            };
+            match apply_result {
                 Ok(applied) => {
                     if applied.books_count > 0 {
                         log::info!("收到书籍元数据 {} 条", applied.books_count);
@@ -1044,7 +1106,8 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
         put_path_atomic(
             config,
             &format!("{}/changesets/{device_id}/{name}", l2_root(config)),
-            packed.jsonl.into_bytes(),
+            // 线上格式 gzip(JSONL)：结构化 JSON 实测压缩 10 倍+（坚果云流量敏感）
+            changelog::encode_changeset(&packed.jsonl)?,
         )
         .await?;
 
@@ -1241,6 +1304,7 @@ mod tests {
                 title TEXT NOT NULL,
                 messages TEXT NOT NULL,
                 starred INTEGER NOT NULL DEFAULT 0,
+                scope TEXT NOT NULL DEFAULT 'book',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -1840,6 +1904,7 @@ mod tests {
                 title TEXT NOT NULL,
                 messages TEXT NOT NULL,
                 starred INTEGER NOT NULL DEFAULT 0,
+                scope TEXT NOT NULL DEFAULT 'book',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
@@ -1860,6 +1925,7 @@ mod tests {
                 content TEXT NOT NULL,
                 is_active INTEGER DEFAULT 1,
                 is_system INTEGER DEFAULT 0,
+                scope TEXT NOT NULL DEFAULT 'both',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -1867,6 +1933,28 @@ mod tests {
                 id TEXT PRIMARY KEY NOT NULL,
                 name TEXT NOT NULL UNIQUE,
                 color TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            "CREATE TABLE folders (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                parent_id TEXT,
+                trashed_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            "CREATE TABLE paper_folders (
+                paper_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                PRIMARY KEY (paper_id, folder_id)
+            )",
+            "CREATE TABLE prompt_presets (
+                id TEXT PRIMARY KEY NOT NULL,
+                scope TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -1906,6 +1994,9 @@ mod tests {
             ("reading_sessions", "id"),
             ("skills", "id"),
             ("tags", "id"),
+            ("folders", "id"),
+            ("paper_folders", "paper_id || ':' || folder_id"),
+            ("prompt_presets", "id"),
         ] {
             for (suffix, op, key) in [
                 ("ai", "INSERT", format!("NEW.{pk}")),

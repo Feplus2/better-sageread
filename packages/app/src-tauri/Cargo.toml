@@ -38,6 +38,8 @@ tauri-plugin-log = "2"
 reqwest = { version = "0.12", features = ["stream", "blocking", "json"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+# changeset gzip 压缩（L2 流量：结构化 JSON 实测压缩 10 倍+）
+flate2 = "1"
 futures-util = "0.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 sqlite-vec = "0.1.6"

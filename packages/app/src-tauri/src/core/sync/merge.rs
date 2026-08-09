@@ -9,6 +9,8 @@ pub struct ThreadRowData {
     pub title: String,
     pub messages: String,
     pub starred: i64,
+    /// 对话作用域（'global'/'book'；H2 新增，旧 changeset 无此字段时回落 'book'）
+    pub scope: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -321,6 +323,7 @@ mod tests {
             title: "旧标题".into(),
             messages: msgs_json(&[msg("a", 100, 100)]),
             starred: 0,
+            scope: "book".into(),
             created_at: 100,
             updated_at: 200,
         };

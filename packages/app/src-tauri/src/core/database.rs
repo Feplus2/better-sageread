@@ -145,7 +145,9 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     .execute(pool)
     .await?;
 
-    const SYNC_TABLES: [(&str, &str); 7] = [
+    // 同步表触发器清单（CREATE TRIGGER IF NOT EXISTS 幂等）；
+    // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式
+    const SYNC_TABLES: [(&str, &str); 10] = [
         ("books", "id"),
         ("book_status", "book_id"),
         ("book_notes", "id"),
@@ -153,6 +155,9 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         ("reading_sessions", "id"),
         ("skills", "id"),
         ("tags", "id"),
+        ("folders", "id"),
+        ("paper_folders", "paper_id || ':' || folder_id"),
+        ("prompt_presets", "id"),
     ];
 
     for (table, pk) in SYNC_TABLES {
