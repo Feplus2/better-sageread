@@ -51,12 +51,14 @@
 
 central 26 → 17：五组"单实体多动作"合并——`manageBook`（delete/open/resetProgress）、`manageSync`（backupNow/listBackups/restore/syncNow/updatePrefs）、`manageThreads` 扩（+search/export）、`managePreferences`（setTheme/reader/ui）、`manageSkill` 扩（+toggle）。13 个旧文件删除，注册链五处同步（含 central-prompt 清单与操作示例改写）。**旧对话兼容（转换层容错）**：`stripUnknownToolParts`（`ai/utils/message-processor.ts`）在 convertToModelMessages 前剔除已下线工具名的 part（该函数遇未知工具名会抛 TypeValidationError，已在 ai 包 dist 核实）；空 part 消息整条丢弃。验证：tsc/biome clean；CDP `scripts/cdp-test-tool-consolidation.mjs` 24/24 PASS。
 
-### P2 · MCP 客户端运行时（盘活生态 + F 批 Zotero brain 夹带）
+### P2 · MCP 客户端运行时（盘活生态 + F 批 Zotero brain 夹带）—— ✅ 2026-08-06 已落地
 
-- mcp-store 配置模型已在（stdio/sse），registry 注入点是注释占位（registry.ts:359）。
-- 落地：AI SDK `experimental_createMCPClient`（或 @modelcontextprotocol/sdk 直连 stdio）→ 聊天启动时按启用配置拉 `listTools` → 转 AI SDK tool 定义，命名空间 `mcp_{server}_{tool}` → 挂进 central（可选 scope 复选）。
-- MCP 工具默认全部 Tier 2（外部进程行为不可预知），确认卡显示 server 名。
-- 默认夹带：Zotero brain 精简版 MCP（搜库/下载/导入），与刚完成的 Zotero 批量导入形成"批量走原生、零散走 MCP"互补。
+> **2026-08-06 已拍板排产**：详细执行计划见 `docs/agent-ecosystem-plan.md`（分两期：B 批远程 HTTP/SSE 运行时 → D 批 stdio；配套秘钥安全 A 批、市场 C 批；Zotero brain 精简版夹带已纳入 F 批，含下载源瀑布与代理配套）。**当日全批次（S/A/B/C/D/F/E）落地**，静态验收全绿；真机运行时验证项（stdio server 实连/无残留进程/代理全链路）留待用户手测。
+
+- **B 批（远程运行时）**：AI SDK `experimental_createMCPClient` + 自研 Streamable HTTP/SSE 传输（`ai/mcp/mcp-transport.ts`，走 Tauri 网络栈绕 CORS）；连接管理器 `ai/mcp/mcp-manager.ts` 按 scope 聚合工具，命名空间 `mcp_{server}_{tool}`；tool-guard 全确认卡（server 维度免打扰）；`manageMcp` 工具让 Agent 自管理配置。
+- **D 批（stdio）**：Rust 子进程桥 `core/mcp/`（Windows `cmd /C` 包裹 + CREATE_NO_WINDOW + Job Object 孤儿防护 + taskkill 树杀 + 审计日志），前端 `TauriStdioMcpTransport`；首次启动确认卡（strict/relaxed）；env 的 `{{secret:NAME}}` 在 Rust 侧替换，真值不进 JS。
+- **A 批（秘钥安全）/C 批（市场）**：keyring 保管箱 + `{{secret:NAME}}` 引用机制；MCP 官方 Registry 市场一键安装；SKILL.md 兼容导入（Claude Code 生态）。~~自建技能索引仓市场（`sageread-skills`）~~：2026-08-09 用户拍板**不做**（口径以 `agent-ecosystem-plan.md` 为准），技能生态只保留文件导入。
+- **F 批（Zotero brain 夹带）**：独立仓 `zotero-brain-slim`（~1400 行，6 工具：搜库/四源发现/7 级下载瀑布/导入 Zotero/Collection 管理，剪除解析与向量化）+ SageRead 侧应用级代理三档（设置页，作用 Rust 请求与 stdio spawn env）+ `importPaper` 工具（单篇 PDF→文献库，与 importBook 书库链路区分）。分发形态（uvx 独立仓 vs sidecar）待用户拍板；灰色口径按 ecosystem-plan F4 执行。
 
 ### P3 · 上下文与对话工程（长任务硬伤）
 
@@ -79,4 +81,4 @@ central 26 → 17：五组"单实体多动作"合并——`manageBook`（delete/
 
 ## 五、建议排产
 
-P0（本周）→ P1 安全模型 + 写文件/runPython（下周）→ P2 MCP（随后）。P3 可插入任何间隙。
+P0（本周）→ P1 安全模型 + 写文件/runPython（下周）→ ~~P2 MCP（随后）~~ ✅ P2 已落地（2026-08-06）。P3 可插入任何间隙。

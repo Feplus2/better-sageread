@@ -48,6 +48,7 @@ SageRead 有两套互不影响的配色系统：
 | `--accent` / `--accent-foreground` | 悬停高亮、轻强调（如气泡底） |
 | `--destructive` | 危险操作（删除等） |
 | `--border` / `--input` / `--ring` | 边框 / 输入框边框 / 聚焦环 |
+| `--tab-background` / `--tab-active` / `--tab-active-foreground` | 标签栏栏底 / 激活（及悬停）标签面 / 其上文字（横向标签条与垂直标签栏共用） |
 | `--sidebar` 系列（`-foreground` `-primary` `-accent` `-border` `-ring`） | 侧边栏专用配色 |
 | `--font-sans` / `--font-serif` / `--font-mono` | 界面字体族 |
 | `--radius` | 基础圆角 |
@@ -146,6 +147,8 @@ html:not(.dark) [data-region="bookshelf"] {
 
 - **深色模式**：应用用 `<html class="dark">` 切换。主题若不写 `html.dark` 块，深色模式回落默认主题的深色变量；写了就能完全掌控两套配色。区域性规则里引用 `var(--xxx)` 而不是写死颜色，可让一条规则自动适配深浅两套。
 - **硬编码颜色类**：部分组件写死了 Tailwind 颜色（如 `bg-white`、`text-neutral-600`、`dark:bg-neutral-800`），覆盖变量对这些元素无效，需要用 data-region 钩子写更具体的选择器直接指定（特异性高于单个工具类即可，通常不需要 `!important`）。
+- **neutral 色阶重映射**：内置主题均覆盖 `--color-neutral-*` 全套色阶（Tailwind v4 的 `*-neutral-*` 工具类全部走这组变量），写 neutral 类的组件会自动跟随主题；自定义主题建议同样覆盖，否则大量小组件（hover 底色、边框、辅助文字）会停留在默认灰。
+- **小图标按钮 hover**：顶栏/聊天头/侧栏的圆形小按钮 hover 统一走 `--accent`，想要主题化的 hover 观感只需把 `--accent` 设成主题强调色。
 - **注入顺序**：主题 CSS 注入在 `document.head` 末尾的 `<style id="sageread-global-theme">`，在打包样式之后，同特异性下主题规则优先。
 - **书籍 iframe 不受影响**：`data-region` 钩子都在应用文档里；任何全局主题规则都不会渗进书籍渲染 iframe，反之亦然。
 - **参考模板**：内置主题 `parchment`（`public/themes/parchment.css`）就是按本文档写的教学模板，分区注释齐全，可直接复制改名后修改。

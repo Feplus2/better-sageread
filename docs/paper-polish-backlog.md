@@ -4,6 +4,8 @@
 
 ## 待办
 
+> **2026-08-06 注**：以下条目已纳入 `docs/agent-ecosystem-plan.md` 排产——C2 打磨项 / webSearch 结构化面板 / read_epub 元组 bug → E 批；F 批 MCP 相关 → B/D 批（Zotero brain 夹带暂缓待确认）。
+
 ### F 批：Agent 与生态（2026-08-04 用户输入）
 - **Agent 能力大升级（"给它双手"）**：让 Agent 拥有读取/创建/写入/修改本地文件的能力 + 运行命令行（Python 指令等）的能力。定位共识：不做专业科研 Agent，但必须能完成基础任务（写报告、跑脚本）。现状盘点：已有 `readLocalFile`/`downloadFile`/`httpRequest`/`extractZip` 等 central 工具（ai/tools/central/），缺**写文件/编辑文件**与**执行命令**两大类；执行命令的安全模型需设计（白名单？沙盒目录？确认制？）
 - **Zotero brain MCP 精简版（默认 MCP 夹带）**：只做 ① 搜数据库 ② 下载 PDF ③ 导入 Zotero ④ 导入 SageRead 解析放进文件夹；剪除解析与向量化（与 SageRead 已实现部分重叠）。作为 SageRead 默认 MCP 存在（用户自述"夹带私货"，但对外不承认与 SageRead 的绑定关系——灰色通道捞 PDF 的版权敏感性，文档与宣传口径注意）
@@ -22,12 +24,12 @@
 - **论文导出遗留（2026-08-03 整篇导出批）**：译文/对照模式 frontmatter 仍是英文元数据（title_zh/abstract_zh 不回写 YAML，js-yaml 重排会动用户字段顺序，暂缓）
 - ~~**MinerU 公式 legacy TeX 兼容扫荡**~~（✅ 2026-08-02 实证关闭：对 Converter 全量产出 126 MinerU + 125 paddle 逐篇 grep，`\bf \cal \sf \tt \textcircled` 全库 0 次——Converter 侧已在落盘前处理，本项无需 SageRead 侧动作）
 - **词对齐残留打磨（2026-08-02 测试发现；2026-08-05 用户拍板：影响已不显著但排产做好）**：句首虚词区错配（worth↔远离/noting↔分界线，功能词向量区分度低）；非连续对应不可表达（"not…at all"↔"根本"，jieba 把"根本无法"粘成一词）；历史标注 -tgt 镜像疑似重复区间注册（绿色标注 4 个相同 105 字区间）。jieba 已上线（见 2026-08-02 已消化批），本项为剩余残留
-- **epub 插件 read_epub 潜在外观 bug（2026-08-05 发现）**：`reader.rs` 把 `get_current_str()` 的元组顺序搞反了——返回是（内容, MIME)，read_epub 取 .1 当内容（实为 MIME 串），导致其 chapters 的 content 全是 "application/xhtml+xml"、标题退化为 "Chapter N" 占位。当前无下游使用（pipeline 只取标题/计数，正文走 mdbook 转换），未动；若将来启用 read_epub 的章节内容，先修这个
+- ~~**epub 插件 read_epub 潜在外观 bug（2026-08-05 发现）**~~（✅ 2026-08-06 E3 批已修：`reader.rs` 改取 `get_current_str()` 元组第一元素（内容）；cargo test 15 全绿）：~~`reader.rs` 把 `get_current_str()` 的元组顺序搞反了——返回是（内容, MIME)，read_epub 取 .1 当内容（实为 MIME 串），导致其 chapters 的 content 全是 "application/xhtml+xml"、标题退化为 "Chapter N" 占位~~
 - ~~**tauri-plugin-epub 测试目标既有损坏（2026-08-02 发现，未修）**~~（✅ 2026-08-03 已修，提交 4fa902e：25 个过期测试编译错误清零——失效 API 测试删除/接口变更跟进/tempfile 补 dev-dep，cargo test 15 全绿，zh_segmenter 3 组同步解锁）
 - ~~**"笔记"概念清除计划（2026-07-29 用户拍板：逐步清除 notes 概念，全部迁移到"标注"）**~~（✅ 2026-08-03 全部消化，见下"笔记概念清除收尾"批）
-- webSearch 结构化结果面板（chat 页右侧工具详情面板目前只支持 mindmap/rag）
+- ~~webSearch 结构化结果面板~~（✅ 2026-08-06 E2 批已消化：`web-search-viewer.tsx` 标题/域名/摘要卡片，点击 plugin-opener 开外链；chat 页工具详情面板 + 工具卡眼睛入口接线）：~~chat 页右侧工具详情面板目前只支持 mindmap/rag~~
 - paper 设置下拉支持自定义字体之外的更多书籍阅读器设置项（按需）
-- **C2 打磨项**（2026-08-05 用户拍板排产，下一批做）：AI 标亮命中稳定性——降 temperature 抑制 3~8 条抽奖波动、toast 附丢弃原因（复述/公式句/未匹配分类）、quote 匹配器再加一层宽松归一
+- ~~**C2 打磨项**~~（✅ 2026-08-06 E1 批全部消化）：~~AI 标亮命中稳定性——降 temperature 抑制 3~8 条抽奖波动（已 0.2）、toast 附丢弃原因（复述/公式句/未匹配分类/去重，`dropReasons` 透传）、quote 匹配器再加一层宽松归一（标点替空格兜底层 + fixture 16/16）~~
 - ~~**对话选段存笔记/引用**~~（2026-08-05 用户拍板**不做**：判定为冗余鸡肋——聊天内容要留存走导出/引用链路已够）
 - foliate paginator 启动时对隐藏 tab 过早渲染抛 `el is null`（无害、切换即恢复；修复需动书籍挂载生命周期，风险不值，持续观察）
 - **发行版 rebranding 清单（2026-08-05 用户提醒，封装自己的发行版时执行）**：脱离原作者单飞时 `tauri.conf.json` 必改——① `identifier`（现 `com.xincmm.sageread.dev`；⚠️ 它决定 appDataDir 路径，改标识 = 老用户数据目录变更：要么首发前改定，要么配数据目录迁移）；② `productName` / 窗口 `title`（现 sageread）；③ updater `endpoints`（现指向原作者仓库 xincmm/sageread releases——不改则"检查更新"跟随旧版本）与 `pubkey`（换自有 minisign 密钥对）；④ macOS `signingIdentity`（现为原作者 Apple ID）；⑤ icons 与关于页署名同步排查。
@@ -39,6 +41,13 @@
 - Tooltip 统一扫尾（✅ 2026-08-04 已全部消化，见下批；statistics 页实证无需改动）
 
 ## 已消化
+
+### 2026-08-06 批次 E（ecosystem-plan 收尾小点批）
+- [x] **E1 AI 标亮稳定性三件套**：模板抽取 temperature 已 0.2；生成 toast 附丢弃原因分布（复述/公式句/未匹配分类/去重，`GenerateHighlightsResult.dropReasons` 管线透传）；quote 匹配器宽松归一层（标点替空格兜底，严格层保留，fixture 16/16）
+- [x] **E2 webSearch 结构化面板**：标题/域名/摘要卡片，点击 plugin-opener 开外链，复用聊天页右侧滑出容器，无新依赖
+- [x] **E3 read_epub 元组顺序 bug**：改取 `get_current_str()` 第一元素（内容），epub 插件 cargo test 15 全绿
+- [x] **E4 tags 跨设备 UNIQUE 冲突**：`apply_tag_upsert`（同名不同 UUID 归并到既有 id，LWW 字段语义保留，同款 apply_skill_upsert），sync 测试 28 全绿含新增同名冲突用例
+- [x] **E5 AI 产物侧边预览**：writeFile 工具卡按扩展名（.md/.html/.svg）出「预览产物」按钮，内容取自工具 input 零 IO；预览体系新增 markdown 格式（react-markdown 管线），HTML 沿用既有 sandboxed iframe
 
 ### 2026-08-05 怜烟主题 + 多标签页堆叠修复批
 - [x] **全局主题「怜烟」**：背景视频循环（亮=哀鸿水墨 / 暗=苏怜烟暖金，1080p30 H.264 faststart，1.0MB/0.7MB）+ 半透明变量 + 毛玻璃。机制：主题 CSS 声明 `--bg-video`/`--bg-frost`，`components/theme-background-video.tsx` 全局挂载（未声明的主题零侵入）。**毛玻璃走整屏磨砂层而非逐面 backdrop-filter**（resize 时残留合成块 + 性能差）；嵌套 `bg-background` 去重为 card 色防多层叠加实色。配色由抽帧决定
