@@ -30,6 +30,9 @@
   --sidebar-ring: #6e838c;
   --content: #3a4045;
   --layout: #e9ecea;
+    --tab-background: #e4e7e3;
+    --tab-active: #f2f4f1;
+    --tab-active-foreground: #3a4045;
 
   --color-neutral-50: #f4f6f3;
   --color-neutral-100: #eaeeeb;
@@ -76,6 +79,9 @@ html.dark {
   --sidebar-ring: #8ca3ac;
   --content: #d9dcd8;
   --layout: #212629;
+    --tab-background: #252b2e;
+    --tab-active: #2e3538;
+    --tab-active-foreground: #d9dcd8;
 
   --color-neutral-50: #eef1ed;
   --color-neutral-100: #dfe4de;

@@ -51,6 +51,9 @@
   /* 历史遗留 token（text-base-content 等 daisyUI 遗留类在此引用） */
   --content: #4f3f2c;
   --layout: #f4e7c8;
+    --tab-background: #f0e5c8;
+    --tab-active: #f9f1dc;
+    --tab-active-foreground: #4f3f2c;
 
   /* Tailwind neutral 色阶重映射：所有 text-neutral-* / bg-neutral-* /
    * border-neutral-*/hover:bg-neutral-* 一次性变为暖棕灰 */
@@ -103,6 +106,9 @@ html.dark {
 
   --content: #e0d2ae;
   --layout: #2b251c;
+    --tab-background: #322a1f;
+    --tab-active: #453a2b;
+    --tab-active-foreground: #e0d2ae;
 
   --shadow-warm-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.35);

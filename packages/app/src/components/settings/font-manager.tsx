@@ -157,13 +157,13 @@ export default function FontManager() {
                       </div>
                       <div className="flex">
                         <div
-                          className="flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                          className="flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent"
                           onClick={() => handleEditClick(font)}
                         >
                           <SquarePen className="h-4 w-4" />
                         </div>
                         <div
-                          className="flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                          className="flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent"
                           onClick={() => handleDelete(font.filename)}
                         >
                           <Trash2 className="h-4 w-4" />

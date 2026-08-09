@@ -27,13 +27,13 @@ import { type AITagSuggestion, generateTagsWithAI } from "@/services/ai-tag-serv
 import { updateBookVectorizationMeta } from "@/services/book-service";
 import { type EpubIndexResult, indexEpub, rebuildCoverAfterDownload } from "@/services/book-service";
 import { syncDownloadBook } from "@/services/sync-service";
-import { createTag, getTags, type Tag } from "@/services/tag-service";
+import { type Tag, createTag, getTags } from "@/services/tag-service";
 import { useLayoutStore } from "@/store/layout-store";
 import { useNotificationStore } from "@/store/notification-store";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
-import { appDataDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
+import { appDataDir } from "@tauri-apps/api/path";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { exists } from "@tauri-apps/plugin-fs";
 import { Check, Cloud, MoreHorizontal } from "lucide-react";
@@ -122,14 +122,18 @@ export default function BookItem({
   const [isDownloading, setIsDownloading] = useState(false);
   // 封面文件缺失（如云端下载后未重建）时回落占位渐变，而不是破图
   const [coverBroken, setCoverBroken] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: book.id/coverUrl 是刻意的触发依赖（书籍/封面变更时重置破图标记）
   useEffect(() => setCoverBroken(false), [book.id, book.coverUrl]);
 
   // 检测书籍文件是否仅在云端（本地文件不存在）
   useEffect(() => {
     if (book.filePath) {
-      appDataDir().then((base) => exists(`${base}/${book.filePath}`)).then((fileExists) => {
-        setIsCloudOnly(!fileExists);
-      }).catch(() => setIsCloudOnly(false));
+      appDataDir()
+        .then((base) => exists(`${base}/${book.filePath}`))
+        .then((fileExists) => {
+          setIsCloudOnly(!fileExists);
+        })
+        .catch(() => setIsCloudOnly(false));
     }
   }, [book.filePath]);
 
@@ -510,7 +514,9 @@ export default function BookItem({
             >
               <div className="relative p-2 pb-0">
                 <div className="mb-2">
-                  <h4 className="truncate text-neutral-600 text-sm leading-tight dark:text-neutral-200">{book.title}</h4>
+                  <h4 className="truncate text-neutral-600 text-sm leading-tight dark:text-neutral-200">
+                    {book.title}
+                  </h4>
                 </div>
 
                 <div data-region="book-cover" className="relative aspect-[4/5] w-full overflow-hidden">
@@ -569,7 +575,7 @@ export default function BookItem({
                           <button
                             type="button"
                             onClick={(e) => e.stopPropagation()}
-                            className="rounded p-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-600"
+                            className="rounded p-0.5 hover:bg-accent dark:hover:bg-accent"
                           >
                             <MoreHorizontal className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
                           </button>
@@ -598,7 +604,9 @@ export default function BookItem({
                       </DropdownMenuSub>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setShowEditDialog(true)}>编辑信息</DropdownMenuItem>
-                      {book.coverUrl && <DropdownMenuItem onClick={() => handleDownloadImage()}>下载图片</DropdownMenuItem>}
+                      {book.coverUrl && (
+                        <DropdownMenuItem onClick={() => handleDownloadImage()}>下载图片</DropdownMenuItem>
+                      )}
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger>管理标签</DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
@@ -618,7 +626,9 @@ export default function BookItem({
                         </DropdownMenuSubContent>
                       </DropdownMenuSub>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => console.log(isUnread ? "Mark as Read clicked" : "Mark as Unread clicked")}>
+                      <DropdownMenuItem
+                        onClick={() => console.log(isUnread ? "Mark as Read clicked" : "Mark as Unread clicked")}
+                      >
                         {isUnread ? "标记为已读" : "标记为未读"}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />

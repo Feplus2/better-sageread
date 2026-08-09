@@ -58,7 +58,7 @@ export default function WindowControls() {
         <TooltipTrigger asChild>
           <button
             onClick={handleMinimize}
-            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-accent dark:text-neutral-400 dark:hover:bg-accent"
           >
             <Minus className="size-4" />
           </button>
@@ -70,7 +70,7 @@ export default function WindowControls() {
         <TooltipTrigger asChild>
           <button
             onClick={handleToggleMaximize}
-            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
+            className="flex h-7 w-8 items-center justify-center text-neutral-700 hover:bg-accent dark:text-neutral-400 dark:hover:bg-accent"
           >
             {isMaximized ? <Square className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </button>

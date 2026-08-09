@@ -14,7 +14,7 @@ export default function NotificationDropdown() {
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <DropdownMenuTrigger asChild>
-        <button className="relative flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-neutral-200 focus:outline-none focus-visible:ring-0 dark:hover:bg-neutral-700">
+        <button className="relative flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 dark:hover:bg-accent">
           {unreadCount > 0 ? (
             <>
               <BellDot size={18} />
@@ -74,7 +74,7 @@ export default function NotificationDropdown() {
                 >
                   <button
                     onClick={() => removeNotification(notification.id)}
-                    className="absolute top-2 right-2 rounded-full p-1 opacity-0 transition-opacity hover:bg-neutral-200 group-hover:opacity-100 dark:hover:bg-neutral-700"
+                    className="absolute top-2 right-2 rounded-full p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 dark:hover:bg-accent"
                   >
                     <X size={14} className="text-neutral-500 dark:text-neutral-400" />
                   </button>

@@ -4,28 +4,52 @@
    暗色：紫檀黑 × 昏金 × 淡紫（配苏怜烟暖金循环）
    视频层由 components/theme-background-video.tsx 读取 --bg-video 挂载 */
 
+/* ════════════════════════ 调透明度指南（先看这里） ════════════════════════
+   本主题所有「透明度」都是 rgba(...) 里的【第 4 个数】，范围 0 ~ 1：
+     0   = 全透明（完全看不见这层颜色）
+     1   = 全实色（完全不透，壁纸被盖死）
+   建议每次只动 0.05~0.15 的幅度慢慢试。
+
+   文件分两大块：
+     :root { ... }      亮色模式的参数
+     html.dark { ... }  暗色模式的参数（变量名一样，值是另一套）
+
+   想调哪个地方，就找对应的变量（✦ = 最常调的）：
+     ✦ --popover     弹出的浮层：下拉菜单、选择器、右键菜单、气泡卡片
+     ✦ --muted       垂直标签页那条竖条、hover 时的底色、徽章衬底
+       --secondary   次级按钮（浅色底的那种按钮）
+       --card        主内容卡片（书架卡片、各面板）
+       --sidebar     最左侧的导航边栏
+       --background  全局画布 = 视频壁纸上面那层"总遮罩"，
+                     调大壁纸变淡、调小壁纸变艳（影响全场，谨慎动）
+     弹窗（设置页等对话框）：不在这里，搜下面「弹窗承力面」那条规则单独调
+     阅读区（书页默认背景）：在文件末尾 --reader-solid-alpha，需重开书籍生效
+
+   改完保存后，回到应用刷新页面（或重开对应窗口）即可看到效果。
+   ═══════════════════════════════════════════════════════════════════════ */
+
 :root {
   --bg-video: url("/themes/lianyan/light.mp4");
-  --bg-frost: blur(15px) saturate(1.15);
+  --bg-frost: blur(10px) saturate(1.15);
 
-  --background: rgba(243, 240, 234, 0.30);
+  --background: rgba(243, 240, 234, 0.14); /* 全局画布：视频壁纸的总遮罩（影响全场，谨慎调） */
   --foreground: #2b2624;
-  --card: rgba(248, 246, 241, 0.46);
+  --card: rgba(248, 246, 241, 0.30); /* 主内容卡片、面板 */
   --card-foreground: #2b2624;
-  --popover: rgba(250, 248, 244, 0.60);
+  --popover: rgba(250, 248, 244, 0.88); /* ✦ 弹出的浮层：下拉菜单/气泡/右键菜单，太透就调大第 4 个数 */
   --popover-foreground: #2b2624;
   --primary: #3a4346;
   --primary-foreground: #f5f2eb;
-  --secondary: rgba(229, 224, 216, 0.38);
+  --secondary: rgba(229, 224, 216, 0.58); /* 次级按钮 */
   --secondary-foreground: #38322d;
-  --muted: rgba(236, 232, 224, 0.34);
+  --muted: rgba(236, 232, 224, 0.70); /* ✦ 垂直标签页竖条、hover 底色、徽章衬底 */
   --muted-foreground: #6e655c;
   --accent: rgba(201, 147, 43, 0.18);
   --accent-foreground: #7a5a18;
   --border: rgba(90, 80, 70, 0.28);
   --input: rgba(90, 80, 70, 0.32);
   --ring: #8a6d3b;
-  --sidebar: rgba(238, 234, 227, 0.34);
+  --sidebar: rgba(238, 234, 227, 0.20); /* 最左侧导航边栏 */
   --sidebar-foreground: #2b2624;
   --sidebar-primary: #3a4346;
   --sidebar-primary-foreground: #f5f2eb;
@@ -34,7 +58,11 @@
   --sidebar-border: rgba(90, 80, 70, 0.26);
   --sidebar-ring: #8a6d3b;
   --content: #2b2624;
-  --layout: rgba(243, 240, 234, 0.30);
+  --layout: rgba(243, 240, 234, 0.14);
+    /* 标签栏：与竖条同款半透明遮罩，激活标签用半透明卡片面 */
+    --tab-background: rgba(236, 232, 224, 0.70);
+    --tab-active: rgba(248, 246, 241, 0.72);
+    --tab-active-foreground: #2b2624;
 
   --color-neutral-50: #f7f4ee;
   --color-neutral-100: #efece5;
@@ -55,26 +83,26 @@
 
 html.dark {
   --bg-video: url("/themes/lianyan/dark.mp4");
-  --bg-frost: blur(16px) saturate(1.20);
+  --bg-frost: blur(11px) saturate(1.20);
 
-  --background: rgba(26, 19, 22, 0.42);
+  --background: rgba(26, 19, 22, 0.22); /* 全局画布：视频壁纸的总遮罩（影响全场，谨慎调） */
   --foreground: #efe3d0;
-  --card: rgba(38, 28, 32, 0.52);
+  --card: rgba(38, 28, 32, 0.34); /* 主内容卡片、面板 */
   --card-foreground: #efe3d0;
-  --popover: rgba(44, 33, 38, 0.62);
+  --popover: rgba(44, 33, 38, 0.90); /* ✦ 弹出的浮层：下拉菜单/气泡/右键菜单 */
   --popover-foreground: #efe3d0;
   --primary: #d8b56a;
   --primary-foreground: #2a1e14;
-  --secondary: rgba(74, 56, 60, 0.40);
+  --secondary: rgba(74, 56, 60, 0.58); /* 次级按钮 */
   --secondary-foreground: #efe3d0;
-  --muted: rgba(64, 48, 52, 0.36);
+  --muted: rgba(64, 48, 52, 0.72); /* ✦ 垂直标签页竖条、hover 底色、徽章衬底 */
   --muted-foreground: #b49c8e;
   --accent: rgba(183, 142, 201, 0.2);
   --accent-foreground: #c9a3d8;
   --border: rgba(216, 181, 106, 0.22);
   --input: rgba(216, 181, 106, 0.26);
   --ring: #d8b56a;
-  --sidebar: rgba(34, 25, 29, 0.40);
+  --sidebar: rgba(34, 25, 29, 0.26); /* 最左侧导航边栏 */
   --sidebar-foreground: #efe3d0;
   --sidebar-primary: #d8b56a;
   --sidebar-primary-foreground: #2a1e14;
@@ -83,7 +111,10 @@ html.dark {
   --sidebar-border: rgba(216, 181, 106, 0.2);
   --sidebar-ring: #d8b56a;
   --content: #efe3d0;
-  --layout: rgba(26, 19, 22, 0.42);
+  --layout: rgba(26, 19, 22, 0.22);
+    --tab-background: rgba(64, 48, 52, 0.72);
+    --tab-active: rgba(40, 35, 33, 0.60);
+    --tab-active-foreground: #efe3d0;
 
   --color-neutral-50: #f2e9dc;
   --color-neutral-100: #e5d8c6;
@@ -111,6 +142,15 @@ body,
 /* 嵌套同面色统一为 card 色：防双层叠加成实色，同时保住内容列的遮罩（单磨砂层下文字可读性的关键） */
 .bg-background .bg-background {
   background: var(--card);
+}
+
+/* 弹窗承力面（设置页等对话框的底色）：对话框直接浮在视频上，用全局 --background 会太透，
+   所以这里单独覆写。想调弹窗透明度就改下面两条规则的第 4 个数（0.94）：调小变透、调大变实。 */
+[data-region="dialog"] {
+  background: rgba(248, 246, 241, 0.94); /* 亮色弹窗底色 */
+}
+html.dark [data-region="dialog"] {
+  background: rgba(38, 28, 32, 0.94); /* 暗色弹窗底色 */
 }
 
 /* 毛玻璃由整屏磨砂层统一提供（theme-background-video.tsx 的 --bg-frost 层）。
@@ -162,4 +202,18 @@ html.dark {
   --chat-heading: #f2e6cd;
   --chat-heading-hover: #d8b56a;
   --chat-heading-rule-hover: rgba(216, 181, 106, 0.45);
+}
+
+/* ══════════════ 阅读区「默认背景」的透明度（怜烟专属，别的主题没有） ══════════════
+   管的是：打开一本书 → 阅读设置 → 背景选「默认」时，文字底下那层纸的浓淡。
+   动态壁纸就是从这层半透明的纸后面透上来的。
+     0 = 全透明（壁纸全露，文字会很难读）
+     1 = 全实色（回到以前的纯白纸，完全看不见壁纸）
+   建议在 0.4 ~ 0.85 之间调。亮色用上面那条，暗色用下面那条。
+   注意：这个样式是注入到书籍文档里的，改完必须【重新打开一本书】才生效。 */
+:root {
+  --reader-solid-alpha: 0.5;
+}
+html.dark {
+  --reader-solid-alpha: 0.6;
 }

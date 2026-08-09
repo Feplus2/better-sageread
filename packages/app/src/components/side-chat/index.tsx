@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoPreview } from "@/hooks/use-auto-preview";
@@ -14,12 +13,11 @@ import {
   Lightbulb,
   ListChecks,
   MessageCirclePlus,
-  NotebookPen,
   ScrollText,
   Search,
   UserSearch,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
@@ -66,9 +64,14 @@ function ChatContent({ bookId }: ChatContentProps) {
     setSelectedModel,
     handleAskSelection,
     handleRemoveReference,
+    images,
+    handleRemoveImage,
+    handleAddImageFiles,
+    registerInputEl,
     handleSubmit,
     handleRetry,
     handleNewThread,
+    canRetry,
     handleShowThreads,
     handleSelectThread,
     handleBackFromThreads,
@@ -89,10 +92,12 @@ function ChatContent({ bookId }: ChatContentProps) {
   // AI 回复完成后自动打开可预览代码块的预览面板
   useAutoPreview(messages, status);
 
-  const handleViewToolDetail = (toolPart: any) => {
+  // 引用稳定（useCallback）：ChatMessages 内的 MemoizedTool 按引用比较跳过重渲染，
+  // 内联函数每次重建会使 memo 全部失效（卡顿修复 2026-08-07）
+  const handleViewToolDetail = useCallback((toolPart: any) => {
     setToolDetail(toolPart);
     setShowMindmapDialog(true);
-  };
+  }, []);
 
   // 多选导出
   const getSelectedMessages = () => messages.filter((m) => selectedIds.has(m.id));
@@ -103,12 +108,11 @@ function ChatContent({ bookId }: ChatContentProps) {
   });
 
   const promptSuggestions = [
-    { text: "总结这一页的内容", icon: ScrollText, isNew: true },
-    { text: "解释这个概念", icon: Lightbulb, isNew: false },
-    { text: "分析作者的观点", icon: UserSearch, isNew: false },
-    { text: "找出关键信息", icon: Search, isNew: true },
-    { text: "提出相关问题", icon: CircleQuestionMark, isNew: false },
-    { text: "生成学习笔记", icon: NotebookPen, isNew: true },
+    { text: "总结这一页的内容", icon: ScrollText },
+    { text: "解释这个概念", icon: Lightbulb },
+    { text: "分析作者的观点", icon: UserSearch },
+    { text: "找出关键信息", icon: Search },
+    { text: "提出相关问题", icon: CircleQuestionMark },
   ] as const;
 
   const EmptyState = () => (
@@ -127,7 +131,7 @@ function ChatContent({ bookId }: ChatContentProps) {
           </div>
         </div>
         <div className="space-y-1">
-          {promptSuggestions.map(({ text, icon: Icon, isNew }) => (
+          {promptSuggestions.map(({ text, icon: Icon }) => (
             <div
               key={text}
               onClick={() => {
@@ -140,14 +144,6 @@ function ChatContent({ bookId }: ChatContentProps) {
                 <Icon className="size-4" />
                 {text}
               </span>
-              {isNew ? (
-                <Badge
-                  variant="secondary"
-                  className="border-transparent bg-primary/10 font-medium text-[10px] text-primary uppercase tracking-wide"
-                >
-                  New
-                </Badge>
-              ) : null}
             </div>
           ))}
         </div>
@@ -173,8 +169,8 @@ function ChatContent({ bookId }: ChatContentProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 ${
-                      selectionMode ? "bg-neutral-200 dark:bg-neutral-700" : ""
+                    className={`z-40 size-7 rounded-full hover:bg-accent dark:hover:bg-accent ${
+                      selectionMode ? "bg-accent dark:bg-accent" : ""
                     }`}
                     onClick={toggleSelectionMode}
                   >
@@ -189,7 +185,7 @@ function ChatContent({ bookId }: ChatContentProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  className="z-40 size-7 rounded-full hover:bg-accent dark:hover:bg-accent"
                   onClick={handleNewThread}
                 >
                   <MessageCirclePlus className="h-5 w-5" />
@@ -202,7 +198,7 @@ function ChatContent({ bookId }: ChatContentProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="z-40 size-7 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                  className="z-40 size-7 rounded-full hover:bg-accent dark:hover:bg-accent"
                   onClick={handleShowThreads}
                 >
                   <History className="h-5 w-5" />
@@ -234,7 +230,7 @@ function ChatContent({ bookId }: ChatContentProps) {
             scrollKey={currentThread?.id ?? "__init__"}
             onReasoningTimesUpdate={handleReasoningTimesUpdate}
             onRetry={handleRetry}
-            canRetry={status === "ready" && !!displayError}
+            canRetry={canRetry}
             onAskSelection={handleAskSelection}
             onViewToolDetail={handleViewToolDetail}
             selectionMode={selectionMode}
@@ -267,6 +263,10 @@ function ChatContent({ bookId }: ChatContentProps) {
             setInput={setInput}
             references={references}
             onRemoveReference={handleRemoveReference}
+            images={images}
+            onRemoveImage={handleRemoveImage}
+            onAddImageFiles={handleAddImageFiles}
+            onInputEl={registerInputEl}
             onSubmit={handleSubmit}
             onStop={stop}
             status={status}

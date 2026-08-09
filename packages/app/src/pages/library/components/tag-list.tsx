@@ -92,7 +92,7 @@ export default function TagList({
           key={tag.id}
           onClick={(e) => handleTagClick(tag.id, e)}
           className={clsx(
-            "flex w-full select-none items-center justify-between rounded-md px-2 py-1 pr-3 text-left text-sm transition-colors hover:bg-border",
+            "flex w-full select-none items-center justify-between rounded-md px-2 py-1 pr-3 text-left text-sm transition-colors hover:bg-muted",
             isSelected
               ? "bg-muted"
               : selectedTag === tag.id

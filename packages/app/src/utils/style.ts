@@ -71,13 +71,19 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
   // 书籍文档这里只做透明化，让应用侧背景透出来；文字色照常注入书籍侧。
   const hasSceneBackground = !!backgroundImage;
 
+  // 视频壁纸主题（怜烟）下纯色默认背景半透明化：文档背景改用调色板底色的透明版让动态壁纸隐约透出；
+  // 元素级底色同场景背景一样透明化，避免半透明矩形层层叠加越来越实
+  const translucentSolid = themeCode.videoWallpaper === true && !hasSceneBackground;
+  const solidBg = translucentSolid ? tinycolor(bg).setAlpha(themeCode.solidAlpha ?? 0.7).toRgbString() : bg;
+  const transparentElements = hasSceneBackground || translucentSolid;
+
   const colorStyles = `
     html {
-      --theme-bg-color: ${bg};
+      --theme-bg-color: ${solidBg};
       --theme-fg-color: ${fg};
       --theme-primary-color: ${primary};
-      /* 场景/自定义背景下不能用 dark color-scheme：WebView2 会把 iframe 画布默认刷成深色（纯黑纸张盖住应用侧背景） */
-      color-scheme: ${isDarkMode && !hasSceneBackground ? "dark" : "light"};
+      /* 场景/自定义/半透明背景下不能用 dark color-scheme：WebView2 会把 iframe 画布默认刷成深色（纯黑纸张盖住应用侧背景） */
+      color-scheme: ${isDarkMode && !transparentElements ? "dark" : "light"};
     }
     html, body {
       color: ${fg};
@@ -89,23 +95,23 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
       background-color: ${hasSceneBackground ? "transparent" : "var(--theme-bg-color, transparent)"};
       background: ${hasSceneBackground ? "none" : "var(--background-set, none)"};
     }
-    /* 主题自带的背景纹理（如羊皮纸噪点）；场景/自定义背景由应用侧接管，书籍侧不再叠加 */
-    ${texture && !hasSceneBackground ? `html, body { background-image: ${texture}; }` : ""}
+    /* 主题自带的背景纹理（如羊皮纸噪点）；场景/自定义/半透明背景由应用侧接管，书籍侧不再叠加 */
+    ${texture && !transparentElements ? `html, body { background-image: ${texture}; }` : ""}
     div, p, h1, h2, h3, h4, h5, h6 {
-      ${overrideColor ? `background-color: ${hasSceneBackground ? "transparent" : bg} !important;` : ""}
-      ${overrideColor && texture && !hasSceneBackground ? `background-image: ${texture} !important;` : ""}
+      ${overrideColor ? `background-color: ${transparentElements ? "transparent" : solidBg} !important;` : ""}
+      ${overrideColor && texture && !transparentElements ? `background-image: ${texture} !important;` : ""}
       ${overrideColor ? `color: ${fg} !important;` : ""}
     }
     pre, span { /* inline code blocks */
-      ${overrideColor ? `background-color: ${hasSceneBackground ? "transparent" : bg} !important;` : ""}
-      ${overrideColor && texture && !hasSceneBackground ? `background-image: ${texture} !important;` : ""}
+      ${overrideColor ? `background-color: ${transparentElements ? "transparent" : solidBg} !important;` : ""}
+      ${overrideColor && texture && !transparentElements ? `background-image: ${texture} !important;` : ""}
     }
     a:any-link {
       ${overrideColor ? `color: ${primary};` : isDarkMode ? "color: lightblue;" : ""}
       text-decoration: none;
     }
     body.pbg {
-      ${isDarkMode && !hasSceneBackground ? `background-color: ${bg} !important;` : ""}
+      ${isDarkMode && !transparentElements ? `background-color: ${bg} !important;` : ""}
     }
     img {
       ${isDarkMode && invertImgColorInDark ? "filter: invert(100%);" : ""}
@@ -132,7 +138,7 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
     /* for the Feedbooks eBooks */
     .chapterHeader, .chapterHeader * {
       border-color: unset;
-      background-color: ${hasSceneBackground ? "transparent" : bg} !important;
+      background-color: ${transparentElements ? "transparent" : solidBg} !important;
     }
   `;
   return colorStyles;
@@ -358,6 +364,10 @@ export interface ThemeCode {
   texture?: string;
   /** 阅读区背景图（场景/自定义图片）：CSS 背景图值 + 遮罩浓度，纯色时为 undefined */
   backgroundImage?: { image: string; scrim: number };
+  /** 全局主题带动态壁纸（怜烟 --bg-video）：纯色默认背景半透明化透出壁纸 */
+  videoWallpaper?: boolean;
+  /** 纯色背景半透明化时的透明度（主题 css 可用 --reader-solid-alpha 覆盖；缺省浅 0.70 / 深 0.82） */
+  solidAlpha?: number;
 }
 
 export const getThemeCode = () => {
@@ -425,6 +435,14 @@ export const getThemeCode = () => {
     }
   }
 
+  // 全局主题为视频壁纸（怜烟，--bg-video 非空）时，阅读区纯色背景改走半透明（getColorStyles 处理）；
+  // 透明度可由主题 css 的 --reader-solid-alpha 覆盖
+  const docRootStyles =
+    typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
+  const videoWallpaper = docRootStyles?.getPropertyValue("--bg-video").includes("url(") ?? false;
+  const solidAlphaVar = Number.parseFloat(docRootStyles?.getPropertyValue("--reader-solid-alpha") ?? "");
+  const solidAlpha = Number.isFinite(solidAlphaVar) ? solidAlphaVar : isDarkMode ? 0.82 : 0.7;
+
   return {
     bg: defaultPalette["base-100"],
     fg,
@@ -433,6 +451,8 @@ export const getThemeCode = () => {
     isDarkMode,
     texture: currentTheme!.texture,
     backgroundImage,
+    videoWallpaper,
+    solidAlpha,
   } as ThemeCode;
 };
 
@@ -602,6 +622,10 @@ export const applyFixedlayoutStyles = (document: Document, viewSettings: ViewSet
   const overrideColor = viewSettings.overrideColor!;
   const invertImgColorInDark = viewSettings.invertImgColorInDark!;
 
+  // 视频壁纸主题（怜烟）下纯色背景半透明化（同 getColorStyles 的 translucentSolid）
+  const translucentSolid = themeCode.videoWallpaper === true;
+  const solidBg = translucentSolid ? tinycolor(bg).setAlpha(themeCode.solidAlpha ?? 0.7).toRgbString() : bg;
+
   const existingStyleId = "fixed-layout-styles";
   let style = document.getElementById(existingStyleId) as HTMLStyleElement;
   if (style) {
@@ -611,10 +635,10 @@ export const applyFixedlayoutStyles = (document: Document, viewSettings: ViewSet
   style.id = existingStyleId;
   style.textContent = `
     html {
-      --theme-bg-color: ${bg};
+      --theme-bg-color: ${solidBg};
       --theme-fg-color: ${fg};
       --theme-primary-color: ${primary};
-      color-scheme: ${isDarkMode ? "dark" : "light"};
+      color-scheme: ${isDarkMode && !translucentSolid ? "dark" : "light"};
     }
     body {
       position: relative;

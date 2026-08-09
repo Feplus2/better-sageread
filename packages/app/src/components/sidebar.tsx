@@ -180,7 +180,7 @@ export default function Sidebar() {
                     <Link
                       to={item.path}
                       className={clsx(
-                        "flex flex-1 items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-border",
+                        "flex flex-1 items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-muted",
                         isActive ? "text-neutral-900 dark:text-neutral-100" : "text-neutral-700 dark:text-neutral-300",
                       )}
                     >
@@ -211,7 +211,7 @@ export default function Sidebar() {
                   <Link
                     to={item.path}
                     className={clsx(
-                      "flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-border",
+                      "flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-muted",
                       isActive ? "text-neutral-900 dark:text-neutral-100" : "text-neutral-700 dark:text-neutral-300",
                     )}
                   >
@@ -243,7 +243,7 @@ export default function Sidebar() {
           <Link
             to="/trash"
             className={clsx(
-              "flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-border",
+              "flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-muted",
               location.pathname === "/trash"
                 ? "text-neutral-900 dark:text-neutral-100"
                 : "text-neutral-600 dark:text-neutral-300",

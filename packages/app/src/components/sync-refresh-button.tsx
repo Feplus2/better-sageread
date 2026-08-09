@@ -47,7 +47,7 @@ export default function SyncRefreshButton() {
         <button
           onClick={handleClick}
           disabled={isSyncing}
-          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-neutral-200 focus:outline-none focus-visible:ring-0 disabled:opacity-50 dark:hover:bg-neutral-700"
+          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 disabled:opacity-50 dark:hover:bg-accent"
         >
           <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
         </button>

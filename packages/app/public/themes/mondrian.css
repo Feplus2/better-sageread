@@ -31,6 +31,11 @@
   --content: #141414;
   --layout: #f5f1e8;
 
+  /* 标签栏：画布灰底 × 卡片白激活块 */
+  --tab-background: #ece7d9;
+  --tab-active: #fcfaf4;
+  --tab-active-foreground: #141414;
+
   --color-neutral-50: #faf7ef;
   --color-neutral-100: #f2eee1;
   --color-neutral-200: #e4ddc9;
@@ -77,6 +82,10 @@ html.dark {
   --sidebar-ring: #5b8bd0;
   --content: #f0ede2;
   --layout: #12161d;
+
+  --tab-background: #171d26;
+  --tab-active: #202732;
+  --tab-active-foreground: #f0ede2;
 
   --color-neutral-50: #f0ede2;
   --color-neutral-100: #e2ddce;
