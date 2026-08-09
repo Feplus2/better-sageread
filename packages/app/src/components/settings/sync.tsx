@@ -10,8 +10,8 @@ import {
   type L2Status,
   type SnapshotInfo,
   type SyncState,
-  type WebdavConfig,
   WEBDAV_PASSWORD_MASK,
+  type WebdavConfig,
   syncBackupNow,
   syncDeleteBackup,
   syncGetCloudAssets,
@@ -30,6 +30,7 @@ import {
   syncTestConnection,
   syncUploadAllBooks,
 } from "@/services/sync-service";
+import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
 import { CloudUpload, Database, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react";
@@ -79,6 +80,7 @@ export default function SyncSettings() {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [restoringName, setRestoringName] = useState<string | null>(null);
+  const [restoreProgress, setRestoreProgress] = useState<{ current: number; total: number; path: string } | null>(null);
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [l2Status, setL2Status] = useState<L2Status | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -96,6 +98,27 @@ export default function SyncSettings() {
     syncGetL2Status()
       .then(setL2Status)
       .catch((error) => console.error("加载同步状态失败:", error));
+  }, []);
+
+  // 恢复时的大包资产下载进度（Rust stage_restore 发射 sync-restore-assets）
+  useEffect(() => {
+    const unlisten = listen<{ current: number; total: number; path: string; done?: boolean }>(
+      "sync-restore-assets",
+      (event) => {
+        if (event.payload.done) {
+          setRestoreProgress(null);
+        } else {
+          setRestoreProgress({
+            current: event.payload.current,
+            total: event.payload.total,
+            path: event.payload.path,
+          });
+        }
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   // 加载配置与上次备份状态
@@ -188,6 +211,7 @@ export default function SyncSettings() {
     if (!confirmed) return;
 
     setRestoringName(backup.name);
+    setRestoreProgress(null);
     try {
       await syncRestore(backup.name);
       const restart = await ask("恢复已就绪。是否立即重启应用完成恢复？", { title: "恢复就绪" });
@@ -201,6 +225,7 @@ export default function SyncSettings() {
       toast.error("恢复失败", { description: String(error) });
     } finally {
       setRestoringName(null);
+      setRestoreProgress(null);
     }
   };
 
@@ -559,10 +584,20 @@ export default function SyncSettings() {
             ))}
           </div>
         )}
+        {restoreProgress && (
+          <p className="mt-2 text-neutral-600 text-xs dark:text-neutral-400">
+            正在下载备份资产（{restoreProgress.current}/{restoreProgress.total}）：{restoreProgress.path}
+          </p>
+        )}
       </div>
       <div className="rounded-lg bg-muted/80 p-4">
         <div className="flex items-center justify-between">
-          <h2 className="text dark:text-neutral-200">增量同步<span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-400">BETA</span></h2>
+          <h2 className="text dark:text-neutral-200">
+            增量同步
+            <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-400">
+              BETA
+            </span>
+          </h2>
           <Switch
             checked={config.l2_enabled}
             onCheckedChange={(checked) => handleSaveL2Config({ l2_enabled: checked === true })}

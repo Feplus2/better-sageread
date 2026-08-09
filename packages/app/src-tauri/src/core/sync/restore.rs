@@ -1,13 +1,10 @@
-use super::models::{BackupManifest, WebdavConfig};
-use super::webdav;
+use super::models::{BackupManifest, WebdavConfig, CONFIG_JSON_EXCLUDES};
+use super::{backup, webdav};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use zip::ZipArchive;
-
-/// 纳入恢复/保险备份的文件（与备份包内容对应）
-const JSON_FILES: [&str; 3] = ["app-settings.json", "layout-store.json", "llama-store.json"];
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| e.to_string())?;
@@ -24,7 +21,37 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 恢复第一阶段：下载选中备份、校验 manifest、解压到 staging、写 pending-restore.json。
+/// 移动文件（同盘 rename 秒级；跨盘回退 copy+delete）
+fn move_file(src: &Path, dst: &Path) -> Result<(), String> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    fs::copy(src, dst).map_err(|e| e.to_string())?;
+    fs::remove_file(src).map_err(|e| e.to_string())
+}
+
+/// 目录顶层 *.json 清单（排除清单之外；恢复/回滚的 JSON 处理与备份的"全收减排除"同口径）
+fn list_config_jsons(dir: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(read_dir) = fs::read_dir(dir) {
+        for entry in read_dir.flatten() {
+            if !entry.path().is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".json") && !CONFIG_JSON_EXCLUDES.contains(&name.as_str()) {
+                names.push(name);
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// 恢复第一阶段：下载选中备份、校验 manifest、解压到 staging、下载缺失资产（v2）、写 pending-restore.json。
 /// 实际替换发生在下次启动（见 apply_pending_restore），保证数据库连接已关闭。
 pub async fn stage_restore(
     app: &AppHandle,
@@ -53,6 +80,39 @@ pub async fn stage_restore(
     }
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     archive.extract(&staging).map_err(|e| format!("解压备份包失败: {e}"))?;
+
+    // v2 大包资产：本地已有同哈希文件则跳过（同机恢复零下载），否则下载到 staging/assets 并校验
+    if manifest.version >= 2 && !manifest.assets.is_empty() {
+        let total = manifest.assets.len();
+        for (i, asset) in manifest.assets.iter().enumerate() {
+            let target = backup::asset_local_path(app, asset);
+            if let Some(target) = &target {
+                if target.is_file() && backup::sha256_file(target).ok().as_deref() == Some(asset.sha256.as_str()) {
+                    continue;
+                }
+            }
+            let _ = app.emit(
+                "sync-restore-assets",
+                serde_json::json!({ "current": i + 1, "total": total, "path": asset.path }),
+            );
+            let remote = format!("sageread/backups/assets/{}", asset.sha256);
+            let bytes = webdav::get_path(config, &remote)
+                .await?
+                .ok_or_else(|| format!("云端资产缺失（索引存在但文件不在）: {}", asset.sha256))?;
+            if backup::sha256_file_bytes(&bytes) != asset.sha256 {
+                return Err(format!("资产校验失败（sha256 不符）: {}", asset.path));
+            }
+            let staged_asset = staging.join("assets").join(&asset.root).join(&asset.path);
+            if let Some(parent) = staged_asset.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::write(&staged_asset, bytes).map_err(|e| format!("写入暂存资产失败: {e}"))?;
+        }
+        let _ = app.emit(
+            "sync-restore-assets",
+            serde_json::json!({ "current": total, "total": total, "path": "", "done": true }),
+        );
+    }
 
     let pending = serde_json::json!({
         "backup_name": backup_name,
@@ -106,6 +166,49 @@ fn restore_replace_db(staged_db: &Path, db_path: &Path, backup_db_dir: &Path) ->
     remove_db_sidecars(db_path)
 }
 
+/// JSON 时点恢复：staged 顶层 *.json（除 manifest.json）拷入目标目录；
+/// 目标目录中不在 staged 集内的配置 JSON（排除清单之外）删除——恢复即回到备份时点状态
+fn apply_staged_jsons(staging: &Path, target_dir: &Path) -> Result<(), String> {
+    let staged_names = list_config_jsons(staging);
+    for name in &staged_names {
+        if name == "manifest.json" {
+            continue;
+        }
+        fs::copy(staging.join(name), target_dir.join(name)).map_err(|e| format!("恢复 {name} 失败: {e}"))?;
+    }
+    for name in list_config_jsons(target_dir) {
+        if !staged_names.contains(&name) {
+            let _ = fs::remove_file(target_dir.join(&name));
+        }
+    }
+    Ok(())
+}
+
+/// 应用暂存资产（v2）：按 manifest 把 staging/assets 移入目标位置；
+/// 只补齐/覆盖，不删除本地多余文件（防误删用户数据——空机搬家场景本就无差异）
+fn apply_staged_assets(app: &AppHandle, staging: &Path) -> Result<usize, String> {
+    let manifest_path = staging.join("manifest.json");
+    if !manifest_path.exists() {
+        return Ok(0);
+    }
+    let manifest: BackupManifest = serde_json::from_str(
+        &fs::read_to_string(&manifest_path).map_err(|e| format!("读取暂存 manifest 失败: {e}"))?,
+    )
+    .map_err(|e| format!("解析暂存 manifest 失败: {e}"))?;
+    let mut applied = 0;
+    for asset in &manifest.assets {
+        let staged = staging.join("assets").join(&asset.root).join(&asset.path);
+        if !staged.exists() {
+            continue; // 本地下载时被跳过（已有同哈希文件）→ 无需移动
+        }
+        let target = backup::asset_local_path(app, asset)
+            .ok_or_else(|| format!("资产路径非法: {}", asset.path))?;
+        move_file(&staged, &target)?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
 /// 恢复第二阶段（启动时、数据库初始化之前调用）：
 /// 先把当前数据完整备份到 restore-backup-{ts}/（回滚保险），再用 staging 内容替换。
 pub fn apply_pending_restore(app: &AppHandle) -> Result<(), String> {
@@ -122,7 +225,7 @@ pub fn apply_pending_restore(app: &AppHandle) -> Result<(), String> {
         return Err("恢复暂存不存在，已取消恢复".to_string());
     }
 
-    // 1. 回滚保险：备份当前数据
+    // 1. 回滚保险：备份当前数据（资产不回滚——内容寻址，若曾被备份可重下；空机搬家本无可覆盖）
     let backup_dir = config_dir.join(format!(
         "restore-backup-{}",
         chrono::Utc::now().timestamp_millis() / 1000
@@ -130,11 +233,8 @@ pub fn apply_pending_restore(app: &AppHandle) -> Result<(), String> {
     fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
 
     let db_path = config_dir.join("database").join("app.db");
-    for name in JSON_FILES {
-        let src = config_dir.join(name);
-        if src.exists() {
-            fs::copy(&src, backup_dir.join(name)).map_err(|e| e.to_string())?;
-        }
+    for name in list_config_jsons(&config_dir) {
+        fs::copy(config_dir.join(&name), backup_dir.join(&name)).map_err(|e| e.to_string())?;
     }
     let themes_dir = config_dir.join("themes");
     if themes_dir.is_dir() {
@@ -144,12 +244,7 @@ pub fn apply_pending_restore(app: &AppHandle) -> Result<(), String> {
     // 2. 用 staging 内容替换（db 的备份+替换+WAL/SHM 清理合一）
     let staged_db = staging.join("app.db");
     restore_replace_db(&staged_db, &db_path, &backup_dir.join("database"))?;
-    for name in JSON_FILES {
-        let src = staging.join(name);
-        if src.exists() {
-            fs::copy(&src, config_dir.join(name)).map_err(|e| e.to_string())?;
-        }
-    }
+    apply_staged_jsons(&staging, &config_dir)?;
     let staged_themes = staging.join("themes");
     if staged_themes.is_dir() {
         if themes_dir.exists() {
@@ -157,15 +252,16 @@ pub fn apply_pending_restore(app: &AppHandle) -> Result<(), String> {
         }
         copy_dir_recursive(&staged_themes, &themes_dir)?;
     }
+    let assets_applied = apply_staged_assets(app, &staging)?;
 
     // 3. 清理标记与暂存
     let _ = fs::remove_file(&pending_path);
     let _ = fs::remove_dir_all(&staging);
-    log::info!("数据恢复完成，恢复前数据已备份到 {:?}", backup_dir);
+    log::info!("数据恢复完成（资产 {assets_applied} 个），恢复前数据已备份到 {:?}", backup_dir);
     Ok(())
 }
 
-/// 回滚：把最近的 restore-backup-* 目录换回去（需重启生效）
+/// 回滚：把最近的 restore-backup-* 目录换回去（需重启生效；资产不回滚，理由同上）
 pub fn rollback(app: &AppHandle) -> Result<String, String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
 
@@ -187,12 +283,7 @@ pub fn rollback(app: &AppHandle) -> Result<String, String> {
         // 旧 WAL/SHM 同样不得叠在换回的主文件上（同 apply_pending_restore）
         remove_db_sidecars(&config_dir.join("database").join("app.db"))?;
     }
-    for name in JSON_FILES {
-        let src = src_dir.join(name);
-        if src.exists() {
-            fs::copy(&src, config_dir.join(name)).map_err(|e| e.to_string())?;
-        }
-    }
+    apply_staged_jsons(&src_dir, &config_dir)?;
     let staged_themes = src_dir.join("themes");
     let themes_dir = config_dir.join("themes");
     if staged_themes.is_dir() {

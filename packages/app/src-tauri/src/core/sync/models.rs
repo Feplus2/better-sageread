@@ -57,7 +57,44 @@ pub struct BackupManifest {
     pub app_version: String,
     pub contents: Vec<String>,
     pub db_sha256: String,
+    /// v2 大包资产清单（sha256 内容寻址，存于 sageread/backups/assets/）；v1 备份无此字段
+    #[serde(default)]
+    pub assets: Vec<AssetRef>,
 }
+
+/// 大包资产条目（manifest v2）：文件本体按 sha256 存云端资产池，此处只记索引
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AssetRef {
+    /// 根目录内的相对路径（如 books/b1/book.epub、papers/vectors.sqlite）
+    pub path: String,
+    /// 根：appData（应用数据目录）/ config（配置目录）
+    pub root: String,
+    pub sha256: String,
+    pub size: u64,
+    /// 分类标签：book / vectors / font / background / workspace（统计与日志用）
+    pub kind: String,
+}
+
+/// 云端资产池索引（sageread/backups/assets-index.json）：
+/// 记录每个备份引用了哪些资产 sha256，供轮转 GC 计算孤儿（不读各备份 manifest，省下载）
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct AssetsIndex {
+    /// backup_name -> 引用的资产 sha256 列表
+    pub by_backup: std::collections::HashMap<String, Vec<String>>,
+    /// sha256 -> 大小（GC 日志/统计用）
+    pub sizes: std::collections::HashMap<String, u64>,
+}
+
+/// 小包 JSON 收集策略：配置目录顶层 *.json 全收，减去此排除清单
+/// - sync-state.json：L2 设备身份，进包会致两端撞 device_id
+/// - secrets-fallback.json：keyring 降级时的明文密钥，永不上云
+/// - pending-restore.json / backup-assets-cache.json：本机运行态
+pub const CONFIG_JSON_EXCLUDES: [&str; 4] = [
+    "sync-state.json",
+    "secrets-fallback.json",
+    "pending-restore.json",
+    "backup-assets-cache.json",
+];
 
 /// 远端 index.json 里的列表项（用清单文件代替 PROPFIND 解析，简单可靠）
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -70,12 +107,15 @@ pub struct BackupInfo {
     pub db_sha256: String,
 }
 
-/// 本地 sync-state.json：上次备份状态与 db 哈希（无变化检测用）
+/// 本地 sync-state.json：上次备份状态与包哈希（无变化检测用）
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct SyncState {
     pub last_backup_at: Option<i64>,
     pub last_backup_name: Option<String>,
     pub last_db_sha256: Option<String>,
+    /// 整包内容哈希（db+全部 JSON+themes+资产清单）：v2 无变化检测口径（v1 只比 db）
+    #[serde(default)]
+    pub last_pack_sha256: Option<String>,
     pub last_result: Option<String>,
 
     /* ---- L2 增量同步状态（协议 §3） ---- */
