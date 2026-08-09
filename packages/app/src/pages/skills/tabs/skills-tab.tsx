@@ -6,15 +6,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SKILL_SCOPES, SKILL_SCOPE_LABELS, type SkillScope, parseSkillScopes } from "@/services/skill-service";
-import { ListFilter, Loader2, Plus } from "lucide-react";
+import { ListFilter, Loader2, Plus, Upload } from "lucide-react";
 import { useState } from "react";
 import SkillEditorDialog from "../components/skill-editor-dialog";
+import { SkillImportDialog } from "../components/skill-import-dialog";
 import SkillItem from "../components/skill-item";
 import { type Skill, useSkills } from "../hooks/use-skills";
 
 export default function SkillsTab() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   // 作用域筛选（集合包含匹配；空集合 = 全部）
   const [scopeFilter, setScopeFilter] = useState<Set<SkillScope>>(new Set());
   const { data: skills, isLoading, error } = useSkills();
@@ -98,6 +100,10 @@ export default function SkillsTab() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)}>
+            <Upload className="size-4" />
+            导入
+          </Button>
           <Button variant="outline" size="sm" onClick={handleCreate}>
             <Plus className="size-4" />
             新建技能
@@ -124,6 +130,7 @@ export default function SkillsTab() {
       )}
 
       <SkillEditorDialog isOpen={isEditorOpen} onClose={() => setIsEditorOpen(false)} skill={editingSkill} />
+      <SkillImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} />
     </div>
   );
 }

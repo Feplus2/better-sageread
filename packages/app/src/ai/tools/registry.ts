@@ -4,7 +4,8 @@
  * - central（全局助手）：shared + central 工具，拥有全局操作权限
  * - reader（阅读助手）：shared + reader 工具，聚焦内容理解
  * - paper（论文助手）：shared + 论文工具，基础层直接读 paper.md，增强层按向量能力门控
- * - mcp：预留，后续迭代接入外部 MCP Server
+ * - mcp：外部 MCP Server 工具需异步连接，在 custom-chat-transport.ts 调 getMcpToolsForScope() 后
+ *   与本函数返回值合并（见 src/ai/mcp/mcp-manager.ts），不在此同步组装
  */
 import { useLlamaStore } from "@/store/llama-store";
 import type { CoreTool } from "ai";
@@ -18,13 +19,17 @@ import {
   httpRequestTool,
   importBookTool,
   importFontTool,
+  importPaperTool,
   manageBookTool,
+  manageMcpTool,
   managePaperFoldersTool,
   managePreferencesTool,
+  manageSecretsTool,
   manageSkillTool,
   manageSyncTool,
   manageTagsTool,
   manageThreadsTool,
+  processPaperTool,
   readLocalFileTool,
   runCommandTool,
   searchFilesTool,
@@ -202,6 +207,12 @@ registerTools([
     description: "从本地路径导入书籍",
   },
   {
+    name: "importPaper",
+    scope: "central",
+    tool: importPaperTool as CoreTool,
+    description: "解析单篇 PDF 论文并导入文献库（paper.md 链路，非书库）",
+  },
+  {
     name: "manageSync",
     scope: "central",
     tool: manageSyncTool as CoreTool,
@@ -271,13 +282,31 @@ registerTools([
     name: "manageSkill",
     scope: "central",
     tool: manageSkillTool as CoreTool,
-    description: "创建/更新/启用停用 AI 技能",
+    description: "创建/更新/启用停用/删除 AI 技能",
+  },
+  {
+    name: "manageSecrets",
+    scope: "central",
+    tool: manageSecretsTool as CoreTool,
+    description: "密钥保管箱管理（列名/保存/删除，无读出真值能力）",
+  },
+  {
+    name: "manageMcp",
+    scope: "central",
+    tool: manageMcpTool as CoreTool,
+    description: "管理 MCP 服务器配置（新增/修改/启停/删除）",
   },
   {
     name: "managePaperFolders",
     scope: "central",
     tool: managePaperFoldersTool as CoreTool,
     description: "文献库文件夹管理（查看/创建/重命名/删除/移动/归档论文）",
+  },
+  {
+    name: "processPaper",
+    scope: "central",
+    tool: processPaperTool as CoreTool,
+    description: "文献库论文翻译与句词对齐（status/translate/align；translate 自动带对齐）",
   },
 ]);
 
@@ -332,12 +361,9 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     }
   }
 
-  // 5. 预留 MCP 工具注入点（后续迭代）
-  // for (const reg of registry) {
-  //   if (reg.scope === "mcp") {
-  //     tools[reg.name] = reg.tool;
-  //   }
-  // }
+  // 5. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求
+  // （流结束要 closeAll），故不在此同步函数合并，而在 custom-chat-transport.ts 里
+  // 调 getMcpToolsForScope() 后与本函数返回值合并，见 src/ai/mcp/mcp-manager.ts。
 
   return tools;
 }

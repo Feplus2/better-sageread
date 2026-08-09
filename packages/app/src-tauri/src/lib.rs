@@ -3,8 +3,8 @@
 mod core;
 use crate::core::{
     agent_ws::commands::{
-        agent_edit_file, agent_read_file, agent_resolve_path, agent_run_command, agent_search_files,
-        agent_write_file,
+        agent_edit_file, agent_list_dir, agent_read_file, agent_resolve_path, agent_run_command,
+        agent_search_files, agent_write_file,
     },
     books::commands::{
         create_book_note,
@@ -45,6 +45,8 @@ use crate::core::{
         ensure_llamacpp_directories, get_app_data_dir, get_llamacpp_backend_path, greet,
         list_local_models, llama_server_binary_name_cmd,
     },
+    local_api::start_local_api,
+    mcp::{mcp_stdio_close, mcp_stdio_start, mcp_stdio_write, McpStdioState},
     papers::commands::{
         create_folder, delete_folder, get_paper_folder_map, list_folders, list_trashed_folders,
         move_folder, purge_folder, rename_folder, restore_folder, set_paper_folders,
@@ -53,6 +55,11 @@ use crate::core::{
         clear_active_prompt_preset, create_prompt_preset, delete_prompt_preset,
         get_active_prompt_preset, list_prompt_presets, set_active_prompt_preset,
         update_prompt_preset,
+    },
+    proxy::{proxy_get_config, proxy_save_config, proxy_test},
+    secrets::{
+        agent_http_request, secret_delete, secret_get_for_runtime, secret_has,
+        secret_list_user, secret_resolve_batch, secret_set, secret_user_delete, secret_user_set,
     },
     skills::commands::{
         create_skill, delete_skill, get_skill_by_id, get_skills, toggle_skill_active,
@@ -92,6 +99,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(ConverterState::default())
         .manage(PaperConverterState::default())
+        .manage(McpStdioState::default())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
@@ -106,6 +114,8 @@ pub fn run() {
         .plugin(tauri_plugin_epub::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
+            // 应用级代理设置载入内存快照（批次 F3-1；失败视为 off 不阻塞）
+            crate::core::proxy::load(&app_handle);
             if std::env::consts::OS == "windows" {
                 if let Some(window) = app.get_webview_window("main") {
                     if let Err(e) = window.set_decorations(false) {
@@ -146,6 +156,9 @@ pub fn run() {
                 if let Err(e) = core::sync::restore::apply_pending_restore(&app_handle) {
                     log::error!("应用待恢复数据失败: {}", e);
                 }
+
+                // 存量明文密钥迁移（批次 A2，幂等；失败仅告警不阻塞启动）
+                core::secrets::migrate::migrate_plaintext_secrets(&app_handle);
 
                 let pool = database::initialize(&app_handle)
                     .await
@@ -301,6 +314,27 @@ pub fn run() {
             agent_edit_file,
             agent_search_files,
             agent_run_command,
+            agent_list_dir,
+            // secrets（批次 A：keyring 密钥保管）
+            secret_set,
+            secret_delete,
+            secret_has,
+            secret_get_for_runtime,
+            secret_resolve_batch,
+            secret_list_user,
+            secret_user_set,
+            secret_user_delete,
+            agent_http_request,
+            // I2：sageread-mcp 本地通道（localhost-only HTTP + token，密钥不出 app 进程）
+            start_local_api,
+            // mcp stdio（批次 D：本地 MCP server 子进程桥）
+            mcp_stdio_start,
+            mcp_stdio_write,
+            mcp_stdio_close,
+            // proxy（批次 F3-1：应用级代理三档）
+            proxy_get_config,
+            proxy_save_config,
+            proxy_test,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -333,10 +367,14 @@ pub fn run() {
                     };
                     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), exit_sync).await;
 
-                    if let Err(e) = tauri_plugin_llamacpp::cleanup_llama_processes(app_handle).await
+                    if let Err(e) =
+                        tauri_plugin_llamacpp::cleanup_llama_processes(app_handle.clone()).await
                     {
                         log::error!("清理 llamacpp 进程失败: {}", e);
                     }
+
+                    // MCP stdio 子进程全部回收（批次 D1：防孤儿 node/uvx）
+                    crate::core::mcp::close_all_sessions(&app_handle).await;
 
                     // destroy 不再触发 CloseRequested，避免循环
                     let _ = window.destroy();

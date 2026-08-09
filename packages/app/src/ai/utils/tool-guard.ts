@@ -6,6 +6,11 @@
  * - fileRead（readLocalFile/searchFiles）：界内静默；界外 strict 确认卡、relaxed/full 静默
  * - command（runCommand）：strict/relaxed 确认卡、full 静默；任何模式 Rust 侧写审计日志
  * - network（httpRequest）：GET 静默；非 GET 任何模式确认卡（数据离机通道）
+ * - mcp_*（批次 B4）：远程 MCP 工具 strict/relaxed 确认卡（server 名 + 工具名 + 参数摘要），
+ *   full 静默放行；「本次会话不再询问」按 server 维度记忆（仅内存）
+ * - manageMcp（批次 B5）：全动作 Tier 2 确认卡；create/delete 恒确认（唯一 key 使免打扰失效）
+ * - manageSecrets：set/delete 恒确认（确认卡不回显密钥真值）；list 静默
+ * - manageSkill.delete / manageThreads.delete：破坏性恒确认（其余动作静默）
  *
  * 路径界内/界外判定走 Rust agent_resolve_path（canonicalize + 根前缀，符号链接也绕不过）；
  * allowOutside 放行参数由本层在确认通过/模式放行后注入，不在工具 inputSchema 暴露（模型够不着）。
@@ -14,6 +19,7 @@ import { useAgentConfirmStore } from "@/store/agent-confirm-store";
 import { resolveWorkspaceRootForScope, useAgentSettingsStore } from "@/store/agent-settings-store";
 import { invoke } from "@tauri-apps/api/core";
 import type { CoreTool } from "ai";
+import { parseMcpToolName } from "../mcp/mcp-manager";
 import type { AgentScope } from "../tools/registry";
 
 interface GuardVerdict {
@@ -58,6 +64,17 @@ function guardFailedResult(error: unknown) {
   };
 }
 
+/** 确认卡参数摘要：stringify + 截断，避免长参数刷屏 */
+function summarizeArgs(args: unknown, max = 300): string {
+  try {
+    const text = JSON.stringify(args);
+    if (text === undefined) return "";
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  } catch {
+    return String(args);
+  }
+}
+
 /** 确认请求（挂起等待用户），同时响应流中止：中止即撤卡并按拒绝处理 */
 function requestWithAbort(
   req: { toolName: string; title: string; detail: string; dontAskKey: string },
@@ -93,7 +110,198 @@ export function wrapToolsWithGuard(tools: Record<string, CoreTool>, agentScope: 
   for (const [name, baseTool] of Object.entries(tools)) {
     const spec = GUARDED_TOOLS[name];
     const originalExecute = baseTool.execute;
-    if (!spec || typeof originalExecute !== "function") {
+    if (typeof originalExecute !== "function") {
+      wrapped[name] = baseTool;
+      continue;
+    }
+
+    // 批次 B4：远程 MCP 工具（mcp_ 前缀）——strict/relaxed 确认卡，full 静默放行；
+    // 「本次会话不再询问该 server」按 server 维度记忆（dontAskKey=mcpServer:{key}，仅内存不落盘）
+    if (name.startsWith("mcp_")) {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            if (safetyMode === "full") {
+              return await originalExecute(args, options);
+            }
+            const origin = parseMcpToolName(name);
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: `调用 MCP 工具 ${origin?.originalTool ?? name}`,
+                detail: `服务器：${origin?.serverName ?? origin?.serverKey ?? "未知"}\n工具：${origin?.originalTool ?? name}\n参数：${summarizeArgs(args)}`,
+                dontAskKey: `mcpServer:${origin?.serverKey ?? name}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    // 批次 B5：manageMcp 全动作 Tier 2 确认；create/delete 恒确认（唯一 key 使「不再询问」失效）
+    if (name === "manageMcp") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            const alwaysConfirm = action === "create" || action === "delete";
+            const target = String(args?.name ?? args?.id ?? "");
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: `管理 MCP 服务器（${action || "未知动作"}）`,
+                detail: summarizeArgs(args, 500),
+                dontAskKey: alwaysConfirm
+                  ? `manageMcp:${action}:${crypto.randomUUID()}`
+                  : `manageMcp:${action}:${target}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    // 密钥保管箱：set/delete 恒确认（唯一 key）；list 仅返回名称，静默放行。
+    // 本工具无读出真值通道，确认卡 detail 不含 value 防回显
+    if (name === "manageSecrets") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            if (action !== "set" && action !== "delete") {
+              return await originalExecute(args, options);
+            }
+            const secretName = String(args?.name ?? "");
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: action === "set" ? `保存密钥「${secretName}」到保管箱` : `从保管箱删除密钥「${secretName}」`,
+                detail:
+                  action === "set"
+                    ? `将把用户提供的密钥真值存入系统凭据管理器（密钥内容不回显），之后以 {{secret:${secretName}}} 引用`
+                    : `删除后引用 {{secret:${secretName}}} 的配置将失效`,
+                dontAskKey: `manageSecrets:${action}:${crypto.randomUUID()}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    // 破坏性动作恒确认（用户拍板 2026-08-06：删除能力要给，但破坏性操作必问）：
+    // manageSkill.delete / manageThreads.delete；其余动作静默
+    if (name === "manageSkill" || name === "manageThreads") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            if (action !== "delete") {
+              return await originalExecute(args, options);
+            }
+            const target = String(args?.skillName ?? args?.threadId ?? "");
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: name === "manageSkill" ? `删除技能「${target}」` : `删除对话（${target}）`,
+                detail: summarizeArgs(args, 300),
+                dontAskKey: `${name}:delete:${crypto.randomUUID()}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    // 批次 F4：importPaper Tier 2 确认（解析重操作，会拉起 Papers_Converter sidecar 长时间运行）；
+    // strict/relaxed 确认、full 静默，同一文件免打扰
+    if (name === "importPaper") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            if (safetyMode === "full") {
+              return await originalExecute(args, options);
+            }
+            const filePath = String(args?.filePath ?? "");
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: "解析并导入论文",
+                detail: filePath,
+                dontAskKey: `importPaper:${filePath}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    // I1：processPaper action=reparse 为破坏性动作（替换正文，译文转陈旧/对齐需重建）→ 恒确认
+    // （唯一 key 使「不再询问」失效）；其余动作（status/translate/align）走正常确认流程
+    if (name === "processPaper") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            if (action !== "reparse" || safetyMode === "full") {
+              return await originalExecute(args, options);
+            }
+            const paperId = String(args?.paperId ?? "");
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: "重新解析论文（替换正文）",
+                detail: `论文 ${paperId} 将用源 PDF 重新解析并替换现有正文；已有译文转陈旧（续翻自动更新），句词对齐需重建`,
+                dontAskKey: `processPaper:reparse:${crypto.randomUUID()}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
+    if (!spec) {
       wrapped[name] = baseTool;
       continue;
     }
@@ -128,7 +336,9 @@ export function wrapToolsWithGuard(tools: Record<string, CoreTool>, agentScope: 
             }
             const needConfirm = spec.action === "fileWrite" ? safetyMode !== "full" : safetyMode === "strict";
             if (!needConfirm) {
-              return await originalExecute({ ...baseArgs, ...grant }, options);
+              // A4：界外读在 relaxed/full 下静默放行，但需注入 allowOutside 过 Rust 侧拦截
+              const readGrant = spec.action === "fileRead" ? { allowOutside: true } : grant;
+              return await originalExecute({ ...baseArgs, ...readGrant }, options);
             }
             detail = verdict.resolved;
             dontAskKey = `${name}:${verdict.resolved}`;
@@ -161,7 +371,9 @@ export function wrapToolsWithGuard(tools: Record<string, CoreTool>, agentScope: 
           );
           if (!approved) return cancelledResult();
 
-          return await originalExecute({ ...baseArgs, ...grant }, options);
+          // A4：界外读经确认卡放行后同样注入 allowOutside
+          const finalGrant = spec.action === "fileRead" ? { ...grant, allowOutside: true } : grant;
+          return await originalExecute({ ...baseArgs, ...finalGrant }, options);
         } catch (error) {
           return guardFailedResult(error);
         }

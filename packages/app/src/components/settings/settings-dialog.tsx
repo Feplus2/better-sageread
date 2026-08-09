@@ -24,6 +24,8 @@ import GeneralSettings from "./general";
 import LlamaSettings from "./llama";
 import ProviderDetailSettings from "./provider-detail";
 import ProvidersSettings from "./providers";
+import ProxySettings from "./proxy-settings";
+import SecretVault from "./secret-vault";
 import ShortcutsSettings from "./shortcuts";
 import SyncSettings from "./sync";
 import TTSSettings from "./tts-settings";
@@ -43,7 +45,9 @@ type SettingsKey =
   | "converter"
   | "web-search"
   | "agent"
+  | "proxy"
   | "model-providers"
+  | "secret-vault"
   | "shortcuts"
   | "provider-openai"
   | "provider-anthropic"
@@ -101,6 +105,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     { key: "tts", label: "语音模型" },
     { key: "web-search", label: "网络搜索" },
     { key: "agent", label: "Agent" },
+    { key: "proxy", label: "网络代理" },
     { key: "sync", label: "数据同步" },
     { key: "converter", label: "PDF 转换" },
     {
@@ -111,6 +116,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         label: provider.name,
       })),
     },
+    { key: "secret-vault", label: "密钥保管箱" },
     // { key: "shortcuts", label: "快捷键" },
   ];
 
@@ -145,10 +151,14 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         return <WebSearchSettings />;
       case "agent":
         return <AgentSettings />;
+      case "proxy":
+        return <ProxySettings />;
       case "model-providers":
         return (
           <ProvidersSettings onProviderSelect={(providerId) => setActiveKey(`provider-${providerId}` as SettingsKey)} />
         );
+      case "secret-vault":
+        return <SecretVault />;
       case "font-manager":
         return <FontManager />;
       case "shortcuts":
