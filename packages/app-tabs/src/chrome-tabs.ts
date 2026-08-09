@@ -54,6 +54,8 @@ export interface TabProperties {
   favicon?: boolean | string;
   faviconClass?: string;
   isCloseIconVisible?: boolean;
+  /** 休眠标识（P2 标签页休眠）：为 true 时标签降低透明度提示视图已卸载 */
+  dimmed?: boolean;
 }
 
 let instanceId = 0;
@@ -502,6 +504,9 @@ class ChromeTabs {
     if (tabProperties.id) {
       tabEl.setAttribute("data-tab-id", tabProperties.id);
     }
+
+    // 休眠标签降低透明度（P2）；非休眠恢复原样
+    tabEl.style.opacity = tabProperties.dimmed ? "0.45" : "";
   }
 
   cleanUpPreviouslyDraggedTabs() {

@@ -24,14 +24,14 @@ import {
 } from "@/services/sync-service";
 import { syncUiConfigNow } from "@/services/ui-config-sync";
 import { useAppSettingsStore } from "@/store/app-settings-store";
-import { useLayoutStore } from "@/store/layout-store";
+import { markTabWoken, useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
 import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
 import { Resizable } from "re-resizable";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import appIconUrl from "../../src-tauri/icons/32x32.png";
 
 /** 全局设置入口（窗口顶栏右侧，横向/纵向两种顶栏模式共用，全页面可点） */
@@ -42,7 +42,7 @@ function TopbarSettingsButton() {
       <TooltipTrigger asChild>
         <button
           onClick={toggleSettingsDialog}
-          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-neutral-200 focus:outline-none focus-visible:ring-0 dark:hover:bg-neutral-700"
+          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 dark:hover:bg-accent"
         >
           <Settings size={18} />
         </button>
@@ -80,6 +80,74 @@ export default function ReaderLayout() {
   const isVertical = tabOrientation === "vertical";
   // 侧边栏高度：横向模式标签栏 36px，纵向模式窄顶条 32px，另加 main 的 p-1 和余量
   const sidebarHeightClass = isVertical ? "h-[calc(100dvh-44px)]" : "h-[calc(100dvh-48px)]";
+
+  // ─── P2 标签页休眠（性能优化，2026-08-08）───
+  // 只卸重型阅读视图（论文 PaperReader / 书籍 ReaderViewer），侧栏与聊天保活（护流式任务）；
+  // 阅读状态在 zustand store 中独立于视图，切回重挂载自动恢复。
+  // 双条件：宽限期内切回零成本；挂载数超上限时 LRU 立即休眠（防多开堆积）。
+  const TAB_SLEEP_GRACE_MS = 10 * 60 * 1000;
+  const TAB_MOUNT_LIMIT = 6;
+  // 休眠清单存 layout-store：横排/竖排标签栏据此降透明度提示（不持久化）
+  const sleptTabIds = useLayoutStore((s) => s.sleptTabIds);
+  const sleptTabs = useMemo(() => new Set(sleptTabIds), [sleptTabIds]);
+  const lastActiveRef = useRef(new Map<string, number>());
+
+  // 激活即唤醒 + 刷新活跃时间；顺手清理已关闭 tab 的残留 id
+  useEffect(() => {
+    lastActiveRef.current.set(activeTabId, Date.now());
+    const { sleptTabIds: prev, setSleptTabIds } = useLayoutStore.getState();
+    if (prev.length === 0) return;
+    const tabIds = new Set(useLayoutStore.getState().tabs.map((t) => t.id));
+    // 唤醒的 tab 先打一次性标记：重挂载的开书快拉据此静默（不弹进度同步 toast）
+    if (activeTabId && prev.includes(activeTabId)) markTabWoken(activeTabId);
+    setSleptTabIds(prev.filter((id) => id !== activeTabId && tabIds.has(id)));
+  }, [activeTabId]);
+
+  // 新增 tab 时写入基准时间：避免"开新 tab 放置超宽限期→下个巡检立即休眠"的突然行为
+  useEffect(() => {
+    const now = Date.now();
+    for (const t of tabs) {
+      if (!lastActiveRef.current.has(t.id)) lastActiveRef.current.set(t.id, now);
+    }
+  }, [tabs]);
+
+  // 定时巡检：宽限期到期或 LRU 超限则休眠
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const {
+        tabs,
+        activeTabId: activeId,
+        sleptTabIds: prev,
+        setSleptTabIds,
+        getReaderStore,
+      } = useLayoutStore.getState();
+      const now = Date.now();
+      const next = new Set(prev);
+      next.delete(activeId);
+      // PDF 标签页永不休眠：原生 iframe 渲染没有阅读位置恢复通道，休眠重挂载后用户会丢阅读位置
+      const isPdfTab = (tabId: string) => getReaderStore(tabId)?.getState().bookData?.book?.format === "PDF";
+      // LRU 硬上限：挂载数超限时从最久未活跃的开始休眠
+      let mounted = tabs.filter((t) => !next.has(t.id));
+      if (mounted.length > TAB_MOUNT_LIMIT) {
+        const oldestFirst = mounted
+          .filter((t) => t.id !== activeId && !isPdfTab(t.id))
+          .sort((a, b) => (lastActiveRef.current.get(a.id) ?? 0) - (lastActiveRef.current.get(b.id) ?? 0));
+        for (const t of oldestFirst) {
+          if (mounted.length <= TAB_MOUNT_LIMIT) break;
+          next.add(t.id);
+          mounted = mounted.filter((m) => m.id !== t.id);
+        }
+      }
+      // 宽限期：非活动超阈值 → 休眠（新增 tab 已由上方 effect 写入基准时间）
+      for (const t of tabs) {
+        if (t.id === activeId || next.has(t.id) || isPdfTab(t.id)) continue;
+        const last = lastActiveRef.current.get(t.id) ?? now;
+        if (now - last > TAB_SLEEP_GRACE_MS) next.add(t.id);
+      }
+      setSleptTabIds([...next]);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // 启动时应用持久化的全局主题（值来自 localStorage 同步读取，无异步恢复闪烁）
   useEffect(() => {
@@ -270,7 +338,7 @@ export default function ReaderLayout() {
         <div
           data-tauri-drag-region
           data-region="reader-tabs"
-          className="relative flex h-8 shrink-0 select-none items-center pr-1 dark:bg-tab-background"
+          className="relative flex h-8 shrink-0 select-none items-center bg-tab-background pr-1"
           style={isWindows ? undefined : { paddingLeft: 70 }}
         >
           {/* 左侧顶格：主页 / 切换横向标签。
@@ -311,10 +379,10 @@ export default function ReaderLayout() {
       ) : (
         <div
           data-region="reader-tabs"
-          className="select-none border-neutral-200 dark:border-neutral-700 dark:bg-tab-background"
+          className="select-none border-neutral-200 bg-tab-background dark:border-neutral-700"
         >
           <Tabs
-            tabs={tabs}
+            tabs={tabs.map((t) => ({ ...t, dimmed: sleptTabs.has(t.id) }))}
             onTabActive={activateTab}
             onTabClose={removeTab}
             onTabReorder={reorderTab}
@@ -382,11 +450,13 @@ export default function ReaderLayout() {
                     zIndex: tab.id === activeTabId ? 1 : 0,
                   }}
                 >
-                  <PaperReaderView paperId={tab.bookId} title={tab.title} />
+                  <PaperReaderView paperId={tab.bookId} title={tab.title} viewSleeping={sleptTabs.has(tab.id)} />
                 </div>
               );
             }
 
+            // P2：休眠态仅渲染外壳（侧栏保活，foliate 视图由 isSlept 分支控制卸载）
+            const isSlept = sleptTabs.has(tab.id);
             const store = getReaderStore(tab.id);
             if (!store) return null;
 
@@ -446,7 +516,7 @@ export default function ReaderLayout() {
                   height: "100%",
                 }}
                 minWidth={320}
-                maxWidth={580}
+                maxWidth={800}
                 enable={{
                   top: false,
                   right: swapSidebars,
@@ -502,7 +572,8 @@ export default function ReaderLayout() {
                   {swapSidebars ? chatSidebar : notepadSidebar}
 
                   <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
-                    <ReaderViewer />
+                    {/* P2 休眠态：卸载 foliate 视图（阅读位置由 reader store 恢复），侧栏/聊天保活 */}
+                    {!isSlept && <ReaderViewer />}
 
                     {showOverlay && (
                       <div className="absolute inset-0 z-50 flex items-center justify-center rounded-md bg-background/80 backdrop-blur-sm dark:bg-neutral-900/60" />

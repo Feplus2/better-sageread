@@ -659,6 +659,19 @@ foliate-view {
   padding: 2px 0;
 }
 
+/* ---------- 论文块级惰性布局（性能优化施工 B，2026-08-08） ----------
+ * 论文原文/译文单篇可挂载数万元素（KaTeX 公式占大头），任何 Radix 弹层打开都会触发
+ * 全页强制样式重算/回流，成本随 DOM 规模线性增长（实测 5.3 万元素时开设置 6s+）。
+ * content-visibility: auto 让屏幕外块整体跳过样式/布局计算，强制回流只扫可视区附近；
+ * CDP 注入实测 6.3s → 1.8s（scripts/cdp-perf-css-ab.mjs）。
+ * contain-intrinsic-size 的 auto 关键字在首次渲染后记住真实高度，占位估算只影响首轮；
+ * 跳转链路（TOC/搜索/标注定位）均走 behavior:smooth，目标块接近视口时浏览器先行渲染，
+ * 相对坐标换算随滚动自动修正。 */
+.paper-content > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
 /* ---------- 论文逐段对照译文块 ----------
  * 对照模式在每个可翻译块后插入 <div class="paper-translation" data-translation>（paper-blocks.ts），
  * listBlocks 已按 [data-translation] 同级排除，不占锚点块序号。样式：左竖线 + 次要色 + 略小字号。 */

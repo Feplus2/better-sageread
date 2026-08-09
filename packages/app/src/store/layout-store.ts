@@ -15,6 +15,18 @@ export interface Tab extends TabProperties {
 
 export type TabOrientation = "horizontal" | "vertical";
 
+/** P2 休眠唤醒的一次性标记：激活休眠 tab 时写入，视图重挂载的开书快拉消费后即删。
+ *  命中标记的挂载走静默快拉（不弹进度 toast）；模块级 Set，不进 zustand、不持久化 */
+const wokenTabIds = new Set<string>();
+
+/** 标记某 tab 刚从休眠唤醒（由 reader-layout 激活 effect 调用） */
+export const markTabWoken = (tabId: string): void => {
+  wokenTabIds.add(tabId);
+};
+
+/** 消费唤醒标记（Set.delete 返回是否命中，天然一次性） */
+export const consumeTabWoken = (tabId: string): boolean => wokenTabIds.delete(tabId);
+
 interface LayoutStore {
   tabs: Tab[];
   activeTabId: string | null;
@@ -26,6 +38,10 @@ interface LayoutStore {
 
   tabOrientation: TabOrientation;
   isVerticalTabCollapsed: boolean;
+
+  /** P2 标签页休眠：已休眠（阅读视图卸载）的 tab id 列表；不持久化，重启后从全新状态重新计时 */
+  sleptTabIds: string[];
+  setSleptTabIds: (ids: string[]) => void;
 
   openBook: (bookId: string, title: string) => void;
   openPaper: (paperId: string, title: string) => void;
@@ -52,6 +68,14 @@ export const useLayoutStore = create<LayoutStore>()(
       isNotepadVisible: false,
       tabOrientation: "horizontal",
       isVerticalTabCollapsed: false,
+      sleptTabIds: [],
+
+      setSleptTabIds: (ids: string[]) => {
+        const prev = get().sleptTabIds;
+        // 引用稳定：内容不变时不触发订阅方重渲染
+        if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return;
+        set({ sleptTabIds: ids });
+      },
 
       openBook: (bookId: string, title: string) => {
         const tabId = `reader-${bookId}`;

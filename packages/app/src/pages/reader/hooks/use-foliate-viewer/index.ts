@@ -4,6 +4,7 @@ import { applySyncResult } from "@/services/apply-sync-result";
 import { getBookStatus } from "@/services/book-service";
 import { syncGetConfig, syncPullNow } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
+import { consumeTabWoken } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { BookConfig } from "@/types/book";
 import type { ViewSettings } from "@/types/book";
@@ -51,6 +52,8 @@ export const useFoliateViewer = (bookId: string, bookDoc: BookDoc, config: BookC
 
     (async () => {
       // 打开书单点快拉（L2）：~1.5s 超时，超时/失败静默放行本地位置
+      // 休眠唤醒的重挂载不算开书：消费唤醒标记走静默快拉（仍拉远端进度，但不弹 toast 扰民）
+      const silentPull = consumeTabWoken(`reader-${bookId}`);
       try {
         const syncConfig = await syncGetConfig();
         if (syncConfig?.l2_enabled && syncConfig.endpoint) {
@@ -68,7 +71,10 @@ export const useFoliateViewer = (bookId: string, bookDoc: BookDoc, config: BookC
               config.location = status.location;
               const percent =
                 status.progressTotal > 0 ? Math.round((status.progressCurrent / status.progressTotal) * 100) : 0;
-              toast.info(`已同步另一台设备的进度（第 ${percent}%）`);
+              // 休眠唤醒的静默快拉不弹 toast；正常开书保留提示
+              if (!silentPull) {
+                toast.info(`已同步另一台设备的进度（第 ${percent}%）`);
+              }
             }
           }
 
@@ -100,8 +106,10 @@ export const useFoliateViewer = (bookId: string, bookDoc: BookDoc, config: BookC
       });
 
       manager.setViewSettingsCallback((updatedSettings: ViewSettings) => {
+        // 读最新设置而非挂载时的 settings 快照：挂载后用户改过设置时，旧快照回写会覆盖新值（陈旧闭包）
+        const { settings: currentSettings } = useAppSettingsStore.getState();
         setSettings({
-          ...settings,
+          ...currentSettings,
           globalViewSettings: updatedSettings,
         });
       });
@@ -157,11 +165,18 @@ export const useFoliateViewer = (bookId: string, bookDoc: BookDoc, config: BookC
   useEffect(() => {
     const view = managerRef.current?.getView();
     if (view?.renderer && isInitialized.current) {
-      if (settings.globalViewSettings.scrolled) {
-        view.renderer.setAttribute("flow", "scrolled");
-      }
+      // 双向校正：陈旧链路曾把分页冲回 scrolled，这里以 store 为准强制还原
+      view.renderer.setAttribute("flow", settings.globalViewSettings.scrolled ? "scrolled" : "paginated");
     }
   }, [insets.top, insets.right, insets.bottom, insets.left, settings.globalViewSettings]);
+
+  // 设置面板变更时同步 manager 的 config 快照与 StyleManager：
+  // 否则章节加载/resize 会用陈旧快照回写 store，把分页选择冲回滚动模式
+  useEffect(() => {
+    if (isInitialized.current) {
+      managerRef.current?.syncGlobalViewSettings(settings.globalViewSettings);
+    }
+  }, [settings.globalViewSettings]);
 
   const { handlePageFlip, handleContinuousScroll } = usePagination(
     bookId,

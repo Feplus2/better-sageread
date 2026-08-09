@@ -16,7 +16,7 @@ function TabTypeIcon({ tab, className }: { tab: Tab; className: string }) {
  * - 标签列表可滚动、可拖拽排序、中键关闭，按类型分组（书籍在前、论文在后）
  */
 export default function VerticalTabBar() {
-  const { tabs, activeTabId, activateTab, removeTab, reorderTab } = useLayoutStore();
+  const { tabs, activeTabId, activateTab, removeTab, reorderTab, sleptTabIds } = useLayoutStore();
 
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
@@ -70,7 +70,7 @@ export default function VerticalTabBar() {
               tab.id === activeTabId
                 ? "bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100"
                 : "text-neutral-500 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-700"
-            } ${dragTabId === tab.id ? "opacity-50" : ""}`}
+            } ${dragTabId === tab.id ? "opacity-50" : sleptTabIds.includes(tab.id) ? "opacity-40" : ""}`}
             onClick={() => activateTab(tab.id)}
           >
             <TabTypeIcon tab={tab} className="size-4" />
@@ -109,7 +109,7 @@ export default function VerticalTabBar() {
                   tab.id === activeTabId
                     ? "bg-neutral-200 font-medium text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100"
                     : "text-neutral-600 hover:bg-neutral-200/70 dark:text-neutral-400 dark:hover:bg-neutral-700/60"
-                } ${dragTabId === tab.id ? "opacity-50" : ""}`}
+                } ${dragTabId === tab.id ? "opacity-50" : sleptTabIds.includes(tab.id) ? "opacity-40" : ""}`}
                 onClick={() => activateTab(tab.id)}
               >
                 <TabTypeIcon tab={tab} className="size-4 shrink-0" />
@@ -145,7 +145,7 @@ export default function VerticalTabBar() {
     >
       {/* 窄条（常驻，占位 48px） */}
       <div
-        className="flex h-full w-12 flex-col items-center border-neutral-200 bg-muted py-2 dark:border-neutral-700 dark:bg-tab-background"
+        className="flex h-full w-12 flex-col items-center border-neutral-200 bg-tab-background py-2 dark:border-neutral-700"
         style={{ borderRightWidth: 1 }}
       >
         <div className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
@@ -156,7 +156,7 @@ export default function VerticalTabBar() {
 
       {/* 详细信息浮层（absolute，不推挤布局；隐藏时 pointer-events-none 不挡交互） */}
       <div
-        className={`absolute top-0 left-0 z-40 h-full w-[220px] border-neutral-200 bg-muted shadow-around transition-all duration-150 dark:border-neutral-700 dark:bg-tab-background ${
+        className={`absolute top-0 left-0 z-40 h-full w-[220px] border-neutral-200 bg-tab-background shadow-around transition-all duration-150 dark:border-neutral-700 ${
           hovered ? "pointer-events-auto translate-x-0 opacity-100" : "-translate-x-1 pointer-events-none opacity-0"
         }`}
         style={{ borderRightWidth: 1 }}

@@ -68,7 +68,7 @@
   bottom: 6px;
   right: -10px;
   width: 1px;
-  background: #d1d5db;
+  background: var(--color-neutral-300, #d1d5db);
   opacity: 1;
   transition: opacity 0.2s ease;
   z-index: 10;
@@ -88,7 +88,7 @@
 }
 .chrome-tabs .chrome-tab[active] {
   z-index: 5;
-  background: #ffffff;
+  background: var(--tab-active, #ffffff);
   border-radius: 8px;
   border: 1px solid var(--color-neutral-300);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -102,7 +102,7 @@
 @media (hover: hover) {
   .chrome-tabs .chrome-tab:not([active]):hover {
     z-index: 2;
-    background: #ffffff;
+    background: var(--tab-active, #ffffff);
     border-radius: 8px;
     border: 1px solid var(--color-neutral-300);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -160,7 +160,7 @@
   overflow: hidden;
   white-space: nowrap;
   margin-left: 0;
-  color: #141414;
+  color: var(--tab-active-foreground, #141414);
   font-size: 13px;
   font-weight: 500;
   -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 calc(100% - 24px), transparent);
@@ -179,7 +179,7 @@
   display: none;
 }
 .chrome-tabs .chrome-tab[active] .chrome-tab-title {
-  color: #262626;
+  color: var(--tab-active-foreground, #262626);
 }
 .chrome-tabs .chrome-tab .chrome-tab-drag-handle {
   position: absolute;
@@ -204,16 +204,16 @@
   transition: opacity 0.2s ease;
   pointer-events: auto;
   z-index: 1;
-  background: linear-gradient(to right, transparent 0%, #f3f3ef 30%, #f3f3ef 100%);
+  background: linear-gradient(to right, transparent 0%, var(--tab-background, #f3f3ef) 30%, var(--tab-background, #f3f3ef) 100%);
 }
 
 .chrome-tabs .chrome-tab[active] .chrome-tab-close {
-  background: linear-gradient(to right, transparent 0%, #ffffff 30%, #ffffff 100%);
+  background: linear-gradient(to right, transparent 0%, var(--tab-active, #ffffff) 30%, var(--tab-active, #ffffff) 100%);
 }
 
 @media (hover: hover) {
   .chrome-tabs .chrome-tab:not([active]):hover .chrome-tab-close {
-    background: linear-gradient(to right, transparent 0%, #ffffff 30%, #ffffff 100%);
+    background: linear-gradient(to right, transparent 0%, var(--tab-active, #ffffff) 30%, var(--tab-active, #ffffff) 100%);
   }
 }
 .chrome-tabs .chrome-tab .chrome-tab-close::before {

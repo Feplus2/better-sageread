@@ -33,6 +33,7 @@ interface ThemeState {
   setThemeColor: (color: string) => void;
   setGlobalTheme: (name: string | null) => Promise<void>;
   refreshGlobalThemes: () => Promise<void>;
+  reloadGlobalThemes: () => Promise<void>;
   setReaderBackground: (bg: ReaderBackground | null) => void;
   setAutoScroll: (enabled: boolean) => void;
   setSwapSidebars: (enabled: boolean) => void;
@@ -177,7 +178,13 @@ export const useThemeStore = create<ThemeState>((set, get) => {
     refreshGlobalThemes: async () => {
       const themes = await listGlobalThemes();
       set({ availableGlobalThemes: themes });
-      // 重扫列表后重新注入当前主题，让刷新按钮能加载 CSS 文件的最新内容
+      // 仅扫描列表，不重新注入当前主题：重注入会触发全局重渲染，
+      // 打开设置页等高频场景不应承担此成本（卡顿修复 2026-08-07）；
+      // 需要加载 CSS 文件最新内容时用 reloadGlobalThemes（刷新按钮专用）
+    },
+
+    reloadGlobalThemes: async () => {
+      await get().refreshGlobalThemes();
       const current = get().globalTheme;
       if (current) {
         await get().setGlobalTheme(current);
@@ -207,8 +214,10 @@ export const useThemeStore = create<ThemeState>((set, get) => {
       set({ globalTheme: name });
 
       if (!name) {
-        // 选"默认"：移除注入的 <style>，恢复默认外观
+        // 选"默认"：移除注入的 <style>，恢复默认外观；
+        // 重建 themeCode（--bg-video 消失后阅读区应回落不透明纯色）
         injectGlobalThemeCss(null);
+        set({ themeCode: getThemeCode() });
         return;
       }
 
@@ -225,11 +234,16 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         }
         set({ globalTheme: null });
         injectGlobalThemeCss(null);
+        set({ themeCode: getThemeCode() });
         return;
       }
 
       const css = await loadGlobalThemeCss(entry);
       injectGlobalThemeCss(css);
+      // CSS 注入后必须重建 themeCode：怜烟等视频壁纸主题的 --bg-video 判定
+      // 依赖注入后的 computed style，否则首进/刷新时阅读区会停留在旧的不透明纯色，
+      // 要等用户手动切换阅读背景才会纠正（见 reader-layout 启动时异步注入时序）
+      set({ themeCode: getThemeCode() });
     },
 
     setAutoScroll: (enabled) => {

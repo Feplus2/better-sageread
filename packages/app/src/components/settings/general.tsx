@@ -27,9 +27,10 @@ export default function GeneralSettings() {
   const [appVersion, setAppVersion] = useState("0.1.0");
 
   const { themeMode, autoScroll, swapSidebars, setThemeMode, setAutoScroll, setSwapSidebars } = useThemeStore();
-  const { globalTheme, availableGlobalThemes, setGlobalTheme, refreshGlobalThemes } = useThemeStore();
+  const { globalTheme, availableGlobalThemes, setGlobalTheme, refreshGlobalThemes, reloadGlobalThemes } =
+    useThemeStore();
 
-  // 进入设置页时扫描一次主题列表（内置 + 用户主题文件夹）
+  // 进入设置页时扫描一次主题列表（内置 + 用户主题文件夹；仅扫描不重注入，避免全局重渲染）
   useEffect(() => {
     refreshGlobalThemes();
   }, [refreshGlobalThemes]);
@@ -60,7 +61,7 @@ export default function GeneralSettings() {
   };
 
   const handleRefreshThemes = async () => {
-    await refreshGlobalThemes();
+    await reloadGlobalThemes();
     toast.success("主题列表已刷新");
   };
 
@@ -236,12 +237,7 @@ export default function GeneralSettings() {
               </DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="size-8 p-0"
-                    onClick={handleOpenThemesFolder}
-                  >
+                  <Button size="sm" variant="outline" className="size-8 p-0" onClick={handleOpenThemesFolder}>
                     <FolderOpen className="size-4" />
                   </Button>
                 </TooltipTrigger>
@@ -249,12 +245,7 @@ export default function GeneralSettings() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="size-8 p-0"
-                    onClick={handleRefreshThemes}
-                  >
+                  <Button size="sm" variant="outline" className="size-8 p-0" onClick={handleRefreshThemes}>
                     <RefreshCw className="size-4" />
                   </Button>
                 </TooltipTrigger>

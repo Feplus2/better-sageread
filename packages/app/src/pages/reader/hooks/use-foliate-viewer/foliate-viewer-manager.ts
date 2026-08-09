@@ -1,5 +1,6 @@
 import { type BookDoc, getDirection } from "@/lib/document";
 import { transformContent } from "@/services/transform-service";
+import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { BookConfig } from "@/types/book";
 import type { ViewSettings } from "@/types/book";
 import { type FoliateView, wrappedFoliateView } from "@/types/view";
@@ -167,7 +168,10 @@ export class FoliateViewerManager {
     if (!doc) return;
 
     const writingDir = this.view?.renderer.setStyles && getDirection(doc);
-    const { bookDoc, globalViewSettings } = this.config;
+    const { bookDoc } = this.config;
+    // 读最新全局设置而非 config 快照：快照停留在开书时刻，若用户在设置面板改过
+    // 滚动/分页等，用快照回写 store 会把用户选择冲掉（分页跨章节回落滚动模式的根因）
+    const globalViewSettings = useAppSettingsStore.getState().settings.globalViewSettings;
 
     // Update view settings based on document
     const updatedSettings = {
@@ -343,6 +347,15 @@ export class FoliateViewerManager {
   }
 
   // Public API methods
+  /** 设置面板变更全局视图设置时同步 config 快照与 StyleManager，
+   * 防止章节加载/resize 等后续链路用陈旧快照回写 store 或重算布局 */
+  syncGlobalViewSettings(settings: ViewSettings): void {
+    this.config.globalViewSettings = settings;
+    if (this.styleManager) {
+      this.styleManager.updateSettings(settings);
+    }
+  }
+
   updateViewSettings(settings: Partial<ViewSettings>): void {
     if (this.styleManager) {
       this.styleManager.updateSettings(settings);
