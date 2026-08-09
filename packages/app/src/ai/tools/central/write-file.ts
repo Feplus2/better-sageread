@@ -1,3 +1,4 @@
+import { SECRET_WRITE_REJECTION, containsSecret, isMemoryFile } from "@/ai/utils/secret-patterns";
 /**
  * 全局助手工具：写入本地文件（Agent 工作区，P1）
  * 界外写入的 allowOutside 由 transport 的 tool-guard 在确认卡通过后注入，不在 inputSchema 暴露。
@@ -41,6 +42,16 @@ export const writeFileTool = tool({
     rootOverride,
   }: { reasoning: string; path: string; content: string; allowOutside?: boolean; rootOverride?: string | null }) => {
     try {
+      // S2 安全：向 memory.md 写入含密钥模式的内容直接拒绝
+      if (isMemoryFile(path)) {
+        const hit = containsSecret(content);
+        if (hit) {
+          return {
+            results: { success: false, message: SECRET_WRITE_REJECTION(hit) },
+            meta: { reasoning, path },
+          };
+        }
+      }
       const root = rootOverride !== undefined ? rootOverride : useAgentSettingsStore.getState().workspaceRoot;
       const res = await invoke<WriteFileResponse>("agent_write_file", {
         root,

@@ -10,6 +10,7 @@ import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessageToMarkdown } from "@/lib/export-thread-markdown";
 import { cn } from "@/lib/utils";
 import { audioPlayerManager, synthesizeSpeechChunked } from "@/services/tts-service";
+import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { useThreadStore } from "@/store/thread-store";
 import { useTTSStore } from "@/store/tts-store";
 import { getReasoningTimes } from "@/types/message";
@@ -27,7 +28,7 @@ import {
   RefreshCw,
   Volume2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { ChatSelectionPopup } from "./chat-selection-popup";
@@ -63,6 +64,24 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   runCommand: "执行命令",
   searchFiles: "搜索文件",
 };
+
+/** P3 聊天消息尾部窗口（性能优化，2026-08-08；2026-08-09 收窄+视口填充）：
+ * 初始只渲染最近 6 条（长消息时可视区连一条都放不下，原 30 条纯浪费）；
+ * 短消息填不满可视区时自动续加直到填满（视口填充 effect），上滑渐进加载依旧。
+ * 仅裁渲染层，messages 数据层全量保留（AI 上下文/导出不受影响） */
+const INITIAL_WINDOW = 6;
+const EXPAND_STEP = 6;
+
+/** 向上找最近的可滚动祖先（全局聊天与书籍侧栏各自有自己的滚动容器） */
+function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+  let cur = el?.parentElement ?? null;
+  while (cur) {
+    const { overflowY } = getComputedStyle(cur);
+    if ((overflowY === "auto" || overflowY === "scroll") && cur.scrollHeight > cur.clientHeight) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
 
 interface ChatMessagesProps {
   messages: any[];
@@ -102,6 +121,74 @@ export function reorderTextAndReasoning(message: UIMessage): UIMessage {
   return { ...message, parts: reordered };
 }
 
+// ---- 渲染单元 memo 化（卡顿修复 2026-08-07）----
+// 流式更新每 50ms 触发一次全列表重渲染；历史消息的文本与 tool part 对象引用不变，
+// memo 命中即跳过最贵的 react-markdown 全量重解析与 Tool 子树重建，只重渲最后一条消息。
+const MemoizedMarkdownContent = memo(
+  function MemoizedMarkdownContent({
+    text,
+    className,
+    markdown,
+  }: {
+    text: string;
+    className: string;
+    markdown: boolean;
+  }) {
+    return (
+      <MessageContent className={className} markdown={markdown}>
+        {text}
+      </MessageContent>
+    );
+  },
+  (prev, next) => prev.text === next.text && prev.className === next.className && prev.markdown === next.markdown,
+);
+
+const MemoizedReasoningContent = memo(
+  function MemoizedReasoningContent({ text }: { text: string }) {
+    return (
+      <ReasoningContent className="ml-2 border-l-2 border-l-neutral-300 px-2 pl-4 dark:border-l-neutral-600" markdown>
+        {text}
+      </ReasoningContent>
+    );
+  },
+  (prev, next) => prev.text === next.text,
+);
+
+const MemoizedTool = memo(
+  function MemoizedTool({
+    part,
+    toolName,
+    onViewDetail,
+    isChatPage,
+  }: {
+    part: any;
+    toolName: string;
+    onViewDetail?: (toolPart: any) => void;
+    isChatPage: boolean;
+  }) {
+    return (
+      <Tool
+        className="w-full"
+        toolPart={{
+          type: toolName,
+          state: part.state ?? "output-available",
+          input: part.input,
+          output: part.output,
+          toolCallId: part.toolCallId,
+          errorText: part.errorText,
+        }}
+        onViewDetail={onViewDetail}
+        isChatPage={isChatPage}
+      />
+    );
+  },
+  (prev, next) =>
+    prev.part === next.part &&
+    prev.toolName === next.toolName &&
+    prev.onViewDetail === next.onViewDetail &&
+    prev.isChatPage === next.isChatPage,
+);
+
 export function ChatMessages({
   messages,
   status,
@@ -118,6 +205,8 @@ export function ChatMessages({
 }: ChatMessagesProps) {
   const { scrollToBottom } = useStickToBottomContext();
   const isChatPage = useIsChatPage();
+  // H3：宽版聊天布局（放宽消息列 max-w 约束）
+  const wideChatLayout = useChatSettingsStore((s) => s.wideChatLayout);
   const lastMessage = reorderTextAndReasoning(messages[messages.length - 1]);
   const reasoningPart = lastMessage?.parts?.findLast((part: UIMessagePart<any, any>) => part.type === "reasoning");
   const isStreaming = status === "streaming";
@@ -136,6 +225,57 @@ export function ChatMessages({
 
   const hasInitialScrolled = useRef(false);
   const prevScrollKey = useRef(scrollKey);
+
+  // ─── P3 尾部窗口：默认只渲染最近 N 条，上滑渐进加载（切换对话重置；多选模式全量渲染）───
+  const [visibleCount, setVisibleCount] = useState(INITIAL_WINDOW);
+  const firstMessageId = messages[0]?.id;
+  const prevFirstIdRef = useRef(firstMessageId);
+  useEffect(() => {
+    if (prevFirstIdRef.current !== firstMessageId) {
+      prevFirstIdRef.current = firstMessageId;
+      setVisibleCount(INITIAL_WINDOW);
+    }
+  }, [firstMessageId]);
+
+  const windowActive = !selectionMode && messages.length > visibleCount;
+  const windowStartIndex = windowActive ? messages.length - visibleCount : 0;
+  const visibleMessages = windowActive ? messages.slice(windowStartIndex) : messages;
+
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const expandAdjustRef = useRef<{ scroller: HTMLElement; prevHeight: number } | null>(null);
+
+  const expandWindow = useCallback(() => {
+    const scroller = findScrollableAncestor(loadMoreRef.current);
+    if (scroller) expandAdjustRef.current = { scroller, prevHeight: scroller.scrollHeight };
+    setVisibleCount((c) => Math.min(messages.length, c + EXPAND_STEP));
+  }, [messages.length]);
+
+  // 扩展后用新增高度差补偿 scrollTop，保持视口内容不跳
+  // biome-ignore lint/correctness/useExhaustiveDependencies: visibleCount 是刻意的触发依赖（effect 体只读 ref），等扩展渲染提交后再补偿
+  useLayoutEffect(() => {
+    const st = expandAdjustRef.current;
+    if (!st) return;
+    expandAdjustRef.current = null;
+    const delta = st.scroller.scrollHeight - st.prevHeight;
+    if (delta > 0) st.scroller.scrollTop += delta;
+  }, [visibleCount]);
+
+  // 上滑接近占位行（提前 200px）自动扩展；短消息填不满视口时占位行本就可见，
+  // 观察器会连续触发扩展直至全量渲染（原"视口填充 effect"因 findScrollableAncestor
+  // 要求容器已溢出才返回，在短消息场景恒为死代码，已移除）
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !windowActive) return;
+    const root = findScrollableAncestor(el);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) expandWindow();
+      },
+      { root, rootMargin: "200px 0px 0px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [windowActive, expandWindow]);
 
   const getFilteredTextFromDOM = (messageId: string): string => {
     const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -279,9 +419,7 @@ export function ChatMessages({
 
       elements.push(
         <div key={`text-${elements.length}`} className="min-w-0" onMouseUp={handleTextSelection}>
-          <MessageContent className={className} markdown={isAssistant}>
-            {textBuffer}
-          </MessageContent>
+          <MemoizedMarkdownContent text={textBuffer} className={className} markdown={isAssistant} />
         </div>,
       );
       textBuffer = "";
@@ -317,6 +455,24 @@ export function ChatMessages({
         continue;
       }
 
+      // J2：图片附件（file part，base64 dataUrl 随消息落库；纯文本模型请求时已在 transport 剔除）
+      if (type === "file") {
+        flushText();
+        const url = (part as any).url;
+        const mediaType = (part as any).mediaType ?? "";
+        if (typeof url === "string" && mediaType.startsWith("image/")) {
+          elements.push(
+            <img
+              key={`file-${i}`}
+              src={url}
+              alt={(part as any).filename ?? "图片"}
+              className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
+            />,
+          );
+        }
+        continue;
+      }
+
       if (type === "reasoning") {
         flushText();
         const isCurrentlyStreaming = reasoningStreaming && i === lastReasoningIndex;
@@ -340,12 +496,7 @@ export function ChatMessages({
                 )}
               </div>
             </ReasoningTrigger>
-            <ReasoningContent
-              className="ml-2 border-l-2 border-l-neutral-300 px-2 pl-4 dark:border-l-neutral-600"
-              markdown
-            >
-              {part.text || ""}
-            </ReasoningContent>
+            <MemoizedReasoningContent text={part.text || ""} />
           </Reasoning>,
         );
         continue;
@@ -356,17 +507,10 @@ export function ChatMessages({
         const toolType = type.replace(/^tool-/, "");
         const toolName = TOOL_NAME_MAP[toolType] || toolType;
         elements.push(
-          <Tool
+          <MemoizedTool
             key={`tool-${i}`}
-            className="w-full"
-            toolPart={{
-              type: toolName,
-              state: part.state ?? "output-available",
-              input: part.input,
-              output: part.output,
-              toolCallId: part.toolCallId,
-              errorText: part.errorText,
-            }}
+            part={part}
+            toolName={toolName}
             onViewDetail={onViewToolDetail}
             isChatPage={isChatPage}
           />,
@@ -388,19 +532,45 @@ export function ChatMessages({
 
   return (
     <ChatContainerContent className="select-auto py-6 first:mt-0">
-      {messages.map((message, index) => {
+      {windowActive && (
+        <div
+          ref={loadMoreRef}
+          className={cn("mx-auto w-full", wideChatLayout ? "max-w-5xl" : "max-w-3xl", isChatPage ? "px-4" : "px-2")}
+        >
+          <button
+            type="button"
+            onClick={expandWindow}
+            className="w-full rounded-lg border border-neutral-300 border-dashed py-1.5 text-neutral-500 text-xs hover:bg-muted dark:border-neutral-700 dark:text-neutral-400"
+          >
+            还有 {windowStartIndex} 条更早的消息，点击或上滑加载
+          </button>
+        </div>
+      )}
+      {visibleMessages.map((message, localIndex) => {
+        const index = windowStartIndex + localIndex;
         const isAssistant = message.role === "assistant";
         const isLastMessage = index === messages.length - 1;
         const isFirstMessage = index === 0;
         const isStreaming = status === "streaming";
         const showError = !!errorMessage && isLastMessage;
-        const canShowRetry = showError && !!onRetry;
+        // H1：中断标记（用户停止/异常中断后落库的 assistant 消息）→ 显示「继续生成」
+        const interruptedMark =
+          isAssistant &&
+          isLastMessage &&
+          !isStreaming &&
+          !!((message.metadata as { interrupted?: boolean } | undefined)?.interrupted ?? false);
+        const canShowRetry = (showError || interruptedMark) && !!onRetry;
         const reorderedMessage = reorderTextAndReasoning(message);
 
         return (
           <Message
             key={message.id}
-            className={cn("mx-auto flex w-full max-w-3xl flex-col items-start gap-2", isChatPage ? "px-4" : "px-2")}
+            className={cn(
+              "mx-auto flex w-full flex-col items-start gap-2",
+              // 宽版（仅全局助手提供开关）：去掉宽度上限，自适应版面宽度，与输入区同口径
+              wideChatLayout ? "max-w-none" : "max-w-3xl",
+              isChatPage ? "px-4" : "px-2",
+            )}
           >
             <div
               className={cn("w-full", selectionMode && "flex cursor-pointer items-start gap-2")}
@@ -425,8 +595,9 @@ export function ChatMessages({
                     {((!isStreaming && isLastMessage) || !isLastMessage) && !selectionMode && (
                       <div className="flex items-center justify-between">
                         <MessageActions className="-ml-2.5 flex transform-gpu gap-0">
-                          {canShowRetry && (
-                            <MessageAction tooltip="刷新重试" delayDuration={100}>
+                          {/* 重新生成：末条 assistant 恒存在（不依赖错误/中断；用户 2026-08-08 拍板） */}
+                          {isLastMessage && !!onRetry && (
+                            <MessageAction tooltip="重新生成" delayDuration={100}>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -540,6 +711,11 @@ export function ChatMessages({
                     {showError && (
                       <div className="mt-2 w-full rounded-lg border border-red-200 bg-red-50 p-3 text-red-800 text-xs dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
                         错误: {errorMessage}
+                      </div>
+                    )}
+                    {interruptedMark && !showError && (
+                      <div className="mt-1 w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                        回复已中断
                       </div>
                     )}
                   </div>

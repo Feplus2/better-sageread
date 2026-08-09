@@ -23,30 +23,66 @@ export function stripUnknownToolParts(messages: UIMessage[], tools: Record<strin
     .filter((message) => !Array.isArray(message.parts) || message.parts.length > 0);
 }
 
+/**
+ * 转换前 parts 合法化（2026-08-07 修复 Invalid prompt 报错）：
+ * 用户中途停止/异常中断会留下 text 为 undefined 的 reasoning/text part，
+ * convertToModelMessages 原样透传后 zod 按 text:z.string() 校验失败，
+ * 抛 "The messages must be a ModelMessage[]"；这里归一为空串。
+ */
+export function sanitizeMessageParts(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (!Array.isArray(message.parts)) return message;
+    const parts = message.parts
+      .filter((part: any) => part != null && typeof part.type === "string")
+      .map((part: any) => {
+        if ((part.type === "reasoning" || part.type === "text") && typeof part.text !== "string") {
+          return { ...part, text: part.text == null ? "" : String(part.text) };
+        }
+        return part;
+      });
+    return { ...message, parts } as UIMessage;
+  });
+}
+
 export function processQuoteMessages(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {
-    if (message.role === "user" && Array.isArray(message.parts)) {
-      const quoteParts = message.parts.filter((part: any) => part.type === "quote");
-      const textParts = message.parts.filter((part: any) => part.type === "text");
+    if (message.role !== "user" || !Array.isArray(message.parts)) return message;
+    if (!(message.parts as any[]).some((part: any) => part.type === "quote")) return message;
 
-      if (quoteParts.length > 0) {
-        const quotesText = quoteParts
-          .map((part: any, index: number) => {
-            const normalized = part.text.replace(/\s+$/g, "");
-            const quoted = normalized.replace(/\n/g, "\n> ");
-            return `${part.source || `引用${index + 1}`}：\n> ${quoted}`;
-          })
-          .join("\n\n");
-
-        const userText = textParts.map((part: any) => part.text).join("");
-        const combinedText = `${quotesText}\n\n${userText}`.trim();
-
-        return {
-          ...message,
-          parts: [{ type: "text", text: combinedText } as any],
-        } as UIMessage;
+    // K2：严格按 parts 原有顺序拼装，保留用户把引用插在正文任意位置的指代关系
+    //（旧版把全部引用堆在正文最前，多条引用时指代不清）
+    const segments: string[] = [];
+    let quoteIndex = 0;
+    for (const part of message.parts as any[]) {
+      if (part.type === "quote") {
+        quoteIndex += 1;
+        const normalized = String(part.text ?? "").replace(/\s+$/g, "");
+        const quoted = normalized.replace(/\n/g, "\n> ");
+        segments.push(`${part.source || `引用${quoteIndex}`}：\n> ${quoted}`);
+      } else if (part.type === "text" && part.text) {
+        segments.push(part.text);
       }
     }
-    return message;
+
+    return {
+      ...message,
+      parts: [{ type: "text", text: segments.join("\n\n").trim() } as any],
+    } as UIMessage;
   });
+}
+
+/**
+ * J2：剔除所有消息里的 file part（图片等）。
+ * 当前模型不支持多模态时在 transport 转换前调用：历史轮次的图片一并跳过，
+ * 纯文本模型只是"看不到图"，绝不因图片内容报 API 错误。
+ */
+export function stripFileParts(messages: UIMessage[]): UIMessage[] {
+  return messages
+    .map((message) => {
+      if (!Array.isArray(message.parts)) return message;
+      if (!(message.parts as any[]).some((part: any) => part.type === "file")) return message;
+      const parts = (message.parts as any[]).filter((part: any) => part.type !== "file");
+      return { ...message, parts } as UIMessage;
+    })
+    .filter((message) => !Array.isArray(message.parts) || message.parts.length > 0);
 }

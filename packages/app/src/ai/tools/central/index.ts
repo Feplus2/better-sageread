@@ -3,6 +3,7 @@
  */
 export { convertPdfTool } from "./convert-pdf";
 export { importBookTool } from "./import-book";
+export { importPaperTool } from "./import-paper";
 export { manageBookTool } from "./manage-book";
 export { managePreferencesTool } from "./manage-preferences";
 export { manageSyncTool } from "./manage-sync";
@@ -23,4 +24,7 @@ export { editFileTool } from "./edit-file";
 export { runCommandTool } from "./run-command";
 export { searchFilesTool } from "./search-files";
 export { manageSkillTool } from "./manage-skill";
+export { manageSecretsTool } from "./manage-secrets";
+export { manageMcpTool } from "./manage-mcp";
 export { managePaperFoldersTool } from "./manage-paper-folders";
+export { processPaperTool } from "./process-paper";

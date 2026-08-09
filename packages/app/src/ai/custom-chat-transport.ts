@@ -14,15 +14,21 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
+import { toast } from "sonner";
+import { getMcpToolsForScope } from "./mcp/mcp-manager";
 import { chatReasoningProviderOptions } from "./providers/reasoning-map";
+import { modelSupportsVision } from "./providers/vision-map";
 import { getToolsForScope } from "./tools/registry";
 import {
   loadMemorySection,
   loadWorkspaceSection,
   processQuoteMessages,
+  sanitizeMessageParts,
   selectMessagesWithinBudget,
+  stripFileParts,
   stripUnknownToolParts,
 } from "./utils";
+import { repairImageDataUrl, sniffImageMediaType } from "./utils/media-sniff";
 import { wrapToolsWithGuard } from "./utils/tool-guard";
 
 export class CustomChatTransport implements ChatTransport<UIMessage> {
@@ -75,8 +81,39 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const activeBookId = chatContext?.activeBookId;
     const agentScope = chatContext?.agentScope ?? "reader";
 
-    const processedMessages = processQuoteMessages(options.messages);
-    // token 预算制选择（256k 预算 + 40 条保底），替代原固定 8 条硬截断
+    const sel = useProviderStore.getState().selectedModel;
+
+    // J2：当前模型不支持多模态时，剔除全部 file part（含历史图片）——
+    // 纯文本模型只是看不到图，绝不因图片内容报 API 错误
+    const visionOk = !sel || modelSupportsVision(sel.providerId, sel.modelId);
+    let messagesForProcess = visionOk ? options.messages : stripFileParts(options.messages);
+
+    // J2 补环：存量 file part 的 mediaType 可能是 text/plain（早期 blob.type 错误落库），
+    // 按 base64 魔数嗅探修正 mediaType 字段与 dataUrl MIME 前缀（部分提供商按 URL 头判类型）
+    if (visionOk) {
+      messagesForProcess = messagesForProcess.map((message) => {
+        if (!Array.isArray(message.parts)) return message;
+        let touched = false;
+        const parts = (message.parts as any[]).map((part: any) => {
+          if (part?.type !== "file" || typeof part.url !== "string") return part;
+          if (
+            typeof part.mediaType === "string" &&
+            part.mediaType.startsWith("image/") &&
+            part.url.startsWith(`data:${part.mediaType}`)
+          ) {
+            return part;
+          }
+          const sniffed = sniffImageMediaType(part.url);
+          if (!sniffed) return part;
+          touched = true;
+          return { ...part, mediaType: sniffed, url: repairImageDataUrl(part.url) };
+        });
+        return touched ? ({ ...message, parts } as typeof message) : message;
+      });
+    }
+
+    const processedMessages = processQuoteMessages(messagesForProcess);
+    // token 双水位活塞：≤点火线(256k)零压缩；超过则泄压到 128k 以内，最近 10 条永不压缩
     const { kept: selectedMessages, dropped } = selectMessagesWithinBudget(processedMessages);
 
     // 超预算裁掉的旧消息：滚动压缩为摘要（按对话持久化到 thread.metadata），注入 system prompt
@@ -93,20 +130,36 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     }
 
     // 根据 Agent 角色动态组装工具集（paper scope 时 activeBookId 即论文 id，paperScopeIds 为检索范围）
-    // P1：包装安全守卫——写/执行/外发类工具按安全模式弹确认卡（界外判定在 Rust 侧）
+    // 批次 B3/D：并入当前 scope 启用的 MCP server 工具（连接失败逐个提示，不阻塞本条消息）
+    const mcp = await getMcpToolsForScope(agentScope);
+    for (const failure of mcp.failures) {
+      toast.warning(`MCP 服务器「${failure.server}」连接失败：${failure.error}，已跳过`);
+    }
+
+    // P1：包装安全守卫——写/执行/外发类工具按安全模式弹确认卡（界外判定在 Rust 侧；mcp_ 前缀工具同样受门控）
     const tools = wrapToolsWithGuard(
-      getToolsForScope(agentScope, {
-        bookId: activeBookId,
-        paperId: activeBookId,
-        paperScopeIds: chatContext?.paperScopeIds,
-      }),
+      {
+        ...getToolsForScope(agentScope, {
+          bookId: activeBookId,
+          paperId: activeBookId,
+          paperScopeIds: chatContext?.paperScopeIds,
+        }),
+        ...mcp.tools,
+      },
       agentScope,
     );
 
-    const convertedMessages = convertToModelMessages(stripUnknownToolParts(selectedMessages, tools), {
-      tools,
-      ignoreIncompleteToolCalls: true,
-    });
+    // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
+    options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });
+
+    // sanitizeMessageParts：中断残留的 undefined text part 归一（否则 convert 后 zod 校验报 Invalid prompt）
+    const convertedMessages = convertToModelMessages(
+      stripUnknownToolParts(sanitizeMessageParts(selectedMessages), tools),
+      {
+        tools,
+        ignoreIncompleteToolCalls: true,
+      },
+    );
 
     const systemPrompt =
       (await buildPrompt(chatContext)) +
@@ -117,7 +170,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     // P3 思考强度档位：AI SDK 原生参数族（openai/google/openrouter/grok）在此下发；
     // DeepSeek/GLM/Qwen/Kimi 等自定义端点由 factory 的动态 fetch 包装打请求体补丁
-    const sel = useProviderStore.getState().selectedModel;
     const reasoningLevel = useChatSettingsStore.getState().reasoningLevel;
     const providerOptions = sel ? chatReasoningProviderOptions(sel.providerId, sel.modelId, reasoningLevel) : undefined;
 
@@ -129,6 +181,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       stopWhen: stepCountIs(20),
       tools,
       system: systemPrompt,
+      onFinish: () => {
+        void mcp.closeAll();
+      },
       ...(providerOptions ? { providerOptions } : {}),
     });
 

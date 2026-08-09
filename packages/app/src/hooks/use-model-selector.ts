@@ -6,6 +6,12 @@ import { useCallback, useEffect, useMemo } from "react";
 export function useModelSelector(defaultProviderId?: string, defaultModelId?: string) {
   const { modelProviders, selectedModel, setSelectedModel } = useProviderStore();
 
+  // 当前选中 provider 的 apiKey（响应式）：keyring 异步载入 key 后 updateProvider 会变更 modelProviders，
+  // 需据此重建模型实例，否则实例会攥住创建时捕获的空 key（401）不放
+  const currentApiKey = selectedModel
+    ? (modelProviders.find((p) => p.provider === selectedModel.providerId)?.apiKey ?? "")
+    : "";
+
   useEffect(() => {
     if (!selectedModel) {
       let initialModel: SelectedModel | null = null;
@@ -48,6 +54,7 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
     }
   }, [selectedModel, modelProviders, defaultProviderId, defaultModelId, setSelectedModel]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentApiKey 是刻意依赖——keyring 异步载入 key 后触发实例重建，修复启动竞态导致的 401
   const currentModelInstance = useMemo(() => {
     if (!selectedModel) return null;
 
@@ -60,7 +67,7 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
       console.error("Failed to create model instance:", error);
       return null;
     }
-  }, [selectedModel]);
+  }, [selectedModel, currentApiKey]);
 
   const handleModelSelect = useCallback(
     (model: SelectedModel) => {

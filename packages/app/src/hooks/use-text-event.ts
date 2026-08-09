@@ -1,4 +1,4 @@
-import type { ExplainTextEventDetail, QuoteToChatEventDetail } from "@/services/iframe-service";
+import type { ExplainTextEventDetail, ImageToChatEventDetail, QuoteToChatEventDetail } from "@/services/iframe-service";
 import { useCallback, useEffect } from "react";
 
 interface UseTextEventHandlerOptions {
@@ -6,11 +6,13 @@ interface UseTextEventHandlerOptions {
   onTextReceived?: (text: string) => void;
   /** "Ask AI"：把选中文本注入输入框引用区（不自动发送） */
   onQuoteReference?: (text: string) => void;
+  /** 阅读区图片引用：以附件注入输入区（不自动发送） */
+  onImageReference?: (image: { dataUrl: string; mediaType: string; name: string }) => void;
   activeBookId?: string;
 }
 
 export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
-  const { sendMessage, onTextReceived, onQuoteReference, activeBookId } = options;
+  const { sendMessage, onTextReceived, onQuoteReference, onImageReference, activeBookId } = options;
 
   const handleTextEvent = useCallback(
     (event: CustomEvent<ExplainTextEventDetail>) => {
@@ -56,6 +58,21 @@ export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
     [onQuoteReference, activeBookId],
   );
 
+  const handleImageToChatEvent = useCallback(
+    (event: CustomEvent<ImageToChatEventDetail>) => {
+      const { dataUrl, mediaType, name, bookId } = event.detail;
+
+      if (bookId && bookId !== activeBookId) {
+        return;
+      }
+
+      if (dataUrl) {
+        onImageReference?.({ dataUrl, mediaType, name });
+      }
+    },
+    [onImageReference, activeBookId],
+  );
+
   useEffect(() => {
     window.addEventListener("explainText", handleTextEvent as EventListener);
 
@@ -71,4 +88,12 @@ export const useTextEventHandler = (options: UseTextEventHandlerOptions) => {
       window.removeEventListener("quoteToChat", handleQuoteToChatEvent as EventListener);
     };
   }, [handleQuoteToChatEvent]);
+
+  useEffect(() => {
+    window.addEventListener("imageToChat", handleImageToChatEvent as EventListener);
+
+    return () => {
+      window.removeEventListener("imageToChat", handleImageToChatEvent as EventListener);
+    };
+  }, [handleImageToChatEvent]);
 };

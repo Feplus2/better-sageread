@@ -1,8 +1,8 @@
+import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
 /**
  * 全局助手工具：下载文件到本地
  */
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
-import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
 

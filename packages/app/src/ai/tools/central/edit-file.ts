@@ -1,3 +1,4 @@
+import { SECRET_WRITE_REJECTION, containsSecret, isMemoryFile } from "@/ai/utils/secret-patterns";
 /**
  * 全局助手工具：精确编辑本地文件（Agent 工作区，P1）
  * 语义对齐 Kimi Code 的 Edit：oldString 精确匹配 + 唯一性校验，失败给可操作提示。
@@ -54,6 +55,16 @@ export const editFileTool = tool({
     rootOverride?: string | null;
   }) => {
     try {
+      // S2 安全：向 memory.md 写入含密钥模式的内容直接拒绝
+      if (isMemoryFile(path)) {
+        const hit = containsSecret(newString);
+        if (hit) {
+          return {
+            results: { success: false, message: SECRET_WRITE_REJECTION(hit) },
+            meta: { reasoning, path },
+          };
+        }
+      }
       const root = rootOverride !== undefined ? rootOverride : useAgentSettingsStore.getState().workspaceRoot;
       const res = await invoke<EditFileResponse>("agent_edit_file", {
         root,

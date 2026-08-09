@@ -22,6 +22,39 @@ const RUN_MAX_TIMEOUT_SECS: u64 = 600;
 const RUN_MAX_OUTPUT_CHARS: usize = 20_000;
 /// 遍历时跳过的目录名（工作区可能指向用户项目夹）
 const SKIP_DIRS: [&str; 3] = [".git", "node_modules", "__pycache__"];
+/// 敏感路径 denylist（A4，全模式生效，不可被 allow_outside 覆盖）：命中即拒读
+const DENY_EXACT_NAMES: [&str; 5] = [
+    "model-provider.json",
+    "llama-store.json",
+    "converter-store.json",
+    "mcp-servers.json",
+    "webdav-config.json",
+];
+
+/// 敏感路径判定：凭据类 JSON / 证书私钥 / .env（纵深防御，迁移后这些 JSON 已无 key 仍保留）
+fn is_denied_path(resolved: &str) -> bool {
+    let path = Path::new(resolved);
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let lower = file_name.to_ascii_lowercase();
+    if DENY_EXACT_NAMES.contains(&lower.as_str()) {
+        return true;
+    }
+    if lower.ends_with(".pem") || lower.ends_with(".key") {
+        return true;
+    }
+    if lower == "id_rsa" || lower.starts_with("id_rsa.") {
+        return true;
+    }
+    if lower == ".env" || lower.starts_with(".env.") {
+        return true;
+    }
+    false
+}
+
+const DENY_MESSAGE: &str = "该文件可能包含凭据，已由安全策略拦截";
 
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -61,9 +94,18 @@ pub fn agent_read_file(
     path: String,
     offset: Option<usize>,
     limit: Option<usize>,
+    allow_outside: Option<bool>,
 ) -> Result<ReadResult, String> {
     let root = resolve_root(&app, &root)?;
     let v = guard(&root, &path);
+    // A4：Rust 侧补界外拦截（默认拒绝；allow_outside 由 tool-guard 按模式注入，不进模型 schema）
+    if v.verdict == "out" && allow_outside != Some(true) {
+        return Err(format!("路径在工作区外且未经用户确认: {}", v.resolved));
+    }
+    // A4：敏感路径 denylist（全模式生效，不可被 allow_outside 覆盖）
+    if is_denied_path(&v.resolved) {
+        return Err(DENY_MESSAGE.to_string());
+    }
     if !v.exists || v.is_dir {
         return Err(format!("文件不存在或是目录: {}", v.resolved));
     }
@@ -211,6 +253,61 @@ pub struct SearchResult {
     pub searched_files: usize,
 }
 
+// ---- agent_list_dir（readLocalFile 的 list 模式；与 read 同套守卫，不用 plugin-fs 避免 scope 拦截） ----
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntryInfo {
+    pub name: String,
+    pub is_directory: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDirResult {
+    pub resolved: String,
+    pub items: Vec<DirEntryInfo>,
+}
+
+#[tauri::command]
+pub fn agent_list_dir(
+    app: AppHandle,
+    root: Option<String>,
+    path: String,
+    allow_outside: Option<bool>,
+) -> Result<ListDirResult, String> {
+    let root = resolve_root(&app, &root)?;
+    let v = guard(&root, &path);
+    if v.verdict == "out" && allow_outside != Some(true) {
+        return Err(format!("路径在工作区外且未经用户确认: {}", v.resolved));
+    }
+    if is_denied_path(&v.resolved) {
+        return Err(DENY_MESSAGE.to_string());
+    }
+    if !v.exists || !v.is_dir {
+        return Err(format!("目录不存在: {}", v.resolved));
+    }
+    let entries = std::fs::read_dir(&v.resolved).map_err(|e| format!("读取目录失败: {e}"))?;
+    let mut items: Vec<DirEntryInfo> = entries
+        .flatten()
+        .map(|entry| DirEntryInfo {
+            name: entry.file_name().to_string_lossy().to_string(),
+            is_directory: entry.file_type().map(|t| t.is_dir()).unwrap_or(false),
+        })
+        .collect();
+    // 目录在前 + 名称排序；截断防巨型目录把模型上下文打爆
+    items.sort_by(|a, b| {
+        b.is_directory
+            .cmp(&a.is_directory)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    items.truncate(500);
+    Ok(ListDirResult {
+        resolved: v.resolved,
+        items,
+    })
+}
+
 fn walk_files(base: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![base.to_path_buf()];
@@ -262,8 +359,13 @@ pub fn agent_search_files(
             let matcher = glob.compile_matcher();
             let mut hits: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
             let files = walk_files(&base);
-            let searched = files.len();
+            let mut searched = 0usize;
             for f in files {
+                // A4：denylist 与 read_file/list_dir 同口径，glob 结果同样不暴露敏感文件
+                if is_denied_path(f.to_string_lossy().as_ref()) {
+                    continue;
+                }
+                searched += 1;
                 let rel = f.strip_prefix(&root).unwrap_or(&f);
                 if matcher.is_match(rel) || matcher.is_match(&f) {
                     let modified = std::fs::metadata(&f).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -289,6 +391,10 @@ pub fn agent_search_files(
             let mut matches = Vec::new();
             let mut searched = 0usize;
             'outer: for f in walk_files(&base) {
+                // A4：denylist 与 read_file/list_dir 同口径，敏感文件内容不进模型上下文
+                if is_denied_path(f.to_string_lossy().as_ref()) {
+                    continue;
+                }
                 let meta = match std::fs::metadata(&f) {
                     Ok(m) => m,
                     Err(_) => continue,
@@ -309,7 +415,9 @@ pub fn agent_search_files(
                 let rel = display_path(&f);
                 for (i, line) in text.lines().enumerate() {
                     if re.is_match(line) {
-                        matches.push(format!("{}:{}:{}", rel, i + 1, truncate_chars(line, 200)));
+                        // A5 同款脱敏：命中行可能带密钥字面量，进模型上下文前先过模式脱敏
+                        let line = crate::core::secrets::redact_secrets(&truncate_chars(line, 200));
+                        matches.push(format!("{}:{}:{}", rel, i + 1, line));
                         if matches.len() >= GREP_MAX_MATCHES {
                             break 'outer;
                         }
@@ -339,7 +447,8 @@ pub struct RunResult {
     pub truncated: bool,
 }
 
-/// 审计日志：{appData}/agent-audit/commands.jsonl，任何模式都写（best-effort，失败仅 warn）
+/// 审计日志：{appData}/agent-audit/commands.jsonl，任何模式都写（best-effort，失败仅 warn）；
+/// A5：写盘前对 command/stdout/stderr 三字段跑密钥模式脱敏
 fn audit_command(app: &AppHandle, root: &Path, command: &str, result: &RunResult) {
     let write = || -> Result<(), String> {
         let dir = app
@@ -351,11 +460,11 @@ fn audit_command(app: &AppHandle, root: &Path, command: &str, result: &RunResult
         let line = serde_json::json!({
             "ts": chrono::Utc::now().to_rfc3339(),
             "root": display_path(root),
-            "command": command,
+            "command": crate::core::secrets::redact_secrets(command),
             "exitCode": result.exit_code,
             "timedOut": result.timed_out,
-            "stdoutPreview": truncate_chars(&result.stdout, 200),
-            "stderrPreview": truncate_chars(&result.stderr, 200),
+            "stdoutPreview": crate::core::secrets::redact_secrets(&truncate_chars(&result.stdout, 200)),
+            "stderrPreview": crate::core::secrets::redact_secrets(&truncate_chars(&result.stderr, 200)),
         });
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()

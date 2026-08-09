@@ -1,4 +1,6 @@
+import { type LibraryKind, filterByKind } from "@/ai/tools/book";
 import { getAllBookNotes } from "@/services/book-note-service";
+import { getBooksWithStatus } from "@/services/book-service";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -13,6 +15,8 @@ interface FormattedAnnotation {
     id: string;
     title: string;
     author: string;
+    /** 条目类型：book=书库书籍, paper=文献库论文（无 format 映射时按 book 处理） */
+    kind?: "book" | "paper";
   } | null;
   /** 划线原文 */
   text: string | null;
@@ -40,7 +44,10 @@ function getTimeRangeDescription(days?: number): string {
 }
 
 export const notesTool = tool({
-  description: `获取用户的标注（划线文本与划线下的想法/评论），支持按时间和书籍筛选。
+  description: `获取用户的标注（划线文本与划线下的想法/评论），支持按时间、条目和类型筛选。
+
+📚 **书籍 vs 论文**：标注可能来自书库书籍或文献库论文；用户说"书的标注"传 kind=book，
+"论文的标注"传 kind=paper，不明确时用默认 all。
 
 🎯 **常见用法**：
 • "总结最近的标注/划线" → days=7
@@ -49,7 +56,7 @@ export const notesTool = tool({
 • "总结《人类简史》相关的标注" → bookTitle="人类简史"
 
 📊 **返回内容**：
-标注列表，包含所属书籍、划线原文、想法评论、颜色/星标/类别、创建时间，适合AI分析和总结`,
+标注列表，包含所属条目（含类型）、划线原文、想法评论、颜色/星标/类别、创建时间，适合AI分析和总结`,
 
   inputSchema: z.object({
     reasoning: z.string().min(1).describe("调用此工具的原因，例如：'用户想总结最近一周的标注'"),
@@ -60,8 +67,12 @@ export const notesTool = tool({
       .max(3650)
       .optional()
       .describe("时间范围：最近几天的标注。7=一周, 30=一个月, 60=两个月, 365=今年。不传则返回所有"),
-    bookId: z.string().min(1).optional().describe("指定书籍ID，精确匹配"),
-    bookTitle: z.string().min(1).optional().describe("按书名搜索，模糊匹配（如'人类'可匹配'人类简史'）"),
+    bookId: z.string().min(1).optional().describe("指定条目 ID，精确匹配"),
+    bookTitle: z.string().min(1).optional().describe("按标题搜索，模糊匹配（如'人类'可匹配'人类简史'）"),
+    kind: z
+      .enum(["book", "paper", "all"])
+      .optional()
+      .describe("标注所属条目类型：book=仅书籍, paper=仅论文, all=全部（默认）"),
     limit: z.number().int().min(1).max(200).default(50).describe("最多返回条数，默认50"),
   }),
 
@@ -70,17 +81,26 @@ export const notesTool = tool({
     days,
     bookId,
     bookTitle,
+    kind,
     limit,
   }: {
     reasoning: string;
     days?: number;
     bookId?: string;
     bookTitle?: string;
+    kind?: LibraryKind;
     limit?: number;
   }) => {
     try {
       // 跨书查询标注（type='annotation'，创建时间倒序）；limit 放宽一倍给后续过滤留余量
       const raw = await getAllBookNotes({ noteType: "annotation", limit: Math.min(200, (limit || 50) * 2) });
+
+      // kind 过滤需要 id→format 映射（标注数据自身不带 format）
+      let formatById: Map<string, string> | null = null;
+      if (kind && kind !== "all") {
+        const books = await getBooksWithStatus({ limit: 500 });
+        formatById = new Map(books.map((b) => [b.id, b.format]));
+      }
 
       const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : null;
       const titleTerm = bookTitle?.toLowerCase().trim() || null;
@@ -90,9 +110,17 @@ export const notesTool = tool({
         if (cutoff && item.createdAt < cutoff) continue;
         if (bookId?.trim() && item.bookId !== bookId.trim()) continue;
         if (titleTerm && !(item.bookTitle ?? "").toLowerCase().includes(titleTerm)) continue;
+        if (formatById && !filterByKind([{ format: formatById.get(item.bookId) ?? null }], kind).length) continue;
         formatted.push({
           id: item.id,
-          bookInfo: item.bookTitle ? { id: item.bookId, title: item.bookTitle, author: item.bookAuthor ?? "" } : null,
+          bookInfo: item.bookTitle
+            ? {
+                id: item.bookId,
+                title: item.bookTitle,
+                author: item.bookAuthor ?? "",
+                kind: formatById?.get(item.bookId) === "MARKDOWN" ? "paper" : "book",
+              }
+            : null,
           text: item.text ?? null,
           note: item.note?.trim() ? item.note.trim() : null,
           color: item.color ?? null,
@@ -109,7 +137,8 @@ export const notesTool = tool({
         summary: {
           total: formatted.length,
           timeRange: getTimeRangeDescription(days),
-          bookFilter: bookTitle || (bookId ? "指定书籍" : null),
+          bookFilter: bookTitle || (bookId ? "指定条目" : null),
+          kind: kind ?? "all",
         },
         meta: {
           reasoning,
@@ -117,7 +146,8 @@ export const notesTool = tool({
             days: days ?? null,
             bookId: bookId ?? null,
             bookTitle: bookTitle ?? null,
-            limit: limit ?? 50,
+            kind: kind ?? "all",
+            limit: limit || 50,
           },
         },
       };

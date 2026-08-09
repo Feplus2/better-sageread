@@ -1,11 +1,11 @@
 /**
  * 全局助手工具：读取本地文件/目录
  * P1 加固：read 模式改走 Rust agent_read_file（行号 + offset/limit 分页 + 8MB 上限），
- * list 模式沿用 plugin-fs；界外读取的确认分档由 transport 的 tool-guard 包装。
+ * list 模式走 Rust agent_list_dir（与 read 同套路径守卫；不用 plugin-fs，其 scope 不含工作区外路径）；
+ * 界外读取的确认分档由 transport 的 tool-guard 包装，allowOutside 必须透传给 Rust（否则 full 模式也会被拦）。
  */
 import { useAgentSettingsStore } from "@/store/agent-settings-store";
 import { invoke } from "@tauri-apps/api/core";
-import { exists, readDir } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -14,6 +14,11 @@ interface AgentReadResponse {
   totalLines: number;
   truncated: boolean;
   content: string;
+}
+
+interface AgentListDirResponse {
+  resolved: string;
+  items: { name: string; isDirectory: boolean }[];
 }
 
 export const readLocalFileTool = tool({
@@ -45,6 +50,7 @@ read：带行号的内容（格式 "行号<TAB>内容"）、总行数、是否�
     offset,
     limit,
     rootOverride,
+    allowOutside,
   }: {
     reasoning: string;
     path: string;
@@ -52,28 +58,23 @@ read：带行号的内容（格式 "行号<TAB>内容"）、总行数、是否�
     offset?: number;
     limit?: number;
     rootOverride?: string | null;
+    allowOutside?: boolean;
   }) => {
     try {
       if (mode === "list") {
-        const pathExists = await exists(path);
-        if (!pathExists) {
-          return {
-            results: { success: false, message: `路径不存在：${path}` },
-            meta: { reasoning, path },
-          };
-        }
-        const entries = await readDir(path);
-        const items = entries.map((e) => ({
-          name: e.name,
-          isDirectory: e.isDirectory,
-        }));
+        const root = rootOverride !== undefined ? rootOverride : useAgentSettingsStore.getState().workspaceRoot;
+        const res = await invoke<AgentListDirResponse>("agent_list_dir", {
+          root,
+          path,
+          allowOutside: allowOutside ?? null,
+        });
         return {
           results: {
             success: true,
-            message: `目录 ${path} 下有 ${items.length} 项`,
-            items,
+            message: `目录 ${res.resolved} 下有 ${res.items.length} 项`,
+            items: res.items,
           },
-          meta: { reasoning, path },
+          meta: { reasoning, path: res.resolved },
         };
       }
 
@@ -84,6 +85,7 @@ read：带行号的内容（格式 "行号<TAB>内容"）、总行数、是否�
         path,
         offset: offset ?? null,
         limit: limit ?? null,
+        allowOutside: allowOutside ?? null,
       });
       return {
         results: {

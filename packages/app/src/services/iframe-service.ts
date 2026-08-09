@@ -25,6 +25,19 @@ export interface QuoteToChatEvent extends CustomEvent<QuoteToChatEventDetail> {
   type: "quoteToChat";
 }
 
+/** J2 补环：阅读区图片引用到 AI 输入区（dataUrl 附件，不自动发送） */
+export interface ImageToChatEventDetail {
+  dataUrl: string;
+  mediaType: string;
+  name: string;
+  timestamp: number;
+  bookId?: string; // 路由到对应的 AI 面板
+}
+
+export interface ImageToChatEvent extends CustomEvent<ImageToChatEventDetail> {
+  type: "imageToChat";
+}
+
 class IframeService {
   private static instance: IframeService;
 
@@ -125,6 +138,32 @@ class IframeService {
 
     // 派发自定义事件（useTextEventHandler 按 bookId 路由到匹配的聊天面板）
     const event = new CustomEvent<QuoteToChatEventDetail>("quoteToChat", {
+      detail: eventDetail,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    window.dispatchEvent(event);
+  }
+
+  /**
+   * 发送图片引用请求：把阅读区图片以附件形式注入当前 AI 会话输入区（不自动发送）
+   * @param image dataUrl/mediaType/name
+   * @param bookId 关联的书籍/论文ID（路由到对应的 AI 面板）
+   */
+  public sendImageReferenceRequest(image: { dataUrl: string; mediaType: string; name: string }, bookId?: string): void {
+    if (!image.dataUrl) {
+      console.warn("⚠️ 尝试发送空图片引用");
+      return;
+    }
+
+    const eventDetail: ImageToChatEventDetail = {
+      ...image,
+      timestamp: Date.now(),
+      bookId,
+    };
+
+    const event = new CustomEvent<ImageToChatEventDetail>("imageToChat", {
       detail: eventDetail,
       bubbles: true,
       cancelable: true,

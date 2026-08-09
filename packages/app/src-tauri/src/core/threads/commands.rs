@@ -121,17 +121,28 @@ pub async fn edit_thread(
 #[tauri::command]
 pub async fn get_latest_thread_by_book_id(
     book_id: Option<String>,
+    scope: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Option<Thread>, String> {
     let db_pool_guard = state.db_pool.lock().await;
     let pool = db_pool_guard.as_ref().ok_or("Database not initialized")?;
 
-    let row_result = sqlx::query(
-        "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE book_id IS ? ORDER BY updated_at DESC LIMIT 1"
-    )
-    .bind(&book_id)
-    .fetch_optional(pool)
-    .await
+    // H2：续接按 scope 过滤——central（global）续接最近的全局对话（钉书线程 book_id 非空也覆盖）；
+    // 阅读/论文（book）只续接本书自己的对话，不会拾取 central 钉到同书的线程（反之亦然）。
+    let row_result = if scope.as_deref() == Some("global") {
+        sqlx::query(
+            "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE scope = 'global' ORDER BY updated_at DESC LIMIT 1"
+        )
+        .fetch_optional(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT id, book_id, metadata, title, messages, starred, scope, created_at, updated_at FROM threads WHERE book_id IS ? AND scope = 'book' ORDER BY updated_at DESC LIMIT 1"
+        )
+        .bind(&book_id)
+        .fetch_optional(pool)
+        .await
+    }
     .map_err(|e| {
         eprintln!("Failed to fetch latest thread by book_id: {}", e);
         e.to_string()

@@ -1,10 +1,15 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { estimateMessageTokens, estimateMessagesTokens } from "./token-estimator";
 
-/** 历史消息 token 预算：现代模型 1M 上下文起步，256k 约占 1/4，给 system prompt 与输出留余量 */
+/** 模型上下文上限参考值（现代模型 1M 起步）：与点火线同值 */
 export const HISTORY_TOKEN_BUDGET = 256_000;
-/** 保底保留的最近消息条数（预算再紧也不低于此，对齐"放宽到 40+ 条"的拍板） */
-export const RECENT_MESSAGE_FLOOR = 40;
+/** 活塞点火线：历史 token 超过此值才触发压缩（避免每轮频繁点火；2026-08-09 用户拍板 256k） */
+export const COMPRESS_HIGH_WATER = 256_000;
+/** 活塞泄压线：点火后从最新向前保留到此值以内，腾出约一半空间后才需下次点火（点火线的 1/2） */
+export const COMPRESS_LOW_WATER = 128_000;
+/** 保底保留的最近消息条数（单位：条，user/assistant 各算一条）：泄压时这些永不压缩，
+ * 保证 Agent 不忘最近邻对话（2026-08-09 由 40 调为 10：40 过多，真正兜底只需最近几轮） */
+export const RECENT_MESSAGE_FLOOR = 10;
 
 export function selectValidMessages(messages: UIMessage[], maxCount = 8): UIMessage[] {
   if (messages.length === 0) return [];
@@ -97,21 +102,24 @@ export interface BudgetSelection {
 }
 
 /**
- * token 预算制的消息选择（替代固定 8 条硬截断）：
- * - 全量估算 ≤ budget：沿用原有清理逻辑全量保留；
- * - 超出：从最新向前累积，budget 内尽量多留，但不少于 floor 条、且至少保留最后一条 user 起；
- * - kept 复用 cleanupAndValidate 保证 user/assistant 交替；dropped 为原始数组前缀。
+ * token 活塞制的消息选择（2026-08-09 由"超预算每轮裁剪"改为双水位活塞，替代固定 8 条硬截断）：
+ * - 全量估算 ≤ 点火线（highWater）：全量保留，零压缩（大部分轮次走这里）；
+ * - 超过点火线：从最新向前累积到泄压线（lowWater）以内，一次性腾出约半窗空间，
+ *   之后要再攒约 highWater-lowWater 才会下次点火——避免每新一条消息就压一次；
+ * - floor 条保底：最近 N 条即使超泄压线也永不压缩（Agent 不忘最近邻对话）；
+ * - kept 复用 cleanupAndValidate 保证 user/assistant 交替；dropped 为原始数组前缀（滚入摘要）。
  */
 export function selectMessagesWithinBudget(
   messages: UIMessage[],
-  options?: { budget?: number; floor?: number },
+  options?: { budget?: number; lowWater?: number; floor?: number },
 ): BudgetSelection {
   if (messages.length === 0) return { kept: [], dropped: [] };
 
   const lastUserIndex = messages.findLastIndex((msg) => msg.role === "user");
   if (lastUserIndex === -1) return { kept: [], dropped: [] };
 
-  const budget = options?.budget ?? HISTORY_TOKEN_BUDGET;
+  const highWater = options?.budget ?? COMPRESS_HIGH_WATER;
+  const lowWater = options?.lowWater ?? COMPRESS_LOW_WATER;
   const floor = options?.floor ?? RECENT_MESSAGE_FLOOR;
 
   const fallback = (): BudgetSelection => ({
@@ -119,24 +127,24 @@ export function selectMessagesWithinBudget(
     dropped: messages.slice(0, lastUserIndex),
   });
 
-  if (estimateMessagesTokens(messages) <= budget) {
+  if (estimateMessagesTokens(messages) <= highWater) {
     const cleaned = cleanupAndValidate(messages);
     return cleaned.length > 0 ? { kept: cleaned, dropped: [] } : fallback();
   }
 
-  // 从最新向前累积 token，找到 budget 能容纳的分割点
+  // 点火：从最新向前累积 token，找到泄压线能容纳的分割点
   let accumulated = 0;
   let budgetSplit = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const tokens = estimateMessageTokens(messages[i]);
-    if (accumulated + tokens > budget) {
+    if (accumulated + tokens > lowWater) {
       budgetSplit = i + 1;
       break;
     }
     accumulated += tokens;
   }
 
-  // 三约束取最宽：budget 容量、floor 保底、必须含最后一条 user
+  // 三约束取最宽：泄压容量、floor 保底、必须含最后一条 user
   let splitAt = Math.min(budgetSplit, Math.max(messages.length - floor, 0), lastUserIndex);
 
   // 对齐到 user 消息（lastUserIndex 本身是 user，最多前进到那里）

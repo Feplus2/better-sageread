@@ -1,10 +1,21 @@
-import type { UIMessage } from "ai";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import type { SelectedModel } from "@/store/provider-store";
+import type { UIMessage } from "ai";
 
 export interface ChatReference {
   id: string;
   text: string;
+  /** K2：内联引用标记序号（输入区插入 ⟦引用N⟧ 占位，提交时按位置展开为 quote part） */
+  markerNum?: number;
+}
+
+/** J2：输入区附带的图片（base64 随消息 file part 落库；⟦图片N⟧ 标记内联定位） */
+export interface ImageAttachment {
+  id: string;
+  markerNum: number;
+  dataUrl: string;
+  mediaType: string;
+  name: string;
 }
 
 /**
@@ -15,18 +26,18 @@ export interface MessageMetadata {
   // Provider information
   provider?: SelectedModel | null;
   selectedModel?: SelectedModel | null;
-  
+
   // Timestamps
   createdAt?: number;
   updatedAt?: number;
-  
+
   // Usage information
   totalUsage?: {
     totalTokens: number;
     promptTokens?: number;
     completionTokens?: number;
   };
-  
+
   // Reasoning timing data
   reasoningTimes?: ReasoningTimes;
 
@@ -37,7 +48,7 @@ export interface MessageMetadata {
 /**
  * Extended UIMessage with typed metadata
  */
-export interface ExtendedUIMessage extends Omit<UIMessage, 'metadata'> {
+export interface ExtendedUIMessage extends Omit<UIMessage, "metadata"> {
   metadata?: MessageMetadata;
 }
 
@@ -68,7 +79,7 @@ export function setReasoningTimes(message: UIMessage, reasoningTimes: ReasoningT
   return {
     ...message,
     metadata: {
-      ...(message?.metadata as MessageMetadata || {}),
+      ...((message?.metadata as MessageMetadata) || {}),
       reasoningTimes,
     },
   };
@@ -80,7 +91,7 @@ export function setReasoningTimes(message: UIMessage, reasoningTimes: ReasoningT
 export function createMessageMetadata(
   provider?: SelectedModel | null,
   reasoningTimes?: ReasoningTimes,
-  totalUsage?: MessageMetadata['totalUsage']
+  totalUsage?: MessageMetadata["totalUsage"],
 ): MessageMetadata {
   return {
     provider,

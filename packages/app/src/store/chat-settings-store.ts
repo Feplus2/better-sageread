@@ -13,6 +13,12 @@ import { createJSONStorage, persist } from "zustand/middleware";
 interface ChatSettingsState {
   reasoningLevel: ReasoningLevel;
   setReasoningLevel: (level: ReasoningLevel) => void;
+  /** H3：宽版聊天布局（放宽消息列/输入区 max-w 约束，全局/书籍/论文三 scope 同生效） */
+  wideChatLayout: boolean;
+  setWideChatLayout: (wide: boolean) => void;
+  /** H3：输入区 textarea 最小高度（px，顶边拖拽手柄可调） */
+  inputHeight: number;
+  setInputHeight: (height: number) => void;
 }
 
 export const useChatSettingsStore = create<ChatSettingsState>()(
@@ -20,11 +26,19 @@ export const useChatSettingsStore = create<ChatSettingsState>()(
     (set) => ({
       reasoningLevel: "medium",
       setReasoningLevel: (reasoningLevel) => set({ reasoningLevel }),
+      wideChatLayout: false,
+      setWideChatLayout: (wideChatLayout) => set({ wideChatLayout }),
+      inputHeight: 60,
+      setInputHeight: (inputHeight) => set({ inputHeight }),
     }),
     {
       name: tauriStorageKey.chatSettings,
       storage: createJSONStorage(() => tauriStorage),
-      partialize: (state) => ({ reasoningLevel: state.reasoningLevel }),
+      partialize: (state) => ({
+        reasoningLevel: state.reasoningLevel,
+        wideChatLayout: state.wideChatLayout,
+        inputHeight: state.inputHeight,
+      }),
     },
   ),
 );

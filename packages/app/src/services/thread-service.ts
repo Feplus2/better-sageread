@@ -107,9 +107,9 @@ export function getThreadContext(thread: Thread): string | undefined {
   }
 }
 
-export async function getLatestThreadBybookId(bookId?: string): Promise<Thread | null> {
+export async function getLatestThreadBybookId(bookId: string | undefined, scope: ThreadScope): Promise<Thread | null> {
   try {
-    const result: RawThread | null = await invoke("get_latest_thread_by_book_id", { bookId: bookId });
+    const result: RawThread | null = await invoke("get_latest_thread_by_book_id", { bookId, scope });
 
     if (result) {
       const thread: Thread = {

@@ -90,10 +90,12 @@ export const managePreferencesTool = tool({
       .string()
       .optional()
       .describe("setTheme：全局主题名称（文件名或显示名，可模糊匹配），传 'default' 恢复默认主题"),
+    // Gemini 兼容：不用 z.union（anyOf 在 Gemini 系端点/中转器上会被拒或捏造成坏 schema），
+    // 统一收敛为字符串，execute 内部解析数字/步进两种形态
     fontSize: z
-      .union([z.number().min(FONT_SIZE_MIN).max(FONT_SIZE_MAX), z.enum(["larger", "smaller"])])
+      .string()
       .optional()
-      .describe("reader：字号 12-32 的绝对值，或 larger/smaller 调大/调小一档"),
+      .describe("reader：字号——传 12-32 的数字（如 '16'），或 larger/smaller 调大/调小一档"),
     fontName: z.string().optional().describe("reader：字体名称（内置预设或用户上传字体的名称，模糊匹配）"),
     lineHeight: z.number().min(1.0).max(3.0).optional().describe("reader：行高倍数（1.0-3.0，默认 1.6）"),
     background: z
@@ -125,7 +127,7 @@ export const managePreferencesTool = tool({
     action: "setTheme" | "reader" | "ui";
     mode?: "light" | "dark" | "auto";
     globalTheme?: string;
-    fontSize?: number | "larger" | "smaller";
+    fontSize?: string;
     fontName?: string;
     lineHeight?: number;
     background?: string;
@@ -205,12 +207,25 @@ export const managePreferencesTool = tool({
         const patch: Record<string, unknown> = {};
 
         if (fontSize !== undefined) {
-          const next =
-            fontSize === "larger"
-              ? Math.min(FONT_SIZE_MAX, current.defaultFontSize + 2)
-              : fontSize === "smaller"
-                ? Math.max(FONT_SIZE_MIN, current.defaultFontSize - 2)
-                : fontSize;
+          const token = String(fontSize).trim().toLowerCase();
+          let next: number;
+          if (token === "larger") {
+            next = Math.min(FONT_SIZE_MAX, current.defaultFontSize + 2);
+          } else if (token === "smaller") {
+            next = Math.max(FONT_SIZE_MIN, current.defaultFontSize - 2);
+          } else {
+            const num = Number(token);
+            if (!Number.isFinite(num)) {
+              return {
+                results: {
+                  success: false,
+                  message: `fontSize 无法解析：'${fontSize}'（需 12-32 数字或 larger/smaller）`,
+                },
+                meta: { reasoning },
+              };
+            }
+            next = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(num)));
+          }
           patch.defaultFontSize = next;
           changes.push(`字号 ${current.defaultFontSize} → ${next}`);
         }
