@@ -12,6 +12,8 @@ use zip::{CompressionMethod, ZipWriter};
 /// 轮转保留的备份份数（配置缺失时的回落值）
 const DEFAULT_MAX_KEEP: usize = 10;
 /// 纳入备份的 JSON 配置（model-provider.json 含 API 密钥，刻意排除）
+/// llama-store.json 的 apiKey 由前端 partialize 保证不落盘（置空），若未来恢复持久化 key
+/// 必须同步将其移出白名单
 const JSON_FILES: [&str; 3] = ["app-settings.json", "layout-store.json", "llama-store.json"];
 
 fn sha256_hex(bytes: &[u8]) -> String {

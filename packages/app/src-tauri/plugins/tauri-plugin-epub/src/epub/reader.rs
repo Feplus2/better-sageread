@@ -41,9 +41,9 @@ impl EpubReader {
         for i in 0..spine_len {
             doc.set_current_page(i);
 
-            // 获取当前页面的HTML内容
+            // 获取当前页面的HTML内容（get_current_str 返回 (内容, MIME)，取第一个元素；E3 修复）
             let html_content = doc.get_current_str().unwrap_or_default();
-            let html_str = &html_content.1; // 取元组的第二个元素（HTML内容）
+            let html_str = &html_content.0;
 
             // 提取章节标题
             let chapter_title = self

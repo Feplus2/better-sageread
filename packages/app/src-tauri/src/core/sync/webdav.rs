@@ -18,9 +18,9 @@ fn file_path(config: &WebdavConfig, name: &str) -> String {
     format!("{}/{}", config.remote_dir.trim_matches('/'), name)
 }
 
-/// 统一 HTTP client：connect 10s / 总 120s 超时（防弱网下载悬挂）
+/// 统一 HTTP client：connect 10s / 总 120s 超时（防弱网下载悬挂）；代理走应用级设置（批次 F3-1）
 fn client() -> Result<Client, String> {
-    Client::builder()
+    crate::core::proxy::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(120))
         .build()

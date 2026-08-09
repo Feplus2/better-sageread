@@ -515,6 +515,56 @@ async fn apply_skill_upsert(
     }
 }
 
+/// tags：两端各自创建同名标签（id 不同、name 相同），按主键 INSERT 会撞 UNIQUE(name)
+/// 导致整包失败（E4，同款方案见 apply_skill_upsert）。本地无此 id 时按 name 归并到
+/// 既有行：LWW 取新则 UPDATE 本地行（保留本地 id 与 LWW 字段语义），否则跳过
+async fn apply_tag_upsert(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    row: &ChangeRow,
+    applied: &mut AppliedOps,
+) -> Result<(), String> {
+    let table = tables::find_table("tags").unwrap();
+    let data = row.data.as_ref().ok_or("UPSERT 行缺少 data")?;
+
+    if let Some(local_at) = local_updated_at(tx, table, &row.id).await? {
+        // 同 id：标准 LWW
+        if merge::remote_wins(Some(local_at), row.updated_at) {
+            update_row(tx, table, &row.id, data).await?;
+            applied.push((row.table.clone(), row.id.clone(), "UPDATE".to_string()));
+        }
+        return Ok(());
+    }
+
+    // 本地无此 id：可能撞同名 → 按 name 归并
+    let name = data.get("name").and_then(Value::as_str).unwrap_or("");
+    let existing: Option<(String, Option<i64>)> = if name.is_empty() {
+        None
+    } else {
+        sqlx::query("SELECT id, updated_at FROM tags WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| format!("读取本地标签失败: {e}"))?
+            .map(|r| (r.get("id"), r.try_get("updated_at").unwrap_or(None)))
+    };
+
+    match existing {
+        Some((local_id, local_at)) => {
+            if merge::remote_wins(local_at, row.updated_at) {
+                // update_row 不含主键列，本地 id 保留
+                update_row(tx, table, &local_id, data).await?;
+                applied.push((row.table.clone(), local_id, "UPDATE".to_string()));
+            }
+            Ok(())
+        }
+        None => {
+            insert_row(tx, table, data).await?;
+            applied.push((row.table.clone(), row.id.clone(), "INSERT".to_string()));
+            Ok(())
+        }
+    }
+}
+
 fn thread_row_from_data(data: &Value) -> ThreadRowData {
     ThreadRowData {
         id: data_string(data, "id").unwrap_or_default(),
@@ -612,6 +662,7 @@ async fn apply_change_row(
         "book_status" => apply_book_status_upsert(tx, row, applied).await,
         "reading_sessions" => apply_session_insert(tx, row, applied).await,
         "skills" => apply_skill_upsert(tx, row, applied).await,
+        "tags" => apply_tag_upsert(tx, row, applied).await,
         _ => apply_lww_upsert(tx, row, applied).await,
     }
 }
@@ -2116,5 +2167,84 @@ mod tests {
         let outcome = apply_changeset(&pool, &changeset_bytes(&[new_skill])).await.unwrap();
         assert_eq!(outcome.count, 1);
         assert_eq!(table_count(&pool, "skills").await, 2);
+    }
+
+    /// tags 跨设备同名冲突（E4）：本地已有同名标签（id 不同），对端同名义 INSERT 按 name 归并 UPDATE
+    #[tokio::test]
+    async fn test_tag_name_conflict_merges_by_name() {
+        let pool = bootstrap_pool(false).await;
+
+        // 本地先建的标签（id 与对端不同、name 相同）
+        sqlx::query(
+            "INSERT INTO tags (id, name, color, created_at, updated_at) VALUES ('local-tag', '待读', 'red', 1000, 2000)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // 模拟稳态：清掉种子行日志，后文才能断言防回环清零
+        sqlx::query("DELETE FROM _sync_log").execute(&pool).await.unwrap();
+
+        let remote = |id: &str, color: &str, updated_at: i64| ChangeRow {
+            table: "tags".to_string(),
+            id: id.to_string(),
+            op: "INSERT".to_string(),
+            updated_at,
+            data: Some(serde_json::json!({
+                "id": id,
+                "name": "待读",
+                "color": color,
+                "created_at": 900,
+                "updated_at": updated_at,
+            })),
+        };
+
+        // 对端同名义 INSERT（updated_at 更新）→ 不撞 UNIQUE(name)，按 name 归并：颜色取远端，id 保本地
+        let outcome = apply_changeset(&pool, &changeset_bytes(&[remote("remote-tag", "blue", 3000)]))
+            .await
+            .unwrap();
+        assert_eq!(outcome.count, 1);
+        assert_eq!(table_count(&pool, "tags").await, 1, "同名标签应归并为一行");
+        let row = sqlx::query("SELECT id, color FROM tags WHERE name = '待读'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("id"), "local-tag");
+        assert_eq!(row.get::<String, _>("color"), "blue");
+        assert_eq!(log_count(&pool).await, 0, "归并写出的日志应被防回环删除");
+
+        // 远端更旧的同名义包 → LWW 不赢，跳过
+        let outcome = apply_changeset(&pool, &changeset_bytes(&[remote("remote-tag", "green", 2500)]))
+            .await
+            .unwrap();
+        assert_eq!(outcome.count, 0);
+        let row = sqlx::query("SELECT color FROM tags WHERE name = '待读'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("color"), "blue");
+
+        // 重放同一包（updated_at 相等）→ 幂等零应用
+        let outcome = apply_changeset(&pool, &changeset_bytes(&[remote("remote-tag", "blue", 3000)]))
+            .await
+            .unwrap();
+        assert_eq!(outcome.count, 0);
+
+        // 无同名的新标签 INSERT → 正常插入
+        let new_tag = ChangeRow {
+            table: "tags".to_string(),
+            id: "tag-new".to_string(),
+            op: "INSERT".to_string(),
+            updated_at: 4000,
+            data: Some(serde_json::json!({
+                "id": "tag-new",
+                "name": "精读",
+                "color": "yellow",
+                "created_at": 4000,
+                "updated_at": 4000,
+            })),
+        };
+        let outcome = apply_changeset(&pool, &changeset_bytes(&[new_tag])).await.unwrap();
+        assert_eq!(outcome.count, 1);
+        assert_eq!(table_count(&pool, "tags").await, 2);
     }
 }
