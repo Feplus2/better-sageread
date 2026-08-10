@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import VerticalTabBar from "@/components/vertical-tab-bar";
 import WindowControls from "@/components/window-controls";
 import { useFontEvents } from "@/hooks/use-font-events";
+import { useSyncEvents } from "@/hooks/use-sync-events";
 import PaperReaderView from "@/pages/paper-reader/paper-reader-view";
 import ReaderViewer from "@/pages/reader";
 import { ReaderProvider } from "@/pages/reader/components/reader-provider";
@@ -54,6 +55,7 @@ function TopbarSettingsButton() {
 
 export default function ReaderLayout() {
   useFontEvents();
+  useSyncEvents();
   const {
     tabs,
     activeTabId,

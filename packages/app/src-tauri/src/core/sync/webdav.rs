@@ -27,21 +27,41 @@ fn client() -> Result<Client, String> {
         .map_err(|e| format!("创建 HTTP client 失败: {e}"))
 }
 
+/// 限流重试上限与基础退避（坚果云高频请求会 429/503）
+const RATE_LIMIT_MAX_RETRIES: u32 = 5;
+
 async fn send(
     config: &WebdavConfig,
     method: Method,
     path: &str,
     body: Option<Vec<u8>>,
 ) -> Result<reqwest::Response, String> {
-    let url = remote_url(config, path)?;
-    let client = client()?;
-    let mut builder = client
-        .request(method, url)
-        .basic_auth(&config.username, Some(&config.password));
-    if let Some(body) = body {
-        builder = builder.body(body);
+    // 429/503 指数退避：2s/4s/8s/16s/32s + 抖动（备份资产池把单次备份的请求数放大了一个量级，退避是刚需）
+    let mut attempt = 0u32;
+    loop {
+        let url = remote_url(config, path)?;
+        let client = client()?;
+        let mut builder = client
+            .request(method.clone(), url)
+            .basic_auth(&config.username, Some(&config.password));
+        if let Some(body) = body.clone() {
+            builder = builder.body(body);
+        }
+        let resp = builder.send().await.map_err(|e| format!("网络请求失败: {e}"))?;
+        let status = resp.status().as_u16();
+        if (status == 429 || status == 503) && attempt < RATE_LIMIT_MAX_RETRIES {
+            attempt += 1;
+            let jitter = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_millis() as u64 % 500)
+                .unwrap_or(0);
+            let backoff_ms = (1000u64 << attempt) + jitter;
+            log::warn!("WebDAV 限流 (HTTP {status})，{backoff_ms}ms 后第 {attempt}/{RATE_LIMIT_MAX_RETRIES} 次重试: {path}");
+            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            continue;
+        }
+        return Ok(resp);
     }
-    builder.send().await.map_err(|e| format!("网络请求失败: {e}"))
 }
 
 /// 逐级 MKCOL 创建远端目录；201=已创建、405=已存在，均视为成功

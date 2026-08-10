@@ -4,7 +4,7 @@ use crate::core::state::AppState;
 use sqlx::{Row, SqlitePool};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 取数据库连接池克隆（立即释放全局锁——锁只护句柄获取，不护后续网络 await）
 async fn clone_db_pool(state: &State<'_, AppState>) -> Result<SqlitePool, String> {
@@ -174,7 +174,12 @@ pub async fn sync_get_config(app: AppHandle) -> Result<Option<WebdavConfigView>,
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut config: WebdavConfig =
         serde_json::from_str(&content).map_err(|e| format!("解析 WebDAV 配置失败: {e}"))?;
-    let has_password = !config.password.is_empty();
+    // A 批后密码住 keyring、JSON 恒空：「已保存」判定须查凭据管理器（兼顾旧版 JSON 残留）
+    let has_password = !config.password.is_empty()
+        || crate::core::secrets::get_secret(&app, "webdav", "password")
+            .ok()
+            .flatten()
+            .is_some_and(|p| !p.is_empty());
     // S3：真密码不返回前端，前端只见掩码
     config.password = if has_password { PASSWORD_MASK.to_string() } else { String::new() };
     Ok(Some(WebdavConfigView { config, has_password }))
@@ -215,7 +220,17 @@ pub async fn sync_backup_now(app: AppHandle, state: State<'_, AppState>) -> Resu
     let config = load_config(&app)?;
     let db_pool_guard = state.db_pool.lock().await;
     let pool = db_pool_guard.as_ref().ok_or("数据库未初始化")?;
-    backup::run_backup(&app, pool, &config).await
+    let result = backup::run_backup(&app, pool, &config).await;
+    // 完成/失败发事件：全局监听写进通知中心——备份在 Rust 侧跑全程，
+    // 设置页关掉不影响执行，结果落在通知中心可回看（含手动/自动/Agent 三条触发路径）
+    let _ = app.emit(
+        "sync-backup-done",
+        match &result {
+            Ok(outcome) => serde_json::json!({ "ok": true, "message": outcome.message }),
+            Err(e) => serde_json::json!({ "ok": false, "message": e }),
+        },
+    );
+    result
 }
 
 #[tauri::command]

@@ -1889,8 +1889,8 @@ export default function PapersPage() {
             </div>
           ) : papers.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-950/40 dark:to-indigo-900/30">
-                <BookOpenText className="h-10 w-10 text-blue-500 dark:text-blue-400" />
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10">
+                <BookOpenText className="h-10 w-10 text-primary" />
               </div>
               <div className="max-w-lg space-y-3 text-center">
                 <h2 className="font-bold text-neutral-900 text-xl dark:text-neutral-100">文献库还是空的</h2>
