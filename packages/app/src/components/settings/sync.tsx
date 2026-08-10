@@ -83,6 +83,9 @@ export default function SyncSettings() {
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [restoringName, setRestoringName] = useState<string | null>(null);
   const [restoreProgress, setRestoreProgress] = useState<{ current: number; total: number; path: string } | null>(null);
+  const [backupProgress, setBackupProgress] = useState<{ stage: string; current?: number; total?: number } | null>(
+    null,
+  );
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [l2Status, setL2Status] = useState<L2Status | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -123,10 +126,18 @@ export default function SyncSettings() {
         }
       },
     );
-    const unlistenBackup = listen("sync-backup-done", () => setIsBackingUp(false));
+    const unlistenBackup = listen("sync-backup-done", () => {
+      setIsBackingUp(false);
+      setBackupProgress(null);
+    });
+    const unlistenProgress = listen<{ stage: string; current?: number; total?: number; name?: string }>(
+      "sync-backup-progress",
+      (event) => setBackupProgress(event.payload),
+    );
     return () => {
       unlistenAssets.then((fn) => fn());
       unlistenBackup.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
     };
   }, []);
 
@@ -536,6 +547,13 @@ export default function SyncSettings() {
               }）`
             : "还没有备份过"}
         </p>
+        {isBackingUp && backupProgress && (
+          <p className="mt-1 text-neutral-600 text-xs dark:text-neutral-400">
+            {backupProgress.stage === "scan"
+              ? "正在扫描本地资产…"
+              : `正在上传资产包（${backupProgress.current}/${backupProgress.total}）`}
+          </p>
+        )}
       </div>
 
       <div className="rounded-lg bg-muted/80 p-4">

@@ -62,27 +62,38 @@ pub struct BackupManifest {
     pub assets: Vec<AssetRef>,
 }
 
-/// 大包资产条目（manifest v2）：文件本体按 sha256 存云端资产池，此处只记索引
+/// 大包资产包（manifest v3）：按捆上传——每本书一包、字体/背景/工作区各一捆、向量库单文件。
+/// 请求数从"文件数"压到"书数+4"（WebDAV 频率限流的治本）；内容清单哈希不变则永不重传。
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AssetRef {
-    /// 根目录内的相对路径（如 books/b1/book.epub、papers/vectors.sqlite）
-    pub path: String,
-    /// 根：appData（应用数据目录）/ config（配置目录）
-    pub root: String,
-    pub sha256: String,
-    pub size: u64,
-    /// 分类标签：book / vectors / font / background / workspace（统计与日志用）
+    /// 包类型：book / fonts / backgrounds / workspace / vectors
     pub kind: String,
+    /// 包名：book id 或固定名（fonts/backgrounds/workspace/vectors）
+    pub name: String,
+    /// 包内容清单哈希（目录内全部文件 path+sha256 的组合哈希；向量库为文件哈希）
+    pub sha256: String,
+    /// 包 zip 体积（字节）
+    pub size: u64,
 }
 
-/// 云端资产池索引（sageread/backups/assets-index.json）：
-/// 记录每个备份引用了哪些资产 sha256，供轮转 GC 计算孤儿（不读各备份 manifest，省下载）
+impl AssetRef {
+    /// 云端包文件名（内容寻址：哈希变了就是新文件，旧文件由 GC 回收）
+    pub fn bundle_remote_name(&self) -> String {
+        format!("{}-{}-{}.zip", self.kind, self.name, &self.sha256[..16.min(self.sha256.len())])
+    }
+}
+
+/// 云端资产池索引（asset-bundles-index.json）：
+/// 记录每个备份引用了哪些资产捆，供轮转 GC 计算孤儿（不读各备份 manifest，省下载）
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct AssetsIndex {
-    /// backup_name -> 引用的资产 sha256 列表
+    /// backup_name -> 引用的资产内容哈希列表
     pub by_backup: std::collections::HashMap<String, Vec<String>>,
-    /// sha256 -> 大小（GC 日志/统计用）
+    /// 内容哈希 -> 捆 zip 体积（判存/统计用）
     pub sizes: std::collections::HashMap<String, u64>,
+    /// 内容哈希 -> 云端捆文件名（GC 删除孤儿时按名删——文件名含捆名，无法从哈希反推）
+    #[serde(default)]
+    pub bundle_files: std::collections::HashMap<String, String>,
 }
 
 /// 小包 JSON 收集策略：配置目录顶层 *.json 全收，减去此排除清单

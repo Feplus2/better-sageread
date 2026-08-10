@@ -21,18 +21,6 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 移动文件（同盘 rename 秒级；跨盘回退 copy+delete）
-fn move_file(src: &Path, dst: &Path) -> Result<(), String> {
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    if fs::rename(src, dst).is_ok() {
-        return Ok(());
-    }
-    fs::copy(src, dst).map_err(|e| e.to_string())?;
-    fs::remove_file(src).map_err(|e| e.to_string())
-}
-
 /// 目录顶层 *.json 清单（排除清单之外；恢复/回滚的 JSON 处理与备份的"全收减排除"同口径）
 fn list_config_jsons(dir: &Path) -> Vec<String> {
     let mut names = Vec::new();
@@ -81,28 +69,37 @@ pub async fn stage_restore(
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     archive.extract(&staging).map_err(|e| format!("解压备份包失败: {e}"))?;
 
-    // v2 大包资产：本地已有同哈希文件则跳过（同机恢复零下载），否则下载到 staging/assets 并校验
-    if manifest.version >= 2 && !manifest.assets.is_empty() {
+    // v3 资产捆：本地目标内容哈希一致则跳过（同机恢复零下载），否则下载捆 zip 到 staging/bundles
+    if manifest.version >= 3 && !manifest.assets.is_empty() {
         let total = manifest.assets.len();
         for (i, asset) in manifest.assets.iter().enumerate() {
-            let target = backup::asset_local_path(app, asset);
-            if let Some(target) = &target {
-                if target.is_file() && backup::sha256_file(target).ok().as_deref() == Some(asset.sha256.as_str()) {
-                    continue;
+            let skip = match backup::bundle_target_dir(app, &asset.kind, &asset.name) {
+                Some(dir) => {
+                    if asset.kind == "vectors" {
+                        // 向量库是单文件：直接比文件哈希
+                        backup::sha256_file(&dir.join("vectors.sqlite")).ok().as_deref() == Some(asset.sha256.as_str())
+                    } else {
+                        backup::dir_content_hash(&dir).ok().flatten().as_deref() == Some(asset.sha256.as_str())
+                    }
                 }
+                None => false,
+            };
+            if skip {
+                continue;
             }
             let _ = app.emit(
                 "sync-restore-assets",
-                serde_json::json!({ "current": i + 1, "total": total, "path": asset.path }),
+                serde_json::json!({ "current": i + 1, "total": total, "path": asset.name }),
             );
-            let remote = format!("{}/assets/{}", config.remote_dir.trim_matches('/'), asset.sha256);
+            let remote = format!(
+                "{}/asset-bundles/{}",
+                config.remote_dir.trim_matches('/'),
+                asset.bundle_remote_name()
+            );
             let bytes = webdav::get_path(config, &remote)
                 .await?
-                .ok_or_else(|| format!("云端资产缺失（索引存在但文件不在）: {}", asset.sha256))?;
-            if backup::sha256_file_bytes(&bytes) != asset.sha256 {
-                return Err(format!("资产校验失败（sha256 不符）: {}", asset.path));
-            }
-            let staged_asset = staging.join("assets").join(&asset.root).join(&asset.path);
+                .ok_or_else(|| format!("云端资产捆缺失: {}", asset.bundle_remote_name()))?;
+            let staged_asset = staging.join("bundles").join(asset.bundle_remote_name());
             if let Some(parent) = staged_asset.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
@@ -184,8 +181,8 @@ fn apply_staged_jsons(staging: &Path, target_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 应用暂存资产（v2）：按 manifest 把 staging/assets 移入目标位置；
-/// 只补齐/覆盖，不删除本地多余文件（防误删用户数据——空机搬家场景本就无差异）
+/// 应用暂存资产捆（v3）：把 staging/bundles 的捆 zip 解包到目标目录（整目录时点替换，防 zip-slip）；
+/// stage 时判定本地同内容的捆没有暂存文件，自动跳过（保留本地现状）
 fn apply_staged_assets(app: &AppHandle, staging: &Path) -> Result<usize, String> {
     let manifest_path = staging.join("manifest.json");
     if !manifest_path.exists() {
@@ -195,15 +192,40 @@ fn apply_staged_assets(app: &AppHandle, staging: &Path) -> Result<usize, String>
         &fs::read_to_string(&manifest_path).map_err(|e| format!("读取暂存 manifest 失败: {e}"))?,
     )
     .map_err(|e| format!("解析暂存 manifest 失败: {e}"))?;
+    if manifest.version < 3 {
+        return Ok(0);
+    }
     let mut applied = 0;
     for asset in &manifest.assets {
-        let staged = staging.join("assets").join(&asset.root).join(&asset.path);
-        if !staged.exists() {
-            continue; // 本地下载时被跳过（已有同哈希文件）→ 无需移动
+        let staged_zip = staging.join("bundles").join(asset.bundle_remote_name());
+        if !staged_zip.exists() {
+            continue;
         }
-        let target = backup::asset_local_path(app, asset)
-            .ok_or_else(|| format!("资产路径非法: {}", asset.path))?;
-        move_file(&staged, &target)?;
+        let target = backup::bundle_target_dir(app, &asset.kind, &asset.name)
+            .ok_or_else(|| format!("资产捆目标非法: {}", asset.name))?;
+        // 时点恢复语义：整目录替换（先清后解）
+        if target.exists() {
+            fs::remove_dir_all(&target).map_err(|e| format!("清理目标目录失败 {}: {e}", target.display()))?;
+        }
+        fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        let file = fs::File::open(&staged_zip).map_err(|e| format!("读取暂存捆失败: {e}"))?;
+        let mut archive = ZipArchive::new(file).map_err(|e| format!("资产捆损坏 {}: {e}", asset.bundle_remote_name()))?;
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).map_err(|e| format!("读取捆条目失败: {e}"))?;
+            let Some(enclosed) = entry.enclosed_name() else {
+                continue; // 防 zip-slip（含 .. 的条目直接丢弃）
+            };
+            let out_path = target.join(enclosed);
+            if entry.is_dir() {
+                fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(parent) = out_path.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut out_file = fs::File::create(&out_path).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+            }
+        }
         applied += 1;
     }
     Ok(applied)
