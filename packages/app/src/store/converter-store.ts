@@ -6,9 +6,10 @@ import { createJSONStorage, persist } from "zustand/middleware";
 /** 书籍转换解析引擎（Books_Converter --engine；表格密集默认 mineru 更稳） */
 export type BookConvertEngine = "mineru" | "paddleocr";
 
-/** 论文解析引擎（Papers_Converter --provider；基线 paddleocr，MinerU 表格备选，GLM 第二备选；
- * mineru-pipeline = MinerU pipeline 后端 + 不强制 OCR：文字版论文零幻觉、整图不碎） */
-export type PaperConvertEngine = "paddleocr" | "mineru" | "mineru-pipeline" | "glm";
+/** 论文解析引擎（Papers_Converter --provider；基线 paddleocr，MinerU 表格备选；
+ * mineru-pipeline = MinerU pipeline 后端 + 不强制 OCR：文字版论文零幻觉、整图不碎。
+ * GLM 引擎已下线（实测无优势，2026-08-11 移除暴露面，store 字段保留兼容旧配置） */
+export type PaperConvertEngine = "paddleocr" | "mineru" | "mineru-pipeline";
 
 interface ConverterState {
   mineruToken: string;

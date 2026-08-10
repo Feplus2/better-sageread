@@ -205,10 +205,9 @@ interface PaperConvertParams {
 
 /** 引擎对应的 Token 检查（返回 null 通过，否则为引导文案） */
 export function paperEngineTokenError(engine: string): string | null {
-  const { mineruToken, paddleocrToken, glmApiKey } = useConverterStore.getState();
+  const { mineruToken, paddleocrToken } = useConverterStore.getState();
   if (engine.startsWith("mineru") && !mineruToken) return "尚未配置 MinerU Token，请先在 设置 → PDF 转换 中填写";
   if (engine === "paddleocr" && !paddleocrToken) return "尚未配置 PaddleOCR Token，请先在 设置 → PDF 转换 中填写";
-  if (engine === "glm" && !glmApiKey) return "尚未配置 GLM API Key，请先在 设置 → PDF 转换 中填写";
   return null;
 }
 

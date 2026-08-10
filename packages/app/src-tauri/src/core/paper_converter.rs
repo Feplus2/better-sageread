@@ -28,7 +28,7 @@ impl Default for PaperConverterState {
 #[serde(rename_all = "camelCase")]
 pub struct PaperConvertParams {
     pub pdf_path: String,
-    /// 解析引擎（None=sidecar 默认 paddleocr；"paddleocr"|"mineru"|"glm"）
+    /// 解析引擎（None=sidecar 默认 paddleocr；"paddleocr"|"mineru"|"mineru-pipeline"；GLM 已下线）
     pub engine: Option<String>,
     pub mineru_token: Option<String>,
     pub paddleocr_token: Option<String>,

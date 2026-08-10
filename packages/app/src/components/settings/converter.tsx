@@ -18,14 +18,12 @@ const PAPER_ENGINE_OPTIONS: { value: PaperConvertEngine; label: string; hint: st
     hint: "文字版论文推荐：正文零幻觉、大图整幅不碎；扫描版请用 VLM 引擎",
   },
   { value: "mineru", label: "MinerU", hint: "表格密集论文备选（跨页表合并最稳）" },
-  { value: "glm", label: "GLM（智谱）", hint: "第二备选，需智谱 API Key" },
 ];
 
 const ENGINE_LABELS: Record<string, string> = {
   mineru: "MinerU",
   "mineru-pipeline": "MinerU 文字层管线",
   paddleocr: "PaddleOCR",
-  glm: "GLM（智谱）",
 };
 
 /** 选中引擎但未配置对应 Token 的提示条 */
@@ -45,16 +43,14 @@ export default function ConverterSettings() {
   const {
     mineruToken,
     paddleocrToken,
-    glmApiKey,
     engine,
     paperEngine,
     setMineruToken,
     setPaddleocrToken,
-    setGlmApiKey,
     setEngine,
     setPaperEngine,
   } = useConverterStore();
-  const tokens = { mineru: mineruToken, paddleocr: paddleocrToken, glm: glmApiKey };
+  const tokens = { mineru: mineruToken, paddleocr: paddleocrToken };
 
   return (
     <div className="space-y-6 p-4">
@@ -108,29 +104,6 @@ export default function ConverterSettings() {
               <button
                 type="button"
                 onClick={() => openUrl("https://aistudio.baidu.com")}
-                className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
-              >
-                <ExternalLink className="size-3" />
-                申请
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="glm-api-key" className="text-sm">
-              GLM API Key
-            </Label>
-            <div className="flex items-center gap-2">
-              <SecretInput
-                category="converter"
-                secretKey="glm"
-                id="glm-api-key"
-                placeholder="在 bigmodel.cn 申请（仅论文 GLM 引擎需要）"
-                onSaved={setGlmApiKey}
-                onCleared={() => setGlmApiKey("")}
-              />
-              <button
-                type="button"
-                onClick={() => openUrl("https://open.bigmodel.cn")}
                 className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-primary text-xs hover:underline"
               >
                 <ExternalLink className="size-3" />
