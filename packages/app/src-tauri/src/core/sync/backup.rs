@@ -240,15 +240,32 @@ fn collect_bundles(app: &AppHandle, config_dir: &Path) -> Result<(Vec<Bundle>, A
             }
         }
         // 全局向量库（books+papers 统一；远程 embedding 重建要 API 费）
+        // 热文件一致性：活库直接拷贝会带上 WAL 未合并的不完整页——先 VACUUM INTO 出一致快照再打包
         let vectors = app_data.join("papers").join("vectors.sqlite");
         if vectors.is_file() {
-            let papers_dir = app_data.join("papers");
-            let sha = hash_file_cached(&mut cache, "vectors/vectors/vectors.sqlite", &vectors)?;
+            let snapshot = config_dir.join("sync-staging").join("vectors-snapshot.sqlite");
+            if snapshot.exists() {
+                fs::remove_file(&snapshot).map_err(|e| e.to_string())?;
+            }
+            let conn = {
+                // 注册 sqlite-vec（chunk_embeddings 是 vec0 虚拟表，VACUUM 读行需要扩展；
+                // 与 books/commands.rs 同款注册，进程级幂等）
+                unsafe {
+                    rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                        sqlite_vec::sqlite3_vec_init as *const (),
+                    )));
+                }
+                rusqlite::Connection::open(&vectors).map_err(|e| format!("打开向量库失败: {e}"))?
+            };
+            conn.execute("VACUUM INTO ?1", [snapshot.to_string_lossy().replace('\\', "/")])
+                .map_err(|e| format!("向量库快照失败: {e}"))?;
+            drop(conn);
+            let sha = hash_file_cached(&mut cache, "vectors/vectors/vectors.sqlite", &snapshot)?;
             bundles.push(Bundle {
                 kind: "vectors",
                 name: "vectors".to_string(),
-                target_dir: papers_dir,
-                files: vec![(vectors, "vectors.sqlite".to_string())],
+                target_dir: app_data.join("papers"),
+                files: vec![(snapshot, "vectors.sqlite".to_string())],
                 content_hash: sha,
             });
         }
