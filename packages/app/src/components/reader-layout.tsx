@@ -161,28 +161,42 @@ export default function ReaderLayout() {
     });
   }, []);
 
-  // WebDAV 自动备份：按配置的频率 setInterval（关闭/每小时/每天）
+  // WebDAV 自动备份（运行期配置自检，与 L2 调度同款）：60 秒基础 tick 重读配置，
+  // off/hourly/daily 改动即时生效（原版只在挂载时读一次，改了配置要刷新才生效）。
+  // 备份自身有整包哈希门控——数据无变化零流量，到点空转代价可忽略。
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    let backingUp = false;
+    let lastBackupAt = 0;
 
-    const setup = async () => {
+    const tick = async () => {
+      if (cancelled || backingUp) return;
+      let config: Awaited<ReturnType<typeof syncGetConfig>>;
       try {
-        const config = await syncGetConfig();
-        if (cancelled || !config || config.auto_backup === "off" || !config.endpoint) return;
-        const intervalMs = config.auto_backup === "hourly" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-        timer = setInterval(() => {
-          syncBackupNow().catch((error) => console.warn("自动备份失败:", error));
-        }, intervalMs);
+        config = await syncGetConfig();
+      } catch {
+        return;
+      }
+      if (cancelled || !config || config.auto_backup === "off" || !config.endpoint) return;
+      const intervalMs = config.auto_backup === "hourly" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      if (Date.now() - lastBackupAt < intervalMs) return;
+      backingUp = true;
+      lastBackupAt = Date.now();
+      try {
+        await syncBackupNow();
       } catch (error) {
-        console.warn("自动备份初始化失败:", error);
+        console.warn("自动备份失败:", error);
+      } finally {
+        backingUp = false;
       }
     };
 
-    setup();
+    const timer = setInterval(() => {
+      void tick();
+    }, 60_000);
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
     };
   }, []);
 
