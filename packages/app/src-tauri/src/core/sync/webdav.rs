@@ -27,8 +27,8 @@ fn client() -> Result<Client, String> {
         .map_err(|e| format!("创建 HTTP client 失败: {e}"))
 }
 
-/// 限流重试上限与基础退避（坚果云高频请求会 429/503）
-const RATE_LIMIT_MAX_RETRIES: u32 = 5;
+/// 限流重试上限与基础退避（坚果云免费版 30 分钟 600 次请求；6 次约 130 秒覆盖短时窗口）
+const RATE_LIMIT_MAX_RETRIES: u32 = 6;
 
 async fn send(
     config: &WebdavConfig,
@@ -59,6 +59,12 @@ async fn send(
             log::warn!("WebDAV 限流 (HTTP {status})，{backoff_ms}ms 后第 {attempt}/{RATE_LIMIT_MAX_RETRIES} 次重试: {path}");
             tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
             continue;
+        }
+        // 重试耗尽仍限流：给出可理解的错误（与流量配额无关，是请求频率预算）
+        if status == 429 || status == 503 {
+            return Err(format!(
+                "坚果云请求频率超限（HTTP {status}）：免费版每 30 分钟 600 次请求预算已耗尽，请等几分钟再试（与上传流量配额无关）"
+            ));
         }
         return Ok(resp);
     }

@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { useNotificationStore } from "@/store/notification-store";
 import dayjs from "dayjs";
-import { Bell, BellDot, CheckCheck, Info, Trash2, X } from "lucide-react";
+import { Bell, CheckCheck, Info, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 export default function NotificationDropdown() {
@@ -14,17 +14,10 @@ export default function NotificationDropdown() {
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <DropdownMenuTrigger asChild>
+        {/* 静默通知（用户 2026-08-10 拍板）：铃铛不显示数字红点——重要提示都有 toast 打底，
+            错过的去通知列表找回即可；未读在列表内用高亮底色标注（bell 不催促） */}
         <button className="relative flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 dark:hover:bg-accent">
-          {unreadCount > 0 ? (
-            <>
-              <BellDot size={18} />
-              <span className="-right-1 -top-1 absolute flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 font-bold text-[10px] text-white">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            </>
-          ) : (
-            <Bell size={18} />
-          )}
+          <Bell size={18} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="bottom" sideOffset={4} alignOffset={-3} className="w-80 rounded-2xl p-0!">

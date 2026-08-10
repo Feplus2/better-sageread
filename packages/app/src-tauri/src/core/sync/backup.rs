@@ -342,22 +342,24 @@ pub async fn run_backup(
         });
     }
 
-    // 5. 上传缺失资产（云端按 sha256 判存，存在即零流量；先确保资产池集合存在，防 409）
+    // 5. 读资产索引（读失败中止防误删；同时作为"云端已有哪些资产"的免 PROPFIND 判存依据——
+    //    坚果云免费版每 30 分钟 600 次请求，逐资产 PROPFIND 会把单次备份请求数翻倍）
+    let mut assets_index = read_assets_index(config).await?;
+
+    // 6. 上传缺失资产（索引里已有的 sha256 直接零请求跳过；PUT 内容寻址幂等，重复覆盖无害）
     webdav::ensure_remote_dirs(config, &[assets_dir(config)]).await?;
     let mut assets_uploaded = 0usize;
     for asset in &assets {
-        let remote = format!("{}/{}", assets_dir(config), asset.sha256);
-        if webdav::path_exists(config, &remote).await? {
+        if assets_index.sizes.contains_key(&asset.sha256) {
             continue;
         }
         let local = asset_local_path(app, asset).ok_or_else(|| format!("资产路径非法: {}", asset.path))?;
         let bytes = fs::read(&local).map_err(|e| format!("读取资产失败 {}: {e}", asset.path))?;
-        webdav::put_path(config, &remote, bytes).await?;
+        webdav::put_path(config, &format!("{}/{}", assets_dir(config), asset.sha256), bytes).await?;
         assets_uploaded += 1;
+        // 平滑请求频率：免费版 600 次/30 分钟预算内不打爆（退避重试仍是兜底）
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-
-    // 6. 读资产索引（读失败中止防误删；上传 zip 前失败最干净）
-    let mut assets_index = read_assets_index(config).await?;
 
     // 7. 打包上传小包
     let created_at = chrono::Utc::now().timestamp_millis();

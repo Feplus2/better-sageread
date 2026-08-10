@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { notify } from "@/lib/notify";
 import {
   type AssetsStatus,
   type BackupInfo,
@@ -189,15 +190,15 @@ export default function SyncSettings() {
     try {
       const outcome = await syncBackupNow();
       if (outcome.status === "skipped") {
-        toast.info(outcome.message);
+        notify.info(outcome.message);
       } else {
-        toast.success(outcome.message);
+        notify.success(outcome.message);
       }
       setSyncState(await syncGetState());
       refreshBackups();
     } catch (error) {
       console.error("备份失败:", error);
-      toast.error("备份失败", { description: String(error) });
+      notify.error("备份失败", String(error));
     } finally {
       setIsBackingUp(false);
     }
@@ -222,7 +223,7 @@ export default function SyncSettings() {
       }
     } catch (error) {
       console.error("恢复失败:", error);
-      toast.error("恢复失败", { description: String(error) });
+      notify.error("恢复失败", String(error));
     } finally {
       setRestoringName(null);
       setRestoreProgress(null);
@@ -500,7 +501,8 @@ export default function SyncSettings() {
             </Button>
           </div>
           <p className="text-neutral-600 text-xs dark:text-neutral-400">
-            配置仅保存在本机；坚果云请在账号设置里创建应用密码。备份不包含书籍文件和 API 密钥（设计如此）。
+            配置仅保存在本机；坚果云请在账号设置里创建应用密码。备份为全量搬家（含书籍/论文文件、向量库、字体与背景等，大文件按内容哈希去重、只传一次）；API
+            密钥永不包含（仅存本机凭据管理器）。
           </p>
         </div>
       </div>
