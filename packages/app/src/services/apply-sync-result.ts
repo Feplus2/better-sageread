@@ -1,4 +1,8 @@
-import { markProgrammaticNavigation, msSinceUserNavigation } from "@/pages/reader/hooks/navigation-tracker";
+import {
+  markProgrammaticNavigation,
+  markSyncPending,
+  msSinceUserNavigation,
+} from "@/pages/reader/hooks/navigation-tracker";
 import { getBookStatus } from "@/services/book-service";
 import type { SyncRunResult } from "@/services/sync-service";
 import { reapplyCurrentBackground } from "@/services/ui-config-sync";
@@ -71,6 +75,8 @@ async function applyProgressToOpenBooks(bookIds: string[]) {
 
       const percent = status.progressTotal > 0 ? Math.round((status.progressCurrent / status.progressTotal) * 100) : 0;
       if (msSinceUserNavigation(tab.bookId) < ANTI_JUMP_WINDOW_MS) {
+        // 不跳转期间阅读器仍持旧位置：标记远端位置待采纳，其自动保存跳过（防陈旧回写覆盖刚同步的行）
+        markSyncPending(tab.bookId, status.location);
         toast.info(`另一台设备进度已到 ${percent}%，刷新后生效`);
       } else {
         // 标记程序化跳转：这次 goTo 引起的位置变化不算用户翻页，避免污染防跳动保护

@@ -2,7 +2,7 @@ import { getBookStatus, updateBookStatus } from "@/services/book-service";
 import { throttle } from "@/utils/throttle";
 import { useCallback, useEffect, useRef } from "react";
 import { useReaderStore } from "../components/reader-provider";
-import { isProgrammaticNavigation, markUserNavigation } from "./navigation-tracker";
+import { hasStalePendingSync, isProgrammaticNavigation, markUserNavigation } from "./navigation-tracker";
 
 // 活跃判定与 reading session 同规则：20s 无活动 / 失焦 / 窗口隐藏即暂停
 const INACTIVITY_PAUSE_MS = 20 * 1000;
@@ -84,6 +84,11 @@ export const useProgressAutoSave = (bookId: string) => {
   const updateBookProgressWithStatus = useCallback(async () => {
     const currentProgress = progress;
     if (!currentProgress || !currentProgress.pageinfo || !location) {
+      return;
+    }
+
+    // 远端新位置已同步落地但未采纳（防跳动窗口内）：阅读器位置是陈旧的，跳过保存防回写覆盖
+    if (hasStalePendingSync(bookId, location)) {
       return;
     }
 

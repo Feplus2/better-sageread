@@ -186,19 +186,17 @@ export default function ReaderLayout() {
     };
   }, []);
 
-  // L2 增量同步调度（P1 修复）：
-  // 固定 25 秒基础 tick——dirty 立即完整同步（推+拉，不受频率下拉影响）；
-  // clean 时按 sync_frequency 兜底轻量拉取（syncPullNow：远端无新意时只有一个小 GET，无变更零下载）。
-  // 启动时自动一轮照旧。
+  // L2 增量同步调度（P1 修复 + 运行期配置自检）：
+  // 固定 25 秒基础 tick——每轮重读配置（l2_enabled/频率改动即时生效，无需重启或刷新）；
+  // dirty 立即完整同步（推+拉，不受频率下拉影响）；clean 时按 sync_frequency 兜底轻量拉取
+  // （syncPullNow：远端无新意时只有一个小 GET，无变更零下载）。启动时自动一轮照旧。
   // 空闲调度：用户活跃交互时跳过同步，放下书 10 秒后自动同步。
   // biome-ignore lint/correctness/useExhaustiveDependencies: queryClient 实例稳定，定时器只需注册一次
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
     let syncing = false;
     let lastPullAt = 0;
     let lastInteraction = Date.now();
-    let onlineCleanup: (() => void) | null = null;
 
     // 空闲检测：监听用户交互事件
     const markActive = () => {
@@ -228,63 +226,75 @@ export default function ReaderLayout() {
         });
     };
 
-    const setup = async () => {
+    const pullFallbackMsOf = (frequency: string) =>
+      frequency === "30min"
+        ? 30 * 60_000
+        : frequency === "5min"
+          ? 5 * 60_000
+          : frequency === "off"
+            ? Number.POSITIVE_INFINITY
+            : 30_000;
+
+    // 每轮自检配置：未启用/未配置端点则空转（25s 一次轻量读，代价可忽略）
+    const tick = async () => {
+      if (cancelled || syncing || !isIdle()) return;
+      let config: Awaited<ReturnType<typeof syncGetConfig>>;
       try {
-        const config = await syncGetConfig();
-        if (cancelled || !config || !config.l2_enabled || !config.endpoint) return;
-
-        // 启动自动一轮完整同步
-        runWith(syncRunNow);
-        lastPullAt = Date.now();
-
-        // clean 时的拉取兜底频率：下拉仅控制它（off = 不兜底，只能靠推送轮顺带拉取）
-        const pullFallbackMs =
-          config.sync_frequency === "30min"
-            ? 30 * 60_000
-            : config.sync_frequency === "5min"
-              ? 5 * 60_000
-              : config.sync_frequency === "off"
-                ? Number.POSITIVE_INFINITY
-                : 30_000;
-
-        timer = setInterval(() => {
-          // 空闲调度：用户活跃时跳过本轮，下个周期再试
-          if (!isIdle()) return;
-
-          syncHasUnpushed()
-            .then((dirty) => {
-              if (dirty) {
-                runWith(syncRunNow); // 有变更：立即推+拉
-                lastPullAt = Date.now();
-              } else if (Date.now() - lastPullAt >= pullFallbackMs) {
-                runWith(syncPullNow); // 无变更：按兜底频率轻量拉取
-                lastPullAt = Date.now();
-              }
-            })
-            .catch((error) => console.warn("L2 水位检查失败:", error));
-        }, 25_000);
-
-        // 网络恢复时立即一轮同步（dirty 推+拉，clean 轻量拉取）
-        const onOnline = () => {
-          syncHasUnpushed()
-            .then((dirty) => {
-              runWith(dirty ? syncRunNow : syncPullNow);
-              lastPullAt = Date.now();
-            })
-            .catch((error) => console.warn("L2 水位检查失败:", error));
-        };
-        window.addEventListener("online", onOnline);
-        onlineCleanup = () => window.removeEventListener("online", onOnline);
+        config = await syncGetConfig();
+      } catch {
+        return;
+      }
+      if (cancelled || !config || !config.l2_enabled || !config.endpoint) return;
+      try {
+        const dirty = await syncHasUnpushed();
+        if (dirty) {
+          runWith(syncRunNow); // 有变更：立即推+拉
+          lastPullAt = Date.now();
+        } else if (Date.now() - lastPullAt >= pullFallbackMsOf(config.sync_frequency)) {
+          runWith(syncPullNow); // 无变更：按兜底频率轻量拉取
+          lastPullAt = Date.now();
+        }
       } catch (error) {
-        console.warn("L2 同步调度初始化失败:", error);
+        console.warn("L2 水位检查失败:", error);
       }
     };
 
-    setup();
+    // 启动时自动一轮完整同步（仅当已启用）
+    void (async () => {
+      try {
+        const config = await syncGetConfig();
+        if (cancelled || !config || !config.l2_enabled || !config.endpoint) return;
+        runWith(syncRunNow);
+        lastPullAt = Date.now();
+      } catch (error) {
+        console.warn("L2 同步调度初始化失败:", error);
+      }
+    })();
+
+    const timer = setInterval(() => {
+      void tick();
+    }, 25_000);
+
+    // 网络恢复时立即一轮同步（dirty 推+拉，clean 轻量拉取）
+    const onOnline = () => {
+      void (async () => {
+        try {
+          const config = await syncGetConfig();
+          if (cancelled || !config || !config.l2_enabled || !config.endpoint) return;
+          const dirty = await syncHasUnpushed();
+          runWith(dirty ? syncRunNow : syncPullNow);
+          lastPullAt = Date.now();
+        } catch (error) {
+          console.warn("L2 水位检查失败:", error);
+        }
+      })();
+    };
+    window.addEventListener("online", onOnline);
+
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
-      onlineCleanup?.();
+      clearInterval(timer);
+      window.removeEventListener("online", onOnline);
       for (const evt of interactionEvents) {
         window.removeEventListener(evt, markActive);
       }
