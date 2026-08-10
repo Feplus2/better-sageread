@@ -54,6 +54,7 @@ import { type HoverRect, mergeOverlappingRects } from "./paper-hover-rects";
 import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "./paper-metadata";
 import { type SentenceSpan, findSentenceAt, segmentSentences, snapRangeToSentences } from "./paper-sentences";
 import { rehypeDelTilde } from "./rehype-del-tilde";
+import { renderMathInRawTables } from "./render-math-in-tables";
 
 export interface TocItem {
   id: string;
@@ -819,6 +820,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   ref,
 ) {
   const { metadata, body } = useMemo(() => parsePaperMarkdown(markdown), [markdown]);
+  // 原生 HTML 表格内的 $...$ 公式预烘焙为 KaTeX（rehype-katex 不扫 raw HTML 文本）
+  const renderedBody = useMemo(() => renderMathInRawTables(body), [body]);
   const hasMetadata = Object.keys(metadata).length > 0;
 
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -1771,7 +1774,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             rehypePlugins={[rehypeRaw, rehypeKatex, rehypeSlug, rehypeDelTilde]}
             components={components}
           >
-            {body}
+            {renderedBody}
           </ReactMarkdown>
         </div>
         {hoverRects && (
