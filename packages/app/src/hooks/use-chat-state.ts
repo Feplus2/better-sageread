@@ -340,9 +340,22 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         if (!threadSnapshot?.id || msgsSnapshot.length === 0) return;
         const last = msgsSnapshot[msgsSnapshot.length - 1];
         if (last?.role !== "assistant" || !Array.isArray(last.parts) || last.parts.length === 0) return;
+        // 中止收尾：未完成的工具部件（还在 input-streaming/input-available）统一标记为已中止，
+        // 否则"Processing"转圈状态会永久留在消息与落库数据里
+        const closedParts = last.parts.map((part: any) =>
+          typeof part?.type === "string" &&
+          part.type.startsWith("tool-") &&
+          (part.state === "input-streaming" || part.state === "input-available")
+            ? { ...part, state: "output-error", errorText: "已被用户中止" }
+            : part,
+        );
         const marked = [
           ...msgsSnapshot.slice(0, -1),
-          { ...last, metadata: { ...((last.metadata as MessageMetadata) || {}), interrupted: true } },
+          {
+            ...last,
+            parts: closedParts,
+            metadata: { ...((last.metadata as MessageMetadata) || {}), interrupted: true },
+          },
         ];
         // 仅当 UI 仍停留在该对话时才刷新界面与共享 ref；落库始终按快照线程执行
         if (currentThreadRef.current?.id === threadSnapshot.id) {

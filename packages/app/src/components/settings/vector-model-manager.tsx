@@ -106,6 +106,8 @@ export default function VectorModelManager() {
   const [vectorizedCount, setVectorizedCount] = useState(0);
   // G1-3：全量重新向量化进度（null = 空闲）
   const [revectorizeProgress, setRevectorizeProgress] = useState<{ done: number; total: number } | null>(null);
+  // G1-3 取消标记：条目间检查（单条不可中断，靠 embedding 超时兜底不悬死）
+  const revectorizeCancelRef = useRef(false);
 
   const [formData, setFormData] = useState<Omit<VectorModelConfig, "id">>({
     name: "",
@@ -346,12 +348,19 @@ export default function VectorModelManager() {
       { title: "全量重新向量化", kind: "warning" },
     );
     if (!confirmed) return;
+    revectorizeCancelRef.current = false;
     setRevectorizeProgress({ done: 0, total: targets.length });
     let successCount = 0;
     let failCount = 0;
+    let cancelled = false;
     try {
       const config = await getCurrentVectorModelConfig();
       for (let i = 0; i < targets.length; i++) {
+        // 条目间检查取消标记（单条不可中断，靠 embedding 超时 60s 兜底不悬死）
+        if (revectorizeCancelRef.current) {
+          cancelled = true;
+          break;
+        }
         // vectorizeItem 内部已兜底异常（返回 success:false），不会因单条失败中断整批
         const result = await vectorizeItem(targets[i], config);
         if (result.success) successCount++;
@@ -364,7 +373,11 @@ export default function VectorModelManager() {
     countVectorized()
       .then(setVectorizedCount)
       .catch(() => {});
-    if (failCount > 0) {
+    if (cancelled) {
+      toast.info(
+        `已取消：完成 ${successCount + failCount}/${targets.length} 个（成功 ${successCount}，失败 ${failCount}）`,
+      );
+    } else if (failCount > 0) {
       toast.warning(`重新向量化完成：成功 ${successCount} 个，失败 ${failCount} 个（失败条目可稍后重试）`, {
         duration: 8000,
       });
@@ -445,17 +458,23 @@ export default function VectorModelManager() {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-neutral-500 text-xs dark:text-neutral-400">已向量化 {vectorizedCount} 本/篇</span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                disabled={revectorizeProgress !== null}
-                onClick={handleRevectorizeAll}
-              >
-                {revectorizeProgress
-                  ? `重新向量化中 ${revectorizeProgress.done}/${revectorizeProgress.total}`
-                  : "全量重新向量化"}
-              </Button>
+              {revectorizeProgress ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  title="当前条目完成后停止"
+                  onClick={() => {
+                    revectorizeCancelRef.current = true;
+                  }}
+                >
+                  取消（{revectorizeProgress.done}/{revectorizeProgress.total}）
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRevectorizeAll}>
+                  全量重新向量化
+                </Button>
+              )}
             </div>
           </div>
         ) : (

@@ -52,7 +52,12 @@ impl TextVectorizer {
     pub async fn new(config: VectorizerConfig) -> Result<Self> {
         log::info!("初始化嵌入 API 向量化器: embeddings_url={}, model={}", config.embeddings_url, config.model_name);
 
-        let client = Client::new();
+        // 必须带超时：网络抽风时默认 Client 会永久悬挂，批量向量化会整体卡死（真机实证）
+        let client = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .context("Failed to build HTTP client")?;
         let tokenizer = o200k_base().context("Failed to initialize tiktoken tokenizer")?;
 
         Ok(Self {
