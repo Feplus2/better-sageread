@@ -346,8 +346,12 @@ pub fn list_l2_snapshots(app: &AppHandle) -> Result<Vec<SnapshotInfo>, String> {
         })
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
-            // 从文件名提取时间戳：app-<ts>.db
-            let ts = name.trim_start_matches("app-").trim_end_matches(".db").parse::<i64>().unwrap_or(0);
+            // 从文件名提取时间戳：app-<ts>[-uuid].db（uuid 后缀为防撞名，见 engine 快照）
+            let ts = name
+                .strip_prefix("app-")
+                .and_then(|rest| rest.split('-').next())
+                .and_then(|head| head.parse::<i64>().ok())
+                .unwrap_or(0);
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             Some(SnapshotInfo { name, created_at: ts, size })
         })

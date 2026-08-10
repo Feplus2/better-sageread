@@ -219,7 +219,12 @@ async fn snapshot_before_apply(app: &AppHandle, pool: &SqlitePool) -> Result<(),
     let dir = config_dir.join("sync-staging").join("l2-safety");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    let staged = dir.join(format!("app-{}.db", now_ms()));
+    // 并发同步（开机首轮 + 开书快拉）会在同一毫秒撞同名快照文件，VACUUM INTO 双双失败——
+    // 文件名带随机后缀防撞；目标存在先删（VACUUM INTO 要求目标不存在/为空）
+    let staged = dir.join(format!("app-{}-{}.db", now_ms(), uuid::Uuid::new_v4().simple()));
+    if staged.exists() {
+        let _ = std::fs::remove_file(&staged);
+    }
     sqlx::query("VACUUM INTO ?")
         .bind(staged.to_string_lossy().replace('\\', "/"))
         .execute(pool)
