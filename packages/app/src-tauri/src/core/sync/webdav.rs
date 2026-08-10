@@ -27,8 +27,9 @@ fn client() -> Result<Client, String> {
         .map_err(|e| format!("创建 HTTP client 失败: {e}"))
 }
 
-/// 限流重试上限与基础退避（坚果云免费版 30 分钟 600 次请求；6 次约 130 秒覆盖短时窗口）
-const RATE_LIMIT_MAX_RETRIES: u32 = 6;
+/// 限流退避总预算：35 分钟（任何服务器都可能限流——429/503 是标准语义；
+/// 自适应退避穿过限流窗口而不是失败，对后台备份任务"慢一点但终会成功"是对的语义）
+const RATE_LIMIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(35 * 60);
 
 async fn send(
     config: &WebdavConfig,
@@ -36,8 +37,9 @@ async fn send(
     path: &str,
     body: Option<Vec<u8>>,
 ) -> Result<reqwest::Response, String> {
-    // 429/503 指数退避：2s/4s/8s/16s/32s + 抖动（备份资产池把单次备份的请求数放大了一个量级，退避是刚需）
-    let mut attempt = 0u32;
+    // 429/503 自适应退避：2s 起步倍增、60s 封顶 + 抖动，总预算 35 分钟
+    let started = std::time::Instant::now();
+    let mut backoff_ms = 2_000u64;
     loop {
         let url = remote_url(config, path)?;
         let client = client()?;
@@ -49,22 +51,22 @@ async fn send(
         }
         let resp = builder.send().await.map_err(|e| format!("网络请求失败: {e}"))?;
         let status = resp.status().as_u16();
-        if (status == 429 || status == 503) && attempt < RATE_LIMIT_MAX_RETRIES {
-            attempt += 1;
+        if status == 429 || status == 503 {
+            if started.elapsed() >= RATE_LIMIT_BUDGET {
+                return Err(format!(
+                    "服务器限流（HTTP {status}）：已自适应退避重试超过 {} 分钟仍未放行，请稍后再试",
+                    RATE_LIMIT_BUDGET.as_secs() / 60
+                ));
+            }
             let jitter = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.subsec_millis() as u64 % 500)
                 .unwrap_or(0);
-            let backoff_ms = (1000u64 << attempt) + jitter;
-            log::warn!("WebDAV 限流 (HTTP {status})，{backoff_ms}ms 后第 {attempt}/{RATE_LIMIT_MAX_RETRIES} 次重试: {path}");
-            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            let wait = backoff_ms + jitter;
+            log::warn!("WebDAV 限流 (HTTP {status})，{wait}ms 后重试: {path}");
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            backoff_ms = (backoff_ms * 2).min(60_000);
             continue;
-        }
-        // 重试耗尽仍限流：给出可理解的错误（与流量配额无关，是请求频率预算）
-        if status == 429 || status == 503 {
-            return Err(format!(
-                "坚果云请求频率超限（HTTP {status}）：免费版每 30 分钟 600 次请求预算已耗尽，请等几分钟再试（与上传流量配额无关）"
-            ));
         }
         return Ok(resp);
     }

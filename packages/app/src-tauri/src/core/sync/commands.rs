@@ -216,11 +216,19 @@ pub async fn sync_test_connection(app: AppHandle, mut config: WebdavConfig) -> R
 
 #[tauri::command]
 pub async fn sync_backup_now(app: AppHandle, state: State<'_, AppState>) -> Result<BackupOutcome, String> {
-    migrate_cloud_layout(&app).await?;
-    let config = load_config(&app)?;
-    let db_pool_guard = state.db_pool.lock().await;
-    let pool = db_pool_guard.as_ref().ok_or("数据库未初始化")?;
-    let result = backup::run_backup(&app, pool, &config).await;
+    // 防重入：备份在 Rust 侧跑全程（关设置页不中断），重复发起只会徒增请求与限流风险
+    if state.backup_running.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("已有备份任务正在进行中，请等待其完成".to_string());
+    }
+    let result = async {
+        migrate_cloud_layout(&app).await?;
+        let config = load_config(&app)?;
+        let db_pool_guard = state.db_pool.lock().await;
+        let pool = db_pool_guard.as_ref().ok_or("数据库未初始化")?;
+        backup::run_backup(&app, pool, &config).await
+    }
+    .await;
+    state.backup_running.store(false, std::sync::atomic::Ordering::SeqCst);
     // 完成/失败发事件：全局监听写进通知中心——备份在 Rust 侧跑全程，
     // 设置页关掉不影响执行，结果落在通知中心可回看（含手动/自动/Agent 三条触发路径）
     let _ = app.emit(
@@ -231,6 +239,12 @@ pub async fn sync_backup_now(app: AppHandle, state: State<'_, AppState>) -> Resu
         },
     );
     result
+}
+
+/// 备份是否进行中（设置页重开时恢复"备份中"按钮态用）
+#[tauri::command]
+pub async fn sync_is_backup_running(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.backup_running.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 #[tauri::command]

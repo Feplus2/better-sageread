@@ -357,8 +357,8 @@ pub async fn run_backup(
         let bytes = fs::read(&local).map_err(|e| format!("读取资产失败 {}: {e}", asset.path))?;
         webdav::put_path(config, &format!("{}/{}", assets_dir(config), asset.sha256), bytes).await?;
         assets_uploaded += 1;
-        // 平滑请求频率：免费版 600 次/30 分钟预算内不打爆（退避重试仍是兜底）
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // 突发平滑（通用防爆发，非针对特定厂商）；限流由 send() 的自适应退避兜底
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     // 7. 打包上传小包

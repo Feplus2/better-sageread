@@ -73,6 +73,11 @@ export async function syncBackupNow(): Promise<BackupOutcome> {
   return invoke("sync_backup_now");
 }
 
+/** 备份是否在 Rust 侧进行中（重开设置页恢复"备份中"按钮态，防重复发起） */
+export async function syncIsBackupRunning(): Promise<boolean> {
+  return invoke("sync_is_backup_running");
+}
+
 export async function syncListBackups(): Promise<BackupInfo[]> {
   return invoke("sync_list_backups");
 }

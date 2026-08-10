@@ -20,6 +20,7 @@ import {
   syncGetConfig,
   syncGetL2Status,
   syncGetState,
+  syncIsBackupRunning,
   syncListBackups,
   syncListL2Snapshots,
   syncRestartApp,
@@ -101,9 +102,14 @@ export default function SyncSettings() {
       .catch((error) => console.error("加载同步状态失败:", error));
   }, []);
 
-  // 恢复时的大包资产下载进度（Rust stage_restore 发射 sync-restore-assets）
+  // 恢复时的大包资产下载进度（Rust stage_restore 发射 sync-restore-assets）；
+  // 挂载时同步 Rust 侧的备份进行中状态（设置页关闭重开后按钮恢复"备份中"，防重复发起）；
+  // sync-backup-done 到达即复位（全局通知由 use-sync-events 负责）
   useEffect(() => {
-    const unlisten = listen<{ current: number; total: number; path: string; done?: boolean }>(
+    syncIsBackupRunning()
+      .then(setIsBackingUp)
+      .catch((error) => console.warn("查询备份状态失败:", error));
+    const unlistenAssets = listen<{ current: number; total: number; path: string; done?: boolean }>(
       "sync-restore-assets",
       (event) => {
         if (event.payload.done) {
@@ -117,8 +123,10 @@ export default function SyncSettings() {
         }
       },
     );
+    const unlistenBackup = listen("sync-backup-done", () => setIsBackingUp(false));
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenAssets.then((fn) => fn());
+      unlistenBackup.then((fn) => fn());
     };
   }, []);
 
@@ -197,8 +205,14 @@ export default function SyncSettings() {
       setSyncState(await syncGetState());
       refreshBackups();
     } catch (error) {
-      console.error("备份失败:", error);
-      notify.error("备份失败", String(error));
+      const message = String(error);
+      // 已有任务在进行中是提示而非失败（重复点击/重开页面后的再触发）
+      if (message.includes("已有备份任务")) {
+        notify.info(message);
+      } else {
+        console.error("备份失败:", error);
+        notify.error("备份失败", message);
+      }
     } finally {
       setIsBackingUp(false);
     }
