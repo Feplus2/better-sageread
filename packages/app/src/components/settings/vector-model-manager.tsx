@@ -11,7 +11,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type as getOsType } from "@tauri-apps/plugin-os";
 import { ChevronDown, CircuitBoard, Cloud, Edit2, Info, Plus, Server, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** G2：接入方式预设——点击自动填充添加表单（本地部署免 Key，云端需 Key） */
