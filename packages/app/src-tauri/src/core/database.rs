@@ -132,7 +132,8 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         .execute(pool)
         .await?;
 
-    // L2 增量同步：变更日志表 + 七张同步表的触发器（CREATE TRIGGER IF NOT EXISTS 幂等）
+    // L2 增量同步：变更日志表（同步触发器统一在 run_migrations 末尾创建——
+    // folders/paper_folders/prompt_presets 等成员表在后面的迁移里才建，顺序不能反）
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS _sync_log (
             seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,38 +145,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     )
     .execute(pool)
     .await?;
-
-    // 同步表触发器清单（CREATE TRIGGER IF NOT EXISTS 幂等）；
-    // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式
-    const SYNC_TABLES: [(&str, &str); 10] = [
-        ("books", "id"),
-        ("book_status", "book_id"),
-        ("book_notes", "id"),
-        ("threads", "id"),
-        ("reading_sessions", "id"),
-        ("skills", "id"),
-        ("tags", "id"),
-        ("folders", "id"),
-        ("paper_folders", "paper_id || ':' || folder_id"),
-        ("prompt_presets", "id"),
-    ];
-
-    for (table, pk) in SYNC_TABLES {
-        for (suffix, op, key) in [
-            ("ai", "INSERT", format!("NEW.{pk}")),
-            ("au", "UPDATE", format!("NEW.{pk}")),
-            ("ad", "DELETE", format!("OLD.{pk}")),
-        ] {
-            let sql = format!(
-                "CREATE TRIGGER IF NOT EXISTS _sync_{table}_{suffix} AFTER {op} ON {table} BEGIN
-                    INSERT INTO _sync_log (table_name, row_id, op, at)
-                    VALUES ('{table}', {key}, '{op}', CAST(strftime('%s','now') AS INTEGER) * 1000);
-                END"
-            );
-            sqlx::query(&sql).execute(pool).await?;
-        }
-    }
-    println!("Migration applied: _sync_log + sync triggers.");
+    println!("Migration applied: _sync_log.");
 
     // notes 概念废弃（2026-08）：独立"笔记"全部迁移到 book_notes，删表清库。
     // DROP TABLE 幂等，且连带删除其上的 _sync_notes_* 触发器；同时清掉 _sync_log 里的残留行
@@ -417,6 +387,39 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         Err(e) if e.to_string().contains("duplicate column name") => {}
         Err(e) => return Err(e.into()),
     }
+
+    // L2 同步触发器（CREATE TRIGGER IF NOT EXISTS 幂等）统一最后建：
+    // 成员表的建表/列迁移必须全部就绪（folders/paper_folders/prompt_presets 在上方才创建）；
+    // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式
+    const SYNC_TABLES: [(&str, &str); 10] = [
+        ("books", "id"),
+        ("book_status", "book_id"),
+        ("book_notes", "id"),
+        ("threads", "id"),
+        ("reading_sessions", "id"),
+        ("skills", "id"),
+        ("tags", "id"),
+        ("folders", "id"),
+        ("paper_folders", "paper_id || ':' || folder_id"),
+        ("prompt_presets", "id"),
+    ];
+
+    for (table, pk) in SYNC_TABLES {
+        for (suffix, op, key) in [
+            ("ai", "INSERT", format!("NEW.{pk}")),
+            ("au", "UPDATE", format!("NEW.{pk}")),
+            ("ad", "DELETE", format!("OLD.{pk}")),
+        ] {
+            let sql = format!(
+                "CREATE TRIGGER IF NOT EXISTS _sync_{table}_{suffix} AFTER {op} ON {table} BEGIN
+                    INSERT INTO _sync_log (table_name, row_id, op, at)
+                    VALUES ('{table}', {key}, '{op}', CAST(strftime('%s','now') AS INTEGER) * 1000);
+                END"
+            );
+            sqlx::query(&sql).execute(pool).await?;
+        }
+    }
+    println!("Migration applied: sync triggers.");
 
     Ok(())
 }
