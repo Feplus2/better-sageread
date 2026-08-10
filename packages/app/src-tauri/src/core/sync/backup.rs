@@ -13,12 +13,18 @@ use zip::{CompressionMethod, ZipWriter};
 
 /// 轮转保留的备份份数（配置缺失时的回落值）
 const DEFAULT_MAX_KEEP: usize = 10;
-/// 云端资产池目录（大包 sha256 内容寻址，一次一传）
-const ASSETS_DIR: &str = "sageread/backups/assets";
-/// 云端资产池索引（GC 引用计数用）
-const ASSETS_INDEX: &str = "sageread/backups/assets-index.json";
 /// 本地资产哈希缓存（大文件 mtime+size 不变则免重哈希）
 const ASSET_CACHE_FILE: &str = "backup-assets-cache.json";
+
+/// 云端资产池目录（跟随备份 remote_dir，兼容旧布局 sageread-backups）
+fn assets_dir(config: &WebdavConfig) -> String {
+    format!("{}/assets", config.remote_dir.trim_matches('/'))
+}
+
+/// 云端资产池索引路径（GC 引用计数用）
+fn assets_index_path(config: &WebdavConfig) -> String {
+    format!("{}/assets-index.json", config.remote_dir.trim_matches('/'))
+}
 
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{:02x}", b)).collect()
@@ -228,7 +234,7 @@ pub(crate) fn asset_local_path(app: &AppHandle, asset: &AssetRef) -> Option<Path
 // ---- 云端资产池索引（GC 引用计数） ----
 
 async fn read_assets_index(config: &WebdavConfig) -> Result<AssetsIndex, String> {
-    match webdav::get_path(config, ASSETS_INDEX).await? {
+    match webdav::get_path(config, &assets_index_path(config)).await? {
         // 404=首次使用（空索引）；解析失败/网络失败必须中止——
         // 默认空索引继续跑会让 GC 把他端引用的资产误判为孤儿（devices.json 同款教训）
         None => Ok(AssetsIndex::default()),
@@ -336,10 +342,11 @@ pub async fn run_backup(
         });
     }
 
-    // 5. 上传缺失资产（云端按 sha256 判存，存在即零流量）
+    // 5. 上传缺失资产（云端按 sha256 判存，存在即零流量；先确保资产池集合存在，防 409）
+    webdav::ensure_remote_dirs(config, &[assets_dir(config)]).await?;
     let mut assets_uploaded = 0usize;
     for asset in &assets {
-        let remote = format!("{ASSETS_DIR}/{}", asset.sha256);
+        let remote = format!("{}/{}", assets_dir(config), asset.sha256);
         if webdav::path_exists(config, &remote).await? {
             continue;
         }
@@ -402,12 +409,12 @@ pub async fn run_backup(
     }
     let (orphans, new_index) = gc_assets_index(assets_index, &surviving);
     for sha in &orphans {
-        let _ = webdav::delete_path(config, &format!("{ASSETS_DIR}/{sha}")).await;
+        let _ = webdav::delete_path(config, &format!("{}/{}", assets_dir(config), sha)).await;
     }
     if !removed.is_empty() || !orphans.is_empty() {
         log::info!("备份轮转：删除旧包 {} 个，GC 孤儿资产 {} 个", removed.len(), orphans.len());
     }
-    webdav::put_path(config, ASSETS_INDEX, serde_json::to_vec_pretty(&new_index).map_err(|e| e.to_string())?).await?;
+    webdav::put_path(config, &assets_index_path(config), serde_json::to_vec_pretty(&new_index).map_err(|e| e.to_string())?).await?;
 
     // 10. 记录本地状态与资产哈希缓存
     let _ = write_sync_state(

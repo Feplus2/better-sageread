@@ -95,7 +95,7 @@ pub async fn stage_restore(
                 "sync-restore-assets",
                 serde_json::json!({ "current": i + 1, "total": total, "path": asset.path }),
             );
-            let remote = format!("sageread/backups/assets/{}", asset.sha256);
+            let remote = format!("{}/assets/{}", config.remote_dir.trim_matches('/'), asset.sha256);
             let bytes = webdav::get_path(config, &remote)
                 .await?
                 .ok_or_else(|| format!("云端资产缺失（索引存在但文件不在）: {}", asset.sha256))?;
