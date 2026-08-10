@@ -6,6 +6,7 @@ import {
   updateBookVectorizationMeta,
 } from "@/services/book-service";
 import { resolveLlmParams } from "@/services/converter-service";
+import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useConverterStore } from "@/store/converter-store";
 import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
@@ -125,6 +126,7 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
 export async function importPapers(dir: string, folderId?: string): Promise<ImportPapersResult> {
   const scanned = await invoke<ScannedPaper[]>("scan_papers_dir", { dir });
   const result: ImportPapersResult = { imported: 0, skipped: 0, failed: [] };
+  const importedIds: string[] = [];
 
   for (const paper of scanned) {
     try {
@@ -149,6 +151,7 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
         }
       }
       result.imported += 1;
+      importedIds.push(paper.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("已存在")) {
@@ -157,6 +160,18 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
         result.failed.push({ dir: paper.dir, error: message });
       }
     }
+  }
+
+  // L2 开启时异步上传论文文件到云端（不阻塞导入流程，与书籍导入同款；整目录 zip 捆走文件通道）
+  try {
+    const config = await syncGetConfig();
+    if (config?.l2_enabled) {
+      for (const id of importedIds) {
+        syncUploadBook(id).catch((e) => console.warn("论文文件自动上传失败（忽略）:", id, e));
+      }
+    }
+  } catch (error) {
+    console.warn("读取同步配置失败（跳过论文自动上传）:", error);
   }
 
   return result;

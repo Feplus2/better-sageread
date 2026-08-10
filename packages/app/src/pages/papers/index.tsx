@@ -56,7 +56,8 @@ import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, exists } from "@tauri-apps/plugin-fs";
+import { syncDownloadBook } from "@/services/sync-service";
 import clsx from "clsx";
 import {
   ArrowDownWideNarrow,
@@ -65,6 +66,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Cloud,
   FileDown,
   FileText,
   Folder as FolderIcon,
@@ -96,6 +98,34 @@ type Selection = { kind: "all" } | { kind: "unfiled" } | { kind: "folder"; id: s
 type NameDialogState = { mode: "create"; parentId: string | null } | { mode: "rename"; id: string };
 
 /** 向量化状态指示：与图书馆 book-item 同款圆环（绿=已向量化/红=失败/灰=未向量化；进行中为扇形环+百分比） */
+/** L2 仅云端徽标：论文文件（paper.md 捆）不在本地时显示；点击打开时会自动下载（handleOpen 门） */
+function PaperCloudBadge({ paper }: { paper: BookWithStatus }) {
+  const [isCloudOnly, setIsCloudOnly] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (paper.filePath) {
+      appDataDir()
+        .then((base) => exists(`${base}/${paper.filePath}`))
+        .then((fileExists) => {
+          if (!cancelled) setIsCloudOnly(!fileExists);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [paper.filePath]);
+  if (!isCloudOnly) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Cloud className="size-4 text-neutral-400 dark:text-neutral-500" />
+      </TooltipTrigger>
+      <TooltipContent side="bottom">仅在云端，点击打开时自动下载</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function VectorizationRing({ paper, vectorizePercent }: { paper: BookWithStatus; vectorizePercent?: number }) {
   const statusFromMeta = paper.status?.metadata?.vectorization?.status ?? "idle";
   if (vectorizePercent != null) {
@@ -1161,8 +1191,21 @@ export default function PapersPage() {
     setPdfImport(null);
   };
 
-  /** 列表行点击 = 打开论文标签页（阅读视图在标签页三段布局中，正文由 PaperReaderView 自行加载） */
-  const handleOpen = (paper: BookWithStatus) => {
+  /** 列表行点击 = 打开论文标签页（阅读视图在标签页三段布局中，正文由 PaperReaderView 自行加载）。
+   *  L2 仅云端（元数据已同步、文件未下载）时先经文件通道下载再打开（与书籍卡片同款懒加载语义） */
+  const handleOpen = async (paper: BookWithStatus) => {
+    try {
+      const base = await appDataDir();
+      if (paper.filePath && !(await exists(`${base}/${paper.filePath}`))) {
+        toast.info(`正在下载《${paper.title}》...`);
+        // 论文走 zip 捆下载（整目录时点替换解包），失败不打开避免读取落空
+        await syncDownloadBook(paper.id);
+      }
+    } catch (error) {
+      console.error("下载论文失败:", error);
+      toast.error("下载失败", { description: String(error) });
+      return;
+    }
     openPaper(paper.id, paper.title);
   };
 
@@ -2021,6 +2064,7 @@ export default function PapersPage() {
                       {/* 右侧两行纵向：上行 打星/状态徽标/向量化圆环，分隔线，下行 动作（向量化/移动/删除） */}
                       <div className="flex shrink-0 flex-col items-end gap-1.5">
                         <div className="flex items-center gap-1.5">
+                          <PaperCloudBadge paper={paper} />
                           <PaperStars
                             rating={paper.status?.rating ?? 0}
                             onRate={(rating) => handleRate(paper, rating)}

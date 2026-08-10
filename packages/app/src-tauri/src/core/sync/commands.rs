@@ -416,7 +416,7 @@ pub async fn sync_download_book(app: AppHandle, state: State<'_, AppState>, book
 
     // 锁只护 DB：读出必要字段后即释放（clone_db_pool 不持锁），网络下载不持全局锁
     let pool = clone_db_pool(&state).await?;
-    let row = sqlx::query("SELECT file_path FROM books WHERE id = ?")
+    let row = sqlx::query("SELECT file_path, format FROM books WHERE id = ?")
         .bind(&book_id)
         .fetch_optional(&pool)
         .await
@@ -424,10 +424,26 @@ pub async fn sync_download_book(app: AppHandle, state: State<'_, AppState>, book
         .ok_or_else(|| format!("书籍不存在: {book_id}"))?;
 
     let file_path: String = row.get("file_path");
+    let format: String = row.get("format");
 
     // 从 files-index 查找 sha256
     let index = files::read_files_index(&config).await?;
     let entry = index.get(&book_id).ok_or_else(|| format!("云端无此书文件: {book_id}"))?;
+
+    if format == "MARKDOWN" {
+        // 论文是 zip 捆：校验+整目录解包
+        log::info!("开始下载论文: 《{}》({} bytes, sha256={})", entry.title, entry.size, &entry.sha256[..8]);
+        return match files::download_paper_bundle(&config, &app_data_dir, &book_id, &entry.sha256).await {
+            Ok(path) => {
+                log::info!("论文下载完成: 《{}》", entry.title);
+                Ok(path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                log::error!("论文下载失败: 《{}》: {e}", entry.title);
+                Err(e)
+            }
+        };
+    }
 
     log::info!("开始下载书籍: 《{}》({} bytes, sha256={})", entry.title, entry.size, &entry.sha256[..8]);
     match files::download_book(&config, &app_data_dir, &book_id, &file_path, &entry.sha256).await {
