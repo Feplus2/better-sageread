@@ -12,15 +12,27 @@ const ENGINE_OPTIONS: { value: BookConvertEngine; label: string; hint: string }[
 
 const PAPER_ENGINE_OPTIONS: { value: PaperConvertEngine; label: string; hint: string }[] = [
   { value: "paddleocr", label: "PaddleOCR", hint: "论文基线：段落顺序/图注绑定/引文保留最优" },
+  {
+    value: "mineru-pipeline",
+    label: "MinerU 文字层管线",
+    hint: "文字版论文推荐：正文零幻觉、大图整幅不碎；扫描版请用 VLM 引擎",
+  },
   { value: "mineru", label: "MinerU", hint: "表格密集论文备选（跨页表合并最稳）" },
   { value: "glm", label: "GLM（智谱）", hint: "第二备选，需智谱 API Key" },
 ];
 
-const ENGINE_LABELS: Record<string, string> = { mineru: "MinerU", paddleocr: "PaddleOCR", glm: "GLM（智谱）" };
+const ENGINE_LABELS: Record<string, string> = {
+  mineru: "MinerU",
+  "mineru-pipeline": "MinerU 文字层管线",
+  paddleocr: "PaddleOCR",
+  glm: "GLM（智谱）",
+};
 
 /** 选中引擎但未配置对应 Token 的提示条 */
 function TokenWarning({ engine, tokens }: { engine: string; tokens: Record<string, string> }) {
-  if (tokens[engine]) return null;
+  // mineru-pipeline 与 mineru 共享同一 Token
+  const tokenKey = engine === "mineru-pipeline" ? "mineru" : engine;
+  if (tokens[tokenKey]) return null;
   return (
     <p className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
       <TriangleAlert className="size-3.5 shrink-0" />

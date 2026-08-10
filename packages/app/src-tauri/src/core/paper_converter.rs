@@ -57,10 +57,23 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
         output_dir.to_string_lossy().to_string(),
     ];
     let engine = params.engine.as_deref().unwrap_or("paddleocr");
+    // mineru-pipeline：MinerU pipeline 后端 + 不强制 OCR（文字版论文直取文本层——
+    // 零幻觉、按整块裁图不拆子图；扫描版/疑难件仍用 vlm 或 paddleocr）
+    let (engine, model, no_ocr) = match engine {
+        "mineru-pipeline" => ("mineru", Some("pipeline"), true),
+        other => (other, None, false),
+    };
     if engine != "paddleocr" {
         // paddleocr 是 sidecar 默认引擎，显式参数只在非默认时传（保持默认行为面不变）
         args.push("--provider".to_string());
         args.push(engine.to_string());
+    }
+    if let Some(m) = model {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if no_ocr {
+        args.push("--no-ocr".to_string());
     }
 
     log::info!("[PaperConverter] 启动解析: {} (engine={})", params.pdf_path, engine);
