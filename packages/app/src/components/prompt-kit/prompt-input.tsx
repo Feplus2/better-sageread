@@ -1,5 +1,6 @@
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { applyPairedPunctuation } from "@/lib/pair-punctuation";
 import { cn } from "@/lib/utils";
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 
@@ -114,6 +115,13 @@ function PromptInputTextarea({ className, onKeyDown, disableAutosize = false, ..
       onKeyDown?.(e);
       return;
     }
+
+    // 标点自动配对（IME 组合期间不干预）
+    if (!isComposing && applyPairedPunctuation(e, value, setValue)) {
+      onKeyDown?.(e);
+      return;
+    }
+
     onKeyDown?.(e);
   };
 
