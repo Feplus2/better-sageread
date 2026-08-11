@@ -1,4 +1,5 @@
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
+import { useReaderStore as useGlobalReaderStore } from "@/store/reader-store";
 import type { Note, NoteLocation } from "@/types/note";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ const BookNotes = ({ bookId }: { bookId: string }) => {
   const view = useReaderStore((state) => state.view);
   const location = useReaderStore((state) => state.location);
   const progress = useReaderStore((state) => state.progress);
+  const activeBook = useGlobalReaderStore((state) => state.activeBook);
 
   const currentLocation: NoteLocation | null = progress?.sectionLabel
     ? { tag: progress.sectionLabel, cfi: location ?? null, block: progress.sectionId ?? null }
@@ -58,7 +60,14 @@ const BookNotes = ({ bookId }: { bookId: string }) => {
     [view],
   );
 
-  return <NotesTab bookId={bookId} currentLocation={currentLocation} onLocate={handleLocate} />;
+  return (
+    <NotesTab
+      bookId={bookId}
+      bookTitle={activeBook?.title ?? ""}
+      currentLocation={currentLocation}
+      onLocate={handleLocate}
+    />
+  );
 };
 
 interface NotepadContainerProps {

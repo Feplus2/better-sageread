@@ -779,7 +779,7 @@ export function PaperNotepadPanel({
           onLocate={onLocateFigure}
         />
       ) : (
-        <NotesTab bookId={paperId} currentLocation={noteLocation} onLocate={onLocateNote} />
+        <NotesTab bookId={paperId} bookTitle={paperTitle} currentLocation={noteLocation} onLocate={onLocateNote} />
       )}
 
       {/* 多选管理底栏：导出（四种格式）/ 批量删除 / 退出（样式同历史对话批量操作条） */}

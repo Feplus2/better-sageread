@@ -1,11 +1,26 @@
+import { Markdown } from "@/components/prompt-kit/markdown";
+import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { exportNoteToMarkdown, exportNotesToMarkdownFiles } from "@/lib/export-notes-markdown";
 import { createNote, deleteNote, getNotes, updateNote } from "@/services/note-service";
 import type { Note, NoteLocation } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
-import { ChevronLeft, Loader2, MapPin, Plus, Star } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ListChecks,
+  Loader2,
+  MapPin,
+  Plus,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,14 +31,28 @@ const AUTOSAVE_DELAY = 800;
 
 interface NoteCardProps {
   note: Note;
+  selectionMode: boolean;
+  selected: boolean;
   onOpen: () => void;
+  onToggleSelect: () => void;
   onToggleStar: () => void;
   onDelete: () => void;
+  onExport: () => void;
   onLocate: () => void;
 }
 
-/** 笔记卡片：标题 + 正文摘要 + 位置 chip + 更新时间 + 星标；点卡片进编辑态，点 chip 跳正文，右键删除 */
-function NoteCard({ note, onOpen, onToggleStar, onDelete, onLocate }: NoteCardProps) {
+/** 笔记卡片：标题 + 正文摘要 + 位置 chip + 更新时间 + 星标；点卡片进编辑态，点 chip 跳正文，右键导出/删除 */
+function NoteCard({
+  note,
+  selectionMode,
+  selected,
+  onOpen,
+  onToggleSelect,
+  onToggleStar,
+  onDelete,
+  onExport,
+  onLocate,
+}: NoteCardProps) {
   const handleDelete = async () => {
     try {
       const confirmed = await ask(
@@ -41,9 +70,19 @@ function NoteCard({ note, onOpen, onToggleStar, onDelete, onLocate }: NoteCardPr
       <ContextMenuTrigger asChild>
         <div
           className="group cursor-pointer rounded-lg bg-muted p-2 transition-colors hover:bg-neutral-200/60 dark:bg-neutral-900 dark:hover:bg-neutral-800"
-          onClick={onOpen}
+          onClick={selectionMode ? onToggleSelect : onOpen}
         >
-          <div className="flex items-start gap-1.5">
+          <div className="flex items-start gap-2">
+            {/* 多选模式：整行点击切换勾选（样式同标注多选） */}
+            {selectionMode && (
+              <span
+                className={`flex size-4 flex-shrink-0 items-center justify-center self-center rounded border transition-colors ${
+                  selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/50"
+                }`}
+              >
+                {selected && <Check size={12} />}
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium text-sm">{note.title || "无标题笔记"}</div>
               {note.content.trim() && (
@@ -52,7 +91,7 @@ function NoteCard({ note, onOpen, onToggleStar, onDelete, onLocate }: NoteCardPr
                 </div>
               )}
               <div className="mt-1.5 flex items-center gap-2 text-neutral-500 text-xs dark:text-neutral-500">
-                {note.locationTag && (
+                {note.locationTag && !selectionMode && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
@@ -71,8 +110,14 @@ function NoteCard({ note, onOpen, onToggleStar, onDelete, onLocate }: NoteCardPr
                     <TooltipContent side="bottom">跳转到：{note.locationTag}</TooltipContent>
                   </Tooltip>
                 )}
+                {note.locationTag && selectionMode && (
+                  <span className="flex max-w-[10rem] items-center gap-0.5 truncate rounded bg-primary/10 px-1 py-0.5 text-primary">
+                    <MapPin className="size-3 shrink-0" />
+                    <span className="truncate">{note.locationTag}</span>
+                  </span>
+                )}
                 <span className="shrink-0">{dayjs(note.updatedAt).format("MM-DD HH:mm")}</span>
-                {/* 星标切换（样式同标注列表；stopPropagation 不进编辑态） */}
+                {/* 星标切换（样式同标注列表；stopPropagation 不进编辑态/勾选） */}
                 <span
                   role="button"
                   tabIndex={-1}
@@ -93,11 +138,14 @@ function NoteCard({ note, onOpen, onToggleStar, onDelete, onLocate }: NoteCardPr
           </div>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem variant="destructive" onClick={() => handleDelete()}>
-          删除
-        </ContextMenuItem>
-      </ContextMenuContent>
+      {!selectionMode && (
+        <ContextMenuContent>
+          <ContextMenuItem onClick={onExport}>导出为 Markdown</ContextMenuItem>
+          <ContextMenuItem variant="destructive" onClick={() => handleDelete()}>
+            删除
+          </ContextMenuItem>
+        </ContextMenuContent>
+      )}
     </ContextMenu>
   );
 }
@@ -109,12 +157,18 @@ interface NoteEditorProps {
   onBack: () => void;
 }
 
-/** 编辑态（侧栏内子视图，不扩宽）：返回 + 标题 + 位置 tag + 等宽 textarea；改动 800ms debounce 自动保存 */
+/**
+ * 编辑态（侧栏内子视图，不扩宽）：返回 + 标题 + 位置 tag + 等宽 textarea + Markdown 预览。
+ * 输入区/预览区各自可折叠（默认双展开，上下排布随面板宽度自然伸缩）；
+ * 改动 800ms debounce 自动保存，卸载兜底 flush。
+ */
 function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [locationTag, setLocationTag] = useState(note.locationTag ?? "");
   const [saving, setSaving] = useState<"idle" | "pending" | "saving">("idle");
+  const [inputOpen, setInputOpen] = useState(true);
+  const [previewOpen, setPreviewOpen] = useState(true);
   const timerRef = useRef<number | null>(null);
   // 最新草稿 ref：卸载/返回时兜底 flush，避免防抖窗口内丢字
   const draftRef = useRef({ title, content, locationTag });
@@ -153,6 +207,13 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
     };
   }, []);
 
+  const foldBtn = (open: boolean, label: string) => (
+    <span className="flex items-center gap-1">
+      {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+      {label}
+    </span>
+  );
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-1 border-neutral-200 border-b px-2 py-1.5 dark:border-neutral-700">
@@ -184,13 +245,50 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
             className="w-full rounded bg-muted px-1.5 py-1 outline-none placeholder:text-neutral-400 focus:ring-1 focus:ring-primary/50 dark:bg-neutral-900"
           />
         </div>
-        <Textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="用 Markdown 写笔记…"
-          className="min-h-[50vh] flex-1 resize-none font-mono text-sm leading-relaxed"
-          autoFocus
-        />
+
+        {/* 输入区（可折叠） */}
+        <div className="rounded-lg bg-muted dark:bg-neutral-900">
+          <button
+            type="button"
+            onClick={() => setInputOpen((v) => !v)}
+            className="flex w-full items-center px-2 py-1.5 text-neutral-500 text-xs hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+          >
+            {foldBtn(inputOpen, "输入区")}
+          </button>
+          {inputOpen && (
+            <div className="px-2 pb-2">
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="用 Markdown 写笔记…"
+                className="min-h-[30vh] resize-none bg-background font-mono text-sm leading-relaxed dark:bg-neutral-950"
+                autoFocus
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 预览区（可折叠；react-markdown + KaTeX，与对话区同一渲染管线） */}
+        <div className="rounded-lg bg-muted dark:bg-neutral-900">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen((v) => !v)}
+            className="flex w-full items-center px-2 py-1.5 text-neutral-500 text-xs hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+          >
+            {foldBtn(previewOpen, "预览")}
+          </button>
+          {previewOpen && (
+            <div className="px-3 pb-3">
+              {content.trim() ? (
+                <Markdown className="prose prose-neutral dark:prose-invert prose-headings:my-2 prose-p:my-1.5 max-w-none prose-table:text-xs text-sm leading-relaxed">
+                  {content}
+                </Markdown>
+              ) : (
+                <p className="text-neutral-400 text-xs dark:text-neutral-500">暂无内容</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -198,6 +296,8 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
 
 export interface NotesTabProps {
   bookId: string;
+  /** 书籍/论文标题（导出 frontmatter 用） */
+  bookTitle: string;
   /** 新建时捕获的当前阅读位置（论文 = heading；书籍 = 章节，父组件装配；阅读位置未知为 null） */
   currentLocation: NoteLocation | null;
   /** 点击位置 chip → 正文跳转（父组件实现 精确锚点 → 文本兜底 → 顶部+toast 的降级链） */
@@ -205,12 +305,16 @@ export interface NotesTabProps {
 }
 
 /**
- * 「笔记」tab（论文/书籍共用骨架）：列表态（卡片 + 新建 + 星标 + 右键删除）↔ 编辑态（自动保存）。
- * B2 增量：Markdown 预览/折叠、管理态（多选导出/删除）、导出。
+ * 「笔记」tab（论文/书籍共用）：列表态（卡片 + 新建 + 星标 + 右键导出/删除）
+ * ↔ 编辑态（输入/预览双折叠区 + 自动保存）↔ 管理态（多选/全选 → 批量逐篇导出/删除）。
  */
-export function NotesTab({ bookId, currentLocation, onLocate }: NotesTabProps) {
+export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: NotesTabProps) {
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 管理态（多选批量操作）
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchOperating, setIsBatchOperating] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -224,8 +328,33 @@ export function NotesTab({ bookId, currentLocation, onLocate }: NotesTabProps) {
 
   useEffect(() => {
     setEditingId(null);
+    setSelectionMode(false);
+    setSelectedIds(new Set());
     void reload();
   }, [reload]);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const allSelected = (notes?.length ?? 0) > 0 && (notes ?? []).every((n) => selectedIds.has(n.id));
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedIds(allSelected ? new Set() : new Set((notes ?? []).map((n) => n.id)));
+  }, [allSelected, notes]);
 
   const handleCreate = async () => {
     try {
@@ -296,6 +425,43 @@ export function NotesTab({ bookId, currentLocation, onLocate }: NotesTabProps) {
     }
   };
 
+  // 批量导出：逐篇各存一个 .md（无合集形态），选目录后批量写
+  const handleBatchExport = async () => {
+    const targets = (notes ?? []).filter((n) => selectedIds.has(n.id));
+    if (targets.length === 0) return;
+    setIsBatchOperating(true);
+    try {
+      const succeeded = await exportNotesToMarkdownFiles(targets, bookTitle);
+      if (succeeded > 0) exitSelectionMode();
+    } finally {
+      setIsBatchOperating(false);
+    }
+  };
+
+  // 批量删除：ask 确认 → 逐条删 → 退出管理态
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      const confirmed = await ask(`确定要删除选中的 ${selectedIds.size} 篇笔记吗？\n\n此操作无法撤销。`, {
+        title: "确认批量删除",
+        kind: "warning",
+      });
+      if (!confirmed) return;
+      setIsBatchOperating(true);
+      for (const id of selectedIds) {
+        await deleteNote(id);
+      }
+      toast.success(`已删除 ${selectedIds.size} 篇笔记`);
+      exitSelectionMode();
+      await reload();
+    } catch (error) {
+      console.error("批量删除笔记失败:", error);
+      toast.error("批量删除笔记失败");
+    } finally {
+      setIsBatchOperating(false);
+    }
+  };
+
   const editing = editingId ? (notes?.find((n) => n.id === editingId) ?? null) : null;
 
   if (editing) {
@@ -304,19 +470,47 @@ export function NotesTab({ bookId, currentLocation, onLocate }: NotesTabProps) {
 
   return (
     <>
-      {/* 工具栏：新建 + 计数 */}
+      {/* 工具栏：新建 / 管理（多选）+ 计数 */}
       <div className="flex items-center justify-between border-neutral-200 border-b px-2 py-1.5 dark:border-neutral-700">
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
-          className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-primary-foreground text-xs hover:bg-primary/90"
-        >
-          <Plus className="size-3.5" />
-          新建笔记
-        </button>
-        {notes && notes.length > 0 && (
-          <span className="text-neutral-400 text-xs dark:text-neutral-500">{notes.length} 条</span>
+        {selectionMode ? (
+          <button
+            type="button"
+            onClick={handleSelectAll}
+            className="rounded-md px-1.5 py-1 text-neutral-500 text-xs hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          >
+            {allSelected ? "取消全选" : "全选"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleCreate()}
+            className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-primary-foreground text-xs hover:bg-primary/90"
+          >
+            <Plus className="size-3.5" />
+            新建笔记
+          </button>
         )}
+        <div className="flex items-center gap-0.5">
+          {notes && notes.length > 0 && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                    className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
+                      selectionMode ? "bg-accent dark:bg-accent" : ""
+                    }`}
+                  >
+                    <ListChecks className="size-4 text-neutral-500 dark:text-neutral-400" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{selectionMode ? "退出管理" : "管理"}</TooltipContent>
+              </Tooltip>
+              <span className="text-neutral-400 text-xs dark:text-neutral-500">{notes.length} 条</span>
+            </>
+          )}
+        </div>
       </div>
 
       {notes === null ? (
@@ -337,12 +531,47 @@ export function NotesTab({ bookId, currentLocation, onLocate }: NotesTabProps) {
             <NoteCard
               key={note.id}
               note={note}
+              selectionMode={selectionMode}
+              selected={selectedIds.has(note.id)}
               onOpen={() => setEditingId(note.id)}
+              onToggleSelect={() => toggleSelect(note.id)}
               onToggleStar={() => void handleToggleStar(note)}
               onDelete={() => void handleDelete(note)}
+              onExport={() => void exportNoteToMarkdown(note, bookTitle)}
               onLocate={() => onLocate(note)}
             />
           ))}
+        </div>
+      )}
+
+      {/* 管理态底栏：批量导出（逐篇 .md）/ 批量删除 / 退出（样式同标注多选底栏） */}
+      {selectionMode && (
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-neutral-200 border-t px-2 py-2 dark:border-neutral-700">
+          <span className="text-nowrap text-neutral-500 text-xs dark:text-neutral-400">已选 {selectedIds.size} 条</span>
+          <div className="flex flex-wrap items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selectedIds.size === 0 || isBatchOperating}
+              onClick={() => void handleBatchExport()}
+            >
+              <Download className="h-3.5 w-3.5" />
+              导出
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selectedIds.size === 0 || isBatchOperating}
+              onClick={() => void handleBatchDelete()}
+              className="text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除
+            </Button>
+            <Button variant="ghost" size="sm" onClick={exitSelectionMode} disabled={isBatchOperating}>
+              退出
+            </Button>
+          </div>
         </div>
       )}
     </>
