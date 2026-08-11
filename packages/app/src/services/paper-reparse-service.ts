@@ -48,7 +48,9 @@ export interface ReparseCallbacks {
   isCancelled?: () => boolean;
 }
 
-type ConvertOutcome = { ok: true; paperDir?: string; degenerate?: boolean } | { ok: false; error: string };
+type ConvertOutcome =
+  | { ok: true; paperDir?: string; degenerate?: boolean; incomplete?: boolean }
+  | { ok: false; error: string };
 
 /** 解析某篇论文的源 PDF 路径：zotero_pdf_path（存在才用）→ 书库目录 source.pdf → null。
  * 存在性检查走 Rust path_exists：plugin-fs 的 exists 有作用域限制，看不到 Zotero storage 等库外路径 */
@@ -83,7 +85,7 @@ export async function reparsePapers(
     if (!settle) return;
     settleCurrent = null;
     if (p.type === "done") {
-      settle({ ok: true, paperDir: p.paper_dir, degenerate: p.degenerate === true });
+      settle({ ok: true, paperDir: p.paper_dir, degenerate: p.degenerate === true, incomplete: p.incomplete === true });
     } else if (p.type === "error") {
       settle({ ok: false, error: p.message ?? "解析失败" });
     } else if (p.type === "terminated") {
@@ -148,8 +150,8 @@ export async function reparsePapers(
       try {
         const suspect = await replaceWithConverted(item, outcome.paperDir, metaById[item.id]);
         report.done.push(item);
-        // 本地检测 + converter 质量守卫（done.degenerate）双通道
-        if (suspect || outcome.degenerate) report.suspect.push(item);
+        // 本地检测 + converter 质量守卫（done.degenerate）+ 完整性闸（done.incomplete）三通道
+        if (suspect || outcome.degenerate || outcome.incomplete) report.suspect.push(item);
       } catch (error) {
         report.failed.push({ ...item, error: error instanceof Error ? error.message : String(error) });
       }

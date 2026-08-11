@@ -46,6 +46,7 @@ import {
   vectorizePaper,
 } from "@/services/paper-service";
 import { translatePaper } from "@/services/paper-translation-service";
+import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
@@ -56,8 +57,7 @@ import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { readTextFile, exists } from "@tauri-apps/plugin-fs";
-import { syncDownloadBook } from "@/services/sync-service";
+import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
 import {
   ArrowDownWideNarrow,
@@ -1003,6 +1003,13 @@ export default function PapersPage() {
               settle("skipped");
             } else {
               toast.success(`论文解析入库完成：${progress.title ?? progress.slug}`);
+              // 完整性闸（converter 重试+降级后仍缺内容）：明确提示，不静默交付
+              if (progress.incomplete === true) {
+                toast.warning(`《${progress.title ?? progress.slug}》检测到内容缺失（图/表或整页未解析出）`, {
+                  description: `${progress.qc_warnings?.[0] ?? "完整性检查未通过"}。建议在 设置 → PDF 转换 中更换解析引擎后重新解析`,
+                  duration: 10000,
+                });
+              }
               // 退化循环检测（引擎 VLM 偶发模式延续失控）：本地检测 + converter 质量守卫双通道
               try {
                 const raw = await readTextFile(await join(progress.paper_dir, "paper.md"));

@@ -203,6 +203,10 @@ export interface PaperConvertProgress {
   success?: boolean;
   /** converter 侧质量守卫：重试后仍检测到退化循环时 done 携带 true（见 Papers_Converter quality_guard） */
   degenerate?: boolean;
+  /** converter 侧完整性闸：重试+降级后仍有内容缺失（图/表断号、页数不足）时 done 携带 true */
+  incomplete?: boolean;
+  /** 完整性闸命中的具体问题清单（incomplete 时携带） */
+  qc_warnings?: string[];
   /** 任务归属标识：Rust 侧注入的源 PDF 路径，多任务并发时据此过滤事件（防串台） */
   pdf_path?: string;
 }

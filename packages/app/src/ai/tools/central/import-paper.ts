@@ -164,6 +164,7 @@ export const importPaperTool = tool({
             : { title: progress.title ?? progress.slug },
           folder: folderName?.trim() || undefined,
           degenerate: progress.degenerate === true,
+          incomplete: progress.incomplete === true,
         },
         meta: { reasoning, filePath },
       };
