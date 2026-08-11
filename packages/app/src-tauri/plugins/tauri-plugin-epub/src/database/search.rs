@@ -16,21 +16,24 @@ impl<'a> DatabaseSearch<'a> {
     }
 
     /// 执行向量相似性搜索
+    /// 旧封装：不过滤参考文献区段（行为不变）
     pub fn vector_search(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
-        self.vector_search_filtered(query_embedding, limit, None)
+        self.vector_search_filtered(query_embedding, limit, None, true)
     }
 
     /// 执行向量相似性搜索（可选按 paper_id 集合过滤，供全局论文库使用）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn vector_search_filtered(
         &self,
         query_embedding: &[f32],
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         if self.db.supports_vector_search() {
-            self.vector_search_with_sqlite_vec(query_embedding, limit, paper_ids)
+            self.vector_search_with_sqlite_vec(query_embedding, limit, paper_ids, include_references)
         } else {
-            self.vector_search_fallback(query_embedding, limit, paper_ids)
+            self.vector_search_fallback(query_embedding, limit, paper_ids, include_references)
         }
     }
 
@@ -44,6 +47,7 @@ impl<'a> DatabaseSearch<'a> {
         query_embedding: &[f32],
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         // 将查询向量转换为字节格式，按照示例代码的方式
         let query_bytes: Vec<u8> = query_embedding
@@ -85,6 +89,10 @@ impl<'a> DatabaseSearch<'a> {
             sql.push_str(&format!(" AND dc.paper_id IN ({})", placeholders.join(",")));
             param_values.extend(ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())));
         }
+        // 默认排除参考文献区段分片（字面量条件，不占参数位）
+        if !include_references {
+            sql.push_str(" AND dc.is_references = 0");
+        }
         sql.push_str(" ORDER BY distance ASC");
 
         let mut stmt = self.db.connection().prepare(&sql)?;
@@ -119,6 +127,7 @@ impl<'a> DatabaseSearch<'a> {
         query_embedding: &[f32],
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         // 获取所有嵌入向量
         let mut sql = String::from(
@@ -142,13 +151,20 @@ impl<'a> DatabaseSearch<'a> {
             "#,
         );
 
-        let param_values: Vec<rusqlite::types::Value>;
+        // 组合 WHERE 条件：paper_id 集合过滤 + 默认排除参考文献区段
+        let mut conditions: Vec<String> = Vec::new();
+        let mut param_values: Vec<rusqlite::types::Value> = Vec::new();
         if let Some(ids) = paper_ids {
             let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 1)).collect();
-            sql.push_str(&format!(" WHERE dc.paper_id IN ({})", placeholders.join(",")));
-            param_values = ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())).collect();
-        } else {
-            param_values = Vec::new();
+            conditions.push(format!("dc.paper_id IN ({})", placeholders.join(",")));
+            param_values.extend(ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())));
+        }
+        // 默认排除参考文献区段分片（字面量条件，不占参数位）
+        if !include_references {
+            conditions.push("dc.is_references = 0".to_string());
+        }
+        if !conditions.is_empty() {
+            sql.push_str(&format!(" WHERE {}", conditions.join(" AND ")));
         }
 
         let mut stmt = self.db.connection().prepare(&sql)?;
@@ -291,6 +307,7 @@ mod tests {
             total_chunks_in_file: 1,
             embedding: vec![0.1; 384], // 向量列不支持零长向量（与库维度一致）
             global_chunk_index: 0,
+            is_references: false,
         };
         
         let mut ops = DatabaseOperations::new(&mut db);

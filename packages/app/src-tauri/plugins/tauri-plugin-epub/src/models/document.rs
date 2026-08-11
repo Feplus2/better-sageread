@@ -27,6 +27,10 @@ pub struct DocumentChunk {
 
     // 全局位置信息
     pub global_chunk_index: usize,   // 在整本书中的全局分块序号
+
+    // 参考文献区段标记（建索引时按 References 标题切分打入；
+    // 检索侧读取映射不从 SELECT 带出该列，恒为 false）
+    pub is_references: bool,
 }
 
 /// 搜索结果数据结构

@@ -23,8 +23,8 @@ impl<'a> DatabaseOperations<'a> {
             INSERT INTO document_chunks (
                 book_title, book_author, paper_id, md_file_path, file_order_in_book,
                 related_chapter_titles, chunk_text, chunk_order_in_file,
-                total_chunks_in_file, global_chunk_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                total_chunks_in_file, global_chunk_index, is_references
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             RETURNING id
             "#,
             params![
@@ -38,6 +38,7 @@ impl<'a> DatabaseOperations<'a> {
                 chunk.chunk_order_in_file,
                 chunk.total_chunks_in_file,
                 chunk.global_chunk_index,
+                chunk.is_references,
             ],
             |row| row.get(0),
         )?;

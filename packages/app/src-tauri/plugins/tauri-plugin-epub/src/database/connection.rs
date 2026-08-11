@@ -95,6 +95,10 @@ impl DatabaseConnection {
         db.migrate_paper_id_column()
             .with_context(|| "Failed to migrate paper_id column for search")?;
 
+        // 老库幂等迁移：补充 is_references 列（检索默认排除参考文献区段需要）
+        db.migrate_is_references_column()
+            .with_context(|| "Failed to migrate is_references column for search")?;
+
         Ok(db)
     }
 
@@ -118,6 +122,25 @@ impl DatabaseConnection {
             "CREATE INDEX IF NOT EXISTS idx_paper_id ON document_chunks(paper_id)",
             [],
         ).with_context(|| "Failed to create idx_paper_id index")?;
+
+        Ok(())
+    }
+
+    /// 幂等迁移：document_chunks 增加 is_references 列（已存在则跳过，不建索引）
+    fn migrate_is_references_column(&self) -> Result<()> {
+        let has_is_references = self
+            .conn
+            .prepare("PRAGMA table_info(document_chunks)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|name| name.map(|n| n == "is_references").unwrap_or(false));
+
+        if !has_is_references {
+            log::info!("Migrating document_chunks: adding is_references column");
+            self.conn.execute(
+                "ALTER TABLE document_chunks ADD COLUMN is_references INTEGER NOT NULL DEFAULT 0",
+                [],
+            ).with_context(|| "Failed to add is_references column to document_chunks")?;
+        }
 
         Ok(())
     }
@@ -147,6 +170,7 @@ impl DatabaseConnection {
                 chunk_order_in_file INTEGER NOT NULL,
                 total_chunks_in_file INTEGER NOT NULL,
                 global_chunk_index INTEGER NOT NULL,
+                is_references INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 
                 -- 创建索引以提高查询性能
@@ -159,6 +183,10 @@ impl DatabaseConnection {
         // 老库幂等迁移：补充 paper_id 列与索引（打开 per-book 旧库时同样生效）
         self.migrate_paper_id_column()
             .with_context(|| "Failed to migrate paper_id column")?;
+
+        // 老库幂等迁移：补充 is_references 列（打开 per-book 旧库时同样生效）
+        self.migrate_is_references_column()
+            .with_context(|| "Failed to migrate is_references column")?;
 
         // 创建索引
         self.conn.execute(

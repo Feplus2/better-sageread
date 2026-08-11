@@ -164,6 +164,12 @@ impl EpubReader {
         self.chunker.chunk_md_file(md_content, min_tokens, max_tokens)
     }
 
+    /// 带「参考文献区段」标记的 Markdown 分块（透传 TextChunker）：
+    /// 返回 (分片文本, 是否参考文献区段)，建索引时用于给参考文献分片打标
+    pub fn chunk_md_file_flagged(&self, md_content: &str, min_tokens: usize, max_tokens: usize) -> Vec<(String, bool)> {
+        self.chunker.chunk_md_file_flagged(md_content, min_tokens, max_tokens)
+    }
+
     /// 按章节标题直读小节原文（未向量化兜底通道，不依赖索引/mdbook 产物）。
     /// 定位链：EPUB NCX/Nav 目录 → 扁平化带层级 → 标题匹配（规范化全等 → 包含）→
     /// 条目 href 映射 spine 页 → 小节 = [本条目页, 下一个同级或更高级条目页)；

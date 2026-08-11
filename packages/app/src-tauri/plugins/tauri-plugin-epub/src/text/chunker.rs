@@ -115,14 +115,79 @@ impl TextChunker {
 
     /// 专门用于 Markdown 文件的智能分块方法
     /// 考虑 Markdown 格式特性：标题层级、段落边界、代码块等
+    /// 薄封装：丢掉参考文献标记，只返回分片文本
     pub fn chunk_md_file(&self, md_content: &str, min_tokens: usize, max_tokens: usize) -> Vec<String> {
+        self.chunk_md_file_flagged(md_content, min_tokens, max_tokens)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    /// 带「参考文献区段」标记的 Markdown 分块：
+    /// 找到首个参考文献标题行（ATX 标题，文本以 references / bibliography / 参考文献 开头），
+    /// 其后的全部内容视为参考文献区段；两半各自走完整分块逻辑，
+    /// 正文分片标 false，参考文献分片（含标题行）标 true。
+    /// 找不到标题时全部标 false；参考文献部分过短产生 0 个分片是允许的。
+    pub fn chunk_md_file_flagged(&self, md_content: &str, min_tokens: usize, max_tokens: usize) -> Vec<(String, bool)> {
+        let lines: Vec<&str> = md_content.lines().collect();
+        let ref_heading_line = lines.iter().position(|line| Self::is_references_heading(line));
+
+        match ref_heading_line {
+            Some(k) => {
+                // 注意：两半必须调 chunk_md_file_inner 而非薄封装 chunk_md_file——
+                // 参考文献半段首行就是标题行，再走 flagged 会以 k=0 无限递归
+                let body_part = lines[..k].join("\n");
+                let references_part = lines[k..].join("\n");
+                let mut flagged: Vec<(String, bool)> = self
+                    .chunk_md_file_inner(&body_part, min_tokens, max_tokens)
+                    .into_iter()
+                    .map(|t| (t, false))
+                    .collect();
+                flagged.extend(
+                    self.chunk_md_file_inner(&references_part, min_tokens, max_tokens)
+                        .into_iter()
+                        .map(|t| (t, true)),
+                );
+                flagged
+            }
+            None => self
+                .chunk_md_file_inner(md_content, min_tokens, max_tokens)
+                .into_iter()
+                .map(|t| (t, false))
+                .collect(),
+        }
+    }
+
+    /// 判断一行是否是「参考文献」ATX 标题行：
+    /// trim 后以 1-6 个 `#` 开头并紧跟空白，标题文本（trim 后、忽略大小写）
+    /// 以 references / bibliography / 参考文献 开头（之后允许任意字符，如 "References and Notes"）
+    fn is_references_heading(line: &str) -> bool {
+        let trimmed = line.trim();
+        let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+        if hashes == 0 || hashes > 6 {
+            return false;
+        }
+        let rest = &trimmed[hashes..];
+        // ATX 语法要求 # 序列后紧跟空白
+        if !rest.chars().next().map_or(false, |c| c.is_whitespace()) {
+            return false;
+        }
+        let title = rest.trim();
+        let title_lower = title.to_lowercase();
+        title_lower.starts_with("references")
+            || title_lower.starts_with("bibliography")
+            || title.starts_with("参考文献")
+    }
+
+    /// Markdown 分块主体：先尝试按结构分块，失败回退到按 token 分块
+    fn chunk_md_file_inner(&self, md_content: &str, min_tokens: usize, max_tokens: usize) -> Vec<String> {
         let safe_max_tokens = max_tokens.min(MAX_CHUNK_TOKENS);
-        
+
         // 首先尝试按 Markdown 结构分块
         if let Some(structured_chunks) = self.chunk_by_markdown_structure(md_content, min_tokens, safe_max_tokens) {
             return structured_chunks;
         }
-        
+
         // 如果结构化分块失败，回退到标准文本分块
         log::debug!("Markdown structured chunking failed, falling back to text chunking");
         self.chunk_text_by_tokens(md_content, min_tokens, safe_max_tokens, 0)
@@ -661,6 +726,50 @@ mod tests {
         assert!(!chunks.is_empty());
         // 应该保持Markdown结构
         assert!(chunks.iter().any(|chunk| chunk.contains("# Chapter 1")));
+    }
+
+    #[test]
+    fn test_is_references_heading() {
+        // 命中：1-6 级 ATX 标题，文本以 references / bibliography / 参考文献 开头
+        assert!(TextChunker::is_references_heading("# References"));
+        assert!(TextChunker::is_references_heading("## references and Notes"));
+        assert!(TextChunker::is_references_heading("###### Bibliography"));
+        assert!(TextChunker::is_references_heading("## 参考文献"));
+        assert!(TextChunker::is_references_heading("  ### References  "));
+        // 不命中：非标题行、超过 6 级、# 后无空白、前缀不匹配
+        assert!(!TextChunker::is_references_heading("References"));
+        assert!(!TextChunker::is_references_heading("####### References"));
+        assert!(!TextChunker::is_references_heading("#References"));
+        assert!(!TextChunker::is_references_heading("# Reference List"));
+        assert!(!TextChunker::is_references_heading("# Introduction"));
+    }
+
+    #[test]
+    fn test_chunk_md_file_flagged_marks_references() {
+        let chunker = TextChunker::new().unwrap();
+        let md_text = "# Introduction\nThis is the body content of the paper with enough text to form a chunk.\n\n# References\n[1] Smith et al. Some paper title. Journal of Tests, 2020.\n[2] Doe et al. Another paper title. Proceedings of Testing, 2021.";
+        let flagged = chunker.chunk_md_file_flagged(md_text, 5, 100);
+
+        let body_chunks: Vec<_> = flagged.iter().filter(|(_, is_ref)| !*is_ref).collect();
+        let ref_chunks: Vec<_> = flagged.iter().filter(|(_, is_ref)| *is_ref).collect();
+        // 参考文献标题之后（含标题行）的分片标 true，正文分片标 false
+        assert!(!body_chunks.is_empty());
+        assert!(!ref_chunks.is_empty());
+        assert!(body_chunks.iter().all(|(t, _)| t.contains("Introduction") || t.contains("body content")));
+        assert!(ref_chunks.iter().all(|(t, _)| t.contains("References") || t.contains("[1]") || t.contains("[2]")));
+    }
+
+    #[test]
+    fn test_chunk_md_file_flagged_without_references() {
+        let chunker = TextChunker::new().unwrap();
+        let md_text = "# Chapter 1\nThis is content.\n\n## Section 1.1\nMore content here.";
+        let flagged = chunker.chunk_md_file_flagged(md_text, 5, 100);
+
+        assert!(!flagged.is_empty());
+        // 无参考文献标题时全部标 false，且文本序列与 chunk_md_file 完全一致
+        assert!(flagged.iter().all(|(_, is_ref)| !*is_ref));
+        let plain = chunker.chunk_md_file(md_text, 5, 100);
+        assert_eq!(flagged.into_iter().map(|(t, _)| t).collect::<Vec<_>>(), plain);
     }
 
     #[test]

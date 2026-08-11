@@ -230,8 +230,8 @@ where
             continue;
         }
 
-        // 使用 Markdown 感知分片（更稳定的结构边界）
-        let chunks = reader.chunk_md_file(&md_content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
+        // 使用 Markdown 感知分片（更稳定的结构边界），并标记参考文献区段分片
+        let chunks = reader.chunk_md_file_flagged(&md_content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
         let total_chunks_in_file = chunks.len();
         if total_chunks_in_file == 0 {
             log::debug!("文件无有效分片: {}", md_src);
@@ -273,7 +273,7 @@ where
         // 立即处理该文件的所有分片：分片→向量化→批量入库
         let mut file_batch: Option<Vec<DocumentChunk>> = None;
         // 以“等长估计”给每个 chunk 一个起始位置，用于分配区间
-        for (chunk_index, chunk_content) in chunks.into_iter().enumerate() {
+        for (chunk_index, (chunk_content, is_references)) in chunks.into_iter().enumerate() {
             if chunk_content.trim().is_empty() { continue; }
 
             // 立即向量化和处理这个分片
@@ -309,6 +309,7 @@ where
                 total_chunks_in_file: total_chunks_in_file,
                 embedding,
                 global_chunk_index,
+                is_references,
             };
 
             // 添加到当前文件的批次中
@@ -407,6 +408,7 @@ where
 // 移除了未使用的search_db函数
 
 /// 支持混合搜索模式的数据库搜索
+/// include_references: 是否包含参考文献区段分片（false 时检索默认排除）
 pub async fn search_db_with_mode<P: AsRef<Path>>(
     book_dir: P,
     query: &str,
@@ -416,6 +418,7 @@ pub async fn search_db_with_mode<P: AsRef<Path>>(
     search_mode: &str,
     vector_weight: Option<f32>,
     bm25_weight: Option<f32>,
+    include_references: bool,
 ) -> Result<Vec<crate::models::SearchResult>> {
     let db_path = book_dir.as_ref().join("vectors.sqlite");
 
@@ -447,7 +450,7 @@ pub async fn search_db_with_mode<P: AsRef<Path>>(
             let db = VectorDatabase::open_for_search(&db_path, 1024)
                 .context("Open database failed")?;
 
-            db.search_with_mode(query, None, limit, &config)
+            db.search_with_mode_filtered(query, None, limit, &config, None, include_references)
         }
         _ => {
             // 需要向量化的模式
@@ -464,7 +467,7 @@ pub async fn search_db_with_mode<P: AsRef<Path>>(
             let embedding = v.vectorize_text(query).await?;
 
             // 使用新的搜索接口
-            db.search_with_mode(query, Some(&embedding), limit, &config)
+            db.search_with_mode_filtered(query, Some(&embedding), limit, &config, None, include_references)
         }
     }
 }
@@ -636,14 +639,14 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
             continue;
         }
 
-        let chunks = reader.chunk_md_file(file.content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
+        let chunks = reader.chunk_md_file_flagged(file.content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
         let total_chunks_in_file = chunks.len();
         if total_chunks_in_file == 0 {
             continue;
         }
         let absolute_md_path = md_file_path.to_string_lossy().to_string();
 
-        for (chunk_index, chunk_content) in chunks.into_iter().enumerate() {
+        for (chunk_index, (chunk_content, is_references)) in chunks.into_iter().enumerate() {
             if chunk_content.trim().is_empty() {
                 continue;
             }
@@ -669,6 +672,7 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
                 total_chunks_in_file,
                 embedding,
                 global_chunk_index,
+                is_references,
             });
             global_chunk_index += 1;
 
@@ -730,7 +734,7 @@ where
     }
 
     let reader = EpubReader::new().context("初始化分片器失败")?;
-    let chunks = reader.chunk_md_file(&md_content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
+    let chunks = reader.chunk_md_file_flagged(&md_content, MIN_CHUNK_TOKENS, MAX_CHUNK_TOKENS);
     let total_chunks_in_file = chunks.len();
     if total_chunks_in_file == 0 {
         anyhow::bail!("paper.md 无有效分片: {:?}", md_file_path);
@@ -780,7 +784,7 @@ where
     let mut total_processed_chunks = 0;
     let mut error_stats = ErrorStats::new();
 
-    for (chunk_index, chunk_content) in chunks.into_iter().enumerate() {
+    for (chunk_index, (chunk_content, is_references)) in chunks.into_iter().enumerate() {
         if chunk_content.trim().is_empty() {
             continue;
         }
@@ -807,6 +811,7 @@ where
             total_chunks_in_file,
             embedding,
             global_chunk_index: chunk_index,
+            is_references,
         });
 
         if batch.len() >= batch_size {
@@ -851,6 +856,7 @@ where
 
 /// 全局论文库检索：hybrid（提供嵌入配置时）或 BM25 降级，两侧都支持 paper_id 集合过滤
 /// 库不存在或 paper_ids 为 Some(空集) 时返回空结果，不报错
+/// include_references: 是否包含参考文献区段分片（false 时检索默认排除）
 pub async fn search_papers_global<P: AsRef<Path>>(
     db_path: P,
     query: &str,
@@ -859,6 +865,7 @@ pub async fn search_papers_global<P: AsRef<Path>>(
     vectorizer: Option<VectorizerConfig>,
     vector_weight: Option<f32>,
     bm25_weight: Option<f32>,
+    include_references: bool,
 ) -> Result<Vec<crate::models::SearchResult>> {
     let db_path = db_path.as_ref();
 
@@ -893,7 +900,7 @@ pub async fn search_papers_global<P: AsRef<Path>>(
 
             let embedding = v.vectorize_text(query).await?;
 
-            db.search_with_mode_filtered(query, Some(&embedding), limit, &config, paper_ids.as_deref())
+            db.search_with_mode_filtered(query, Some(&embedding), limit, &config, paper_ids.as_deref(), include_references)
         }
         // 无嵌入配置：BM25 降级检索（不需要向量维度）
         None => {
@@ -901,7 +908,7 @@ pub async fn search_papers_global<P: AsRef<Path>>(
             let db = VectorDatabase::open_for_search(db_path, 1024)
                 .context("Open database failed")?;
 
-            db.search_with_mode_filtered(query, None, limit, &config, paper_ids.as_deref())
+            db.search_with_mode_filtered(query, None, limit, &config, paper_ids.as_deref(), include_references)
         }
     }
 }

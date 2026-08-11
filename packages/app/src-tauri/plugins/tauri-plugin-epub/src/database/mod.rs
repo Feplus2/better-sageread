@@ -67,26 +67,30 @@ impl VectorDatabase {
     }
 
     /// 执行向量相似性搜索（可选按 paper_id 集合过滤）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn vector_search_filtered(
         &self,
         query_embedding: &[f32],
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         let search = DatabaseSearch::new(&self.db);
-        search.vector_search_filtered(query_embedding, limit, paper_ids)
+        search.vector_search_filtered(query_embedding, limit, paper_ids, include_references)
     }
 
     /// 执行混合搜索（BM25 + 向量搜索）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn hybrid_search(
         &self,
         query: &str,
         query_embedding: &[f32],
         limit: usize,
         config: &crate::models::HybridSearchConfig,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         let hybrid_search = HybridSearch::new(&self.db);
-        hybrid_search.search(query, query_embedding, limit, config)
+        hybrid_search.search_filtered(query, query_embedding, limit, config, None, include_references)
     }
 
     /// 执行BM25文本搜索
@@ -104,15 +108,17 @@ impl VectorDatabase {
     }
 
     /// 执行BM25文本搜索（可选按 paper_id 集合过滤）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn bm25_search_filtered(
         &self,
         query: &str,
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         let config = crate::models::HybridSearchConfig::default();
         let bm25_search = BM25Search::new(&self.db, config.k1, config.b);
-        let bm25_results = bm25_search.search_filtered(query, limit, paper_ids)?;
+        let bm25_results = bm25_search.search_filtered(query, limit, paper_ids, include_references)?;
 
         // 转换为SearchResult格式
         Ok(bm25_results.into_iter().map(|r| {
@@ -127,6 +133,7 @@ impl VectorDatabase {
     // 移除了未使用的search_similar方法
 
     /// 统一搜索接口，支持所有搜索模式
+    /// 旧封装：不过滤参考文献区段（行为不变）
     pub fn search_with_mode(
         &self,
         query: &str,
@@ -149,7 +156,7 @@ impl VectorDatabase {
             }
             SearchMode::Hybrid => {
                 if let Some(embedding) = query_embedding {
-                    self.hybrid_search(query, embedding, limit, config)
+                    self.hybrid_search(query, embedding, limit, config, true)
                 } else {
                     // 如果没有向量，回退到BM25搜索
                     self.bm25_search(query, limit)
@@ -159,6 +166,7 @@ impl VectorDatabase {
     }
 
     /// 统一搜索接口（可选按 paper_id 集合过滤，供全局论文库使用）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn search_with_mode_filtered(
         &self,
         query: &str,
@@ -166,27 +174,28 @@ impl VectorDatabase {
         limit: usize,
         config: &crate::models::HybridSearchConfig,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<SearchResult>> {
         use crate::models::SearchMode;
 
         match config.mode {
             SearchMode::VectorOnly => {
                 if let Some(embedding) = query_embedding {
-                    self.vector_search_filtered(embedding, limit, paper_ids)
+                    self.vector_search_filtered(embedding, limit, paper_ids, include_references)
                 } else {
                     Err(anyhow::anyhow!("Vector embedding required for vector-only search"))
                 }
             }
             SearchMode::BM25Only => {
-                self.bm25_search_filtered(query, limit, paper_ids)
+                self.bm25_search_filtered(query, limit, paper_ids, include_references)
             }
             SearchMode::Hybrid => {
                 if let Some(embedding) = query_embedding {
                     let hybrid_search = HybridSearch::new(&self.db);
-                    hybrid_search.search_filtered(query, embedding, limit, config, paper_ids)
+                    hybrid_search.search_filtered(query, embedding, limit, config, paper_ids, include_references)
                 } else {
                     // 如果没有向量，回退到BM25搜索
-                    self.bm25_search_filtered(query, limit, paper_ids)
+                    self.bm25_search_filtered(query, limit, paper_ids, include_references)
                 }
             }
         }
@@ -236,6 +245,7 @@ impl VectorDatabase {
                 total_chunks_in_file: row.get(9)?,
                 global_chunk_index: row.get(10)?,
                 embedding: Vec::new(), // 向量数据不需要返回
+                is_references: false,  // 上下文扩展不从 SELECT 带出该列，恒 false
             })
         })?;
 
@@ -289,6 +299,7 @@ impl VectorDatabase {
                 total_chunks_in_file: row.get(9)?,
                 global_chunk_index: row.get(10)?,
                 embedding: Vec::new(), // 向量数据不需要返回
+                is_references: false,  // 上下文扩展不从 SELECT 带出该列，恒 false
             })
         })?;
 
@@ -313,6 +324,7 @@ impl VectorDatabase {
             total_chunks_in_file: r.total_chunks_in_file,
             global_chunk_index: r.global_chunk_index,
             embedding: Vec::new(),
+            is_references: false, // SearchResult 不带出该列，恒 false
         }).collect())
     }
 
@@ -354,6 +366,7 @@ impl VectorDatabase {
                 total_chunks_in_file: row.get(9)?,
                 global_chunk_index: row.get(10)?,
                 embedding: Vec::new(),
+                is_references: false, // 不从 SELECT 带出该列，恒 false
             })
         })?;
 

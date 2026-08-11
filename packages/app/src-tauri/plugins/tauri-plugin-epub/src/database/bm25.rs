@@ -19,16 +19,19 @@ impl<'a> BM25Search<'a> {
     }
 
     /// 执行BM25搜索
+    /// 旧封装：不过滤参考文献区段（行为不变）
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<BM25SearchResult>> {
-        self.search_filtered(query, limit, None)
+        self.search_filtered(query, limit, None, true)
     }
 
     /// 执行BM25搜索（可选按 paper_id 集合过滤，供全局论文库使用）
+    /// include_references 为 false 时排除参考文献区段分片
     pub fn search_filtered(
         &self,
         query: &str,
         limit: usize,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<Vec<BM25SearchResult>> {
         // 1. 预处理查询文本
         let query_terms = self.preprocess_text(query);
@@ -43,7 +46,7 @@ impl<'a> BM25Search<'a> {
         let mut scores: HashMap<i64, f32> = HashMap::new();
 
         for term in &query_terms {
-            let term_scores = self.calculate_term_scores(term, &stats, paper_ids)?;
+            let term_scores = self.calculate_term_scores(term, &stats, paper_ids, include_references)?;
             for (chunk_id, score) in term_scores {
                 *scores.entry(chunk_id).or_insert(0.0) += score;
             }
@@ -145,6 +148,7 @@ impl<'a> BM25Search<'a> {
         term: &str,
         stats: &BM25Stats,
         paper_ids: Option<&[String]>,
+        include_references: bool,
     ) -> Result<HashMap<i64, f32>> {
         let mut scores = HashMap::new();
 
@@ -165,6 +169,10 @@ impl<'a> BM25Search<'a> {
             let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
             sql.push_str(&format!(" AND paper_id IN ({})", placeholders.join(",")));
             param_values.extend(ids.iter().map(|id| rusqlite::types::Value::Text(id.clone())));
+        }
+        // 默认排除参考文献区段分片（字面量条件，不占参数位）
+        if !include_references {
+            sql.push_str(" AND is_references = 0");
         }
 
         let mut stmt = self.db.connection().prepare(&sql)?;

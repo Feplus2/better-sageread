@@ -37,13 +37,19 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
 🌐 **检索技巧**：
 • 论文正文为英文：**请用英文术语构造 query**（中文提问先在心里翻译成英文专业术语再检索），命中率显著更高
 • 复杂问题拆成 2-3 个不同措辞的 query 分次检索（同义词/上下位词/具体↔抽象），比一次长查询覆盖更全
-• 概念性查询可调高 vectorWeight，精确术语/符号/人名可调高 bm25Weight`,
+• 概念性查询可调高 vectorWeight，精确术语/符号/人名可调高 bm25Weight
+• 默认不命中参考文献列表（References 小节的分片已打标排除）；确需检索参考文献（如找某篇引用）时传 includeReferences=true
+• 长综述全文总结类需求，优先 getPaperToc + readPaperSection 按小节通读，不要把 topK 拉满当全文阅读器用`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想比较多篇论文的方法'"),
       query: z.string().min(1).describe("检索问题（论文正文为英文，请用英文专业术语构造，命中率更高）"),
-      topK: z.number().int().min(1).max(20).default(5).describe("返回的片段数量，建议 3-8 个"),
+      topK: z.number().int().min(1).max(30).default(5).describe("返回的片段数量，建议 3-8 个"),
       vectorWeight: z.number().min(0).max(1).default(0.7).describe("向量搜索权重（0-1），概念性查询可调高"),
       bm25Weight: z.number().min(0).max(1).default(0.3).describe("关键词搜索权重（0-1），术语查询可调高"),
+      includeReferences: z
+        .boolean()
+        .default(false)
+        .describe("是否包含参考文献列表（References 小节）的分片，默认排除；找引用/溯源时才开"),
     }),
     execute: async ({
       reasoning,
@@ -51,12 +57,14 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
       topK,
       vectorWeight,
       bm25Weight,
+      includeReferences,
     }: {
       reasoning: string;
       query: string;
       topK?: number;
       vectorWeight?: number;
       bm25Weight?: number;
+      includeReferences?: boolean;
     }) => {
       const vectorConfig = await getCurrentVectorModelConfig();
 
@@ -66,6 +74,7 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
         topK: topK ?? 5,
         vectorWeight: vectorWeight ?? 0.7,
         bm25Weight: bm25Weight ?? 0.3,
+        includeReferences: includeReferences ?? false,
         embeddingsUrl: vectorConfig.embeddingsUrl,
         model: vectorConfig.model,
         apiKey: vectorConfig.apiKey,

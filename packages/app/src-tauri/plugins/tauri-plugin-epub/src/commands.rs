@@ -231,6 +231,8 @@ pub async fn search_db<R: Runtime>(
     search_mode: Option<String>,      // "vector", "bm25", "hybrid"
     vector_weight: Option<f32>,       // 向量权重 (0.0-1.0)
     bm25_weight: Option<f32>,         // BM25权重 (0.0-1.0)
+    // 是否包含参考文献区段分片（缺省 false：检索默认排除）
+    include_references: Option<bool>,
 ) -> Result<Vec<SearchItemDto>, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let book_dir = app_data_dir.join("books").join(book_id);
@@ -251,6 +253,7 @@ pub async fn search_db<R: Runtime>(
         mode,
         vector_weight,
         bm25_weight,
+        include_references.unwrap_or(false),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -551,6 +554,8 @@ pub async fn search_papers_db<R: Runtime>(
     embeddings_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    // 是否包含参考文献区段分片（缺省 false：检索默认排除）
+    include_references: Option<bool>,
 ) -> Result<Vec<PaperSearchItemDto>, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_path = app_data_dir.join("papers").join("vectors.sqlite");
@@ -571,6 +576,7 @@ pub async fn search_papers_db<R: Runtime>(
         vectorizer,
         vector_weight,
         bm25_weight,
+        include_references.unwrap_or(false),
     )
     .await
     .map_err(|e| e.to_string())?;
