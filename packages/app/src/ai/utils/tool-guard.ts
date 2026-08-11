@@ -209,6 +209,39 @@ export function wrapToolsWithGuard(tools: Record<string, CoreTool>, agentScope: 
       continue;
     }
 
+    // 笔记写入恒确认（笔记面板铁边界 2026-08-11：AI 落笔前用户过目——确认卡即草稿预览，
+    // 唯一 key 使「不再询问」失效）；list/read/toggleStar/export 静默（export 经系统保存对话框，天然有确认）
+    if (name === "manageNotes") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            if (action !== "create" && action !== "update") {
+              return await originalExecute(args, options);
+            }
+            const title = String(args?.title ?? "");
+            const contentPreview = String(args?.content ?? "").slice(0, 500);
+            const modeText = action === "create" ? "新建笔记" : `修改笔记（${String(args?.mode ?? "append")} 模式）`;
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: `${modeText}${title ? `「${title}」` : ""}`,
+                detail: `将写入笔记面板的内容草稿：\n${contentPreview}${String(args?.content ?? "").length > 500 ? "…" : ""}`,
+                dontAskKey: `manageNotes:${action}:${crypto.randomUUID()}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
     // 破坏性动作恒确认（用户拍板 2026-08-06：删除能力要给，但破坏性操作必问）：
     // manageSkill.delete / manageThreads.delete；其余动作静默
     if (name === "manageSkill" || name === "manageThreads") {

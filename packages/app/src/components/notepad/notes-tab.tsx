@@ -4,7 +4,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { exportNoteToMarkdown, exportNotesToMarkdownFiles } from "@/lib/export-notes-markdown";
-import { createNote, deleteNote, getNotes, updateNote } from "@/services/note-service";
+import { NOTES_CHANGED_EVENT, createNote, deleteNote, getNotes, updateNote } from "@/services/note-service";
 import type { Note, NoteLocation } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
@@ -332,6 +332,16 @@ export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: Notes
     setSelectedIds(new Set());
     void reload();
   }, [reload]);
+
+  // 外部写入实时刷新（聊天区「存为笔记」/ manageNotes 工具）：监听变更广播，按 bookId 过滤
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ bookId?: string }>).detail;
+      if (detail?.bookId === bookId) void reload();
+    };
+    window.addEventListener(NOTES_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(NOTES_CHANGED_EVENT, handler);
+  }, [bookId, reload]);
 
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false);

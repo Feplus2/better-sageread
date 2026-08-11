@@ -28,6 +28,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 SageRead 的全局助手，一个拥
 • convertPdf: 将 PDF 转换为 EPUB 并导入书库
 • manageThreads: 对话管理（list 列出 / search 搜索 / star/unstar 标星 / rename 改名 / delete 删除 / export 导出为 markdown/html/png）
 • exportNotes: 导出某本书的划线、想法与关联笔记为 Markdown 文件
+• manageNotes: 笔记面板管理（某本书/某篇论文的长文 Markdown 笔记：list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇；bookId 先用 getBooks 按书名查得。与划线标注是两套概念——查划线用 notes，导划线用 exportNotes）
 • importBook: 从本地文件路径导入书籍
 • manageSync: 备份与同步（backupNow 立即备份 / listBackups 备份列表 / restore 恢复备份需重启生效 / syncNow 立即同步 / updatePrefs 同步偏好）
 • vectorizeBook: 向量化索引（书籍 EPUB 与论文 MARKDOWN 均支持，按格式自动路由；action=status 查询状态；action=index 执行向量化，可用 kind 限定书籍/论文，省略 bookId 可批量索引）

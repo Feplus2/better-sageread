@@ -362,6 +362,7 @@ export function PaperChatPanel({
             error={displayError}
             autoScroll={autoScroll}
             scrollKey={currentThread?.id ?? "__init__"}
+            bookId={currentThread?.book_id ?? paperId ?? null}
             onReasoningTimesUpdate={handleReasoningTimesUpdate}
             onRetry={handleRetry}
             canRetry={canRetry}

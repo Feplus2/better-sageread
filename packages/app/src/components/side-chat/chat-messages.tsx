@@ -9,6 +9,7 @@ import { useTextSelection } from "@/hooks/use-text-selection";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessageToMarkdown } from "@/lib/export-thread-markdown";
 import { cn } from "@/lib/utils";
+import { createNote } from "@/services/note-service";
 import { audioPlayerManager, synthesizeSpeechChunked } from "@/services/tts-service";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { useThreadStore } from "@/store/thread-store";
@@ -23,6 +24,7 @@ import {
   Download,
   Image as ImageIcon,
   Loader2,
+  NotebookPen,
   Pause,
   Quote,
   RefreshCw,
@@ -58,6 +60,7 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   manageSync: "备份同步",
   managePreferences: "偏好设置",
   manageThreads: "对话管理",
+  manageNotes: "笔记管理",
   manageSkill: "技能管理",
   writeFile: "写入文件",
   editFile: "编辑文件",
@@ -194,6 +197,7 @@ export function ChatMessages({
   status,
   error,
   scrollKey,
+  bookId,
   onReasoningTimesUpdate,
   onRetry,
   canRetry = true,
@@ -205,6 +209,10 @@ export function ChatMessages({
 }: ChatMessagesProps) {
   const { scrollToBottom } = useStickToBottomContext();
   const isChatPage = useIsChatPage();
+  // 「存为笔记」的目标书/论文：优先侧栏绑定的 bookId（reader/paper scope 经 props 下发），
+  // 全局对话页回退全局 currentThread 的 book_id；两者皆空则按钮不渲染
+  const globalThreadBookId = useThreadStore((s) => s.currentThread?.book_id);
+  const noteBookId = bookId ?? globalThreadBookId ?? null;
   // H3：宽版聊天布局（放宽消息列 max-w 约束）
   const wideChatLayout = useChatSettingsStore((s) => s.wideChatLayout);
   const lastMessage = reorderTextAndReasoning(messages[messages.length - 1]);
@@ -664,6 +672,32 @@ export function ChatMessages({
                             </Button>
                           </MessageAction>
 
+                          {/* 存为笔记：助手消息正文 → 当前书籍/论文的笔记面板（仅绑书对话显示） */}
+                          {noteBookId && (
+                            <MessageAction tooltip="存为笔记" delayDuration={100}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7 rounded-full"
+                                onClick={() => {
+                                  const textContent = message.parts
+                                    .map((part: any) => (part.type === "text" ? part.text : ""))
+                                    .join("")
+                                    .trim();
+                                  if (!textContent || !noteBookId) return;
+                                  void createNote({ bookId: noteBookId, content: textContent })
+                                    .then(() => toast.success("已存为笔记（左侧「笔记」tab 可查看/整理）"))
+                                    .catch((error) => {
+                                      console.error("存为笔记失败:", error);
+                                      toast.error("存为笔记失败");
+                                    });
+                                }}
+                              >
+                                <NotebookPen size={10} />
+                              </Button>
+                            </MessageAction>
+                          )}
+
                           <MessageAction
                             tooltip={
                               audioStates.get(message.id) === "playing"
@@ -819,6 +853,31 @@ export function ChatMessages({
                             <ImageIcon size={12} />
                           </Button>
                         </MessageAction>
+                        {/* 存为笔记：助手消息正文 → 当前书籍/论文的笔记面板（仅绑书对话显示） */}
+                        {noteBookId && (
+                          <MessageAction tooltip="存为笔记" delayDuration={100}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 rounded-full hover:bg-white dark:hover:bg-neutral-600"
+                              onClick={() => {
+                                const textContent = reorderedMessage.parts
+                                  .map((part: any) => (part.type === "text" ? part.text : ""))
+                                  .join("")
+                                  .trim();
+                                if (!textContent || !noteBookId) return;
+                                void createNote({ bookId: noteBookId, content: textContent })
+                                  .then(() => toast.success("已存为笔记（左侧「笔记」tab 可查看/整理）"))
+                                  .catch((error) => {
+                                    console.error("存为笔记失败:", error);
+                                    toast.error("存为笔记失败");
+                                  });
+                              }}
+                            >
+                              <NotebookPen size={12} />
+                            </Button>
+                          </MessageAction>
+                        )}
                       </MessageActions>
                     )}
                     {showError && (

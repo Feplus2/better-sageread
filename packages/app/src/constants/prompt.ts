@@ -86,6 +86,10 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
       "\n\n—— 补充工具：章节原文直读 ——\nreadBookSection：按目录章节标题直读小节原文。RAG 检索命中为空时（通常是本书未建索引），立即改用它读取原文再作答，不要凭印象编造。";
   }
 
+  // 笔记面板（manageNotes 对 reader 常驻注册；静态追加说明，不动 DB 基词/预设）
+  base +=
+    "\n\n—— 笔记面板 ——\nmanageNotes：当前书的笔记面板管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。笔记是长文 Markdown 产出（章节总结/读书灵感/人话版解读），与划线标注（notes 工具查询的是后者）是两套概念，不要混写。讨论产出值得留存时，先把整理稿展示给用户讨论，再用 create/update 落笔（会自动弹确认卡由用户过目）；可按当前章节名填 locationTag。";
+
   let prompt = base;
 
   if (activeSkillNames && activeSkillNames.length > 0) {

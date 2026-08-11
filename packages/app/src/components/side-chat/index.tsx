@@ -228,6 +228,7 @@ function ChatContent({ bookId }: ChatContentProps) {
             error={displayError}
             autoScroll={autoScroll}
             scrollKey={currentThread?.id ?? "__init__"}
+            bookId={currentThread?.book_id ?? bookId ?? null}
             onReasoningTimesUpdate={handleReasoningTimesUpdate}
             onRetry={handleRetry}
             canRetry={canRetry}

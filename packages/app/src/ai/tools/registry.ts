@@ -59,6 +59,7 @@ import {
   notesTool,
   webSearchTool,
 } from "./index";
+import { createManageNotesTool } from "./manage-notes";
 
 // ==================== 类型定义 ====================
 
@@ -308,6 +309,12 @@ registerTools([
     tool: processPaperTool as CoreTool,
     description: "文献库论文翻译与句词对齐（status/translate/align；translate 自动带对齐）",
   },
+  {
+    name: "manageNotes",
+    scope: "central",
+    tool: createManageNotesTool() as CoreTool,
+    description: "笔记面板管理（列出/读取/新建/修改/星标/导出；长文笔记，非划线标注）",
+  },
 ]);
 
 // ==================== 工具组装 ====================
@@ -343,6 +350,8 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
       tools.ragRange = createRagRangeTool(context.bookId) as CoreTool;
     }
     tools.readBookSection = createReadBookSectionTool(context.bookId) as CoreTool;
+    // 笔记面板（绑定当前书；create/update 由 tool-guard 弹确认卡）
+    tools.manageNotes = createManageNotesTool(context.bookId) as CoreTool;
   }
 
   // 4. 论文助手专属：基础层结构工具（始终可用，直接读 paper.md）+ 增强层语义检索（向量能力门控）
@@ -353,6 +362,8 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.getPaperInfo = createPaperInfoTool(context.paperId) as CoreTool;
     tools.getCitations = createGetCitationsTool(context.paperId) as CoreTool;
     tools.getFigures = createGetFiguresTool(context.paperId) as CoreTool;
+    // 笔记面板（绑定当前论文；create/update 由 tool-guard 弹确认卡）
+    tools.manageNotes = createManageNotesTool(context.paperId) as CoreTool;
 
     const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
     if (hasVectorCapability) {
@@ -389,6 +400,7 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
       "- getPaperInfo: 获取当前论文元数据",
       "- getCitations: 提取当前论文的参考文献列表",
       "- getFigures: 提取当前论文的图片清单（图注与所在小节）",
+      "- manageNotes: 笔记面板管理（列出/读取/新建/修改/星标/导出当前论文的笔记）",
     );
     if (useLlamaStore.getState().hasVectorCapability()) {
       descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");
