@@ -334,7 +334,7 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
           )}
         </div>
 
-        {/* 编辑/预览同一板块：编辑 = 等宽 textarea（标点配对已挂）；预览 = react-markdown + KaTeX 渲染 */}
+        {/* 编辑/预览同一板块：编辑 = 等宽 textarea（标点配对已挂）；预览 = 聊天区同款 chat-md 主题渲染（hover/动效/主题色） */}
         {mode === "edit" ? (
           <Textarea
             ref={textareaRef}
@@ -347,7 +347,7 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
         ) : (
           <div className="min-h-[45vh] rounded-lg bg-muted px-3 py-2 dark:bg-neutral-900">
             {content.trim() ? (
-              <Markdown className="prose prose-neutral dark:prose-invert prose-headings:my-2 prose-p:my-1.5 max-w-none prose-table:text-xs text-sm leading-relaxed">
+              <Markdown className="chat-md prose prose-headings:my-2 prose-p:my-1.5 max-w-none prose-table:text-xs text-foreground text-sm leading-relaxed">
                 {content}
               </Markdown>
             ) : (
