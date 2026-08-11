@@ -54,7 +54,8 @@ impl<'a> BM25Search<'a> {
 
         // 4. 排序并限制结果
         let mut scored_chunks: Vec<(i64, f32)> = scores.into_iter().collect();
-        scored_chunks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // 防御：分数万一含 NaN（统计缓存陈旧等边界），partial_cmp 得 None，unwrap 会 panic
+        scored_chunks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored_chunks.truncate(limit);
 
         // 5. 归一化分数到[0,1]区间
@@ -200,8 +201,9 @@ impl<'a> BM25Search<'a> {
             return Ok(scores);
         }
 
-        // 计算逆文档频率 (IDF)
-        let idf = ((stats.total_docs as f32 - df as f32 + 0.5) / (df as f32 + 0.5)).ln();
+        // 计算逆文档频率 (IDF)；参数 <= 0（统计缓存陈旧导致 df > N 的边界）时按 0 权重处理，防 NaN
+        let idf_arg = (stats.total_docs as f32 - df as f32 + 0.5) / (df as f32 + 0.5);
+        let idf = if idf_arg > 0.0 { idf_arg.ln() } else { 0.0 };
 
         // 为每个匹配的文档计算BM25分数
         for (chunk_id, tf, doc_length) in matching_docs {
@@ -225,10 +227,12 @@ impl<'a> BM25Search<'a> {
     fn calculate_bm25_score(&self, tf: usize, doc_length: usize, avg_doc_length: f32, idf: f32) -> f32 {
         let tf_f32 = tf as f32;
         let doc_length_f32 = doc_length as f32;
-        
+        // 防御：空库/异常统计下 avg_doc_length 可能为 0，除零会产生 inf/NaN
+        let avg_len = if avg_doc_length > f32::EPSILON { avg_doc_length } else { 1.0 };
+
         let numerator = tf_f32 * (self.k1 + 1.0);
-        let denominator = tf_f32 + self.k1 * (1.0 - self.b + self.b * (doc_length_f32 / avg_doc_length));
-        
+        let denominator = tf_f32 + self.k1 * (1.0 - self.b + self.b * (doc_length_f32 / avg_len));
+
         idf * (numerator / denominator)
     }
     

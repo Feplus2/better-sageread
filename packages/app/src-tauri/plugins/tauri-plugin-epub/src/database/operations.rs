@@ -128,12 +128,17 @@ impl<'a> DatabaseOperations<'a> {
         }
 
         self.db.begin_transaction()?;
-        
+
         let result = self.insert_chunks_batch_inner(chunks);
-        
+
         match result {
             Ok(ids) => {
                 self.db.commit_transaction()?;
+                // BM25 统计基于全库文档，新增分片后缓存即失效。
+                // 删除侧（delete_chunks_by_paper_id）只覆盖"重索引有旧行"的情形；
+                // 首次向已有库添加新论文（deleted=0）也必须失效，否则 stale total_docs
+                // 会让 idf = ln((N - df + 0.5)/(df + 0.5)) 参数变负产生 NaN 分数。
+                self.db.connection_mut().execute("DELETE FROM bm25_stats", [])?;
                 Ok(ids)
             }
             Err(e) => {

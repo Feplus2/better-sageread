@@ -155,8 +155,8 @@ impl<'a> HybridSearch<'a> {
             });
         }
 
-        // 4. 按合并分数排序
-        hybrid_results.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score).unwrap());
+        // 4. 按合并分数排序（防御 NaN：partial_cmp 得 None 时按相等处理，不 panic）
+        hybrid_results.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(hybrid_results)
     }

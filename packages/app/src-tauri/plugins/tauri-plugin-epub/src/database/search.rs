@@ -193,8 +193,8 @@ impl<'a> DatabaseSearch<'a> {
 
         let mut results: Vec<SearchResult> = rows.collect::<Result<Vec<_>, _>>()?;
         
-        // 按相似度排序并限制结果数量
-        results.sort_by(|a, b| b.similarity_score.partial_cmp(&a.similarity_score).unwrap());
+        // 按相似度排序并限制结果数量（防御 NaN：partial_cmp 得 None 时按相等处理）
+        results.sort_by(|a, b| b.similarity_score.partial_cmp(&a.similarity_score).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(limit);
         
         Ok(results)
