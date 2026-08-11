@@ -16,11 +16,7 @@ export function rehypeDelTilde() {
       if (!node.children) return;
       node.children = node.children.flatMap((child) => {
         if (child.type === "element" && child.tagName === "del") {
-          return [
-            { type: "text", value: "~~" },
-            ...(child.children ?? []),
-            { type: "text", value: "~~" },
-          ];
+          return [{ type: "text", value: "~~" }, ...(child.children ?? []), { type: "text", value: "~~" }];
         }
         walk(child);
         return [child];

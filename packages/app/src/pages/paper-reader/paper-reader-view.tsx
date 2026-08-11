@@ -373,6 +373,9 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     return { tag: currentHeading.text, cfi: currentHeading.id, block: block >= 0 ? block : null };
   }, [currentHeading, toc]);
 
+  // 笔记位置选择器的章节清单（与捕获同构：tag=标题文本，cfi=slug，block=TOC 序号）
+  const noteTocItems = useMemo<NoteLocation[]>(() => toc.map((t, i) => ({ tag: t.text, cfi: t.id, block: i })), [toc]);
+
   // 笔记位置跳转：精确锚点（slug）→ TOC 文本匹配（重解析 slug 漂移兜底）→ 全文 quote → 轻提示
   const handleLocateNote = useCallback(
     (note: Note) => {
@@ -394,7 +397,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   const notepadSidebar = notesOpen && (
     <Resizable
       defaultSize={{
-        width: 300,
+        width: 360,
         height: "100%",
       }}
       minWidth={260}
@@ -437,6 +440,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           translationMap={translationMap}
           onLocateFigure={handleLocateFigure}
           noteLocation={noteLocation}
+          noteTocItems={noteTocItems}
           onLocateNote={handleLocateNote}
           onUpdateNote={(id, note) => updateAnnotation(id, { note })}
           onDeleteAnnotation={deleteAnnotation}

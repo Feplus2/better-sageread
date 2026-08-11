@@ -9,9 +9,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  PAPER_EXPORT_MODE_LABELS,
   type PaperExportFormat,
   type PaperExportMode,
-  PAPER_EXPORT_MODE_LABELS,
   exportPaperDocument,
 } from "@/lib/export-paper";
 import { cn } from "@/lib/utils";
@@ -114,7 +114,7 @@ function OptionCard({
         <Icon className="size-4" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-sm font-medium leading-tight">{title}</span>
+        <span className="font-medium text-sm leading-tight">{title}</span>
         <span className="truncate text-muted-foreground text-xs">{desc}</span>
       </span>
       {trailing ?? <SelectionCircle selected={selected} />}
@@ -124,7 +124,7 @@ function OptionCard({
 
 /** 区块标题（内容/附加/格式）：小字距标签，与卡片拉开层级 */
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="text-muted-foreground text-xs font-medium tracking-wider">{children}</div>;
+  return <div className="font-medium text-muted-foreground text-xs tracking-wider">{children}</div>;
 }
 
 /** 论文导出对话框：内容（原文/译文/对照）+ 附加（标注/图片）+ 格式（Markdown/HTML/PDF） */
@@ -265,8 +265,8 @@ export default function PaperExportDialog({
                     )}
                   >
                     <option.icon className={cn("size-4", selected && "text-primary")} />
-                    <span className="text-sm font-medium leading-none">{option.label}</span>
-                    <span className="text-muted-foreground text-[11px] leading-none">{option.hint}</span>
+                    <span className="font-medium text-sm leading-none">{option.label}</span>
+                    <span className="text-[11px] text-muted-foreground leading-none">{option.hint}</span>
                   </button>
                 );
               })}

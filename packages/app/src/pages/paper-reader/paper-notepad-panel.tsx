@@ -84,6 +84,8 @@ interface PaperNotepadPanelProps {
   onLocateFigure: (item: PaperFigureItem) => void;
   /** 笔记位置捕获：当前 heading（无阅读位置为 null） */
   noteLocation: NoteLocation | null;
+  /** 笔记位置选择器的章节清单（TOC headings 同构映射） */
+  noteTocItems: NoteLocation[];
   /** 笔记位置跳转：slug 锚点 → TOC 文本兜底 → quote 兜底 */
   onLocateNote: (note: Note) => void;
   /** 右键"编辑评论"保存（落 book_notes.note） */
@@ -312,6 +314,7 @@ export function PaperNotepadPanel({
   translationMap,
   onLocateFigure,
   noteLocation,
+  noteTocItems,
   onLocateNote,
   onUpdateNote,
   onDeleteAnnotation,
@@ -582,91 +585,90 @@ export function PaperNotepadPanel({
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          {activeTab === "annotations" && sorted.length > 0 && (
-            <div className="flex items-center gap-0.5 pr-2">
-              {selectionMode ? (
-                <button
-                  type="button"
-                  onClick={handleSelectAll}
-                  className="rounded-md px-1.5 py-1 text-neutral-500 text-xs hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-                >
-                  {allSelected ? "取消全选" : "全选"}
-                </button>
-              ) : (
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setStarFilter((f) => (f === "all" ? "starred" : "all"))}
-                        className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
-                          starFilter === "starred" ? "bg-accent dark:bg-accent" : ""
-                        }`}
-                      >
-                        <Star
-                          className={`size-4 ${
-                            starFilter === "starred"
-                              ? "fill-amber-400 text-amber-400"
-                              : "text-neutral-500 dark:text-neutral-400"
-                          }`}
-                        />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{starFilter === "starred" ? "显示全部" : "仅看星标"}</TooltipContent>
-                  </Tooltip>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        title="导出全部标注"
-                        className="flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent"
-                      >
-                        <Download className="size-4 text-neutral-500 dark:text-neutral-400" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "markdown", false)}>
-                        导出为 Markdown
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "html", false)}>
-                        导出为 HTML
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "image", false)}>
-                        导出为图片
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "pdf", false)}>
-                        导出为 PDF
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
+        </div>
+      </div>
+
+      {/* 标注操作行（星标筛选/导出/多选管理/计数）：独立在 tab 栏下方一行，不与 tab 挤位（2026-08-11 用户裁定） */}
+      {activeTab === "annotations" && sorted.length > 0 && (
+        <div className="flex items-center justify-end gap-0.5 border-neutral-200 border-b px-2 py-1 dark:border-neutral-700">
+          {selectionMode ? (
+            <button
+              type="button"
+              onClick={handleSelectAll}
+              className="rounded-md px-1.5 py-1 text-neutral-500 text-xs hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            >
+              {allSelected ? "取消全选" : "全选"}
+            </button>
+          ) : (
+            <>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                    onClick={() => setStarFilter((f) => (f === "all" ? "starred" : "all"))}
                     className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
-                      selectionMode ? "bg-accent dark:bg-accent" : ""
+                      starFilter === "starred" ? "bg-accent dark:bg-accent" : ""
                     }`}
                   >
-                    <ListChecks className="size-4 text-neutral-500 dark:text-neutral-400" />
+                    <Star
+                      className={`size-4 ${
+                        starFilter === "starred"
+                          ? "fill-amber-400 text-amber-400"
+                          : "text-neutral-500 dark:text-neutral-400"
+                      }`}
+                    />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">{selectionMode ? "退出管理" : "多选管理"}</TooltipContent>
+                <TooltipContent side="bottom">{starFilter === "starred" ? "显示全部" : "仅看星标"}</TooltipContent>
               </Tooltip>
-              <span className="pl-1 text-neutral-400 text-xs dark:text-neutral-500">
-                {starFilter === "starred" && !selectionMode
-                  ? `${visible.length}/${sorted.length} 条`
-                  : `${sorted.length} 条`}
-              </span>
-            </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    title="导出全部标注"
+                    className="flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent"
+                  >
+                    <Download className="size-4 text-neutral-500 dark:text-neutral-400" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "markdown", false)}>
+                    导出为 Markdown
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "html", false)}>
+                    导出为 HTML
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "image", false)}>
+                    导出为图片
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void exportAnnotationList(sorted, "pdf", false)}>
+                    导出为 PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           )}
-          {activeTab === "ai-highlights" && aiAnnotations.length > 0 && (
-            <span className="pr-2 text-neutral-400 text-xs dark:text-neutral-500">{aiAnnotations.length} 条</span>
-          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                className={`flex size-7 items-center justify-center rounded-full hover:bg-accent dark:hover:bg-accent ${
+                  selectionMode ? "bg-accent dark:bg-accent" : ""
+                }`}
+              >
+                <ListChecks className="size-4 text-neutral-500 dark:text-neutral-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{selectionMode ? "退出管理" : "多选管理"}</TooltipContent>
+          </Tooltip>
+          <span className="pl-1 text-neutral-400 text-xs dark:text-neutral-500">
+            {starFilter === "starred" && !selectionMode
+              ? `${visible.length}/${sorted.length} 条`
+              : `${sorted.length} 条`}
+          </span>
         </div>
-      </div>
+      )}
 
       {activeTab === "annotations" ? (
         visible.length === 0 ? (
@@ -726,6 +728,10 @@ export function PaperNotepadPanel({
               <Trash2 className="size-3.5" />
               清除
             </button>
+            {/* 计数从头部移入本行（右对齐），头部只留 tab 栏 */}
+            {aiAnnotations.length > 0 && (
+              <span className="ml-auto text-neutral-400 text-xs dark:text-neutral-500">{aiAnnotations.length} 条</span>
+            )}
           </div>
 
           {aiAnnotations.length === 0 ? (
@@ -779,7 +785,13 @@ export function PaperNotepadPanel({
           onLocate={onLocateFigure}
         />
       ) : (
-        <NotesTab bookId={paperId} bookTitle={paperTitle} currentLocation={noteLocation} onLocate={onLocateNote} />
+        <NotesTab
+          bookId={paperId}
+          bookTitle={paperTitle}
+          currentLocation={noteLocation}
+          tocItems={noteTocItems}
+          onLocate={onLocateNote}
+        />
       )}
 
       {/* 多选管理底栏：导出（四种格式）/ 批量删除 / 退出（样式同历史对话批量操作条） */}

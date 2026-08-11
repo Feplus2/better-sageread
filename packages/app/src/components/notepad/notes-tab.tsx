@@ -1,26 +1,21 @@
 import { Markdown } from "@/components/prompt-kit/markdown";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { exportNoteToMarkdown, exportNotesToMarkdownFiles } from "@/lib/export-notes-markdown";
+import { applyPairedPunctuation } from "@/lib/pair-punctuation";
 import { NOTES_CHANGED_EVENT, createNote, deleteNote, getNotes, updateNote } from "@/services/note-service";
 import type { Note, NoteLocation } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
-import {
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  ListChecks,
-  Loader2,
-  MapPin,
-  Plus,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { Check, ChevronLeft, Download, ListChecks, ListTree, Loader2, MapPin, Plus, Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -150,30 +145,57 @@ function NoteCard({
   );
 }
 
+/** 编辑器草稿（位置三件套：TOC 选择器同时写 cfi/block 保持锚点精确；手改 tag 不动锚点） */
+interface NoteDraft {
+  title: string;
+  content: string;
+  locationTag: string;
+  locationCfi: string | null;
+  locationBlock: number | null;
+}
+
 interface NoteEditorProps {
   note: Note;
+  /** 章节清单（位置选择器数据源；空数组时隐藏选择器按钮，仅手输） */
+  tocItems: NoteLocation[];
   /** 自动保存（debounce 在外层实现）：落库并回写最新行 */
-  onSave: (id: string, draft: { title: string; content: string; locationTag: string }) => Promise<void>;
+  onSave: (id: string, draft: NoteDraft) => Promise<void>;
   onBack: () => void;
 }
 
 /**
- * 编辑态（侧栏内子视图，不扩宽）：返回 + 标题 + 位置 tag + 等宽 textarea + Markdown 预览。
- * 输入区/预览区各自可折叠（默认双展开，上下排布随面板宽度自然伸缩）；
- * 改动 800ms debounce 自动保存，卸载兜底 flush。
+ * 编辑态（侧栏内子视图，不扩宽）：返回 + 标题 + 位置 tag（可手输/可从 TOC 选）+
+ * 编辑|预览 切换（同一板块互换，Typora 式源码/预览二态，非上下堆叠）。
+ * 改动 800ms debounce 自动保存，卸载兜底 flush；textarea 挂了标点自动配对。
  */
-function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
+function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [locationTag, setLocationTag] = useState(note.locationTag ?? "");
+  const [locationCfi, setLocationCfi] = useState<string | null>(note.locationCfi);
+  const [locationBlock, setLocationBlock] = useState<number | null>(note.locationBlock);
   const [saving, setSaving] = useState<"idle" | "pending" | "saving">("idle");
-  const [inputOpen, setInputOpen] = useState(true);
-  const [previewOpen, setPreviewOpen] = useState(true);
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
   const timerRef = useRef<number | null>(null);
   // 最新草稿 ref：卸载/返回时兜底 flush，避免防抖窗口内丢字
-  const draftRef = useRef({ title, content, locationTag });
-  draftRef.current = { title, content, locationTag };
+  const draftRef = useRef<NoteDraft>({ title, content, locationTag, locationCfi, locationBlock });
+  draftRef.current = { title, content, locationTag, locationCfi, locationBlock };
   const dirtyRef = useRef(false);
+
+  // 标点自动配对（原生 beforeinput；IME 提交的全角符号也覆盖，见 pair-punctuation.ts）
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  useEffect(() => {
+    if (mode !== "edit") return; // 预览态 textarea 未挂载
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const handler = (e: Event) => {
+      applyPairedPunctuation(e as InputEvent, ta, contentRef.current, setContent);
+    };
+    ta.addEventListener("beforeinput", handler);
+    return () => ta.removeEventListener("beforeinput", handler);
+  }, [mode]);
 
   const flush = useCallback(async () => {
     if (!dirtyRef.current) return;
@@ -187,7 +209,7 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
   }, [note.id, onSave]);
 
   // 内容变化 → debounce 自动保存
-  // biome-ignore lint/correctness/useExhaustiveDependencies: title/content/locationTag 是变化侦测信号（正文只走 ref 草稿），必须列全
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 各草稿字段是变化侦测信号（正文只走 ref 草稿），必须列全
   useEffect(() => {
     dirtyRef.current = true;
     setSaving("pending");
@@ -196,7 +218,7 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
       timerRef.current = null;
       void flush();
     }, AUTOSAVE_DELAY);
-  }, [title, content, locationTag, flush]);
+  }, [title, content, locationTag, locationCfi, locationBlock, flush]);
 
   // 卸载兜底（返回列表/切 tab/关面板）：有未保存改动立即 flush
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在卸载时跑一次（onSave/note.id 经 ref 化草稿兜底，不依赖最新值）
@@ -207,12 +229,12 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
     };
   }, []);
 
-  const foldBtn = (open: boolean, label: string) => (
-    <span className="flex items-center gap-1">
-      {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-      {label}
-    </span>
-  );
+  const modePill = (active: boolean) =>
+    `rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+      active
+        ? "bg-background font-medium text-foreground shadow-sm dark:bg-neutral-700"
+        : "text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+    }`;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -228,6 +250,15 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
         <span className="text-neutral-400 text-xs dark:text-neutral-500">
           {saving === "idle" ? "已自动保存" : saving === "pending" ? "编辑中…" : "保存中…"}
         </span>
+        {/* 编辑|预览 切换（同一板块互换） */}
+        <div className="ml-auto flex items-center rounded-full bg-muted p-0.5 dark:bg-neutral-800">
+          <button type="button" onClick={() => setMode("edit")} className={modePill(mode === "edit")}>
+            编辑
+          </button>
+          <button type="button" onClick={() => setMode("preview")} className={modePill(mode === "preview")}>
+            预览
+          </button>
+        </div>
       </div>
       <div className="flex-1 space-y-2 overflow-y-auto p-2">
         <input
@@ -244,51 +275,57 @@ function NoteEditor({ note, onSave, onBack }: NoteEditorProps) {
             placeholder="位置标签（创建时自动捕获，可修改）"
             className="w-full rounded bg-muted px-1.5 py-1 outline-none placeholder:text-neutral-400 focus:ring-1 focus:ring-primary/50 dark:bg-neutral-900"
           />
-        </div>
-
-        {/* 输入区（可折叠） */}
-        <div className="rounded-lg bg-muted dark:bg-neutral-900">
-          <button
-            type="button"
-            onClick={() => setInputOpen((v) => !v)}
-            className="flex w-full items-center px-2 py-1.5 text-neutral-500 text-xs hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-          >
-            {foldBtn(inputOpen, "输入区")}
-          </button>
-          {inputOpen && (
-            <div className="px-2 pb-2">
-              <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="用 Markdown 写笔记…"
-                className="min-h-[30vh] resize-none bg-background font-mono text-sm leading-relaxed dark:bg-neutral-950"
-                autoFocus
-              />
-            </div>
+          {/* 从目录选择位置：同时写入精确锚点（cfi/block），比手输文本更可靠 */}
+          {tocItems.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="从目录选择章节位置"
+                  className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-accent dark:hover:bg-accent"
+                >
+                  <ListTree className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-72 w-64 overflow-y-auto">
+                {tocItems.map((item, index) => (
+                  <DropdownMenuItem
+                    key={`${item.cfi ?? item.tag}-${index}`}
+                    onClick={() => {
+                      setLocationTag(item.tag);
+                      setLocationCfi(item.cfi);
+                      setLocationBlock(item.block);
+                    }}
+                  >
+                    <span className="truncate">{item.tag}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
 
-        {/* 预览区（可折叠；react-markdown + KaTeX，与对话区同一渲染管线） */}
-        <div className="rounded-lg bg-muted dark:bg-neutral-900">
-          <button
-            type="button"
-            onClick={() => setPreviewOpen((v) => !v)}
-            className="flex w-full items-center px-2 py-1.5 text-neutral-500 text-xs hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-          >
-            {foldBtn(previewOpen, "预览")}
-          </button>
-          {previewOpen && (
-            <div className="px-3 pb-3">
-              {content.trim() ? (
-                <Markdown className="prose prose-neutral dark:prose-invert prose-headings:my-2 prose-p:my-1.5 max-w-none prose-table:text-xs text-sm leading-relaxed">
-                  {content}
-                </Markdown>
-              ) : (
-                <p className="text-neutral-400 text-xs dark:text-neutral-500">暂无内容</p>
-              )}
-            </div>
-          )}
-        </div>
+        {/* 编辑/预览同一板块：编辑 = 等宽 textarea（标点配对已挂）；预览 = react-markdown + KaTeX 渲染 */}
+        {mode === "edit" ? (
+          <Textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="用 Markdown 写笔记…"
+            className="min-h-[45vh] flex-1 resize-none bg-muted font-mono text-sm leading-relaxed dark:bg-neutral-900"
+            autoFocus
+          />
+        ) : (
+          <div className="min-h-[45vh] rounded-lg bg-muted px-3 py-2 dark:bg-neutral-900">
+            {content.trim() ? (
+              <Markdown className="prose prose-neutral dark:prose-invert prose-headings:my-2 prose-p:my-1.5 max-w-none prose-table:text-xs text-sm leading-relaxed">
+                {content}
+              </Markdown>
+            ) : (
+              <p className="text-neutral-400 text-xs dark:text-neutral-500">暂无内容</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -300,15 +337,17 @@ export interface NotesTabProps {
   bookTitle: string;
   /** 新建时捕获的当前阅读位置（论文 = heading；书籍 = 章节，父组件装配；阅读位置未知为 null） */
   currentLocation: NoteLocation | null;
+  /** 章节清单（位置选择器数据源；论文 = TOC headings，书籍 = book.toc 拍平） */
+  tocItems: NoteLocation[];
   /** 点击位置 chip → 正文跳转（父组件实现 精确锚点 → 文本兜底 → 顶部+toast 的降级链） */
   onLocate: (note: Note) => void;
 }
 
 /**
  * 「笔记」tab（论文/书籍共用）：列表态（卡片 + 新建 + 星标 + 右键导出/删除）
- * ↔ 编辑态（输入/预览双折叠区 + 自动保存）↔ 管理态（多选/全选 → 批量逐篇导出/删除）。
+ * ↔ 编辑态（编辑|预览切换 + 自动保存 + TOC 位置选择器）↔ 管理态（多选/全选 → 批量逐篇导出/删除）。
  */
-export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: NotesTabProps) {
+export function NotesTab({ bookId, bookTitle, currentLocation, tocItems, onLocate }: NotesTabProps) {
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   // 管理态（多选批量操作）
@@ -382,12 +421,14 @@ export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: Notes
     }
   };
 
-  const handleSave = useCallback(async (id: string, draft: { title: string; content: string; locationTag: string }) => {
+  const handleSave = useCallback(async (id: string, draft: NoteDraft) => {
     try {
       await updateNote(id, {
         title: draft.title.trim(),
         content: draft.content,
         locationTag: draft.locationTag.trim() || null,
+        locationCfi: draft.locationCfi,
+        locationBlock: draft.locationBlock,
       });
       // 位置/星标不参与排序重排前的轻更新：只回写该行，避免编辑中列表跳动
       setNotes((prev) =>
@@ -399,6 +440,8 @@ export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: Notes
                     title: draft.title.trim(),
                     content: draft.content,
                     locationTag: draft.locationTag.trim() || null,
+                    locationCfi: draft.locationCfi,
+                    locationBlock: draft.locationBlock,
                     updatedAt: Date.now(),
                   }
                 : n,
@@ -475,7 +518,7 @@ export function NotesTab({ bookId, bookTitle, currentLocation, onLocate }: Notes
   const editing = editingId ? (notes?.find((n) => n.id === editingId) ?? null) : null;
 
   if (editing) {
-    return <NoteEditor note={editing} onSave={handleSave} onBack={() => setEditingId(null)} />;
+    return <NoteEditor note={editing} tocItems={tocItems} onSave={handleSave} onBack={() => setEditingId(null)} />;
   }
 
   return (

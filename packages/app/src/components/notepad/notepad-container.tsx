@@ -23,6 +23,19 @@ function findTocByLabel(
   return null;
 }
 
+/** book.toc 递归拍平为位置选择器清单（cfi 优先，退化 href；block = foliate section id） */
+function flattenToc(
+  items: { label: string; href: string; cfi?: string; id?: number; subitems?: unknown[] }[],
+): NoteLocation[] {
+  const out: NoteLocation[] = [];
+  for (const item of items) {
+    const tag = collapseWs(item.label);
+    if (tag) out.push({ tag, cfi: item.cfi ?? item.href ?? null, block: item.id ?? null });
+    if (item.subitems) out.push(...flattenToc(item.subitems as typeof items));
+  }
+  return out;
+}
+
 /** 书籍侧笔记 tab：从 reader store 装配当前位置（CFI + 章节标题 + sectionId），跳转走 goTo 降级链 */
 const BookNotes = ({ bookId }: { bookId: string }) => {
   const view = useReaderStore((state) => state.view);
@@ -33,6 +46,9 @@ const BookNotes = ({ bookId }: { bookId: string }) => {
   const currentLocation: NoteLocation | null = progress?.sectionLabel
     ? { tag: progress.sectionLabel, cfi: location ?? null, block: progress.sectionId ?? null }
     : null;
+
+  // 位置选择器清单：book.toc 拍平（view 未就绪为空数组，选择器按钮自动隐藏）
+  const tocItems = view?.book?.toc ? flattenToc(view.book.toc) : [];
 
   const handleLocate = useCallback(
     (note: Note) => {
@@ -65,6 +81,7 @@ const BookNotes = ({ bookId }: { bookId: string }) => {
       bookId={bookId}
       bookTitle={activeBook?.title ?? ""}
       currentLocation={currentLocation}
+      tocItems={tocItems}
       onLocate={handleLocate}
     />
   );

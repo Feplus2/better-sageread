@@ -489,7 +489,7 @@ export default function ReaderLayout() {
             const notepadSidebar = isNotepadVisible && (
               <Resizable
                 defaultSize={{
-                  width: 300,
+                  width: 360,
                   height: "100%",
                 }}
                 minWidth={260}
