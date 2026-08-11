@@ -13,7 +13,7 @@ import { createTag, getTags } from "@/services/tag-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useLibraryStore } from "@/store/library-store";
 import clsx from "clsx";
-import { ListChecks, Plus, Sparkles, Tags, Trash2, Upload as UploadIcon, X } from "lucide-react";
+import { FileDown, ListChecks, Plus, Sparkles, Tags, Trash2, Upload as UploadIcon, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
