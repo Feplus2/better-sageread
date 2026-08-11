@@ -1,6 +1,6 @@
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
 import { useReaderStore as useGlobalReaderStore } from "@/store/reader-store";
-import type { Note, NoteLocation } from "@/types/note";
+import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { NotepadContent } from "./notepad-content";
@@ -23,15 +23,16 @@ function findTocByLabel(
   return null;
 }
 
-/** book.toc 递归拍平为位置选择器清单（cfi 优先，退化 href；block = foliate section id） */
+/** book.toc 递归拍平为位置选择器清单（cfi 优先，退化 href；block = foliate section id；depth 层级缩进） */
 function flattenToc(
   items: { label: string; href: string; cfi?: string; id?: number; subitems?: unknown[] }[],
-): NoteLocation[] {
-  const out: NoteLocation[] = [];
+  depth = 0,
+): NoteTocItem[] {
+  const out: NoteTocItem[] = [];
   for (const item of items) {
     const tag = collapseWs(item.label);
-    if (tag) out.push({ tag, cfi: item.cfi ?? item.href ?? null, block: item.id ?? null });
-    if (item.subitems) out.push(...flattenToc(item.subitems as typeof items));
+    if (tag) out.push({ tag, cfi: item.cfi ?? item.href ?? null, block: item.id ?? null, depth });
+    if (item.subitems) out.push(...flattenToc(item.subitems as typeof items, depth + 1));
   }
   return out;
 }

@@ -46,3 +46,8 @@ export interface NoteLocation {
   cfi: string | null;
   block: number | null;
 }
+
+/** TOC 位置选择器条目：NoteLocation + 标题层级深度（缩进展示用，0 = 顶级） */
+export interface NoteTocItem extends NoteLocation {
+  depth: number;
+}

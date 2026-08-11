@@ -1,22 +1,17 @@
 import { Markdown } from "@/components/prompt-kit/markdown";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { exportNoteToMarkdown, exportNotesToMarkdownFiles } from "@/lib/export-notes-markdown";
-import { applyPairedPunctuation } from "@/lib/pair-punctuation";
+import { applyCompositionPairing, applyPairedPunctuation } from "@/lib/pair-punctuation";
 import { NOTES_CHANGED_EVENT, createNote, deleteNote, getNotes, updateNote } from "@/services/note-service";
-import type { Note, NoteLocation } from "@/types/note";
+import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
 import { Check, ChevronLeft, Download, ListChecks, ListTree, Loader2, MapPin, Plus, Star, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** 展示用文本折叠（Markdown 原文含换行/语法标记，只作预览） */
@@ -157,7 +152,7 @@ interface NoteDraft {
 interface NoteEditorProps {
   note: Note;
   /** 章节清单（位置选择器数据源；空数组时隐藏选择器按钮，仅手输） */
-  tocItems: NoteLocation[];
+  tocItems: NoteTocItem[];
   /** 自动保存（debounce 在外层实现）：落库并回写最新行 */
   onSave: (id: string, draft: NoteDraft) => Promise<void>;
   onBack: () => void;
@@ -176,6 +171,13 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
   const [locationBlock, setLocationBlock] = useState<number | null>(note.locationBlock);
   const [saving, setSaving] = useState<"idle" | "pending" | "saving">("idle");
   const [mode, setMode] = useState<"edit" | "preview">("edit");
+  // TOC 位置选择器
+  const [tocOpen, setTocOpen] = useState(false);
+  const [tocFilter, setTocFilter] = useState("");
+  const filteredTocItems = useMemo(() => {
+    const q = tocFilter.trim().toLowerCase();
+    return q ? tocItems.filter((t) => t.tag.toLowerCase().includes(q)) : tocItems;
+  }, [tocItems, tocFilter]);
   const timerRef = useRef<number | null>(null);
   // 最新草稿 ref：卸载/返回时兜底 flush，避免防抖窗口内丢字
   const draftRef = useRef<NoteDraft>({ title, content, locationTag, locationCfi, locationBlock });
@@ -193,8 +195,15 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
     const handler = (e: Event) => {
       applyPairedPunctuation(e as InputEvent, ta, contentRef.current, setContent);
     };
+    const compHandler = () => {
+      applyCompositionPairing(ta, setContent);
+    };
     ta.addEventListener("beforeinput", handler);
-    return () => ta.removeEventListener("beforeinput", handler);
+    ta.addEventListener("compositionend", compHandler);
+    return () => {
+      ta.removeEventListener("beforeinput", handler);
+      ta.removeEventListener("compositionend", compHandler);
+    };
   }, [mode]);
 
   const flush = useCallback(async () => {
@@ -275,10 +284,11 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
             placeholder="位置标签（创建时自动捕获，可修改）"
             className="w-full rounded bg-muted px-1.5 py-1 outline-none placeholder:text-neutral-400 focus:ring-1 focus:ring-primary/50 dark:bg-neutral-900"
           />
-          {/* 从目录选择位置：同时写入精确锚点（cfi/block），比手输文本更可靠 */}
+          {/* 从目录选择位置：同时写入精确锚点（cfi/block），比手输文本更可靠。
+              Popover + 轻量 div 列表（Radix MenuItem 数百条时打开卡顿）；层级按 depth 缩进，顶部可过滤 */}
           {tocItems.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover open={tocOpen} onOpenChange={setTocOpen}>
+              <PopoverTrigger asChild>
                 <button
                   type="button"
                   title="从目录选择章节位置"
@@ -286,22 +296,41 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
                 >
                   <ListTree className="size-3.5" />
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-h-72 w-64 overflow-y-auto">
-                {tocItems.map((item, index) => (
-                  <DropdownMenuItem
-                    key={`${item.cfi ?? item.tag}-${index}`}
-                    onClick={() => {
-                      setLocationTag(item.tag);
-                      setLocationCfi(item.cfi);
-                      setLocationBlock(item.block);
-                    }}
-                  >
-                    <span className="truncate">{item.tag}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-1.5">
+                <input
+                  value={tocFilter}
+                  onChange={(e) => setTocFilter(e.target.value)}
+                  placeholder="过滤章节…"
+                  autoFocus
+                  className="mb-1 w-full rounded bg-muted px-2 py-1 text-xs outline-none placeholder:text-neutral-400 focus:ring-1 focus:ring-primary/50 dark:bg-neutral-900"
+                />
+                <div className="max-h-64 overflow-y-auto">
+                  {filteredTocItems.length === 0 ? (
+                    <p className="px-2 py-3 text-center text-neutral-400 text-xs">无匹配章节</p>
+                  ) : (
+                    filteredTocItems.map((item, index) => (
+                      <button
+                        type="button"
+                        key={`${item.cfi ?? item.tag}-${index}`}
+                        onClick={() => {
+                          setLocationTag(item.tag);
+                          setLocationCfi(item.cfi);
+                          setLocationBlock(item.block);
+                          setTocOpen(false);
+                          setTocFilter("");
+                        }}
+                        className="block w-full truncate rounded px-2 py-1 text-left text-neutral-700 text-xs hover:bg-accent dark:text-neutral-300"
+                        style={{ paddingLeft: `${item.depth * 12 + 8}px` }}
+                        title={item.tag}
+                      >
+                        {item.tag}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
 
@@ -338,7 +367,7 @@ export interface NotesTabProps {
   /** 新建时捕获的当前阅读位置（论文 = heading；书籍 = 章节，父组件装配；阅读位置未知为 null） */
   currentLocation: NoteLocation | null;
   /** 章节清单（位置选择器数据源；论文 = TOC headings，书籍 = book.toc 拍平） */
-  tocItems: NoteLocation[];
+  tocItems: NoteTocItem[];
   /** 点击位置 chip → 正文跳转（父组件实现 精确锚点 → 文本兜底 → 顶部+toast 的降级链） */
   onLocate: (note: Note) => void;
 }

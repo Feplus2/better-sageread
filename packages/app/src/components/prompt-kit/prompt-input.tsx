@@ -1,6 +1,6 @@
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { applyPairedPunctuation } from "@/lib/pair-punctuation";
+import { applyCompositionPairing, applyPairedPunctuation } from "@/lib/pair-punctuation";
 import { cn } from "@/lib/utils";
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 
@@ -118,8 +118,8 @@ function PromptInputTextarea({ className, onKeyDown, disableAutosize = false, ..
     onKeyDown?.(e);
   };
 
-  // 标点自动配对：原生 beforeinput 监听（React 合成 beforeinput 对 textarea 触发不可靠；
-  // 原生层中英文直输与 IME 提交的全角符号都能拿到）
+  // 标点自动配对：原生 beforeinput（英文直输拦截）+ compositionend（IME 中文提交收尾转换）；
+  // 原生层监听（React 合成 beforeinput 对 textarea 触发不可靠）
   const valueRef = useRef(value);
   valueRef.current = value;
   // biome-ignore lint/correctness/useExhaustiveDependencies: textareaRef/setValue 均稳定引用，挂载一次即可
@@ -129,8 +129,15 @@ function PromptInputTextarea({ className, onKeyDown, disableAutosize = false, ..
     const handler = (e: Event) => {
       applyPairedPunctuation(e as InputEvent, ta, valueRef.current, setValue);
     };
+    const compHandler = () => {
+      applyCompositionPairing(ta, setValue);
+    };
     ta.addEventListener("beforeinput", handler);
-    return () => ta.removeEventListener("beforeinput", handler);
+    ta.addEventListener("compositionend", compHandler);
+    return () => {
+      ta.removeEventListener("beforeinput", handler);
+      ta.removeEventListener("compositionend", compHandler);
+    };
   }, [textareaRef, setValue]);
 
   return (

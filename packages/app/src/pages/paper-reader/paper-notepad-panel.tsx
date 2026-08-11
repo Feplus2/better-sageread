@@ -33,7 +33,7 @@ import {
 } from "@/services/paper-highlight-service";
 import { useProviderStore } from "@/store/provider-store";
 import type { BookNote } from "@/types/book";
-import type { Note, NoteLocation } from "@/types/note";
+import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
 import {
@@ -85,7 +85,7 @@ interface PaperNotepadPanelProps {
   /** 笔记位置捕获：当前 heading（无阅读位置为 null） */
   noteLocation: NoteLocation | null;
   /** 笔记位置选择器的章节清单（TOC headings 同构映射） */
-  noteTocItems: NoteLocation[];
+  noteTocItems: NoteTocItem[];
   /** 笔记位置跳转：slug 锚点 → TOC 文本兜底 → quote 兜底 */
   onLocateNote: (note: Note) => void;
   /** 右键"编辑评论"保存（落 book_notes.note） */

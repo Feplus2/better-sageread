@@ -34,7 +34,7 @@ import {
 import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
-import type { Note, NoteLocation } from "@/types/note";
+import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { Resizable } from "re-resizable";
@@ -374,7 +374,10 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   }, [currentHeading, toc]);
 
   // 笔记位置选择器的章节清单（与捕获同构：tag=标题文本，cfi=slug，block=TOC 序号）
-  const noteTocItems = useMemo<NoteLocation[]>(() => toc.map((t, i) => ({ tag: t.text, cfi: t.id, block: i })), [toc]);
+  const noteTocItems = useMemo<NoteTocItem[]>(() => {
+    const minLevel = toc.reduce((min, t) => Math.min(min, t.level), 6);
+    return toc.map((t, i) => ({ tag: t.text, cfi: t.id, block: i, depth: Math.max(0, t.level - minLevel) }));
+  }, [toc]);
 
   // 笔记位置跳转：精确锚点（slug）→ TOC 文本匹配（重解析 slug 漂移兜底）→ 全文 quote → 轻提示
   const handleLocateNote = useCallback(

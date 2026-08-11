@@ -1,16 +1,14 @@
 /**
- * 输入框标点自动配对（beforeinput 层）。
+ * 输入框标点自动配对（双通道）。
  *
- * 为什么在 beforeinput 而不是 keydown：中文全角符号经 IME 组合提交，keydown 阶段
- * 拿不到字符（且 isComposing 守卫必须跳过）。IME 提交在 Chromium/WebView2 里表现为
- * `insertCompositionText`（提交帧 isComposing=false），而非 `insertText`——两种都
- * 必须处理，否则中文标点（全角括号/弯引号/中点省略号）整体漏网。
+ * 通道一（beforeinput 拦截）：英文直输的 insertText——开符插入成对、闭符跳过、
+ * 空对 Backspace 整对删除、... 归一为 …。
  *
- * 行为（对齐常见编辑器）：
- * - 输入开符：插入成对符号，光标置中；有选区时把选区包起来
- * - 输入闭符且下一个字符就是同一闭符：跳过它（不重复插入）
- * - 空对中按 Backspace：整对删除
- * - 连续三个句点 `...` 或中点 `···`：收成标准省略号 `…`（两组即成 `……`）
+ * 通道二（compositionend 收尾）：中文全角符号。探针实测（2026-08-11，微软拼音/WebView2）：
+ * IME 提交帧是 isComposing=true 的 insertCompositionText，且一个字符两帧
+ * （先插临时文本、再选区替换定稿）——beforeinput 层拦截既滤不准 isComposing，
+ * preventDefault 还会和 IME 的两帧定稿打架。故中文不拦、组合结束后再转换，
+ * 此时 IME 无活状态，DOM 值即终稿，转换经 setValue 覆写不会破坏 IME。
  */
 const PAIRS: Record<string, string> = {
   '"': '"',
@@ -31,11 +29,6 @@ const PAIRS: Record<string, string> = {
 };
 const CLOSERS = new Set(Object.values(PAIRS));
 
-/** 文本插入帧判定：直输 insertText + IME 提交帧（insertCompositionText 且组合已结束） */
-function isCommitInsert(ne: InputEvent): boolean {
-  return ne.inputType === "insertText" || (ne.inputType === "insertCompositionText" && !ne.isComposing);
-}
-
 function setCaret(ta: HTMLTextAreaElement, pos: number) {
   requestAnimationFrame(() => {
     ta.selectionStart = pos;
@@ -43,7 +36,7 @@ function setCaret(ta: HTMLTextAreaElement, pos: number) {
   });
 }
 
-/** 返回 true = 已处理（本函数已 preventDefault，不再走默认插入） */
+/** 通道一：beforeinput 拦截（英文直输 insertText；IME 的 composition 帧一律放行）。返回 true = 已处理 */
 export function applyPairedPunctuation(
   ne: InputEvent,
   ta: HTMLTextAreaElement,
@@ -53,10 +46,10 @@ export function applyPairedPunctuation(
   const s = ta.selectionStart;
   const en = ta.selectionEnd;
 
-  // 省略号归一：再输入一个 . 或 · 凑满三点时收成 …
-  if (isCommitInsert(ne) && (ne.data === "." || ne.data === "·")) {
+  // 省略号归一：再输入一个 . 凑满三点时收成 …（中文中点 · 走通道二）
+  if (ne.inputType === "insertText" && ne.data === ".") {
     const prev2 = value.slice(Math.max(0, s - 2), s);
-    if (s === en && (prev2 === ".." || prev2 === "··")) {
+    if (s === en && prev2 === "..") {
       ne.preventDefault();
       setValue(`${value.slice(0, s - 2)}…${value.slice(en)}`);
       setCaret(ta, s - 2 + 1);
@@ -65,7 +58,7 @@ export function applyPairedPunctuation(
     return false;
   }
 
-  if (isCommitInsert(ne) && ne.data && PAIRS[ne.data] !== undefined) {
+  if (ne.inputType === "insertText" && ne.data && PAIRS[ne.data] !== undefined) {
     ne.preventDefault();
     const sel = value.slice(s, en);
     setValue(value.slice(0, s) + ne.data + sel + PAIRS[ne.data] + value.slice(en));
@@ -73,7 +66,7 @@ export function applyPairedPunctuation(
     return true;
   }
 
-  if (isCommitInsert(ne) && ne.data && CLOSERS.has(ne.data) && s === en && value[s] === ne.data) {
+  if (ne.inputType === "insertText" && ne.data && CLOSERS.has(ne.data) && s === en && value[s] === ne.data) {
     ne.preventDefault();
     setCaret(ta, s + 1);
     return true;
@@ -90,4 +83,36 @@ export function applyPairedPunctuation(
   }
 
   return false;
+}
+
+/**
+ * 通道二：IME 提交收尾（compositionend 时调用）。rAF 后读 DOM 终稿做转换：
+ * - 光标前是开符（且后方不是同一闭符）→ 补闭符，光标保持开符后
+ * - 光标前是闭符且后方恰是同一闭符（配对后的闭符输入）→ 删后方闭符（等效"跳过"）
+ * - 光标前三字符是 ··· → 收成 …
+ */
+export function applyCompositionPairing(ta: HTMLTextAreaElement, setValue: (v: string) => void): void {
+  requestAnimationFrame(() => {
+    const value = ta.value;
+    const s = ta.selectionStart;
+    if (s !== ta.selectionEnd || s === 0) return;
+    const prev = value[s - 1];
+
+    if (PAIRS[prev] !== undefined) {
+      if (value[s] === PAIRS[prev]) return; // 后方已是配对闭符，不重复补
+      setValue(value.slice(0, s) + PAIRS[prev] + value.slice(s));
+      setCaret(ta, s);
+      return;
+    }
+    if (CLOSERS.has(prev) && value[s] === prev) {
+      setValue(value.slice(0, s) + value.slice(s + 1));
+      setCaret(ta, s);
+      return;
+    }
+    const prev3 = value.slice(Math.max(0, s - 3), s);
+    if (prev3 === "···") {
+      setValue(`${value.slice(0, s - 3)}…${value.slice(s)}`);
+      setCaret(ta, s - 2);
+    }
+  });
 }
