@@ -160,6 +160,23 @@ pub const TABLES: &[SyncTable] = &[
             ("updated_at", ColType::Int),
         ],
     },
+    // ---- ⑤ 2026-08-11 笔记面板：notes 重建后入 L2b（通用行 LWW，对齐 book_notes 模式） ----
+    SyncTable {
+        name: "notes",
+        pk: "id",
+        columns: &[
+            ("id", ColType::Text),
+            ("book_id", ColType::Text),
+            ("title", ColType::Text),
+            ("content", ColType::Text),
+            ("location_tag", ColType::Text),
+            ("location_block", ColType::Int),
+            ("location_cfi", ColType::Text),
+            ("starred", ColType::Int),
+            ("created_at", ColType::Int),
+            ("updated_at", ColType::Int),
+        ],
+    },
 ];
 
 pub fn find_table(name: &str) -> Option<&'static SyncTable> {

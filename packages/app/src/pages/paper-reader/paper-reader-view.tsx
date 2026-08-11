@@ -34,6 +34,7 @@ import {
 import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
+import type { Note, NoteLocation } from "@/types/note";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { Resizable } from "re-resizable";
@@ -365,6 +366,30 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     [translationMap],
   );
 
+  // 笔记位置捕获：当前 heading → { tag=文本, cfi=slug 锚点, block=TOC 序号（阅读流排序键） }
+  const noteLocation = useMemo<NoteLocation | null>(() => {
+    if (!currentHeading) return null;
+    const block = toc.findIndex((t) => t.id === currentHeading.id);
+    return { tag: currentHeading.text, cfi: currentHeading.id, block: block >= 0 ? block : null };
+  }, [currentHeading, toc]);
+
+  // 笔记位置跳转：精确锚点（slug）→ TOC 文本匹配（重解析 slug 漂移兜底）→ 全文 quote → 轻提示
+  const handleLocateNote = useCallback(
+    (note: Note) => {
+      const reader = paperReaderRef.current;
+      if (!reader) return;
+      if (note.locationCfi && reader.scrollToHeading(note.locationCfi)) return;
+      const tag = note.locationTag?.trim();
+      if (tag) {
+        const hit = toc.find((t) => t.text.trim() === tag);
+        if (hit && reader.scrollToHeading(hit.id)) return;
+        if (reader.scrollToQuote(tag)) return;
+      }
+      toast.info("未能定位到笔记位置（内容可能已变更）");
+    },
+    [toc],
+  );
+
   // 笔记面板（位置/宽度边界与书籍 Notepad 一致，可拖拽调宽、可折叠；swap 时换手柄与间隙方向）
   const notepadSidebar = notesOpen && (
     <Resizable
@@ -401,6 +426,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       >
         <PaperNotepadPanel
           annotations={annotations}
+          paperId={paperId}
           paperTitle={title}
           markdown={markdown}
           onLocateQuotes={(quotes) => paperReaderRef.current?.locateQuotes(quotes) ?? quotes.map(() => null)}
@@ -410,6 +436,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           paperDir={paperDir ?? ""}
           translationMap={translationMap}
           onLocateFigure={handleLocateFigure}
+          noteLocation={noteLocation}
+          onLocateNote={handleLocateNote}
           onUpdateNote={(id, note) => updateAnnotation(id, { note })}
           onDeleteAnnotation={deleteAnnotation}
           onToggleStar={toggleStar}

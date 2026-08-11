@@ -427,3 +427,75 @@ pub struct BookNoteWithBook {
     #[serde(rename = "bookAuthor")]
     pub book_author: Option<String>,
 }
+
+// ==================== Note（笔记面板，2026-08 重建；与 book_notes 标注是两套概念） ====================
+
+/// 笔记：绑定书籍/论文的长文 Markdown 笔记（"人话版总结/灵感"的落点）。
+/// 位置信息三列分工：location_cfi 精确锚点（论文=heading slug；书籍=CFI），
+/// location_tag 文本兜底（重解析漂移后退化文本匹配），location_block 阅读流排序键。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Note {
+    pub id: String,
+    #[serde(rename = "bookId")]
+    pub book_id: String,
+    pub title: String,
+    /// Markdown 正文
+    pub content: String,
+    #[serde(rename = "locationTag")]
+    pub location_tag: Option<String>,
+    #[serde(rename = "locationBlock")]
+    pub location_block: Option<i64>,
+    #[serde(rename = "locationCfi")]
+    pub location_cfi: Option<String>,
+    pub starred: bool,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct NoteCreateData {
+    #[serde(rename = "bookId")]
+    pub book_id: String,
+    pub title: Option<String>,
+    pub content: Option<String>,
+    #[serde(rename = "locationTag")]
+    pub location_tag: Option<String>,
+    #[serde(rename = "locationBlock")]
+    pub location_block: Option<i64>,
+    #[serde(rename = "locationCfi")]
+    pub location_cfi: Option<String>,
+}
+
+/// 更新语义 = COALESCE：None 保留原值（清标题传 Some("")）
+#[derive(Deserialize, Debug)]
+pub struct NoteUpdateData {
+    pub title: Option<String>,
+    pub content: Option<String>,
+    #[serde(rename = "locationTag")]
+    pub location_tag: Option<String>,
+    #[serde(rename = "locationBlock")]
+    pub location_block: Option<i64>,
+    #[serde(rename = "locationCfi")]
+    pub location_cfi: Option<String>,
+    pub starred: Option<bool>,
+}
+
+impl Note {
+    pub fn from_db_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(Self {
+            id: row.try_get("id")?,
+            book_id: row.try_get("book_id")?,
+            title: row.try_get("title")?,
+            content: row.try_get("content")?,
+            location_tag: row.try_get("location_tag")?,
+            location_block: row.try_get("location_block")?,
+            location_cfi: row.try_get("location_cfi")?,
+            starred: row.try_get::<i32, _>("starred").map(|v| v != 0).unwrap_or(false),
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+}

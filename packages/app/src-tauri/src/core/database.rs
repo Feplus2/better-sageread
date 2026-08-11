@@ -147,13 +147,29 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     .await?;
     println!("Migration applied: _sync_log.");
 
-    // notes 概念废弃（2026-08）：独立"笔记"全部迁移到 book_notes，删表清库。
-    // DROP TABLE 幂等，且连带删除其上的 _sync_notes_* 触发器；同时清掉 _sync_log 里的残留行
-    sqlx::query("DROP TABLE IF EXISTS notes").execute(pool).await?;
-    sqlx::query("DELETE FROM _sync_log WHERE table_name = 'notes'")
+    // notes（笔记面板，2026-08 第二轮重建）：首轮"notes 概念废弃"迁移已把旧表 DROP，
+    // 本轮以全新 schema 重建（IF NOT EXISTS 幂等）。注意：不可再保留 DROP TABLE IF EXISTS notes
+    // 迁移——它每次启动都执行，会把新表一并清掉。
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY NOT NULL,
+            book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            location_tag TEXT,
+            location_block INTEGER,
+            location_cfi TEXT,
+            starred INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_notes_book_id ON notes(book_id)")
         .execute(pool)
         .await?;
-    println!("Migration applied: notes table dropped.");
+    println!("Migration applied: notes table (rebuilt).");
 
     // 文献库文件夹模型（§3.2）：folders 树表 + paper_folders 多对多关系表（IF NOT EXISTS 幂等）。
     // 删除文件夹时：子文件夹经 parent_id 级联删除，paper_folders 行经 folder_id 级联删除（论文本身不动）。
@@ -391,7 +407,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     // L2 同步触发器（CREATE TRIGGER IF NOT EXISTS 幂等）统一最后建：
     // 成员表的建表/列迁移必须全部就绪（folders/paper_folders/prompt_presets 在上方才创建）；
     // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式
-    const SYNC_TABLES: [(&str, &str); 10] = [
+    const SYNC_TABLES: [(&str, &str); 11] = [
         ("books", "id"),
         ("book_status", "book_id"),
         ("book_notes", "id"),
@@ -402,6 +418,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         ("folders", "id"),
         ("paper_folders", "paper_id || ':' || folder_id"),
         ("prompt_presets", "id"),
+        ("notes", "id"),
     ];
 
     for (table, pk) in SYNC_TABLES {

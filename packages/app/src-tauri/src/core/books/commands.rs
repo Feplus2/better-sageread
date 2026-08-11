@@ -1513,6 +1513,141 @@ pub async fn replace_paper_content(
     Ok(())
 }
 
+// ==================== Note 相关命令（笔记面板，2026-08 重建） ====================
+
+#[tauri::command]
+pub async fn create_note(app_handle: AppHandle, note_data: NoteCreateData) -> Result<Note, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let note = Note {
+        id: uuid::Uuid::new_v4().to_string(),
+        book_id: note_data.book_id,
+        title: note_data.title.unwrap_or_default(),
+        content: note_data.content.unwrap_or_default(),
+        location_tag: note_data.location_tag,
+        location_block: note_data.location_block,
+        location_cfi: note_data.location_cfi,
+        starred: false,
+        created_at: now,
+        updated_at: now,
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO notes (id, book_id, title, content, location_tag, location_block, location_cfi, starred, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "#,
+    )
+    .bind(&note.id)
+    .bind(&note.book_id)
+    .bind(&note.title)
+    .bind(&note.content)
+    .bind(&note.location_tag)
+    .bind(note.location_block)
+    .bind(&note.location_cfi)
+    .bind(0)
+    .bind(note.created_at)
+    .bind(note.updated_at)
+    .execute(&db_pool)
+    .await
+    .map_err(|e| format!("创建笔记失败: {}", e))?;
+
+    Ok(note)
+}
+
+/// 某本书/论文的全部笔记：星标置顶，组内按阅读流（location_block，空值排后）再按创建时间
+#[tauri::command]
+pub async fn get_notes(app_handle: AppHandle, book_id: String) -> Result<Vec<Note>, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, book_id, title, content, location_tag, location_block, location_cfi, starred, created_at, updated_at
+        FROM notes
+        WHERE book_id = ?1
+        ORDER BY starred DESC, location_block IS NULL, location_block ASC, created_at ASC
+        "#,
+    )
+    .bind(&book_id)
+    .fetch_all(&db_pool)
+    .await
+    .map_err(|e| format!("查询笔记失败: {}", e))?;
+
+    let notes: Result<Vec<Note>, sqlx::Error> = rows.iter().map(Note::from_db_row).collect();
+    notes.map_err(|e| format!("转换查询结果失败: {}", e))
+}
+
+#[tauri::command]
+pub async fn update_note(
+    app_handle: AppHandle,
+    id: String,
+    update_data: NoteUpdateData,
+) -> Result<Note, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let result = sqlx::query(
+        r#"
+        UPDATE notes
+        SET title = COALESCE(?, title),
+            content = COALESCE(?, content),
+            location_tag = COALESCE(?, location_tag),
+            location_block = COALESCE(?, location_block),
+            location_cfi = COALESCE(?, location_cfi),
+            starred = COALESCE(?, starred),
+            updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(&update_data.title)
+    .bind(&update_data.content)
+    .bind(&update_data.location_tag)
+    .bind(update_data.location_block)
+    .bind(&update_data.location_cfi)
+    .bind(update_data.starred.map(|b| if b { 1 } else { 0 }))
+    .bind(now)
+    .bind(&id)
+    .execute(&db_pool)
+    .await
+    .map_err(|e| format!("更新笔记失败: {}", e))?;
+
+    if result.rows_affected() == 0 {
+        return Err("笔记不存在".to_string());
+    }
+
+    let row = sqlx::query(
+        r#"
+        SELECT id, book_id, title, content, location_tag, location_block, location_cfi, starred, created_at, updated_at
+        FROM notes
+        WHERE id = ?1
+        "#,
+    )
+    .bind(&id)
+    .fetch_one(&db_pool)
+    .await
+    .map_err(|e| format!("查询更新后的笔记失败: {}", e))?;
+
+    Note::from_db_row(&row).map_err(|e| format!("转换查询结果失败: {}", e))
+}
+
+#[tauri::command]
+pub async fn delete_note(app_handle: AppHandle, id: String) -> Result<(), String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+
+    let result = sqlx::query("DELETE FROM notes WHERE id = ?1")
+        .bind(&id)
+        .execute(&db_pool)
+        .await
+        .map_err(|e| format!("删除笔记失败: {}", e))?;
+
+    if result.rows_affected() == 0 {
+        return Err("笔记不存在".to_string());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::should_bump_position_changed;

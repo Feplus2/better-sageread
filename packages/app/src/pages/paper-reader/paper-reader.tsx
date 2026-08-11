@@ -64,7 +64,8 @@ export interface TocItem {
 
 /** 暴露给父组件（顶栏 TOC 下拉 / C2 AI 标亮 / 图表速跳）的容器内定位能力 */
 export interface PaperReaderHandle {
-  scrollToHeading: (id: string) => void;
+  /** 滚动到标题（id = rehype-slug 锚点）；未命中返回 false（笔记位置跳转的降级链用） */
+  scrollToHeading: (id: string) => boolean;
   /** C2 AI 标亮：批量 quote → 锚点换算（基于当前渲染 DOM；容器未就绪时全部返回 null） */
   locateQuotes: (quotes: string[]) => (PaperHighlightLocation | null)[];
   /** 图表速跳：图注/表注 quote 全文查找 → 滚动定位 + 闪烁强调；未命中返回 false */
@@ -1171,12 +1172,13 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   }, [paperDir]);
 
   // 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移）
-  const scrollToHeading = useCallback((id: string) => {
+  const scrollToHeading = useCallback((id: string): boolean => {
     setActiveHeadingId(id);
     const root = scrollRef.current;
     const el = document.getElementById(id);
-    if (!root || !el) return;
+    if (!root || !el) return false;
     scrollElementInContainer(root, el);
+    return true;
   }, []);
 
   // 定位闪烁强调（标注定位 / 图表速跳共用）：paper-anno-current 高亮闪 3 次后清除

@@ -1,4 +1,5 @@
 import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { NotesTab } from "@/components/notepad/notes-tab";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,6 +33,7 @@ import {
 } from "@/services/paper-highlight-service";
 import { useProviderStore } from "@/store/provider-store";
 import type { BookNote } from "@/types/book";
+import type { Note, NoteLocation } from "@/types/note";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
 import {
@@ -49,7 +51,7 @@ import {
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-type PaperNotepadTab = "annotations" | "ai-highlights" | "figures";
+type PaperNotepadTab = "annotations" | "ai-highlights" | "figures" | "notes";
 
 /** 标注导出格式（底栏/头部菜单共用同一导出管线） */
 type AnnotationExportFormat = "markdown" | "html" | "image" | "pdf";
@@ -60,6 +62,8 @@ type PaperKindSelect = PaperKind | "auto";
 interface PaperNotepadPanelProps {
   /** 本篇论文的全部标注（type=annotation 且未删除，含 AI 标注） */
   annotations: BookNote[];
+  /** 论文 id（笔记 tab 的 book_id） */
+  paperId: string;
   /** 论文标题（导出文档头与文件名用） */
   paperTitle: string;
   /** paper.md 原始文本（AI 重点生成的输入；未加载完成为 null） */
@@ -78,6 +82,10 @@ interface PaperNotepadPanelProps {
   translationMap: ReadonlyMap<number, string> | null;
   /** 图表速跳：点击图表条目 → 正文滚动定位 */
   onLocateFigure: (item: PaperFigureItem) => void;
+  /** 笔记位置捕获：当前 heading（无阅读位置为 null） */
+  noteLocation: NoteLocation | null;
+  /** 笔记位置跳转：slug 锚点 → TOC 文本兜底 → quote 兜底 */
+  onLocateNote: (note: Note) => void;
   /** 右键"编辑评论"保存（落 book_notes.note） */
   onUpdateNote: (id: string, note: string) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -293,6 +301,7 @@ function PaperAiHighlightItem({ annotation, onLocate, onDelete }: PaperAiHighlig
  */
 export function PaperNotepadPanel({
   annotations,
+  paperId,
   paperTitle,
   markdown,
   onLocateQuotes,
@@ -302,6 +311,8 @@ export function PaperNotepadPanel({
   paperDir,
   translationMap,
   onLocateFigure,
+  noteLocation,
+  onLocateNote,
   onUpdateNote,
   onDeleteAnnotation,
   onToggleStar,
@@ -565,6 +576,10 @@ export function PaperNotepadPanel({
                 <Images className="mr-1 size-4" />
                 <span>图表</span>
               </TabsTrigger>
+              <TabsTrigger className="h-7 rounded-full" value="notes">
+                <NotebookPen className="mr-1 size-4" />
+                <span>笔记</span>
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           {activeTab === "annotations" && sorted.length > 0 && (
@@ -756,13 +771,15 @@ export function PaperNotepadPanel({
             </div>
           )}
         </>
-      ) : (
+      ) : activeTab === "figures" ? (
         <PaperFiguresTab
           markdown={markdown}
           paperDir={paperDir}
           translationMap={translationMap}
           onLocate={onLocateFigure}
         />
+      ) : (
+        <NotesTab bookId={paperId} currentLocation={noteLocation} onLocate={onLocateNote} />
       )}
 
       {/* 多选管理底栏：导出（四种格式）/ 批量删除 / 退出（样式同历史对话批量操作条） */}

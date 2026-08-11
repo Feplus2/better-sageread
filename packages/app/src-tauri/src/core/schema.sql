@@ -111,6 +111,25 @@ CREATE INDEX IF NOT EXISTS idx_book_notes_type ON book_notes(type);
 CREATE INDEX IF NOT EXISTS idx_book_notes_created_at ON book_notes(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_book_notes_cfi ON book_notes(cfi);
 
+-- Note 表 - 笔记面板（2026-08 重建）：绑定书籍/论文的长文 Markdown 笔记，与 book_notes 标注是两套概念
+-- 位置三列：location_cfi 精确锚点（论文=heading slug；书籍=CFI）、location_tag 文本兜底（heading/章节标题）、location_block 阅读流排序键
+CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY NOT NULL,
+    book_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    location_tag TEXT,
+    location_block INTEGER,
+    location_cfi TEXT,
+    starred INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_book_id ON notes(book_id);
+
 -- 技能库表 - 存储 AI 技能的标准操作流程
 CREATE TABLE IF NOT EXISTS skills (
     id TEXT PRIMARY KEY NOT NULL,
