@@ -1,5 +1,10 @@
 import { PreviewPanel } from "@/components/preview/preview-panel";
-import { type PaperViewMode, buildPaperViewMarkdown, cutPaperBlocks } from "@/pages/paper-reader/paper-blocks";
+import {
+  type PaperFigureItem,
+  type PaperViewMode,
+  buildPaperViewMarkdown,
+  cutPaperBlocks,
+} from "@/pages/paper-reader/paper-blocks";
 import PaperExportDialog from "@/pages/paper-reader/paper-export-dialog";
 import PaperHeaderBar from "@/pages/paper-reader/paper-header-bar";
 import { PaperNotepadPanel } from "@/pages/paper-reader/paper-notepad-panel";
@@ -345,6 +350,21 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     [paperId],
   );
 
+  // 图表速跳：图片优先（data-paper-src 全视图模式可靠，译文模式原文图注不在 DOM 时仍能定位）；
+  // 表格/无图条目走图注 quote，译文模式退回译文 quote；全部未命中给轻提示
+  const handleLocateFigure = useCallback(
+    (item: PaperFigureItem) => {
+      const reader = paperReaderRef.current;
+      if (!reader) return;
+      if (item.images.length > 0 && reader.scrollToImage(item.images[0])) return;
+      if (item.quote && reader.scrollToQuote(item.quote)) return;
+      const zh = translationMap?.get(item.blockIndex);
+      if (zh && reader.scrollToQuote(zh.trim().slice(0, 80))) return;
+      toast.info("未能在正文中定位该图表");
+    },
+    [translationMap],
+  );
+
   // 笔记面板（位置/宽度边界与书籍 Notepad 一致，可拖拽调宽、可折叠；swap 时换手柄与间隙方向）
   const notepadSidebar = notesOpen && (
     <Resizable
@@ -353,7 +373,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
         height: "100%",
       }}
       minWidth={260}
-      maxWidth={500}
+      maxWidth={800}
       enable={{
         top: false,
         right: !swapSidebars,
@@ -387,6 +407,9 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           onCreateAiAnnotations={createAiAnnotations}
           onClearAiAnnotations={clearAiAnnotations}
           onLocateAnnotation={setFocusAnnotationId}
+          paperDir={paperDir ?? ""}
+          translationMap={translationMap}
+          onLocateFigure={handleLocateFigure}
           onUpdateNote={(id, note) => updateAnnotation(id, { note })}
           onDeleteAnnotation={deleteAnnotation}
           onToggleStar={toggleStar}

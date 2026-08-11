@@ -133,8 +133,7 @@ foliate-view {
   [role="switch"],
   [role="checkbox"],
   [data-radix-collection-item] {
-    transition-property:
-      color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow;
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow;
     transition-duration: 150ms;
     transition-timing-function: ease-out;
   }
@@ -515,6 +514,25 @@ foliate-view {
   background-color: oklch(0.55 0.15 65 / 0.9);
 }
 
+/* 图表速跳定位到图片时的闪烁强调（::highlight 对 img 替换元素不可见，用 outline 呼吸两次） */
+@keyframes paper-image-jump-flash {
+  0%,
+  50%,
+  100% {
+    outline-color: transparent;
+  }
+  25%,
+  75% {
+    outline-color: oklch(0.75 0.17 70 / 0.95);
+  }
+}
+
+.paper-image-jump-flash {
+  outline: 3px solid transparent;
+  outline-offset: 2px;
+  animation: paper-image-jump-flash 1.2s ease-in-out 1;
+}
+
 /* ---------- 论文标注的中文侧映射高亮（T2，CSS Custom Highlight API） ----------
  * 英文标注经句对齐映射到译文区的镜像高亮：paper-reader.tsx 注册 paper-anno-{color}-tgt
  * 与 paper-anno-{style}-{color}-tgt，与原名同色但透明度略低（highlight 0.22/0.3，线色 55%），
@@ -713,9 +731,7 @@ foliate-view {
   text-decoration: underline;
   text-decoration-color: var(--chat-link-underline, transparent);
   text-underline-offset: 2px;
-  transition:
-    color 0.18s ease,
-    text-decoration-color 0.18s ease;
+  transition: color 0.18s ease, text-decoration-color 0.18s ease;
 }
 .chat-md a:hover {
   color: var(--chat-link-hover, var(--chat-link, inherit));
@@ -726,9 +742,7 @@ foliate-view {
 .chat-md .chat-inline-code {
   background: var(--chat-code-bg, rgba(127, 127, 127, 0.12));
   color: var(--chat-code-text, inherit);
-  transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 .chat-md .chat-inline-code:hover {
   background: var(--chat-code-bg-hover, var(--chat-code-bg, rgba(127, 127, 127, 0.18)));
@@ -739,9 +753,7 @@ foliate-view {
 .chat-md .chat-code-block {
   border: 1px solid transparent;
   border-radius: 8px;
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .chat-md .chat-code-block:hover {
   border-color: var(--chat-codeblock-border, transparent);
@@ -766,9 +778,7 @@ foliate-view {
 /* 引用块：竖线上色 + hover 底纹 */
 .chat-md blockquote {
   border-left-color: var(--chat-quote-border, currentColor);
-  transition:
-    border-color 0.18s ease,
-    background-color 0.18s ease;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
 }
 .chat-md blockquote:hover {
   background: var(--chat-quote-bg-hover, rgba(127, 127, 127, 0.06));
@@ -782,9 +792,7 @@ foliate-view {
 .chat-md h5,
 .chat-md h6 {
   color: var(--chat-heading, inherit);
-  transition:
-    color 0.18s ease,
-    border-color 0.18s ease;
+  transition: color 0.18s ease, border-color 0.18s ease;
 }
 .chat-md h1:hover,
 .chat-md h2:hover,

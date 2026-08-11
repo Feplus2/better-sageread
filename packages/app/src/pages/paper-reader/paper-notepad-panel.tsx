@@ -17,6 +17,8 @@ import { exportAnnotationsToImage } from "@/lib/export-annotations-image";
 import { exportAnnotationsToMarkdown } from "@/lib/export-annotations-markdown";
 import { exportAnnotationsToPdf } from "@/lib/export-annotations-pdf";
 import { parseAnchor } from "@/pages/paper-reader/paper-anchors";
+import type { PaperFigureItem } from "@/pages/paper-reader/paper-blocks";
+import { PaperFiguresTab } from "@/pages/paper-reader/paper-figures-tab";
 import type { PaperHighlightLocation } from "@/pages/paper-reader/paper-highlight-locator";
 import type { AiAnnotationCreateItem } from "@/pages/paper-reader/use-paper-annotations";
 import { HIGHLIGHT_COLOR_HEX, HIGHLIGHT_COLOR_RGBA } from "@/services/constants";
@@ -32,11 +34,22 @@ import { useProviderStore } from "@/store/provider-store";
 import type { BookNote } from "@/types/book";
 import { ask } from "@tauri-apps/plugin-dialog";
 import dayjs from "dayjs";
-import { Check, Download, Highlighter, ListChecks, Loader2, NotebookPen, Sparkles, Star, Trash2 } from "lucide-react";
+import {
+  Check,
+  Download,
+  Highlighter,
+  Images,
+  ListChecks,
+  Loader2,
+  NotebookPen,
+  Sparkles,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-type PaperNotepadTab = "annotations" | "ai-highlights";
+type PaperNotepadTab = "annotations" | "ai-highlights" | "figures";
 
 /** 标注导出格式（底栏/头部菜单共用同一导出管线） */
 type AnnotationExportFormat = "markdown" | "html" | "image" | "pdf";
@@ -59,6 +72,12 @@ interface PaperNotepadPanelProps {
   onClearAiAnnotations: () => Promise<number>;
   /** 点击列表项 → 正文滚动定位 + 闪烁强调 */
   onLocateAnnotation: (id: string) => void;
+  /** 论文目录绝对路径（图表 tab 缩略图用） */
+  paperDir: string;
+  /** 块译文表（图表 tab 图注中译并列显示；无译本为 null） */
+  translationMap: ReadonlyMap<number, string> | null;
+  /** 图表速跳：点击图表条目 → 正文滚动定位 */
+  onLocateFigure: (item: PaperFigureItem) => void;
   /** 右键"编辑评论"保存（落 book_notes.note） */
   onUpdateNote: (id: string, note: string) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -280,6 +299,9 @@ export function PaperNotepadPanel({
   onCreateAiAnnotations,
   onClearAiAnnotations,
   onLocateAnnotation,
+  paperDir,
+  translationMap,
+  onLocateFigure,
   onUpdateNote,
   onDeleteAnnotation,
   onToggleStar,
@@ -522,7 +544,7 @@ export function PaperNotepadPanel({
 
   return (
     <main className="flex h-full flex-col bg-background">
-      {/* 头部：标注 / AI 重点 切换（样式同书籍 NotepadHeader） */}
+      {/* 头部：标注 / AI 重点 / 图表 切换（样式同书籍 NotepadHeader） */}
       <div className="h-10 border-neutral-200 bg-background pt-0 pb-10 dark:border-neutral-700">
         <div className="flex select-none items-center justify-between">
           <Tabs
@@ -538,6 +560,10 @@ export function PaperNotepadPanel({
               <TabsTrigger className="h-7 rounded-full" value="ai-highlights">
                 <Sparkles className="mr-1 size-4" />
                 <span>AI 重点</span>
+              </TabsTrigger>
+              <TabsTrigger className="h-7 rounded-full" value="figures">
+                <Images className="mr-1 size-4" />
+                <span>图表</span>
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -657,7 +683,7 @@ export function PaperNotepadPanel({
             ))}
           </div>
         )
-      ) : (
+      ) : activeTab === "ai-highlights" ? (
         <>
           {/* AI 重点工具栏：类型选择（auto 展示判定结果）+ 生成/重新生成 + 清除（仅 AI 标注） */}
           <div className="flex items-center gap-2 border-neutral-200 border-b px-2 py-1.5 dark:border-neutral-700">
@@ -730,6 +756,13 @@ export function PaperNotepadPanel({
             </div>
           )}
         </>
+      ) : (
+        <PaperFiguresTab
+          markdown={markdown}
+          paperDir={paperDir}
+          translationMap={translationMap}
+          onLocate={onLocateFigure}
+        />
       )}
 
       {/* 多选管理底栏：导出（四种格式）/ 批量删除 / 退出（样式同历史对话批量操作条） */}

@@ -493,7 +493,7 @@ export default function ReaderLayout() {
                   height: "100%",
                 }}
                 minWidth={260}
-                maxWidth={500}
+                maxWidth={800}
                 enable={{
                   top: false,
                   right: !swapSidebars,

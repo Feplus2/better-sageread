@@ -62,11 +62,15 @@ export interface TocItem {
   level: number;
 }
 
-/** 暴露给父组件（顶栏 TOC 下拉 / C2 AI 标亮）的容器内定位能力 */
+/** 暴露给父组件（顶栏 TOC 下拉 / C2 AI 标亮 / 图表速跳）的容器内定位能力 */
 export interface PaperReaderHandle {
   scrollToHeading: (id: string) => void;
   /** C2 AI 标亮：批量 quote → 锚点换算（基于当前渲染 DOM；容器未就绪时全部返回 null） */
   locateQuotes: (quotes: string[]) => (PaperHighlightLocation | null)[];
+  /** 图表速跳：图注/表注 quote 全文查找 → 滚动定位 + 闪烁强调；未命中返回 false */
+  scrollToQuote: (quote: string) => boolean;
+  /** 图表速跳：按图片相对路径（data-paper-src）定位；译文/对照模式图片始终在 DOM，比 quote 可靠 */
+  scrollToImage: (src: string) => boolean;
 }
 
 /** 新建标注的载荷（paper-reader-view 补上 bookId/type 后落 book_notes） */
@@ -512,6 +516,8 @@ function createPaperImageComponent(
           alt={alt ?? ""}
           loading="lazy"
           {...props}
+          // 图表速跳定位锚：相对路径原样留 DOM（blob src 无法反查），见 PaperReaderHandle.scrollToImage
+          data-paper-src={typeof src === "string" ? src : undefined}
           className="mx-auto block max-w-full cursor-zoom-in"
           onClick={() => onPreview?.({ src: resolvedSrc, alt: alt ?? "" })}
         />
@@ -1173,6 +1179,65 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     scrollElementInContainer(root, el);
   }, []);
 
+  // 定位闪烁强调（标注定位 / 图表速跳共用）：paper-anno-current 高亮闪 3 次后清除
+  const flashTimerRef = useRef<number | null>(null);
+  const flashRanges = useCallback((ranges: Range[]) => {
+    const highlightRegistry = getHighlightRegistry();
+    if (!highlightRegistry || typeof Highlight === "undefined") return;
+    if (flashTimerRef.current !== null) window.clearInterval(flashTimerRef.current);
+    let tick = 0;
+    flashTimerRef.current = window.setInterval(() => {
+      tick += 1;
+      if (tick % 2 === 1) {
+        highlightRegistry.set(PAPER_ANNO_CURRENT_HIGHLIGHT, new Highlight(...ranges));
+      } else {
+        highlightRegistry.delete(PAPER_ANNO_CURRENT_HIGHLIGHT);
+      }
+      if (tick >= 5) {
+        if (flashTimerRef.current !== null) window.clearInterval(flashTimerRef.current);
+        flashTimerRef.current = null;
+        highlightRegistry.delete(PAPER_ANNO_CURRENT_HIGHLIGHT);
+      }
+    }, 260);
+  }, []);
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current !== null) window.clearInterval(flashTimerRef.current);
+    },
+    [],
+  );
+
+  // 图表速跳：图注/表注 quote 全文查找 → 滚动定位（约 1/3 视口）+ 闪烁；未命中返回 false
+  const scrollToQuote = useCallback(
+    (quote: string): boolean => {
+      const container = contentRef.current;
+      const root = scrollRef.current;
+      if (!container || !root || !quote.trim()) return false;
+      const range = findQuoteRange(container, quote);
+      if (!range) return false;
+      const top =
+        range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3;
+      root.scrollTo({ top, behavior: "smooth" });
+      flashRanges([range]);
+      return true;
+    },
+    [flashRanges],
+  );
+
+  // 图表速跳：按图片相对路径定位（img data-paper-src；CSS Highlight 对替换元素不可见，用 outline 动画闪烁）
+  const scrollToImage = useCallback((src: string): boolean => {
+    const container = contentRef.current;
+    const root = scrollRef.current;
+    if (!container || !root) return false;
+    const img = container.querySelector(`img[data-paper-src="${CSS.escape(src)}"]`);
+    if (!root || !img) return false;
+    scrollElementInContainer(root, img, root.clientHeight / 4);
+    img.classList.remove("paper-image-jump-flash");
+    void (img as HTMLElement).offsetWidth; // 强制回流以重启动画（连续点同一图也会闪）
+    img.classList.add("paper-image-jump-flash");
+    return true;
+  }, []);
+
   // C2 AI 标亮：侧栏"AI 重点"生成时的批量 quote → 锚点换算（在当前渲染 DOM 上同步执行）
   const locateQuotes = useCallback((quotes: string[]): (PaperHighlightLocation | null)[] => {
     const container = contentRef.current;
@@ -1180,7 +1245,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     return quotes.map((quote) => locateQuoteInPaper(container, quote));
   }, []);
 
-  useImperativeHandle(ref, () => ({ scrollToHeading, locateQuotes }), [scrollToHeading, locateQuotes]);
+  useImperativeHandle(ref, () => ({ scrollToHeading, locateQuotes, scrollToQuote, scrollToImage }), [
+    scrollToHeading,
+    locateQuotes,
+    scrollToQuote,
+    scrollToImage,
+  ]);
 
   // ─── 本文内搜索（CSS Custom Highlight API，与对话内检索同方案；引擎不支持时降级为仅计数+定位） ───
   const normalizedSearchTerm = (searchTerm ?? "").trim().toLowerCase();
@@ -1365,7 +1435,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     };
   }, [body, annotations, viewMode, translation, sourceBlocks]);
 
-  // 侧栏点击标注 → 容器内滚动定位（约 1/3 视口高度处）+ paper-anno-current 闪烁强调
+  // 侧栏点击标注 → 容器内滚动定位（约 1/3 视口高度处）+ paper-anno-current 闪烁强调（走共用 flashRanges）
   useEffect(() => {
     if (!focusAnnotationId) return;
     // 回执清零，允许侧栏重复点击同一项再次触发
@@ -1381,26 +1451,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         root.clientHeight / 3;
       root.scrollTo({ top, behavior: "smooth" });
     }
-    const highlightRegistry = getHighlightRegistry();
-    if (!highlightRegistry || typeof Highlight === "undefined") return;
-    let tick = 0;
-    const timer = window.setInterval(() => {
-      tick += 1;
-      if (tick % 2 === 1) {
-        highlightRegistry.set(PAPER_ANNO_CURRENT_HIGHLIGHT, new Highlight(...ranges));
-      } else {
-        highlightRegistry.delete(PAPER_ANNO_CURRENT_HIGHLIGHT);
-      }
-      if (tick >= 5) {
-        window.clearInterval(timer);
-        highlightRegistry.delete(PAPER_ANNO_CURRENT_HIGHLIGHT);
-      }
-    }, 260);
-    return () => {
-      window.clearInterval(timer);
-      highlightRegistry.delete(PAPER_ANNO_CURRENT_HIGHLIGHT);
-    };
-  }, [focusAnnotationId]);
+    flashRanges(ranges);
+  }, [focusAnnotationId, flashRanges]);
 
   // 弹窗位置：选区/高亮上方居中，上方空间不足则放下方，并夹取在视口内（简化版书籍 popup 避让）
   // 宽度按状态自适应（调用方传入）：译文划词最简（两按钮），选区态紧凑（三按钮），已有标注态展开笔触/颜色行

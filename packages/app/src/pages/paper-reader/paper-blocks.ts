@@ -146,6 +146,165 @@ export function cutPaperBlocks(markdown: string): PaperBlock[] {
   return collectBlocks(tree.children ?? []);
 }
 
+// ─── 图表速跳提取（侧边栏「图表」tab 数据源，运行时解析，不入库） ───
+
+/** 图表条目：编号徽章 + 图注 + 图片清单 + 块索引（译文查表/跳转锚点共用） */
+export interface PaperFigureItem {
+  kind: "figure" | "table";
+  /** 编号（"3"）；无编号图为 null */
+  num: string | null;
+  /** 原始标签（Figure 3 / Fig. 1 / Table 2 / 图 1 / 表 2），列表徽章展示用 */
+  label: string;
+  /** 图注全文（剥掉标签前缀；无图注图为空串） */
+  caption: string;
+  /** 图片相对路径（images/xxx.jpg），文档顺序 */
+  images: string[];
+  /** 图注所在块索引（listBlocks 口径；无图注时 = 首张图片所在块） */
+  blockIndex: number;
+  /** 跳转用 quote（图注首部 80 字符；无图注为空串） */
+  quote: string;
+}
+
+/** 图/表标签前缀（"Fig. 1." / "Figure 3:" / "Table 1" / "图 2" / "表 4"）；分隔符仅 :：.．、 */
+const FIG_LABEL_RE = /^(Figs?\.?|Figure|图)\s*(\d+)\s*([:：.．、])?\s*/i;
+const TABLE_LABEL_RE = /^(Table|表)\s*(\d+)\s*([:：.．、])?\s*/i;
+
+/**
+ * 判定一行文本是否为图/表注：
+ * - 有分隔符（:：.．、）即图注（"Figure 3: (a) ..." 的图注本身以子图引导，合法）；
+ * - 无分隔符且余文以 "(" 开头的是子图标号（"Figure 1 (a)"），不算图注；
+ * - 无分隔符时还要求余文足够长（排除裸标签与段内引用 "Fig. 1B shows..."——后者另有图近邻/表跟随约束兜底）；
+ * - 返回编号、标签与剥离标签后的图注全文。
+ */
+function matchCaptionLine(line: string, re: RegExp): { num: string; label: string; caption: string } | null {
+  const match = re.exec(line);
+  if (!match) return null;
+  const rest = line.slice(match[0].length).trim();
+  if (!match[3] && rest.startsWith("(")) return null;
+  if (!match[3] && rest.length < 12) return null;
+  return { num: match[2], label: line.slice(0, match[0].length).trim(), caption: rest };
+}
+
+/** 表注约束：下一个"有效"顶层节点是表（html 注释如 <!-- page: N --> 跳过；MinerU 产物表为 <table> 原始块或 md 表） */
+function nextIsTable(children: MdNode[], index: number, body: string): boolean {
+  for (let i = index + 1; i < children.length; i++) {
+    const node = children[i];
+    if (node.type === "html") {
+      const raw = body.slice(offsetOf(node.position?.start, node), offsetOf(node.position?.end, node)).trimStart();
+      if (raw.startsWith("<!--")) continue;
+      return raw.startsWith("<table");
+    }
+    if (node.type === "table") return true;
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 提取论文中的图/表条目（与 collectBlocks 同一顶层遍历，块索引与 listBlocks 严格一致，须同步维护）。
+ * 分组规则（对齐 MinerU VLM/pipeline 产物）：
+ *   图片段连续积累为 pending 组；遇到带图注的段落（图注段落自身含图或与 pending 相邻）合组为编号图；
+ *   表注段落后跟 <table> 块才算表；无图注的图组在遇标题/普通段落/文末时结算为"未编号图 N"。
+ */
+export function extractPaperFigures(markdown: string): PaperFigureItem[] {
+  const { body } = splitBody(markdown);
+  const tree = parser.parse(body) as unknown as MdNode;
+  const children = tree.children ?? [];
+  const items: PaperFigureItem[] = [];
+  let blockIndex = 0;
+  let pending: { images: string[]; blockIndex: number } | null = null;
+  let unnumbered = 0;
+
+  const flushUnnumbered = () => {
+    if (pending && pending.images.length > 0) {
+      unnumbered += 1;
+      items.push({
+        kind: "figure",
+        num: null,
+        label: `未编号图 ${unnumbered}`,
+        caption: "",
+        images: pending.images,
+        blockIndex: pending.blockIndex,
+        quote: "",
+      });
+    }
+    pending = null;
+  };
+
+  for (let i = 0; i < children.length; i++) {
+    const node = children[i];
+    switch (node.type) {
+      case "heading":
+        flushUnnumbered(); // 图组不跨小节
+        blockIndex += 1;
+        break;
+      case "paragraph": {
+        const myIndex = blockIndex;
+        blockIndex += 1;
+        const raw = body.slice(offsetOf(node.position?.start, node), offsetOf(node.position?.end, node));
+        const images = [...raw.matchAll(IMAGE_REF_RE)]
+          .map((m) => imageRefUrl(m[0]))
+          .filter((url): url is string => !!url);
+        const text = extractText(node).trim();
+        const lastLine =
+          text
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .at(-1) ?? "";
+        const figCaption = matchCaptionLine(lastLine, FIG_LABEL_RE);
+        if (figCaption && (images.length > 0 || pending)) {
+          items.push({
+            kind: "figure",
+            num: figCaption.num,
+            label: figCaption.label,
+            caption: figCaption.caption,
+            images: [...(pending?.images ?? []), ...images],
+            blockIndex: myIndex,
+            quote: lastLine.slice(0, 80),
+          });
+          pending = null;
+          break;
+        }
+        const tableCaption = matchCaptionLine(lastLine, TABLE_LABEL_RE);
+        if (tableCaption && nextIsTable(children, i, body)) {
+          flushUnnumbered();
+          items.push({
+            kind: "table",
+            num: tableCaption.num,
+            label: tableCaption.label,
+            caption: tableCaption.caption,
+            images: [],
+            blockIndex: myIndex,
+            quote: lastLine.slice(0, 80),
+          });
+          break;
+        }
+        if (images.length > 0) {
+          pending = { images: [...(pending?.images ?? []), ...images], blockIndex: pending?.blockIndex ?? myIndex };
+        } else if (text) {
+          flushUnnumbered(); // 普通文本段落截断图片组（产物中组图与图注恒相邻）
+        }
+        break;
+      }
+      case "list":
+        blockIndex += (node.children ?? []).length;
+        break;
+      case "blockquote":
+        blockIndex += 1;
+        break;
+      case "table":
+        blockIndex += (node.children ?? []).reduce((sum, row) => sum + (row.children ?? []).length, 0);
+        break;
+      default:
+        // html（含 <table> 原始块与页注释）/code/math：不占块序号
+        break;
+    }
+  }
+  flushUnnumbered();
+  return items;
+}
+
 // ─── 视图重建 ───
 
 interface Edit {
@@ -378,13 +537,14 @@ function collectEdits(
  * 公式保持 $...$ 文本（不烘焙 KaTeX HTML），译文中的图片引用清除（原文块已带图）：
  * 导出文档要可编辑、由 md 阅读器原生渲染，对照 div（HTML）只服务阅读区与 HTML 导出。
  */
-export function buildPaperBilingualExportMarkdown(
-  markdown: string,
-  translations: ReadonlyMap<number, string>,
-): string {
+export function buildPaperBilingualExportMarkdown(markdown: string, translations: ReadonlyMap<number, string>): string {
   const { head, body } = splitBody(markdown);
   const tree = parser.parse(body) as unknown as MdNode;
-  const clean = (text: string) => oneLine(text).replace(IMAGE_REF_RE, "").replace(/\s{2,}/g, " ").trim();
+  const clean = (text: string) =>
+    oneLine(text)
+      .replace(IMAGE_REF_RE, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
   const edits: Edit[] = [];
   let index = 0;
   /** 取当前块译文（清理图片引用后）；无译文/空白译文返回 null */
