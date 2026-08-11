@@ -1,12 +1,14 @@
 import SettingsDialog from "@/components/settings/settings-dialog";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import Spinner from "@/components/ui/spinner";
 import { useBookUpload } from "@/hooks/use-book-upload";
 import { useSafeAreaInsets } from "@/hooks/use-safe-areaInsets";
 import { useTheme } from "@/hooks/use-theme";
 import { useUICSS } from "@/hooks/use-ui-css";
-import { updateBook } from "@/services/book-service";
+import ConverterPage from "@/pages/converter";
 import { type BookTagSuggestions, generateTagsForBooks } from "@/services/ai-tag-service";
+import { updateBook } from "@/services/book-service";
 import { createTag, getTags } from "@/services/tag-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useLibraryStore } from "@/store/library-store";
@@ -41,6 +43,8 @@ export default function NewLibraryPage() {
 
   // 书籍多选模式
   const [selectionMode, setSelectionMode] = useState(false);
+  // PDF 转 EPUB 转换器（弹层承载原 /converter 页面；侧边栏导航已收编到图书馆页头按钮）
+  const [converterOpen, setConverterOpen] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(new Set());
   const [batchTagMode, setBatchTagMode] = useState<"add" | "remove" | null>(null);
   const [isBatchOperating, setIsBatchOperating] = useState(false);
@@ -238,6 +242,10 @@ export default function NewLibraryPage() {
               : tags.find((t) => t.id === selectedTagFromUrl)?.name || "我的图书"}
           </h3>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setConverterOpen(true)}>
+              <FileDown size={16} />
+              PDF 转 EPUB
+            </Button>
             {hasBooks && (
               <Button
                 variant={selectionMode ? "default" : "outline"}
@@ -345,9 +353,7 @@ export default function NewLibraryPage() {
                 size="sm"
                 onClick={() =>
                   setSelectedBookIds(
-                    selectedBookIds.size === visibleBooks.length
-                      ? new Set()
-                      : new Set(visibleBooks.map((b) => b.id)),
+                    selectedBookIds.size === visibleBooks.length ? new Set() : new Set(visibleBooks.map((b) => b.id)),
                   )
                 }
               >
@@ -432,6 +438,14 @@ export default function NewLibraryPage() {
       />
 
       <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
+
+      <Dialog open={converterOpen} onOpenChange={setConverterOpen}>
+        <DialogContent className="flex h-[85vh] max-w-4xl flex-col overflow-hidden p-0">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ConverterPage />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
