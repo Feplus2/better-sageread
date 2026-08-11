@@ -115,15 +115,23 @@ function PromptInputTextarea({ className, onKeyDown, disableAutosize = false, ..
       onKeyDown?.(e);
       return;
     }
-
-    // 标点自动配对（IME 组合期间不干预）
-    if (!isComposing && applyPairedPunctuation(e, value, setValue)) {
-      onKeyDown?.(e);
-      return;
-    }
-
     onKeyDown?.(e);
   };
+
+  // 标点自动配对：原生 beforeinput 监听（React 合成 beforeinput 对 textarea 触发不可靠；
+  // 原生层中英文直输与 IME 提交的全角符号都能拿到）
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: textareaRef/setValue 均稳定引用，挂载一次即可
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const handler = (e: Event) => {
+      applyPairedPunctuation(e as InputEvent, ta, valueRef.current, setValue);
+    };
+    ta.addEventListener("beforeinput", handler);
+    return () => ta.removeEventListener("beforeinput", handler);
+  }, [textareaRef, setValue]);
 
   return (
     <Textarea
