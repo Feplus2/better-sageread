@@ -170,7 +170,8 @@ function NoteEditor({ note, tocItems, onSave, onBack }: NoteEditorProps) {
   const [locationCfi, setLocationCfi] = useState<string | null>(note.locationCfi);
   const [locationBlock, setLocationBlock] = useState<number | null>(note.locationBlock);
   const [saving, setSaving] = useState<"idle" | "pending" | "saving">("idle");
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  // 默认视图：已有内容进预览（翻看为主），空笔记进编辑（进来就是写的）
+  const [mode, setMode] = useState<"edit" | "preview">(note.content.trim() ? "preview" : "edit");
   // TOC 位置选择器
   const [tocOpen, setTocOpen] = useState(false);
   const [tocFilter, setTocFilter] = useState("");
