@@ -453,7 +453,10 @@ export default function ReaderLayout() {
       <div className="flex min-h-0 flex-1">
         {isVertical && <VerticalTabBar />}
 
-        <main className="relative flex-1 overflow-hidden rounded-md">
+        {/* overflow-clip 而非 overflow-hidden：hidden 仍是编程式滚动容器，任何 scrollIntoView
+            （书籍 TOC/聊天工具卡等）都会把 main 滚出 20px 左右，整版面上移没入顶栏（2026-08-13 复发根因）；
+            clip 不是滚动容器，scrollTop 恒 0，从机制上免疫 */}
+        <main className="relative flex-1 overflow-clip rounded-md">
           <div
             className="absolute inset-0"
             style={{
