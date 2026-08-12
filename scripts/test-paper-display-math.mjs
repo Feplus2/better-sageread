@@ -117,6 +117,22 @@ eq(
 // 17) 全角括号编号：公式尾部
 eq("全角编号尾部", normalizeDisplayMath("$$x=1 （7）$$"), "$$\nx=1 \\tag{7}\n$$");
 
+// 18) \mum 宏兼容：行内数学段内转换
+eq(
+  "行内 \\mum 转换",
+  normalizeDisplayMath("range of $1.5–20 \\, \\mum$ with"),
+  "range of $1.5–20 \\, \\mu\\mathrm{m}$ with",
+);
+
+// 19) \mum 在 display 段内也转换
+eq("display 内 \\mum 转换", normalizeDisplayMath("$$d = 5 \\mum$$"), "$$\nd = 5 \\mu\\mathrm{m}\n$$");
+
+// 20) 数学段外的 \mum 不动
+eq("段外 \\mum 不动", normalizeDisplayMath("宏 \\mum 不在数学段"), "宏 \\mum 不在数学段");
+
+// 21) 字母后缀不误伤（\mumol 不转）
+eq("\\mumol 不误伤", normalizeDisplayMath("$5 \\mumol$ here"), "$5 \\mumol$ here");
+
 rmSync(outDir, { recursive: true, force: true });
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -19,10 +19,13 @@ const outDir = mkdtempSync(join(tmpdir(), "paper-translation-"));
 const dataDir = join(outDir, "appdata"); // 模拟 appDataDir（books/{paperId}/translation-zh.json 落在这里）
 globalThis.__testDataDir = dataDir;
 
-// 模型行为队列："ok" 返回合法 JSON（从 prompt 解析批次并逐条造译文）；"bad" 返回无法解析的内容
-let behaviorQueue = [];
+// 模型行为开关（并发安全：按 prompt 内容判定，不依赖调用顺序——服务 3 路并发处理批次，
+// 早期 FIFO 行为队列会被 worker 调度打乱，是 2026-08 测试漂移的根因）：
+// alwaysFailIfIncludes：命中文本的批次首次+重试都返回垃圾；failOnceIfIncludes：命中批次仅首次（非严格措辞）失败
+let alwaysFailIfIncludes = null;
+let failOnceIfIncludes = null;
 const calls = [];
-// 术语表通道：独立记录（不占批次行为队列，calls 语义不变=批次调用）
+// 术语表通道：独立记录（不占批次行为开关，calls 语义不变=批次调用）
 const glossaryCalls = [];
 let glossaryBehavior = "ok"; // "ok" 返回两条术语；"bad" 返回垃圾（验证抽取失败不阻断翻译）
 globalThis.__mockGenerateText = async ({ prompt }) => {
@@ -37,8 +40,13 @@ globalThis.__mockGenerateText = async ({ prompt }) => {
     };
   }
   calls.push(prompt);
-  const behavior = behaviorQueue.shift() ?? "ok";
-  if (behavior === "bad") return { text: "这不是合法 JSON（bad control character in string literal …）" };
+  const strict = prompt.includes("严格合法的 JSON");
+  if (alwaysFailIfIncludes && prompt.includes(alwaysFailIfIncludes)) {
+    return { text: "这不是合法 JSON（bad control character in string literal …）" };
+  }
+  if (!strict && failOnceIfIncludes && prompt.includes(failOnceIfIncludes)) {
+    return { text: "这不是合法 JSON（bad control character in string literal …）" };
+  }
   const jsonText = prompt.slice(prompt.indexOf("待翻译内容：") + "待翻译内容：".length).trim();
   const batch = JSON.parse(jsonText);
   return { text: JSON.stringify(batch.map((b) => ({ index: b.index, text: `译文${b.index}` }))) };
@@ -115,26 +123,33 @@ const paperDir = (paperId) => join(dataDir, "books", paperId);
 
 await check("坏批次：重试 1 次仍失败 → 跳过该批并计数，继续后续批次（不整体中止）", async () => {
   mkdirSync(paperDir("p1"), { recursive: true });
-  behaviorQueue = ["ok", "bad", "bad", "ok"]; // 批1 ok；批2 首次+重试都坏；批3 ok
+  alwaysFailIfIncludes = "Paragraph number 12 with some content"; // 批2（块 12–23）首次+重试都坏
   calls.length = 0;
-  const result = await translatePaper({ paperId: "p1", markdown: MD30 });
-  assert(result.cancelled === false, "不应被中止");
-  assert(result.total === 30, `total 应为 30，got ${result.total}`);
-  assert(result.failedBatches === 1, `失败批次应为 1，got ${result.failedBatches}`);
-  assert(result.translated === 18, `应新翻 18 块（12+6），got ${result.translated}`);
-  assert(result.skipped === 0, `首次翻译 skipped 应为 0，got ${result.skipped}`);
-  assert(calls.length === 4, `generateText 应调用 4 次（1+2+1），got ${calls.length}`);
-  assert(calls[2].includes("严格合法的 JSON"), `重试应带"严格 JSON"措辞：${calls[2].slice(0, 120)}…`);
-  // 被跳过的块不落盘（续翻才能识别缺口）
-  const file = await loadPaperTranslation("p1");
-  const keys = Object.keys(file?.blocks ?? {});
-  assert(keys.length === 18, `落盘应为 18 块，got ${keys.length}`);
-  assert(file.blocks["0"] && file.blocks["24"], "批1/批3的块应落盘");
-  assert(!file.blocks["12"] && !file.blocks["23"], "失败批次的块不应落盘");
+  try {
+    const result = await translatePaper({ paperId: "p1", markdown: MD30 });
+    assert(result.cancelled === false, "不应被中止");
+    assert(result.total === 30, `total 应为 30，got ${result.total}`);
+    assert(result.failedBatches === 1, `失败批次应为 1，got ${result.failedBatches}`);
+    assert(result.translated === 18, `应新翻 18 块（12+6），got ${result.translated}`);
+    assert(result.skipped === 0, `首次翻译 skipped 应为 0，got ${result.skipped}`);
+    assert(calls.length === 4, `generateText 应调用 4 次（1+2+1），got ${calls.length}`);
+    const strictCalls = calls.filter((p) => p.includes("严格合法的 JSON"));
+    assert(
+      strictCalls.length === 1 && strictCalls[0].includes("Paragraph number 12"),
+      `重试应带"严格 JSON"措辞且针对批2，got ${strictCalls.length} 次严格调用`,
+    );
+    // 被跳过的块不落盘（续翻才能识别缺口）
+    const file = await loadPaperTranslation("p1");
+    const keys = Object.keys(file?.blocks ?? {});
+    assert(keys.length === 18, `落盘应为 18 块，got ${keys.length}`);
+    assert(file.blocks["0"] && file.blocks["24"], "批1/批3的块应落盘");
+    assert(!file.blocks["12"] && !file.blocks["23"], "失败批次的块不应落盘");
+  } finally {
+    alwaysFailIfIncludes = null;
+  }
 });
 
 await check("续翻（force=false）：只补翻缺口批次，完成后译本齐全", async () => {
-  behaviorQueue = ["ok"]; // 只剩 12 块缺口 → 1 批
   const result = await translatePaper({ paperId: "p1", markdown: MD30 });
   assert(result.failedBatches === 0, `续翻不应有失败批次，got ${result.failedBatches}`);
   assert(result.translated === 12, `应只补翻 12 块，got ${result.translated}`);
@@ -145,27 +160,35 @@ await check("续翻（force=false）：只补翻缺口批次，完成后译本�
 
 await check("重试成功：不计失败批次，批次正常落盘", async () => {
   mkdirSync(paperDir("p2"), { recursive: true });
-  behaviorQueue = ["bad", "ok"]; // 首次坏，重试好
+  failOnceIfIncludes = "Single batch paragraph 0"; // 首次坏，重试好
   calls.length = 0;
-  const result = await translatePaper({ paperId: "p2", markdown: MD12 });
-  assert(result.failedBatches === 0, `重试成功不应计失败，got ${result.failedBatches}`);
-  assert(result.translated === 12, `12 块应全部翻译，got ${result.translated}`);
-  assert(calls.length === 2, `应调用 2 次（首次+重试），got ${calls.length}`);
-  const file = await loadPaperTranslation("p2");
-  assert(Object.keys(file?.blocks ?? {}).length === 12, "12 块应全部落盘");
+  try {
+    const result = await translatePaper({ paperId: "p2", markdown: MD12 });
+    assert(result.failedBatches === 0, `重试成功不应计失败，got ${result.failedBatches}`);
+    assert(result.translated === 12, `12 块应全部翻译，got ${result.translated}`);
+    assert(calls.length === 2, `应调用 2 次（首次+重试），got ${calls.length}`);
+    const file = await loadPaperTranslation("p2");
+    assert(Object.keys(file?.blocks ?? {}).length === 12, "12 块应全部落盘");
+  } finally {
+    failOnceIfIncludes = null;
+  }
 });
 
 await check("全部批次失败：结果正常返回（不抛错），failedBatches 汇总", async () => {
   mkdirSync(paperDir("p3"), { recursive: true });
-  behaviorQueue = ["bad", "bad"]; // 1 批，首次+重试都坏
-  const result = await translatePaper({ paperId: "p3", markdown: MD12 });
-  assert(
-    result.cancelled === false && result.failedBatches === 1,
-    `应平静收尾并计 1 个失败批次：${JSON.stringify(result)}`,
-  );
-  assert(result.translated === 0, "不应有块被翻译");
-  const file = await loadPaperTranslation("p3");
-  assert(Object.keys(file?.blocks ?? {}).length === 0, "失败块不应落盘");
+  alwaysFailIfIncludes = "Single batch paragraph 0"; // 1 批，首次+重试都坏
+  try {
+    const result = await translatePaper({ paperId: "p3", markdown: MD12 });
+    assert(
+      result.cancelled === false && result.failedBatches === 1,
+      `应平静收尾并计 1 个失败批次：${JSON.stringify(result)}`,
+    );
+    assert(result.translated === 0, "不应有块被翻译");
+    const file = await loadPaperTranslation("p3");
+    assert(Object.keys(file?.blocks ?? {}).length === 0, "失败块不应落盘");
+  } finally {
+    alwaysFailIfIncludes = null;
+  }
 });
 
 // ─── 动态术语表 ───

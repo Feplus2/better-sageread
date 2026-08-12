@@ -1,3 +1,5 @@
+import { MATH_SEGMENT_RE } from "./paper-cross-anchor";
+
 /**
  * 论文 display 公式归一化（2026-08-13）
  *
@@ -6,8 +8,10 @@
  * 行内分式的高结构叠到上一行。库里 247 处单行写法均为旧引擎解析产物（新引擎原生多行）。
  *
  * 处理（只动 $$ display 段，$…$ 行内公式不受影响）：
+ * 0) 数学段内宏兼容：`\mum`（VLM 产物里 μm 的习惯写法）→ `\mu\mathrm{m}`——KaTeX 无此宏，
+ *    不转会渲染成红色报错；字母后缀不误伤（\mumol 之类不在此列）。
  * 1) 单行 `$$x$$` → 多行围栏（remark flow math 可中断段落，前后文本行自动分段，无需补空行）；
- * 2) 公式尾部「空格 + (N)」→ `\tag{N}`（KaTeX display 模式编号自动右对齐）；
+ * 2) 公式尾部「空格 + (N)」→ `\tag{N}`（KaTeX display 模式编号自动右对齐；兼容全角括号）；
  * 3) 编号被断行拆到下一行行首的变体（`(1) where …`）→ 移入 `\tag{N}`，余文保留为独立段落。
  *
  * 幂等：已是多行围栏且无编号的输入原样通过。
@@ -15,9 +19,12 @@
  * 不再占块序号（旧解析产物的译文块索引可能因此偏移，重解析/重译后自愈）。
  */
 export function normalizeDisplayMath(body: string): string {
+  // 0) 数学段内宏兼容（$…$ 与 $$…$$ 都过；段外文本不动）
+  let out = body.replace(MATH_SEGMENT_RE, (seg) => seg.replace(/\\mum(?![a-zA-Z])/g, "\\mu\\mathrm{m}"));
+
   // 1) 单行 $$…$$ → 多行围栏。内容不含 $ 才转（排除 "$a$$b$" 邻接伪命中）；
   // 行尾锚定（\r?\n 或 EOS）防 "…$$ 后还有字" 的行内混排误伤；行尾统一按 \n 重发
-  let out = body.replace(
+  out = out.replace(
     /^\$\$([^$\r\n]+?)\$\$[ \t]*(\r?\n|$)/gm,
     (_m, c: string, nl?: string) => `$$\n${c.trim()}\n$$${nl ? "\n" : ""}`,
   );
