@@ -62,7 +62,7 @@ export default function NotificationDropdown() {
                   key={notification.id}
                   className={cn(
                     "group relative rounded-lg border p-2 transition-all hover:shadow-sm",
-                    !notification.read && "border-blue-200 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-900/20",
+                    !notification.read && "border-primary/30 bg-primary/5 dark:border-primary/40 dark:bg-primary/10",
                   )}
                 >
                   <button

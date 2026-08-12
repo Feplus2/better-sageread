@@ -15,7 +15,7 @@ export default function UploadItem({ viewMode = "grid" }: UploadItemProps) {
         viewMode === "grid" ? "aspect-[3/4]" : "h-20"
       } ${
         isDragOver
-          ? "border-blue-400 bg-blue-50 dark:bg-blue-900/20"
+          ? "border-primary bg-primary/10 dark:bg-primary/15"
           : "border-neutral-300 bg-neutral-50 dark:border-neutral-600 dark:bg-neutral-800/50"
       }
         ${isUploading ? "pointer-events-none opacity-50" : "hover:border-neutral-400 dark:hover:border-neutral-500"}

@@ -15,7 +15,7 @@ export default function Upload() {
       <div
         className={`relative flex w-full max-w-140 cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed transition-all duration-200 ${
           isDragOver
-            ? "border-blue-400 bg-blue-50 dark:bg-blue-900/20"
+            ? "border-primary bg-primary/10 dark:bg-primary/15"
             : "border-neutral-300 bg-gradient-to-br from-neutral-50 to-neutral-100 dark:border-neutral-600 dark:bg-gradient-to-br dark:from-neutral-800/30 dark:to-neutral-800/70"
         }
           ${isUploading ? "pointer-events-none opacity-50" : "hover:border-neutral-400 dark:hover:border-neutral-500"}
@@ -47,7 +47,9 @@ export default function Upload() {
               <h2 className="font-medium text-neutral-900 text-xl dark:text-neutral-100">
                 {isUploading ? "上传中..." : "拖拽书籍到此处上传"}
               </h2>
-              <p className="text-neutral-600 text-sm dark:text-neutral-400">支持的格式：.epub、.pdf（PDF 需转换后阅读）</p>
+              <p className="text-neutral-600 text-sm dark:text-neutral-400">
+                支持的格式：.epub、.pdf（PDF 需转换后阅读）
+              </p>
             </div>
 
             <div className="relative">

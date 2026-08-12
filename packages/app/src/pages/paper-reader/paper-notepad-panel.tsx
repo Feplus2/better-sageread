@@ -862,7 +862,7 @@ export function PaperNotepadPanel({
             <button
               type="button"
               onClick={handleSaveNote}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500"
+              className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:bg-primary/90"
             >
               保存
             </button>

@@ -408,7 +408,7 @@ export default function BookItem({
       <div className="flex items-center gap-1">
         <div className="h-1.5 w-12 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
           <div
-            className="h-full bg-blue-500 transition-all duration-300"
+            className="h-full bg-primary transition-all duration-300"
             style={{ width: `${Math.min(progress, 100)}%` }}
           />
         </div>

@@ -279,7 +279,7 @@ export function PaperAnnotationPopup({
             <button
               type="button"
               onClick={handleSaveNote}
-              className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-white text-xs hover:bg-blue-500"
+              className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-primary-foreground text-xs hover:bg-primary/90"
             >
               <Check className="size-3.5" />
               保存
