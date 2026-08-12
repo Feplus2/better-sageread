@@ -99,6 +99,16 @@ pub async fn stage_restore(
             let bytes = webdav::get_path(config, &remote)
                 .await?
                 .ok_or_else(|| format!("云端资产捆缺失: {}", asset.bundle_remote_name()))?;
+            // 落盘前校验清单哈希：内容寻址名下哈希不匹配即损包，拒绝进 staging（防御性加固）
+            let actual = backup::sha256_bytes(&bytes);
+            if actual != asset.sha256 {
+                return Err(format!(
+                    "资产捆校验失败（{}）：期望 {}，实得 {}。请重试恢复",
+                    asset.bundle_remote_name(),
+                    asset.sha256,
+                    actual
+                ));
+            }
             let staged_asset = staging.join("bundles").join(asset.bundle_remote_name());
             if let Some(parent) = staged_asset.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;

@@ -32,6 +32,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// restore.rs 校验下载捆用（与清单 sha256 比对，损包拒绝落 staging）
+pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
+    sha256_hex(bytes)
+}
+
 /// 流式计算文件 sha256（大文件不全量读入内存）
 pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|e| format!("读取文件失败 {}: {e}", path.display()))?;
