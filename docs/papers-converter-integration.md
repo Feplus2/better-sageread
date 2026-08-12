@@ -55,6 +55,7 @@ papers 页「导入 PDF」按钮
 
 ## 六、遗留
 
+- **幻影图注致丢图根修（2026-08-13，Papers_Converter e08357e，exe 已重打同步双实例 binaries）**：yang2021 实例实测事故——跨页断句 "…photon energies of ‖跨页‖ Fig. 3. These data…" 被跨页段落合并后，形态 2 句中粘连切分把 "Fig. 3." 幻影图注切出，引发同号双写、整幅重裁被碎片覆盖（fig3.jpg 只剩 E+F 面板）。三连修复：①形态 2 收紧为封闭类功能词判定（前缀尾词是介词/连词/助动词等则不切；"(h)"/"Region III" 面板标号收尾照切，park2021 回归实证）；②形态 1 加跨页断句守卫（页首块+上段句未完结→保持段落）；③图编号撞名自动加 -2 防线（同号两组不再互相覆盖）。ernst 顺带修正一处过切；五篇回归无图注丢失
 - **VLM 强OCR 定为论文主引擎（2026-08-13，Papers_Converter f818d66，exe 已重打同步 binaries）**：MinerU pipeline 后端（文字层路线）实证否决——其公式模型是字符错误元凶（(14)→(I4)、化学式拆散、`\dot` 误入），textlayer 纯文字层重建亦在 symbol 字体区翻车（=→¼ 等编码陷阱）；MinerU-VLM + 强制 OCR 五篇回归（zhao2020 封面版/madler2001/pratsinis1998/park2021/ernst2007）QC 全无 WARN。同批落地：图组就近成组重裁（≤20 字符小文字块豁免、真图注为组界、caption-first 归组）、Fig. 缩写游离图注识别、同页双图误并修复、表注补号收敛引用。frozen exe 冒烟产物与回归版字节一致；应用内 E2E（`scripts/cdp-test-paper-vlm-reparse.mjs`，zhao2020 封面版）走通。应用侧：`paperEngine` 默认改 `mineru`，`mineru-pipeline` 选项下线（同 GLM 惯例，类型保留兼容旧配置）。LLM 架构实验仓（Papers_Converter_LLM，至 ad1b474）冻结存档
 - **封面误判整页丢失事故（2026-08-12）已根修**：converter 侧 `cover_detect.py` 统一判定（只判 page 0 + 标记阈值收紧 + 正文信号一票否决 + 元数据锚定），AB 验证 127 篇零误杀；专题文档（事故复盘/现行逻辑/调研/辅助模型与脏 PDF spec/AB 记录）见 Papers_Converter `docs/structure-detection.md`；回归测试 `test_cover_detect.py`/`test_article_boundary.py`，AB 脚本 `ab_cover_detect.py`。同批落地：`STRUCTURE_LLM` 辅助模型仲裁通道（默认关）、`ARTICLE_BOUNDARY` 脏 PDF 标题锚点头切/References 后尾切。exe 已重打包并同步 binaries；实测 zhao2020 重解析页锚 4/4、Figure 1-4 齐全、无 incomplete 打标。存量受损篇（zhao2020/Xiang 2015）已补 source.pdf，走文献页「批量重新解析」修复
 - staging 的 LLM 元数据缓存（slug 防漂移，backlog 定论 converter 侧待实现）

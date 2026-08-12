@@ -33,9 +33,10 @@ import { useNotificationStore } from "@/store/notification-store";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { listen } from "@tauri-apps/api/event";
-import { appDataDir } from "@tauri-apps/api/path";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { exists } from "@tauri-apps/plugin-fs";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Check, Cloud, MoreHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -93,6 +94,21 @@ export default function BookItem({
 
   // 右键菜单受控开关（MoreHorizontal 图标点击也可打开）
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /** 打开书籍数据目录（{appData}/books/{id}——转换产物 EPUB/paper.md/封面都在这里） */
+  const handleOpenFolder = async () => {
+    try {
+      const dir = await join(await appDataDir(), "books", book.id);
+      if (!(await exists(dir))) {
+        toast.error("文件夹不存在（可能已被清理）");
+        return;
+      }
+      await openPath(dir);
+    } catch (error) {
+      console.error("打开文件夹失败:", error);
+      toast.error("打开文件夹失败");
+    }
+  };
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -454,6 +470,7 @@ export default function BookItem({
   const menuContent = (
     <ContextMenuContent>
       <ContextMenuItem onClick={() => handleClick()}>打开</ContextMenuItem>
+      <ContextMenuItem onClick={() => void handleOpenFolder()}>打开文件夹</ContextMenuItem>
       <ContextMenuSub>
         <ContextMenuSubTrigger>{isVectorized ? "✓ 向量化" : "向量化"}</ContextMenuSubTrigger>
         <ContextMenuSubContent>
@@ -585,6 +602,7 @@ export default function BookItem({
                     </Tooltip>
                     <DropdownMenuContent align="end" className="w-48">
                       <DropdownMenuItem onClick={() => handleClick()}>打开</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleOpenFolder()}>打开文件夹</DropdownMenuItem>
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger>{isVectorized ? "✓ 向量化" : "向量化"}</DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
