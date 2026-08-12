@@ -6,8 +6,10 @@ import { createJSONStorage, persist } from "zustand/middleware";
 /** 书籍转换解析引擎（Books_Converter --engine；表格密集默认 mineru 更稳） */
 export type BookConvertEngine = "mineru" | "paddleocr";
 
-/** 论文解析引擎（Papers_Converter --provider；基线 paddleocr，MinerU 表格备选；
- * mineru-pipeline = MinerU pipeline 后端 + 不强制 OCR：文字版论文零幻觉、整图不碎。
+/** 论文解析引擎（Papers_Converter --provider；默认 mineru = MinerU-VLM 强制 OCR，
+ * 2026-08-13 五篇回归实证：公式/byline/图注/大图完整性全面最优。
+ * mineru-pipeline（pipeline 后端 + 不强制 OCR）已下线：其后端公式模型是字符错误元凶
+ * （(14)→(I4)、化学式拆散、\dot 误入），2026-08-13 移除暴露面，类型保留兼容旧配置。
  * GLM 引擎已下线（实测无优势，2026-08-11 移除暴露面，store 字段保留兼容旧配置） */
 export type PaperConvertEngine = "paddleocr" | "mineru" | "mineru-pipeline";
 
@@ -39,7 +41,7 @@ export const useConverterStore = create<ConverterState>()(
       paddleocrToken: "",
       glmApiKey: "",
       engine: "mineru",
-      paperEngine: "paddleocr",
+      paperEngine: "mineru",
       zoteroDataDir: "",
       setMineruToken: (mineruToken: string) => set({ mineruToken }),
       setPaddleocrToken: (paddleocrToken: string) => set({ paddleocrToken }),

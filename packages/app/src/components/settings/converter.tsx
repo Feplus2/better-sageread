@@ -11,13 +11,8 @@ const ENGINE_OPTIONS: { value: BookConvertEngine; label: string; hint: string }[
 ];
 
 const PAPER_ENGINE_OPTIONS: { value: PaperConvertEngine; label: string; hint: string }[] = [
-  { value: "paddleocr", label: "PaddleOCR", hint: "论文基线：段落顺序/图注绑定/引文保留最优" },
-  {
-    value: "mineru-pipeline",
-    label: "MinerU 文字层管线",
-    hint: "文字版论文推荐：正文零幻觉、大图整幅不碎；扫描版请用 VLM 引擎",
-  },
-  { value: "mineru", label: "MinerU", hint: "表格密集论文备选（跨页表合并最稳）" },
+  { value: "mineru", label: "MinerU VLM", hint: "推荐：公式/图注/大图完整性最优，免费 1000 页/日" },
+  { value: "paddleocr", label: "PaddleOCR", hint: "速度更快、免费 3000 页/日；复杂公式场景以 MinerU VLM 为准" },
 ];
 
 const ENGINE_LABELS: Record<string, string> = {
