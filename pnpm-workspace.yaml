@@ -1,5 +1,10 @@
 packages:
   - "packages/*"
+# 渲染与样式版本对齐：rehype-katex 声明 katex ^0.16（0.16 渲染端类名 .tag/.sizing），
+# 直接依赖与全量 CSS 是 0.18（类名 .katex-tag/.katex-sizing）——错位导致编号不右齐、上下标不缩小。
+# 统一锁 0.18（2026-08-13）
+overrides:
+  katex: ^0.18.1
 allowBuilds:
   '@biomejs/biome': true
   '@tailwindcss/oxide': true

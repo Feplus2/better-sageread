@@ -107,6 +107,16 @@ eq(
   "text before\n$$\n\\frac{a}{b}\n$$\ntext after",
 );
 
+// 16) 全角括号编号：下一行行首（madler 旧产物 （10）（11）（12））
+eq(
+  "全角编号下一行",
+  normalizeDisplayMath("$$v_{rel}=u_f-v_d$$\n（10） and the gas velocity"),
+  "$$\nv_{rel}=u_f-v_d \\tag{10}\n$$\n\nand the gas velocity",
+);
+
+// 17) 全角括号编号：公式尾部
+eq("全角编号尾部", normalizeDisplayMath("$$x=1 （7）$$"), "$$\nx=1 \\tag{7}\n$$");
+
 rmSync(outDir, { recursive: true, force: true });
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

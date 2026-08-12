@@ -22,16 +22,17 @@ export function normalizeDisplayMath(body: string): string {
     (_m, c: string, nl?: string) => `$$\n${c.trim()}\n$$${nl ? "\n" : ""}`,
   );
 
-  // 2) 公式尾部编号 → \tag。编号前须有空格（排除 f(2) 这类调用尾），只处理单行内容（含环境的多行公式不动）
+  // 2) 公式尾部编号 → \tag。编号前须有空格（排除 f(2) 这类调用尾），只处理单行内容（含环境的多行公式不动）；
+  // 括号兼容全角（旧引擎产物里 （10）（11）（12） 为全角）
   out = out.replace(
-    /^(\$\$\r?\n)([^\r\n]*?\S)[ \t]+\((\d{1,3}[a-z]?)\)[ \t]*\r?(\n\$\$)/gm,
+    /^(\$\$\r?\n)([^\r\n]*?\S)[ \t]+[（(](\d{1,3}[a-z]?)[)）][ \t]*\r?(\n\$\$)/gm,
     (m: string, open: string, content: string, num: string, close: string) =>
       content.includes("\\tag{") ? m : `${open}${content} \\tag{${num}}${close}`,
   );
 
-  // 3) 编号在下一行行首（紧贴围栏无空行）→ 移入 \tag，余文另起一段
+  // 3) 编号在下一行行首（紧贴围栏无空行）→ 移入 \tag，余文另起一段；同样兼容全角括号
   out = out.replace(
-    /^(\$\$\r?\n)([^\r\n]*?)(\r?\n\$\$)\r?\n\((\d{1,3}[a-z]?)\)[ \t]*([^\r\n]*)$/gm,
+    /^(\$\$\r?\n)([^\r\n]*?)(\r?\n\$\$)\r?\n[（(](\d{1,3}[a-z]?)[)）][ \t]*([^\r\n]*)$/gm,
     (m: string, open: string, content: string, close: string, num: string, rest: string) => {
       if (content.includes("\\tag{")) return m;
       const tagged = `${open}${content} \\tag{${num}}${close}`;
