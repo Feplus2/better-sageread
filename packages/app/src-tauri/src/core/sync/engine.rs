@@ -451,13 +451,16 @@ async fn apply_book_status_upsert(
     Ok(())
 }
 
-/// reading_sessions：只增不改，按主键去重合并
-async fn apply_session_insert(
+/// reading_sessions / paper_folders：只增不改的关系表，按主键去重合并（INSERT OR IGNORE）
+/// 注意表名必须按行分派——2026-08-13 前硬编码 reading_sessions，paper_folders 行被插去
+/// reading_sessions 又因 NULL 主键被 OR IGNORE 吞掉：不报错、水位照推、归属关系静默丢失
+async fn apply_relation_insert(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     row: &ChangeRow,
     applied: &mut AppliedOps,
+    table_name: &str,
 ) -> Result<(), String> {
-    let table = tables::find_table("reading_sessions").unwrap();
+    let table = tables::find_table(table_name).unwrap();
     let data = row.data.as_ref().ok_or("UPSERT 行缺少 data")?;
 
     let names = table.columns.iter().map(|(n, _)| *n).collect::<Vec<_>>();
@@ -719,9 +722,9 @@ async fn apply_change_row(
     match row.table.as_str() {
         "threads" => apply_thread_upsert(tx, row, applied).await,
         "book_status" => apply_book_status_upsert(tx, row, applied).await,
-        "reading_sessions" => apply_session_insert(tx, row, applied).await,
+        "reading_sessions" => apply_relation_insert(tx, row, applied, "reading_sessions").await,
         // paper_folders 与 sessions 同构：关系行 INSERT OR IGNORE 去重（无 updated_at）
-        "paper_folders" => apply_session_insert(tx, row, applied).await,
+        "paper_folders" => apply_relation_insert(tx, row, applied, "paper_folders").await,
         "skills" => apply_skill_upsert(tx, row, applied).await,
         "tags" => apply_tag_upsert(tx, row, applied).await,
         "prompt_presets" => apply_prompt_preset_upsert(tx, row, applied).await,
@@ -1535,6 +1538,34 @@ mod tests {
         assert_eq!(log_count(&pool).await, 0);
     }
 
+    /// 回归（2026-08-13 真机实证）：paper_folders 行曾被硬编码插进 reading_sessions，
+    /// NULL 主键被 OR IGNORE 吞掉——不报错、水位照推、归属关系静默丢失。
+    /// 钉死：行必须落在 paper_folders，且不碰 reading_sessions
+    #[tokio::test]
+    async fn test_apply_paper_folders_lands_in_right_table() {
+        let pool = bootstrap_pool(true).await;
+        let row = ChangeRow {
+            table: "paper_folders".to_string(),
+            id: "b1:f1".to_string(),
+            op: "INSERT".to_string(),
+            updated_at: 2000,
+            data: Some(serde_json::json!({ "paper_id": "b1", "folder_id": "f1" })),
+        };
+        apply_changeset(&pool, &changeset_bytes(&[row])).await.unwrap();
+        let landed: Option<(String, String)> =
+            sqlx::query_as("SELECT paper_id, folder_id FROM paper_folders WHERE paper_id = 'b1' AND folder_id = 'f1'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(landed.is_some(), "paper_folders 行应落库");
+        let stray: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM reading_sessions WHERE id <> 's1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stray, 0, "不应碰 reading_sessions");
+    }
+
     #[tokio::test]
     async fn test_thread_merge_apply() {
         let pool = setup_pool().await;
@@ -1963,6 +1994,18 @@ mod tests {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
+            "CREATE TABLE notes (
+                id TEXT PRIMARY KEY NOT NULL,
+                book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                location_tag TEXT,
+                location_block INTEGER,
+                location_cfi TEXT,
+                starred INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
             "CREATE TABLE _sync_log (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 table_name TEXT NOT NULL,
@@ -2000,14 +2043,17 @@ mod tests {
             ("skills", "id"),
             ("tags", "id"),
             ("folders", "id"),
-            ("paper_folders", "paper_id || ':' || folder_id"),
+            ("paper_folders", "{p}paper_id || ':' || {p}folder_id"),
             ("prompt_presets", "id"),
+            ("notes", "id"),
         ] {
-            for (suffix, op, key) in [
-                ("ai", "INSERT", format!("NEW.{pk}")),
-                ("au", "UPDATE", format!("NEW.{pk}")),
-                ("ad", "DELETE", format!("OLD.{pk}")),
-            ] {
+            for (suffix, op, prefix) in [("ai", "INSERT", "NEW."), ("au", "UPDATE", "NEW."), ("ad", "DELETE", "OLD.")] {
+                // {p} 占位展开与生产迁移同构（2026-08-13 前裸列名复刻了生产 bug）
+                let key = if pk.contains("{p}") {
+                    pk.replace("{p}", prefix)
+                } else {
+                    format!("{prefix}{pk}")
+                };
                 let sql = format!(
                     "CREATE TRIGGER _sync_{table}_{suffix} AFTER {op} ON {table} BEGIN
                         INSERT INTO _sync_log (table_name, row_id, op, at)
