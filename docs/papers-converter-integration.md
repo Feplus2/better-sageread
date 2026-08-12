@@ -55,6 +55,8 @@ papers 页「导入 PDF」按钮
 
 ## 六、遗留
 
+- **VLM 强OCR 定为论文主引擎（2026-08-13，Papers_Converter f818d66，exe 已重打同步 binaries）**：MinerU pipeline 后端（文字层路线）实证否决——其公式模型是字符错误元凶（(14)→(I4)、化学式拆散、`\dot` 误入），textlayer 纯文字层重建亦在 symbol 字体区翻车（=→¼ 等编码陷阱）；MinerU-VLM + 强制 OCR 五篇回归（zhao2020 封面版/madler2001/pratsinis1998/park2021/ernst2007）QC 全无 WARN。同批落地：图组就近成组重裁（≤20 字符小文字块豁免、真图注为组界、caption-first 归组）、Fig. 缩写游离图注识别、同页双图误并修复、表注补号收敛引用。frozen exe 冒烟产物与回归版字节一致；应用内 E2E（`scripts/cdp-test-paper-vlm-reparse.mjs`，zhao2020 封面版）走通。应用侧：`paperEngine` 默认改 `mineru`，`mineru-pipeline` 选项下线（同 GLM 惯例，类型保留兼容旧配置）。LLM 架构实验仓（Papers_Converter_LLM，至 ad1b474）冻结存档
+- **封面误判整页丢失事故（2026-08-12）已根修**：converter 侧 `cover_detect.py` 统一判定（只判 page 0 + 标记阈值收紧 + 正文信号一票否决 + 元数据锚定），AB 验证 127 篇零误杀；专题文档（事故复盘/现行逻辑/调研/辅助模型与脏 PDF spec/AB 记录）见 Papers_Converter `docs/structure-detection.md`；回归测试 `test_cover_detect.py`/`test_article_boundary.py`，AB 脚本 `ab_cover_detect.py`。同批落地：`STRUCTURE_LLM` 辅助模型仲裁通道（默认关）、`ARTICLE_BOUNDARY` 脏 PDF 标题锚点头切/References 后尾切。exe 已重打包并同步 binaries；实测 zhao2020 重解析页锚 4/4、Figure 1-4 齐全、无 incomplete 打标。存量受损篇（zhao2020/Xiang 2015）已补 source.pdf，走文献页「批量重新解析」修复
 - staging 的 LLM 元数据缓存（slug 防漂移，backlog 定论 converter 侧待实现）
 - **stage1 引擎 VLM 退化循环**（2026-08-05 实测）：长枚举内容触发"模式延续"失控（如 nm 波长列从真实值 1700 一路递增编到 15800；另一篇单词 fire 重复数百次），失控在引擎原始产物即存在。**两侧已闭环**：converter 侧 `quality_guard.py`（签名周期法，阈值与 SageRead 一致）在 stage1 命中即重试（≤2 次）并最终经 done 事件 `degenerate:true` 打标；SageRead 侧本地同款检测 + 协议字段双通道提示"换引擎重新解析"。实测注意：Yang 2021 这篇在 PaddleOCR-VL 三次重跑全复发，重试不自愈的内容以换引擎为准。exe 未随源码重建（见交接文档待办）
 - Zotero 批量导入：已实现（SageRead 侧，见 docs/zotero-batch-import.md）；converter 侧 `--zotero-key` 透传锚定 slug 仍为 converter 遗留（当前方案不依赖，zotero_key 由 SageRead 注入 frontmatter）
