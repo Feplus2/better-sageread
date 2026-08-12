@@ -404,9 +404,12 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         Err(e) => return Err(e.into()),
     }
 
-    // L2 同步触发器（CREATE TRIGGER IF NOT EXISTS 幂等）统一最后建：
+    // L2 同步触发器统一最后建：
     // 成员表的建表/列迁移必须全部就绪（folders/paper_folders/prompt_presets 在上方才创建）；
-    // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式
+    // 元组第二列是主键表达式：普通表为列名，paper_folders 复合主键用拼接表达式（{p} 为 NEW./OLD. 占位——
+    // 2026-08-13 前生成式只给首列加前缀，"NEW.paper_id || ':' || folder_id" 的裸 folder_id 在触发器里
+    // 解析到 _sync_log 上报 no such column，paper_folders 一切写入连带 books 级联删除全部失败）。
+    // 每次启动 DROP+CREATE 自愈：坏触发器不会随 IF NOT EXISTS 更新，必须显式重建
     const SYNC_TABLES: [(&str, &str); 11] = [
         ("books", "id"),
         ("book_status", "book_id"),
@@ -416,24 +419,32 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         ("skills", "id"),
         ("tags", "id"),
         ("folders", "id"),
-        ("paper_folders", "paper_id || ':' || folder_id"),
+        ("paper_folders", "{p}paper_id || ':' || {p}folder_id"),
         ("prompt_presets", "id"),
         ("notes", "id"),
     ];
 
     for (table, pk) in SYNC_TABLES {
-        for (suffix, op, key) in [
-            ("ai", "INSERT", format!("NEW.{pk}")),
-            ("au", "UPDATE", format!("NEW.{pk}")),
-            ("ad", "DELETE", format!("OLD.{pk}")),
-        ] {
+        for (suffix, op, prefix) in [("ai", "INSERT", "NEW."), ("au", "UPDATE", "NEW."), ("ad", "DELETE", "OLD.")] {
+            let key = if pk.contains("{p}") {
+                pk.replace("{p}", prefix)
+            } else {
+                format!("{prefix}{pk}")
+            };
+            // DROP+CREATE 包进单事务：SQLite DDL 可事务化，原子提交——崩溃不留半态；
+            // 并发双开初始化（dev 热重载遗留进程抢同一库，2026-08-13 实证 panic）退化为串行等待而非 already exists
+            let mut tx = pool.begin().await?;
+            sqlx::query(&format!("DROP TRIGGER IF EXISTS _sync_{table}_{suffix}"))
+                .execute(&mut *tx)
+                .await?;
             let sql = format!(
-                "CREATE TRIGGER IF NOT EXISTS _sync_{table}_{suffix} AFTER {op} ON {table} BEGIN
+                "CREATE TRIGGER _sync_{table}_{suffix} AFTER {op} ON {table} BEGIN
                     INSERT INTO _sync_log (table_name, row_id, op, at)
                     VALUES ('{table}', {key}, '{op}', CAST(strftime('%s','now') AS INTEGER) * 1000);
                 END"
             );
-            sqlx::query(&sql).execute(pool).await?;
+            sqlx::query(&sql).execute(&mut *tx).await?;
+            tx.commit().await?;
         }
     }
     println!("Migration applied: sync triggers.");

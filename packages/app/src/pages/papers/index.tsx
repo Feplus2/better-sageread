@@ -642,14 +642,16 @@ export default function PapersPage() {
     return map;
   }, [members]);
 
-  /** folderId -> 直接成员数 */
+  /** folderId -> 直接成员数（只计在库论文；回收站中的论文保留归属行但不应计入——2026-08-13 修复） */
   const folderCounts = useMemo(() => {
+    const liveIds = new Set(papers.map((p) => p.id));
     const map = new Map<string, number>();
-    for (const { folderId } of members) {
+    for (const { paperId, folderId } of members) {
+      if (!liveIds.has(paperId)) continue;
       map.set(folderId, (map.get(folderId) ?? 0) + 1);
     }
     return map;
-  }, [members]);
+  }, [members, papers]);
 
   /** 当前文件夹的直接子文件夹（主列表顶部的文件夹行；folders 按创建时间升序，filter 保持顺序） */
   const currentSubfolders = useMemo(() => {
