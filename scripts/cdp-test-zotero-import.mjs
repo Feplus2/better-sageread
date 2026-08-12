@@ -103,6 +103,7 @@ const expression = `
 
   // ---- matchExisting（去重链纯函数）----
   const dedup = [
+    { id: "p-old", zoteroKey: null, doi: null, title: "Previously Imported Paper", firstAuthor: null, year: null },
     { id: "p-doi", zoteroKey: null, doi: "https://doi.org/10.1/ABC", title: "Another Paper", firstAuthor: null, year: null },
     { id: "p-sim", zoteroKey: null, doi: null, title: "Study of Flame Syntheses", firstAuthor: "Zhang, San", year: "2016" },
   ];
@@ -112,7 +113,14 @@ const expression = `
     collectionKeys: [], pdfPath: null, hasPdf: true, ...over,
   });
   const mMerge = svc.matchExisting(mkItem({ key: "ITEM0001" }), dedup, stateByKey);
-  check("match: 状态表命中 → merge", mMerge.kind === "merge" && mMerge.paperId === "p-old", JSON.stringify(mMerge));
+  check("match: 状态表命中且论文在库 → merge", mMerge.kind === "merge" && mMerge.paperId === "p-old", JSON.stringify(mMerge));
+  // 状态行指向已彻底清除的论文（paper.md 已不在）→ 落穿为全新导入（upsert 经 UNIQUE(zotero_key) 自愈）
+  const mDead = svc.matchExisting(
+    mkItem({ key: "ITEM0001" }),
+    dedup,
+    new Map([["ITEM0001", { paperId: "p-purged", zoteroKey: "ITEM0001", collectionKeys: [] }]]),
+  );
+  check("match: 状态行死链 → 落穿 import", mDead.kind === "import", JSON.stringify(mDead));
   const mDoi = svc.matchExisting(mkItem({ key: "NEWKEY02", doi: "10.1/abc", title: "No Match Title" }), dedup, new Map());
   check("match: DOI 命中（归一化去前缀） → adopt/doi",
     mDoi.kind === "adopt" && mDoi.via === "doi" && mDoi.paperId === "p-doi", JSON.stringify(mDoi));

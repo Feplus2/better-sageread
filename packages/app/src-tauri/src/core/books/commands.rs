@@ -329,6 +329,14 @@ async fn purge_book_by_id(app_handle: &AppHandle, db_pool: &SqlitePool, id: &str
         .await
         .map_err(|e| format!("彻底删除书籍失败: {}", e))?;
 
+    // Zotero 链接状态（设备本地，无外键不级联）：随彻底清除一并清理，
+    // 否则重导入同一 Zotero 条目时会 merge 到死目录报"paper.md 不存在"（2026-08-13 实证）
+    sqlx::query("DELETE FROM zotero_paper_state WHERE paper_id = ?")
+        .bind(id)
+        .execute(db_pool)
+        .await
+        .map_err(|e| format!("清理 Zotero 链接状态失败: {}", e))?;
+
     if format.as_deref() == Some("MARKDOWN") {
         purge_paper_vectors(&app_data_dir, id);
     }

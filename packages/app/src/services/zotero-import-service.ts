@@ -159,7 +159,9 @@ export function matchExisting(
   stateByKey: ReadonlyMap<string, ZoteroPaperState>,
 ): MatchResult {
   const known = stateByKey.get(item.key);
-  if (known) return { kind: "merge", paperId: known.paperId };
+  // 状态行只在论文仍在库（含回收站，与 dedup 口径一致）时有效；
+  // 指向已彻底清除论文的死行落穿到 adopt/import——重新导入后 upsertPaperState 经 UNIQUE(zotero_key) 自愈覆盖
+  if (known && dedupKeys.some((p) => p.id === known.paperId)) return { kind: "merge", paperId: known.paperId };
 
   const byKey = dedupKeys.find((p) => p.zoteroKey === item.key);
   if (byKey) return { kind: "adopt", paperId: byKey.id, via: "zotero_key" };
