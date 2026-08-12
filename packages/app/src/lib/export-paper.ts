@@ -203,6 +203,9 @@ const PAPER_EXPORT_CSS = `
   main ul, main ol { padding-left: 1.6em; }
   main li { margin: 0.2em 0; }
   .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+  /* \tag 编号右对齐：渲染走 rehype-katex 内嵌 katex 0.16（.tag），自包含 CSS 来自 0.18（.katex-tag），双类名并写 */
+  .katex-display > .katex > .katex-html > .tag,
+  .katex-display > .katex > .katex-html > .katex-tag { position: absolute; right: 0; }
   .paper-translation { margin: 0.35em 0 1em; padding-left: 0.75em; border-left: 2px solid #d8cfc0;
                         color: #6b5c42; font-size: 0.92em; }
   .annotations-section { margin-top: 28px; padding-top: 16px; border-top: 1px solid #ddd3b8; }
@@ -314,7 +317,10 @@ function wrapMarkRange(doc: Document, containerEl: Element, mark: PendingMark): 
 function applyAnnotationsInline(bodyHtml: string, params: PaperExportParams): string {
   const annotations = params.annotations ?? [];
   if (annotations.length === 0) return bodyHtml;
-  const parsed = new DOMParser().parseFromString(`<body><div id="paper-export-root">${bodyHtml}</div></body>`, "text/html");
+  const parsed = new DOMParser().parseFromString(
+    `<body><div id="paper-export-root">${bodyHtml}</div></body>`,
+    "text/html",
+  );
   const container = parsed.querySelector("#paper-export-root");
   if (!container) return bodyHtml;
   const blockEls = listBlocks(container);

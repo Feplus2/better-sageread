@@ -1,4 +1,5 @@
 import { load } from "js-yaml";
+import { normalizeDisplayMath } from "./paper-display-math";
 
 /** 结构化作者（Pandoc 官方约定） */
 export interface PaperAuthor {
@@ -53,14 +54,28 @@ export function parseFrontmatter(yamlText: string): PaperMetadata {
 /**
  * 解析论文 Markdown：拆出 frontmatter 元数据与正文。
  * 无 frontmatter 或 YAML 解析失败时返回空 metadata，正文尽量保留。
+ * 正文统一过 normalizeDisplayMath（display 公式归一，详见 paper-display-math.ts）。
  */
 export function parsePaperMarkdown(raw: string): { metadata: PaperMetadata; body: string } {
   const match = raw.match(FRONTMATTER_RE);
   if (!match) {
-    return { metadata: {}, body: raw };
+    return { metadata: {}, body: normalizeDisplayMath(raw) };
   }
 
-  return { metadata: parseFrontmatter(match[1]), body: raw.slice(match[0].length) };
+  return { metadata: parseFrontmatter(match[1]), body: normalizeDisplayMath(raw.slice(match[0].length)) };
+}
+
+/**
+ * 拆 head（frontmatter 原文，含 --- 行，无 frontmatter 时为空串）与归一化正文。
+ * 供重建类调用方（buildPaperViewMarkdown 的 splitBody）使用——body 经归一化后长度已变，
+ * 严禁再用「原串长度 - body 长度」反推 head。
+ */
+export function splitPaperMarkdown(raw: string): { head: string; body: string } {
+  const match = raw.match(FRONTMATTER_RE);
+  if (!match) {
+    return { head: "", body: normalizeDisplayMath(raw) };
+  }
+  return { head: match[0], body: normalizeDisplayMath(raw.slice(match[0].length)) };
 }
 
 /** 把 author 字段（结构化/字符串数组/单字符串）归一化为名字列表 */

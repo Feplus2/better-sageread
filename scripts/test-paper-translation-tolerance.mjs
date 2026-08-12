@@ -49,6 +49,8 @@ const STUBS = {
   "@/ai/providers/factory": `
     export const getUtilityModel = () => ({ providerId: "mock", modelId: "mock" });
     export const createModelInstance = () => ({});
+    export const createUtilityModelInstance = () => ({});
+    export const utilityTaskProviderOptions = () => undefined;
   `,
   ai: `
     export const generateText = (...args) => globalThis.__mockGenerateText(...args);
@@ -176,7 +178,9 @@ await check("术语表：首轮抽取 → 注入全部批次 prompt → 随译�
   assert(result.translated === 12, `12 块应全部翻译，got ${result.translated}`);
   assert(glossaryCalls.length === 1, `术语表应抽取 1 次，got ${glossaryCalls.length}`);
   assert(glossaryCalls[0].includes("标题") === false, "无 frontmatter 的 fixture 不应含标题段");
-  const injected = calls.every((p) => p.includes("术语表（以下术语必须严格采用给定译法") && p.includes("rock-salt → 岩盐"));
+  const injected = calls.every(
+    (p) => p.includes("术语表（以下术语必须严格采用给定译法") && p.includes("rock-salt → 岩盐"),
+  );
   assert(injected, "全部批次 prompt 应注入术语表");
   const file = await loadPaperTranslation("p4");
   assert(file?.glossary?.length === 2, `术语表应随译本落盘 2 条，got ${file?.glossary?.length}`);
@@ -208,7 +212,10 @@ await check("术语表抽取失败：不阻断翻译，批次 prompt 无术语�
     const result = await translatePaper({ paperId: "p6", markdown: MD12 });
     assert(result.translated === 12, `抽取失败仍应翻完 12 块，got ${result.translated}`);
     assert(glossaryCalls.length === 1, "抽取应尝试过 1 次");
-    assert(calls.every((p) => !p.includes("术语表（以下术语")), "批次 prompt 不应含术语表段");
+    assert(
+      calls.every((p) => !p.includes("术语表（以下术语")),
+      "批次 prompt 不应含术语表段",
+    );
     const file = await loadPaperTranslation("p6");
     assert(!file?.glossary, "抽取失败不应落盘术语表");
   } finally {

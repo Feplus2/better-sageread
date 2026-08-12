@@ -19,7 +19,7 @@ import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { MATH_SEGMENT_RE } from "./paper-cross-anchor";
-import { parsePaperMarkdown } from "./paper-metadata";
+import { parsePaperMarkdown, splitPaperMarkdown } from "./paper-metadata";
 
 export type PaperBlockKind =
   | "p"
@@ -61,8 +61,8 @@ const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
 /** LF 归一 + 去 frontmatter 后的正文（重建时 head 原样拼回） */
 function splitBody(markdown: string): { head: string; body: string } {
   const normalized = markdown.replace(/\r\n?/g, "\n");
-  const { body } = parsePaperMarkdown(normalized);
-  return { head: normalized.slice(0, normalized.length - body.length), body };
+  // body 经 parsePaperMarkdown 归一化后不再是原串后缀，head 须由 splitPaperMarkdown 正面给出
+  return splitPaperMarkdown(normalized);
 }
 
 /** mdast → DOM textContent 等口径纯文本：图片/原始 HTML 无文本贡献，硬换行与源内换行一样是 "\n" 文本节点，行内/行间公式保留 $ 定界 */
