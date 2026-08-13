@@ -49,7 +49,7 @@ SageRead/
 │   ├── app-tabs/       # Chrome 风格标签 UI 库（拖拽排序，基于 draggabilly）
 │   └── foliate-js/     # EPUB 渲染内核（johnfactotum/foliate-js 的 vendored fork）
 ├── scripts/            # 开发辅助脚本：15 个 test-*.mjs、62 个 cdp-*.mjs 等
-├── docs/               # 22 篇设计/演进文档（见下"文档地图"）
+├── docs/               # 23 篇设计/演进文档（见下"文档地图"）
 ├── fixtures/papers/    # 测试用样例论文（如 zhao2020rational）
 ├── assets/             # README 截图
 ├── package.json        # 根脚本入口（dev/build/...）
@@ -60,7 +60,7 @@ SageRead/
 
 - `src/` 前端：`pages/`（页面）、`components/`（组件）、`services/`（Tauri command 封装）、`store/`（zustand）、`ai/`（AI SDK 集成层）等，详见 `wiki/01-architecture.md`
 - `src-tauri/` Rust 后端：`src/core/` 为全部业务核心（books/papers/sync/mcp/skills/secrets/...），`src-tauri/plugins/tauri-plugin-epub/` 为自研向量检索插件，另有 `tauri-plugin-llamacpp`（本地向量模型）。`src-tauri/binaries/` 存放两个转换器 sidecar exe（gitignored，需手工准备，见 `wiki/05-papers-pipeline.md`）
-- 约 150 个 Tauri command 在 `packages/app/src-tauri/src/lib.rs:190-348` 注册
+- 约 140 个 Tauri command 在 `packages/app/src-tauri/src/lib.rs:190-347` 注册
 
 ### packages/app-tabs
 
@@ -76,7 +76,7 @@ EPUB 渲染内核，是上游 [johnfactotum/foliate-js](https://github.com/johnf
 
 ### docs/
 
-22 篇设计文档，按主题对应 wiki 章节：
+23 篇设计文档，按主题对应 wiki 章节：
 
 - Agent：`agent-ecosystem-plan.md`、`agent-next-phase-plan.md`、`agent-capability-roadmap.md`、`agent-tool-recipe.md`
 - 同步：`sync-protocol.md`、`sync-testing-guide.md`

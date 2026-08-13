@@ -4,7 +4,7 @@
 
 ## 1. 构建与测试命令
 
-根脚本（根 `package.json:7-12`）：
+根脚本（根 `package.json:7-14`）：
 
 ```bash
 pnpm install         # 安装 workspace 依赖
@@ -25,7 +25,7 @@ pnpm tauri           # 透传 tauri CLI
 cd packages/app/src-tauri && cargo test
 ```
 
-约 **58 个用例、13 个文件**。重头在 `src/core/sync/`（engine.rs 18 个、merge.rs 8 个、web_search.rs 6 个等），`tauri-plugin-epub` 的 `text/` 下 15 个（chunker 7、search 3、sanitizer 3 等），另有集成测试 `src-tauri/tests/secrets-roundtrip.rs`。
+约 **58 个用例**。重头在 `src/core/sync/`（engine.rs 18 个、merge.rs 8 个、backup.rs 3 个、changelog.rs 2 个、restore.rs 1 个）+ `core/web_search.rs` 6 个；`tauri-plugin-epub` 共 18 个（其中 `text/` 下 15 个：chunker 7、sanitizer 3、tokenizer 2、zh_segmenter 3）；另有集成测试 `src-tauri/tests/secrets-roundtrip.rs`。
 
 **前端验证组合拳**（仓库惯例）：`pnpm --filter app exec tsc --noEmit` + `biome check <改动文件>` + 对应 `scripts/test-*.mjs` + 必要时 CDP 冒烟。
 
@@ -110,7 +110,7 @@ cd packages/app/src-tauri && cargo test
 - `cdp-perf-*` — 性能审计/CSS A-B/采样
 - `cdp-cleanup-*` — 测试数据清理；`cdp-scan-*` — 批量扫描；`cdp-inspect-*` / `cdp-dump-*` — 结构转储
 
-**Rust 测试分布**（`cargo test`，约 58 个用例）：`core/sync/` 是重头（engine.rs 18、merge.rs 8、web_search.rs 6、backup.rs 3、changelog.rs 2、restore.rs 1）；`tauri-plugin-epub` 的 `text/` 下 15 个（chunker 7、search 3、sanitizer 3 等）；集成测试 `src-tauri/tests/secrets-roundtrip.rs`。
+**Rust 测试分布**（`cargo test`，约 58 个用例）：`core/sync/` 是重头（engine.rs 18、merge.rs 8、backup.rs 3、changelog.rs 2、restore.rs 1），`core/web_search.rs` 另 6 个（注意它在 core/ 直下、不在 sync/）；`tauri-plugin-epub` 共 18 个（`text/` 下 15 个：chunker 7、sanitizer 3、tokenizer 2、zh_segmenter 3）；集成测试 `src-tauri/tests/secrets-roundtrip.rs`。
 
 ## 8. 排障速查
 

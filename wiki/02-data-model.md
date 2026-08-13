@@ -49,7 +49,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 - `book.{format}`（如 `book.epub`）— 原始书文件（:26-29）；插件侧按此约定读取（`plugins/tauri-plugin-epub/src/commands.rs:50`）
 - `cover.jpg` — 封面（:32-35）
 - `metadata.json` — 元数据（:40-43；论文导入/重解析/Zotero 也写它）
-- 论文（MARKDOWN）专有：`paper.md`（正文）、`images/`（插图）、`source.pdf`（原始 PDF）（`:1272-1384`）
+- 论文（MARKDOWN）专有：`paper.md`（正文）、`images/`（插图）、`source.pdf`（原始 PDF）（`:1334-1461`）
 - EPUB 管线产物（tauri-plugin-epub）：`mdbook/`、`chapters/`（`pipeline.rs:110`）、`metadata.md`（`pipeline.rs:561`）、`vectors.sqlite`（每书向量库，`pipeline.rs:26`）
 - `view-settings.json` — 前端按书写的视图设置（`src/lib/tauri-storage.ts:166-168`）
 
@@ -60,33 +60,33 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 | `book.{format}` | `save_book` 从临时路径 rename | `core/books/commands.rs:26-29` |
 | `cover.jpg` | `save_book` | `commands.rs:32-35` |
 | `metadata.json` | `save_book` / 论文导入 / 重解析 / Zotero | `commands.rs:40-43,1392,1515`、`core/zotero.rs:441` |
-| `paper.md`、`images/`、`source.pdf` | `save_paper`（仅 MARKDOWN 论文） | `commands.rs:1272-1384` |
+| `paper.md`、`images/`、`source.pdf` | `save_paper`（仅 MARKDOWN 论文） | `commands.rs:1334-1461` |
 | `mdbook/`、`chapters/`、`metadata.md` | EPUB 索引管线 | `pipeline.rs:110,561`、插件 `commands.rs:140` |
 | `vectors.sqlite` | 索引管线（每书一库） | `pipeline.rs:26` |
 | `view-settings.json` | 前端按书写的视图设置 | `src/lib/tauri-storage.ts:166-168` |
-| `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本） | `services/paper-translation-service.ts:91-98` |
+| `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本） | `services/paper-translation-service.ts:24-25,123` |
 
 删除时整个目录 `remove_dir_all`（`books/commands.rs:321-324`）。
 
 `books/` 之外的 `{appData}` 目录：
 
 - `papers-converter/` — 论文转换器工作目录（`core/paper_converter.rs:49`）
-- `agent-workspace/` — Agent 工作区默认根，含自管理的 memory.md（`core/agent_ws/mod.rs:7-16`）
+- `agent-workspace/` — Agent 工作区默认根（`core/agent_ws/mod.rs:7-16`）；其中的 memory.md 记忆约定由前端提示词注入维护（`src/ai/utils/workspace-context.ts:29,37-53`）
 - `papers/vectors.sqlite` — 论文全局向量库（见第 3 节）
 - `agent-audit/*.jsonl` — Agent 审计日志（mcp-stdio、local-api，写盘前脱敏）
-- `mcp-local.json` — 本地 API 通道的 `{port, token}`（`core/local_api/mod.rs:277-296`）
+- `mcp-local.json` — 本地 API 通道的 `{port, token}`（`core/local_api/mod.rs:300-310`）
 
 `reading_sessions` 表是统计页（`pages/statistics/`，年度热力图）的数据源：每次阅读会话记一行流水（`duration_seconds` 等），配合 `book_status.dwell_seconds`（迁移后补，`database.rs:92`）做停留时长统计。
 
 ## 3. 论文统一向量库 `{appData}/papers/vectors.sqlite`
 
-- 路径出处：`plugins/tauri-plugin-epub/src/commands.rs:469`（`index_paper`）、`:561`（`search_papers_db`）；清理侧 `core/books/commands.rs:350`；备份侧 `core/sync/backup.rs:244`
+- 路径出处：`plugins/tauri-plugin-epub/src/commands.rs:520-590`（`index_paper`）、`:612-670`（`search_papers_db`）；清理侧 `core/books/commands.rs:350`；备份侧 `core/sync/backup.rs:244`
 - 表结构与 per-book 库同 schema（建在 `plugins/tauri-plugin-epub/src/database/connection.rs`）：
   - `document_chunks`（:161）— 分片主表：`book_title/book_author`（论文借用了书的列名）、`paper_id`（:165）、`md_file_path`、`chunk_text`、`chunk_order_in_file`、`global_chunk_index`、`is_references`（:173，检索默认排除参考文献区段）等
   - `chunk_embeddings`（:242）— sqlite-vec `vec0` 虚拟表；扩展不可用时降级 `chunk_embeddings_fallback` BLOB 表（:260）
   - `bm25_stats`（:321）— BM25 统计缓存（内容变了即清空重建）
   - 性能 pragma：`synchronous=NORMAL`、`cache_size=10000`、`temp_store=memory`（:153-155）
-- 语义分离：**论文内容存 `books/{id}/`，向量存全局库**。`index_paper` 读 `books/{paper_id}/paper.md`，按 `paper_id` 先删后插（幂等重索引，`commands.rs:450-469`），前端入口 `services/paper-service.ts:271`
+- 语义分离：**论文内容存 `books/{id}/`，向量存全局库**。`index_paper` 读 `books/{paper_id}/paper.md`，按 `paper_id` 先删后插（幂等重索引，`pipeline.rs:709-779` 的 `process_paper_to_db`，插件命令入口 `commands.rs:520-590`），前端入口 `services/paper-service.ts:271`
 - 级联清理：彻底删除 MARKDOWN 论文时连带清全局库分片（`books/commands.rs:340-416`，软删不清、回收站可恢复）；对端彻底删除经同步到达时同样清理（`core/sync/engine.rs:1038-1049`）
 
 ## 4. 配置 JSON 清单（`{configDir}` 下）
@@ -109,7 +109,7 @@ Rust 侧直接读写的：
 - `secrets-fallback.json` — keyring 不可用时的降级明文存储（见下节）
 - `pending-restore.json` — 待恢复备份的暂存标记（`sync/restore.rs:144,263`）
 - `sync-staging/l2-safety/*.db` — 同步应用前的安全快照（`sync/engine.rs:220-246`）
-- `{appData}/mcp-local.json` — 本地 API 通道的 `{port, token}`（`local_api/mod.rs:277-296`）
+- `{appData}/mcp-local.json` — 本地 API 通道的 `{port, token}`（`local_api/mod.rs:300-310`）
 - `{appData}/agent-audit/*.jsonl` — Agent 审计日志（写盘前脱敏）
 
 另：`web-search-engine`、`tts-config-storage`、`thread-store` 等仍用 **localStorage**（如 `store/web-search-store.ts:63-64`），不是文件。
@@ -128,7 +128,7 @@ Rust 侧直接读写的：
 
 - 删除：`UPDATE books SET trashed_at = ?, updated_at = ?`（`books/commands.rs:253-272`）——磁盘文件与 book_status/threads 等关联数据全部保留；`updated_at` 必须同步推进，否则 L2 同步按 LWW 比较时删除赢不了对端（:256-257 注释）
 - 列表/恢复：`get_trashed_books` 按删除时间倒序（:294-305），`restore_book` 清 `trashed_at`（:275-291）
-- 彻底删除：`purge_book`/`purge_book_by_id`（:307-345）——删磁盘目录 + `DELETE FROM books`（外键级联清关联表）+ 手动清 `zotero_paper_state` + MARKDOWN 论文连带清全局向量库
+- 彻底删除：`purge_book`（:419-423）/`purge_book_by_id`（:307-345）——删磁盘目录 + `DELETE FROM books`（外键级联清关联表）+ 手动清 `zotero_paper_state` + MARKDOWN 论文连带清全局向量库
 - 自动清理：保留 30 天（`TRASH_RETENTION_DAYS`，:426），启动时 `purge_expired_trash`（:429 起）
 
 **文件夹同样软删**：`folders.trashed_at`（`database.rs:204`），删父即子树整体隐藏（沿父链判定可见性，`core/papers/commands.rs:23-38,318-335`），恢复后结构与论文归属原样回来；`purge_folder` 级联删子文件夹与 paper_folders 行，但**论文本身不删**（:163-180）。

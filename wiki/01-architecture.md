@@ -12,7 +12,7 @@
 │    └ 阅读器视图 ← foliate-js（<foliate-view> Web Component）      │
 └────────────── invoke / event ──────────────────────────────────┘
 ┌─────────────────────────── Rust 核心 ────────────────────────────┐
-│ lib.rs: tauri::Builder + ~150 个 command                         │
+│ lib.rs: tauri::Builder + ~140 个 command                         │
 │  core/: books papers threads sync mcp skills secrets local_api   │
 │         agent_ws llama tags prompts zotero converter ...         │
 │  plugins/tauri-plugin-epub: 解析 + 分块 + 向量化 + BM25/混合检索  │
@@ -52,8 +52,8 @@
 ### ai/（AI SDK v5 集成层）
 
 - `ai/custom-chat-transport.ts` — 自定义 `ChatTransport`，组装系统提示词、按 scope 取工具、合并 MCP 工具后调 `streamText`（接线细节见 `04-agent.md` 第 7 节）
-- `ai/tools/registry.ts:325` — `getToolsForScope(agentScope, context)` 按角色动态组装工具；`tools/central/` 21 个全局工具、`tools/paper/` 论文工具、根级共享工具与 `rag-*.ts` 检索工具
-- `ai/mcp/mcp-manager.ts` — MCP 连接管理；`ai/providers/factory.ts` — 按 provider 创建模型实例，统一走 Tauri fetch 绕 CORS
+- `ai/tools/registry.ts:332` — `getToolsForScope(agentScope, context)` 按角色动态组装工具；`tools/central/` 目录导出 28 个工具（22 个 central 专属 + 6 个归 shared）、`tools/paper/` 论文工具、根级共享工具与 `rag-*.ts` 检索工具
+- `ai/mcp/mcp-manager.ts` — MCP 连接管理；`ai/providers/factory.ts` — 按 provider 创建模型实例；anthropic 与 openai-compatible 分支走 Tauri fetch 绕 CORS，其余走 WebView 默认 fetch（跟随系统代理）
 - `ai/hooks/use-chat.ts` — 包装 `@ai-sdk/react` 的 useChat 注入自定义 transport
 - 提示词常量在 `src/constants/`：`prompt.ts:13-26` 按 `agentScope` 路由到 `central-prompt.ts`/`paper-prompt.ts`/阅读提示词，并叠加技能与预设
 - `ai/utils/`：message-selector（上下文活塞）、token-estimator、tool-guard（写操作拦截）、secret-patterns（脱敏）
@@ -65,7 +65,7 @@
 - `main.rs:5` 仅调 `sage_read_lib::run()`，全部逻辑在 `lib.rs`
 - `lib.rs:98-118` `tauri::Builder` 注册官方插件（updater、shell、os、global_shortcut、sql、http、fs、opener、dialog、log）与两个自研插件：`tauri_plugin_llamacpp::init()`（:112）、`tauri_plugin_epub::init()`（:118）；:103-106 manage 四个状态（AppState/ConverterState/PaperConverterState/McpStdioState）
 - `lib.rs:119-188` setup：载入代理快照 → Windows 去窗口装饰 → release 检查更新 → 应用待恢复数据（`apply_pending_restore`）→ 明文密钥迁移 → `database::initialize` → 回收站清理 → 云端目录迁移
-- `lib.rs:190-348` `invoke_handler` 注册约 150 个命令（按模块分组注释）
+- `lib.rs:190-347` `invoke_handler` 注册约 140 个命令（按模块分组注释）
 - `lib.rs:349-393` 拦截 CloseRequested：退出前 L2 推送（5s 超时）→ 清 llamacpp 进程 → 回收全部 MCP stdio 子进程 → destroy
 
 ### core/ 子模块一句话职责（清单见 `core/mod.rs:1-20`）
@@ -86,7 +86,7 @@
 
 ## 3. tauri-plugin-epub（解析 + 向量化 + 混合检索）
 
-插件装配在 `plugins/tauri-plugin-epub/src/lib.rs:30-49`：`Builder::new("epub")` 注册 15 个命令（`parse_epub`、`index_epub`、`search_db`、`read_book_section`、`index_paper`、`search_papers_db`、`index_manual`、`tokenize_zh` 等）；前端以 `plugin:epub|xxx` 形式调用（如 `ai/tools/rag-search.ts:93`、`services/book-service.ts:325-332`）。
+插件装配在 `plugins/tauri-plugin-epub/src/lib.rs:30-49`：`Builder::new("epub")` 注册 17 个命令（`parse_epub`、`index_epub`、`search_db`、`read_book_section`、`index_paper`、`search_papers_db`、`index_manual`、`index_wiki`、`tokenize_zh` 等）；前端以 `plugin:epub|xxx` 形式调用（如 `ai/tools/rag-search.ts:93`、`services/book-service.ts:325-332`）。
 
 **索引管线**（总入口 `pipeline.rs:16-21` `process_epub_to_db`）：
 
@@ -146,7 +146,7 @@ book_dir → 定位 book.epub → epub/reader.rs 解析 → epub2mdbook 转 mdbo
 
 **模型层**（`ai/providers/factory.ts`）：
 
-- 按 provider 创建 AI SDK 实例：openai / deepseek / google / openrouter / openai-compatible，统一走 `@tauri-apps/plugin-http` 的 fetch 绕 CORS
+- 按 provider 创建 AI SDK 实例：openai / deepseek / google / anthropic / grok / openrouter / openai-compatible（预置清单 11 家，见 `constants/predefined-providers.ts`）。注意 fetch 走向分两路：**anthropic 与 openai-compatible 分支传 `fetch: fetchTauri`**（走 Rust 网络栈绕 CORS、跟随应用级代理），openai/deepseek/google/grok/openrouter 走 AI SDK 默认的 WebView fetch（跟随系统代理，不过应用代理）；embedding 则由 Rust 侧 reqwest 发出，始终走应用代理
 - 思考强度由 `reasoning-map.ts` 按端点/模型分档打请求体补丁；摘要压缩、术语表抽取等轻量任务用辅助模型实例并关闭思考
 - 模型配置持久化在 `provider-store` / `llama-store`，密钥永远只在 keyring（见 `02-data-model.md` 第 5 节）
 

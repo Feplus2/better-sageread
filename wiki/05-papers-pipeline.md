@@ -10,7 +10,7 @@
 - **拉起方式：Tauri sidecar**（非 HTTP 服务）。`convert_pdf_to_epub` 命令 spawn `books_converter`，env 注入 `MINERU_TOKEN`/`PADDLEOCR_TOKEN`/`DEEPSEEK_BASE_URL|API_KEY|MODEL`（辅助模型复用），args 传 `pdf --headless --output-dir {appData}/converter [--no-ocr] [--engine paddleocr] [--translate LANG]`。出处：`core/converter.rs:44-98`
 - **进度协议**：stdout 逐行 JSON（`start / progress / stage_done / done / error`），Rust 按行转发 `convert://progress` 事件，退出时补发 `{"type":"terminated"}`；`cancel_convert` kill 子进程（`converter.rs:101-147,154-161`）。阶段顺序：MinerU(1) → Hybrid 结构重建(2) → [翻译(3)，可选] → EPUB 生成。Windows 管道 GBK 问题已用 `ensure_ascii=True` 规避
 - **产物入库**：done 后前端 `importConvertedEpub` 用 plugin-fs 读 epub 字节 → 包成 `File` → 复用书籍既有 `uploadBook()` 链路（`save_book` 落 `books/{id}/` + 入库）。出处：`services/converter-service.ts:94-100`；辅助模型参数解析 `resolveLlmParams`（:39-57）
-- **设置**：MinerU/PaddleOCR Token 存 `converter-store.json`（不进备份/同步白名单）；书籍引擎 `engine` 默认 `"mineru"`（表格密集更稳，`store/converter-store.ts:6-7,43`）
+- **设置**：MinerU/PaddleOCR Token 存 **keyring**（`converter-store.json` 的 token 字段已随密钥迁移置空，`converter-store.ts:32-35,56-64`；注意该 JSON 本身会被收进 L1 备份小包——备份是"顶层 *.json 全收减 `CONFIG_JSON_EXCLUDES` 排除清单"而非白名单，但包里已无密钥）；书籍引擎 `engine` 默认 `"mineru"`（表格密集更稳，`store/converter-store.ts:6-7,43`）
 
 ## 2. Papers_Converter（论文 PDF→paper.md）
 
@@ -37,7 +37,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 
 ### QC 闸（三层）
 
-1. **退化检测 `quality_guard.py`**（stage1 产物层）：签名周期法——字母→a、数字→0、空白折叠后，单行 ≥200 字符内找周期 4..50、连续重复 ≥10 次、覆盖 ≥300 字符的循环；命中即 stage1 重试（`MAX_STAGE1_RETRIES=2`），耗尽则降级到 pipeline 后端兜底；最终仍命中则 done 打标 `degenerate:true` 不阻断。**SageRead 侧有同算法 TS 移植** `src/utils/degenerate.ts:18-21,45-67`（注释明言阈值勿放宽），入库后本地复检（`pages/papers/index.tsx:1026`、`services/paper-reparse-service.ts:153-190`）
+1. **退化检测 `quality_guard.py`**（stage1 产物层）：签名周期法——字母→a、数字→0、空白折叠后，单行 ≥200 字符内找周期 4..50、连续重复 ≥10 次、覆盖 ≥300 字符的循环；命中即 stage1 重试（`MAX_STAGE1_RETRIES=2`），耗尽则降级到 pipeline 后端兜底；最终仍命中则 done 打标 `degenerate:true` 不阻断。**SageRead 侧有同算法 TS 移植** `src/utils/degenerate.ts:18-21,45-67`（阈值是事故回归出来的，见 `docs/papers-converter-integration.md:62`），入库后本地复检（`pages/papers/index.tsx:1026`、`services/paper-reparse-service.ts:153-190`）
 2. **结构边界判定**（stage2 语义层）：`cover_detect.py`（只判 page 0 + 正文信号一票否决）+ 可选 `STRUCTURE_LLM` 辅助模型仲裁 + `ARTICLE_BOUNDARY` 脏 PDF 头切/尾切。方案稿 `docs/paper-structure-boundary-plan.md` 里计划的 `structure_detector.py` **未以该名落地**，实际拆成上述三文件
 3. **完整性闸 `qc_paper.py`**（产物机械层）：WARN 级=图/表编号断号、References 顺序异常、超长参考文献段；**severe 级**=断号 + 页数对照（页锚数 ≤ `int(pdf_pages × 0.6)` 判整页丢失），severe 命中触发换引擎重试链，仍不完整则交付但 done 打标 `incomplete:true` + `qc_warnings` 清单。SageRead 前端消费：`services/paper-service.ts:204-209`（字段定义）、`pages/papers/index.tsx:1017-1019`（toast 提示换引擎重解析）
 
@@ -56,10 +56,10 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 - **embedding 调用**：`text/vectorizer.rs:74-165`——OpenAI 兼容 `/embeddings` 或 Ollama `/api/embed`（按 URL 结尾识别）；tiktoken o200k 计 token；首次调用自动检测向量维度；10s 连接/60s 总超时
 - **写库两条路径**：
   - 书籍：**每书一库** `books/{id}/vectors.sqlite`（`process_epub_to_db`，`pipeline.rs:16-26,171-186`；重建时直接删库文件）
-  - 论文：**全局单库** `{appData}/papers/vectors.sqlite`（`process_paper_to_db`，`pipeline.rs:710-779`；多论文共存绝不删库，按 `paper_id` 先删后插幂等重索引；命令入口 `commands.rs:452-520`）
+  - 论文：**全局单库** `{appData}/papers/vectors.sqlite`（`process_paper_to_db`，`pipeline.rs:709-779`；多论文共存绝不删库，按 `paper_id` 先删后插幂等重索引；命令入口 `commands.rs:520-590`）
   - sqlite-vec 不可用时降级普通存储（`pipeline.rs:186-191,770-772`）
-- **BM25/混合检索**：`search_papers_db`（`commands.rs:545-600`）→ `search_papers_global`（`pipeline.rs:860-913`）：有嵌入配置走 hybrid，无配置降级 BM25-only；`paper_ids` 集合过滤即"逻辑知识库"的物理实现。hybrid = 两路各取 `limit*2` → min-max 归一化 → 加权合并（默认 vector 0.7 / BM25 0.3；短查询智能偏向 BM25），缺一侧只用另一侧（`database/hybrid.rs:81-162`）
-- **已知结构性短板**：BM25 分词是 `to_lowercase + split_whitespace + 滤单字符`（`database/bm25.rs:78-91`），**纯空格分词未接中文**——`text/zh_segmenter.rs`（jieba）只用于论文词级对齐的 `tokenize_zh` 命令（`commands.rs:627-633`），中文论文的 BM25 召回偏弱
+- **BM25/混合检索**：`search_papers_db`（`commands.rs:612-670`）→ `search_papers_global`（`pipeline.rs:860-913`）：有嵌入配置走 hybrid，无配置降级 BM25-only；`paper_ids` 集合过滤即"逻辑知识库"的物理实现。hybrid = 两路各取 `limit*2` → min-max 归一化 → 加权合并（默认 vector 0.7 / BM25 0.3；短查询智能偏向 BM25），缺一侧只用另一侧（`database/hybrid.rs:81-162`）
+- **已知结构性短板**：BM25 分词是 `to_lowercase + split_whitespace + 滤单字符`（`database/bm25.rs:78-91`），**纯空格分词未接中文**——`text/zh_segmenter.rs`（jieba）只用于论文词级对齐的 `tokenize_zh` 命令（`commands.rs:697-703`），中文论文的 BM25 召回偏弱
 - 参考文献噪声治理：chunk 的 `is_references` 标记 + 检索 `include_references` 参数默认 false（`pipeline.rs:412-421,859-868`）
 
 ## 5. 翻译管线
@@ -72,7 +72,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
   - 对齐（句级/词级）：`paper-alignment-service.ts`——译后自动批量 embed 两侧句子 → 余弦相似度矩阵 → 单调 DP；对齐表写回译本 `blocks[idx].align/alignW`，幂等键 = 源 hash + 译文 hash（:31-38）；词级中文分词走 Rust `tokenize_zh`（jieba）
   - 元数据：title/abstract 顺带翻译写入 `metadata.json` 的 `title_zh/abstract_zh`，frontmatter 不动（:266-303）
   - 导出：`lib/export-paper.ts` 合成原文/译文/对照 + 标注 + base64 内嵌图片为 Markdown/HTML/PDF（译文仍不落盘进书库，仅导出物）
-- 注意：`types/book.ts:163` 的 `TranslatorConfig`/`translateTargetLang` 是**遗留配置**，无 UI/服务消费，不是现行功能
+- 注意：`types/book.ts:163` 的 `TranslatorConfig`/`translateTargetLang` 是**遗留配置**——`translateTargetLang` 无功能消费（仅默认值），但同结构的 `translationEnabled`/`showTranslateSource` 仍被阅读器 UI 读取（`utils/style.ts:537,553`、`pages/reader/components/toc-view.tsx:176-177`），别把整块当死代码删
 
 ## 6. Zotero 批量导入
 
@@ -87,17 +87,17 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 - 正文渲染：`paper-reader.tsx`（react-markdown + remark-math + rehype-katex + rehype-slug + GFM）
 - 块/句/锚点模块：`paper-blocks`、`paper-sentences`、`paper-anchors` 一整套——**切块器枚举必须与渲染器 DOM 块严格一致**（翻译对齐依赖这条工程不变量，见第 5 节）
 - 划线/hover：hover 矩形计算与标注落 `book_notes`（`type=annotation|excerpt`，`source` 区分 user/ai）
-- 侧边栏图表：`getFigures` 工具与图表面板消费 `images/` 与 `fig_caption_text`（转换器幻影图注规则的下游受益者）
+- 侧边栏图表：`getFigures` 工具消费 paper.md 的图片 alt 与编号图注段（`captionFrom: "alt"|"block"`，`ai/tools/paper/paper-extras.ts:152-202`），图表面板消费 paper-blocks 提取的 caption（`paper-figures-tab.tsx:71-72`）——转换器幻影图注规则的下游受益者（`fig_caption_text` 是 converter 侧概念，SageRead 仓内无此字段）
 - 质量信号外露：入库后本地复检退化（`utils/degenerate.ts`），`incomplete/qc_warnings` 由 `pages/papers/index.tsx:1017-1026` toast 提示换引擎重解析
 
 ## 8. 文档与代码不一致清单
 
-1. **论文默认引擎**：`docs/papers-converter-integration.md:9,45` 正文仍写"paddleocr 基线"；实际已改 MinerU-VLM 主引擎（同文档 §六与 `converter-store.ts:44` 才是最新事实）
+1. **论文默认引擎**：`docs/papers-converter-integration.md:45` 正文仍写"paddleocr 基线"；实际已改 MinerU-VLM 主引擎（同文档 §六与 `converter-store.ts:44` 才是最新事实）
 2. **`SUPPORTED_FILE_EXTS`**：books-converter 文档 §九称多格式导入解锁 epub/pdf/mobi/cbz/fb2/fbz；代码现状仅 `["epub","pdf"]`（`services/constants.ts:23`）
 3. **结构判定模块命名**：`paper-structure-boundary-plan.md` §5 的 `structure_detector.py` 未以该名落地（实际 `cover_detect.py` + `article_boundary.py` + `structure_llm.py`）
 4. **paper.md 存储位置两种说法都成立**：内容存 `books/{id}/`、向量存 `papers/vectors.sqlite`，引用时讲清分离
 5. **"mineru-pipeline 已下线" vs Rust 保留接线**：UI 下线、通道保留（`paper_converter.rs:62-77`）
-6. `docs/format-strategy-and-paper-module.md` §五的风险清单（如"全局向量库 5000 向量无压力"）是早期估算；"images/ 不在同步文件通道"一说未在 sync 代码中复核到对应逻辑，引用时存疑
+6. `docs/format-strategy-and-paper-module.md` §五的风险清单（如"全局向量库 5000 向量无压力"）是早期估算；其"images/ 不在同步文件通道"一说**已被代码推翻**——论文资产现为整目录 zip 捆（含 images/，`core/sync/files.rs:163-207`）
 
 ## 9. 附：入库链路与触发入口汇总
 
@@ -125,10 +125,10 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 
 - **行尾必须 LF**：paper.md 若为 CRLF，heading 提取会整批失配（契约 `docs/paper-format-contract.md:53-64` 的硬性条款，真机事故）
 - **Windows 管道编码**：sidecar stdout 走 GBK 会炸，converter 侧已用 `ensure_ascii=True` 规避（`docs/books-converter-integration.md` §九）；改进度协议时勿回退
-- **并发串台**：多篇论文同时转换时靠 Rust 注入的 `pdf_path` 区分事件归属（`paper_converter.rs:104-157`），前端按它路由进度条
+- **并发串台**：多篇论文同时转换时靠 Rust 注入的 `pdf_path` 区分事件归属（`paper_converter.rs:104-157`）；消费侧分两路——Agent 工具 `import-paper.ts:88,104` 按 `pdf_path` 过滤事件，论文库页面则靠**串行队列**逐篇转换（`pages/papers/index.tsx:1096`）天然不串台
 - **slug 即目录名**：优先 citekey，重名/变更会影响 `{appData}/papers-converter/{slug}/` 与云端产物对应关系
 - **References 噪声**：分块器只认第一个 References 标题（`pipeline.rs:412-421`），变体拼写（如 "REFERENCES"、Bibliography）的覆盖以分块器正则为准
-- **退化检测阈值勿放宽**：`utils/degenerate.ts:18-21` 的注释明言——阈值是事故回归出来的，放宽会让坏解析静默入库
+- **退化检测阈值勿放宽**：四阈值在 `utils/degenerate.ts:18-21`；阈值是事故回归出来的（`docs/papers-converter-integration.md:62`），放宽会让坏解析静默入库
 - **换引擎重试链**：severe QC 命中后由 converter 侧自动换引擎重试；前端只消费 `incomplete:true` + `qc_warnings` 打标并 toast 提示（`pages/papers/index.tsx:1017-1019`），不要在应用侧重造重试逻辑
 
 ## 11. 附：两条管线对照

@@ -56,7 +56,7 @@
 
 ### Push（`run_sync`，`engine.rs:1103-1260`）
 
-确保云端目录 → **每轮必登记 devices.json**（含纯拉取轮，:1120-1122）→ 首次 `bootstrapped_at` 全量回填 11 张表现存行（含回收站行，:829-845,1124-1131）→ `pack_changes` → gzip PUT → 写 `devices/{self}.json` 指针 → 本地日志修剪（保留 `last_pushed_seq - 100`，:860-869）→ 云端修剪（所有设备已消费 ∧ 非最近 5 个，或超最近 50 个兜底，:871-942）→ **立即持久化水位**（防 pull 失败回退，:1165-1166）→ 书籍文件/资产自动上传（静默 warn）。
+确保云端目录 → **每轮必登记 devices.json**（`run_sync` 内 :1120-1122；纯拉取轮在 `run_pull_only` :1268-1271）→ 首次 `bootstrapped_at` 全量回填 11 张表现存行（含回收站行，:829-845,1124-1131）→ `pack_changes` → gzip PUT → 写 `devices/{self}.json` 指针 → 本地日志修剪（保留 `last_pushed_seq - 100`，:860-869）→ 云端修剪（所有设备已消费 ∧ 非最近 5 个，或超最近 50 个兜底，:871-942）→ **立即持久化水位**（防 pull 失败回退，:1165-1166）→ 书籍文件/资产自动上传（静默 warn）。
 
 ### Pull（`pull_from_devices`，`engine.rs:947-1101`）
 
@@ -99,7 +99,7 @@ bettersageread/
     └── asset-bundles-index.json                  # 捆索引（backup.rs:21-29）
 ```
 
-设备标识：`device_id` = 每安装实例 UUID，首次同步生成、持久化于 `sync-state.json`（不进备份，`engine.rs:99-107`，`models.rs:133-135`）；设置页显示前 8 位（`settings/sync.tsx:672`）。
+设备标识：`device_id` = 每安装实例 UUID，首次同步生成、持久化于 `sync-state.json`（`engine.rs:99-107`，`models.rs:133-135`）；sync-state.json 经 `CONFIG_JSON_EXCLUDES` 排除、不进备份（`models.rs:103-108`）；设置页显示前 8 位（`settings/sync.tsx:672`）。
 
 ## 4. 限流与退避
 
@@ -123,7 +123,7 @@ bettersageread/
 
 ## 6. 文档与代码不一致清单（排雷）
 
-1. **云端根目录改名**：两份同步文档通篇 `sageread/...`，代码为 `bettersageread/...`；旧目录为 `bettersageread-sync`/`-backups`（不再是文档说的 `sageread-sync`）
+1. **云端根目录改名**：两份同步文档通篇 `sageread/...`，代码为 `bettersageread/...`；旧目录为 `bettersageread-sync`/`-backups`（不再是文档说的 `sageread-sync`）。代码注释也有残留：`models.rs:60` 仍写"v2 大包资产清单"、`models.rs:155` 仍写 `sageread/{sync,backups}`
 2. **`sync.json` 全局信息文件不存在**：`docs/sync-protocol.md:23` 设计了它，代码从未读写；全局信息实际只有 `devices.json`
 3. **Changeset 是 gzip 不是裸 JSONL**：文档 §5 未提压缩；实现见 `changelog.rs:216-223`
 4. **覆盖表 8 → 11 张**：文档 §4 无 `folders`/`paper_folders`/`prompt_presets`；`engine.rs:825` 注释仍写"7 张"——注释与文档都过时，以 `tables.rs` 注册表为准
@@ -144,12 +144,12 @@ bettersageread/
 - 25s 推送轮询 / 30s 拉取兜底 / 退出前推送 5s 超时
 - 备份默认保留 10 份（`models.rs:11-13`）
 - L1 写 sync-state 时保留已有 L2 水位字段（`backup.rs:88-98`，有回归测试）
-- `paper_folders` 复合主键行 `paper_id:folder_id` 曾有"全列加前缀"的 bug，现有回归测试（`database.rs:422` 注释记录了修复）
+- `paper_folders` 复合主键行 `paper_id:folder_id` 的触发器曾有"**只给首列加前缀**"的 bug（`NEW.paper_id || ':' || folder_id` 中裸 `folder_id` 报 no such column；`database.rs:409-411` 注释记录了修复——正确写法是两列都加前缀）；现存回归测试 `test_apply_paper_folders_lands_in_right_table`（`engine.rs:1568`）守护的是另一个 paper_folders 错派 bug
 
 ## 8. L1 与 L2 的互操作
 
 - 两者共享 `webdav-config.json` 与 `webdav.rs` 客户端，但目录、格式、调度完全独立，可分别开关
-- `sync-state.json` **不进备份**（设备 ID 每安装实例唯一，`engine.rs:99-107`）；L1 备份写完 sync-state 时会保留已有 L2 水位字段
+- `sync-state.json` **不进备份**（排除清单 `models.rs:103-108`；设备 ID 每安装实例唯一，`engine.rs:99-107`）；L1 备份写完 sync-state 时会保留已有 L2 水位字段
 - L2 应用 changeset 前的安全快照在 `{config}/sync-staging/l2-safety/`（留 3 份，`engine.rs:220-246`），回滚入口为命令 `sync_rollback_l2` + 设置页按钮；L1 恢复前的整机备份在 `restore-backup-{ts}/`（`restore.rs:261-309`）
 - 书籍文件传输走 L2 的 `files/` 通道（sha256 前 2 位分片寻址，`files.rs:20-27,74-77`）；MARKDOWN 论文是**整目录 zip 捆**（`files.rs:163-207`），图片随捆走
 - 修剪水位靠互认：每轮把自己对各设备的应用水位发布到 `devices/{self}.json` 的 `pulled` 字段，供他端修剪云端 changesets（`engine.rs:1083-1094`）

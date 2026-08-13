@@ -36,7 +36,7 @@
   - manageNotes create/update 恒确认（:214-243）
   - manageSkill/manageThreads 的 delete 恒确认（:247-274）
   - importPaper（:278-304）、processPaper reparse（:308-335）
-- 机制：`allowOutside`/`rootOverride` **不进模型 schema**，由守卫在确认通过后注入（`tool-guard.ts:349-375`）；界内/界外判定走 Rust `agent_resolve_path`（canonicalize + 根前缀，`core/agent_ws/commands.rs:69-77`，守卫唯一实现处 `agent_ws/mod.rs:6-9`）
+- 机制：`allowOutside`/`rootOverride` **不进模型 schema**，由守卫在确认通过后注入（`tool-guard.ts:349-375`）；界内/界外判定走 Rust `agent_resolve_path`（canonicalize + 根前缀，`core/agent_ws/commands.rs:69-77`，守卫实现在 `agent_ws/mod.rs:104-115`，:6-9 模块注释标明它是唯一实现处）
 - **确认卡 UI**：`components/side-chat/agent-confirm-card.tsx:11`（队列式逐张处理，"本次会话不再询问此项"复选框 :39-42）；确认桥为 `store/agent-confirm-store.ts` 队列，挂起等待在 `tool-guard.ts:79-102`。三处挂载点：全局助手 `pages/chat/index.tsx:388`、阅读侧边栏 `components/side-chat/index.tsx:261`、论文面板 `pages/papers/paper-chat-panel.tsx:395`
 
 ## 3. 滚动摘要压缩（上下文活塞）
@@ -62,7 +62,7 @@
 - 远程：自研 `StreamableHttpMcpTransport` 与 `SseLegacyMcpTransport`（`ai/mcp/mcp-transport.ts`）；连接管理器 `ai/mcp/mcp-manager.ts`（`getMcpToolsForScope` :154-210；10s 超时、失败降级进 failures 不阻塞本条消息；生命周期跟随单次请求）。B1 结论写在模块头（:5-13）：`experimental_createMCPClient` 直接从 `ai` 包导出，**无需 `@ai-sdk/mcp`**；统一走 @tauri-apps/plugin-http 绕 CORS
 - stdio：Rust 子进程桥 `core/mcp/mod.rs`（命令 `mcp_stdio_start/write/close`，stdout 逐行 emit `mcp-stdio://{session_id}`，stderr 进审计日志且脱敏；Windows `cmd /C` 包裹 + CREATE_NO_WINDOW + Job Object 防孤儿 + taskkill 树杀，:1-11,89-97）；前端 `ai/mcp/tauri-stdio-transport.ts`；首次启动有确认卡 `confirmStdioLaunch`（`mcp-manager.ts:100-113`，strict/relaxed 确认、full 静默）
 
-**配置模型**：`store/mcp-store.ts:7-25`（McpServerV2：transport stdio/http/sse、command/args/env、url/headers、scope 数组、enabled、source/registryName），persist version 2 迁移在 :69-90（v1 scope 单值→集合）。
+**配置模型**：`store/mcp-store.ts:7-25`（`McpServer`：transport stdio/http/sse、command/args/env、url/headers、scope 数组、enabled、source/registryName），persist version 2 迁移在 :69-90（v1 scope 单值→集合）。
 
 **市场一键安装**：数据源官方 Registry `https://registry.modelcontextprotocol.io/v0/servers`（`services/mcp-registry-service.ts:14,87-123`，tauriFetch 绕 CORS，按 official+isLatest 去重）；映射 `buildInstallPrefill`（:172-234）：streamable-http→http+url、npm→stdio+npx、pypi→uvx、oci 标不支持；`isSecret` 的 env 预填 `{{secret:NAME}}`。UI `pages/skills/tabs/mcp-market-dialog.tsx`（安装=预填回表单，用户确认后落 mcp-store）。注意 Registry 字段实测为 camelCase（`registryType`/`environmentVariables`/`isSecret`），仅顶层 `environment_variables` 保留 snake（`mcp-registry-service.ts:7-10,62`）——与 ecosystem-plan 文档口径不同。
 
@@ -110,7 +110,7 @@
 
 **模型层**（`ai/providers/factory.ts`）：
 
-- 支持的 provider：openai / deepseek / google / openrouter / openai-compatible；全部经 `@tauri-apps/plugin-http` 的 fetch 发出，绕开 WebView 的 CORS
+- 支持的 provider：openai / deepseek / google / anthropic / grok / openrouter / openai-compatible（预置清单 11 家，`constants/predefined-providers.ts`，zhipu/kimi 等落 openai-compatible 分支）。**fetch 走向分两路**：anthropic 与 openai-compatible（default 分支）传 `fetch: fetchTauri`，走 Rust 网络栈绕 CORS、跟随应用级代理；openai/deepseek/google/grok/openrouter 走 AI SDK 默认的 WebView fetch（跟随系统代理，不过应用代理）
 - 思考强度：`reasoning-map.ts` 按端点/模型分档生成请求体补丁（`chatReasoningBodyPatch`），聊天模型按用户档位动态下发；摘要压缩、术语表抽取等轻量任务走辅助模型实例（`createUtilityModelInstance`）并尽量关闭思考
 - 密钥运行时加载：前端仅经 `secret_get_for_runtime` 把 key 载入内存发请求，zustand `partialize` 保证不落盘（`services/secret-init.ts:16`）
 
@@ -144,5 +144,5 @@
 3. `@ai-sdk/mcp` 依赖：文档预判要新增，实际无需（`mcp-manager.ts:5-8`）
 4. 上下文窗口参数过时：roadmap P3 写 `RECENT_MESSAGE_FLOOR=40`、无泄压线；现为双水位 256k/128k + floor=10（`message-selector.ts:5-12`）
 5. `skills.scope` 两处缺省口径不一：DB 迁移默认 `'both'`（`database.rs:120`），而模型 `from_db_row` 的 fallback 是 `"reader,central"`（`skills/models.rs:65`）——旧值体系残留
-6. roadmap P1.5 "central 26→17" 是当时快照；现静态注册表 central 为 21 个
+6. roadmap P1.5 "central 26→17" 是当时快照；现静态注册表 central 为 22 个
 7. 一致项抽验（无出入）：三档命名、`{{secret:NAME}}` 正则（Rust `secrets/mod.rs:106` 与前端 `skill-import-service.ts:155` 一致）、迁移标记 `secretsMigratedTo:keyring`、审计脱敏模式清单、确认卡三挂载点、I2 双端点与 token 模型
