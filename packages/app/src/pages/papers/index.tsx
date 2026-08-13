@@ -3,6 +3,13 @@ import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -58,6 +65,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
+import { openPath } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
 import {
   ArrowDownWideNarrow,
@@ -1255,6 +1263,21 @@ export default function PapersPage() {
     }
   };
 
+  /** 打开论文数据目录（{appData}/books/{id}——paper.md/源 PDF/图片都在这里），与图书卡片同款 */
+  const handleOpenPaperFolder = async (paper: BookWithStatus) => {
+    try {
+      const dir = await join(await appDataDir(), "books", paper.id);
+      if (!(await exists(dir))) {
+        toast.error("文件夹不存在（可能已被清理）");
+        return;
+      }
+      await openPath(dir);
+    } catch (error) {
+      console.error("打开文件夹失败:", error);
+      toast.error("打开文件夹失败");
+    }
+  };
+
   // ---- 批量管理 ----
   /** 选中集合对应的论文（按列表顺序；过滤掉已不在库的幽灵 id） */
   const selectedPapers = useMemo(() => papers.filter((p) => selectedIds.has(p.id)), [papers, selectedIds]);
@@ -2018,19 +2041,20 @@ export default function PapersPage() {
                   const displayTitle = metaLang === "zh" ? meta?.title_zh || paper.title : paper.title;
                   const displayAbstract = metaLang === "zh" ? meta?.abstract_zh || meta?.abstract : meta?.abstract;
                   return (
-                    <div
-                      key={paper.id}
-                      role="button"
-                      tabIndex={0}
-                      className="group flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
-                      onClick={() => handleOpen(paper)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          handleOpen(paper);
-                        }
-                      }}
-                    >
+                    <ContextMenu key={paper.id}>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className="group flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
+                          onClick={() => handleOpen(paper)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleOpen(paper);
+                            }
+                          }}
+                        >
                       {/* 多选 checkbox：仅管理模式出现；点击不触发行打开 */}
                       {manageMode && (
                         <div
@@ -2070,113 +2094,58 @@ export default function PapersPage() {
                         )}
                       </div>
 
-                      {/* 右侧两行纵向：上行 打星/状态徽标/向量化圆环，分隔线，下行 动作（向量化/移动/删除） */}
+                      {/* 右侧两行纵向：上行仅打星（重要度），下行状态徽标（向量化圆环/云端/阅读状态）；
+                          动作（向量化/翻译/重新解析/移动/打开文件夹/删除）全部收进卡片右键菜单 */}
                       <div className="flex shrink-0 flex-col items-end gap-1.5">
                         <div className="flex items-center gap-1.5">
-                          <PaperCloudBadge paper={paper} />
                           <PaperStars
                             rating={paper.status?.rating ?? 0}
                             onRate={(rating) => handleRate(paper, rating)}
                           />
-                          <PaperStatusBadge status={paper.status} />
-                          <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
                         </div>
-                        <div className="h-px w-full bg-neutral-200 dark:bg-neutral-700" />
-                        <div className="flex items-center gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={vectorizePercent != null}
-                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleVectorize(paper);
-                                }}
-                              >
-                                {vectorizePercent != null ? (
-                                  <Loader2 className="size-4 animate-spin" />
-                                ) : (
-                                  <Sparkles className="size-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">{isVectorized ? "重新向量化" : "向量化"}</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={batchLocked}
-                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleBatchTranslate([paper]);
-                                }}
-                              >
-                                <Languages className="size-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">翻译</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={batchLocked}
-                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleBatchReparse([paper]);
-                                }}
-                              >
-                                <RefreshCw className="size-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">重新解析（用源 PDF 重走解析管线）</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-7 text-neutral-400 hover:text-primary dark:text-neutral-500"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openMoveDialog(paper);
-                                }}
-                              >
-                                <FolderPen className="size-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">移动到…</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-7 text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleTrash(paper);
-                                }}
-                              >
-                                <Trash2 className="size-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">移到回收站</TooltipContent>
-                          </Tooltip>
+                        <div className="flex items-center gap-1.5">
+                          <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
+                          <PaperCloudBadge paper={paper} />
+                          <PaperStatusBadge status={paper.status} />
                         </div>
                       </div>
-                    </div>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem
+                          disabled={vectorizePercent != null}
+                          onClick={() => void handleVectorize(paper)}
+                        >
+                          {vectorizePercent != null ? (
+                            <Loader2 className="mr-2 size-4 animate-spin" />
+                          ) : (
+                            <Sparkles className="mr-2 size-4" />
+                          )}
+                          {isVectorized ? "重新向量化" : "向量化"}
+                        </ContextMenuItem>
+                        <ContextMenuItem disabled={batchLocked} onClick={() => void handleBatchTranslate([paper])}>
+                          <Languages className="mr-2 size-4" />
+                          翻译
+                        </ContextMenuItem>
+                        <ContextMenuItem disabled={batchLocked} onClick={() => void handleBatchReparse([paper])}>
+                          <RefreshCw className="mr-2 size-4" />
+                          重新解析
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => openMoveDialog(paper)}>
+                          <FolderPen className="mr-2 size-4" />
+                          移动到…
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => void handleOpenPaperFolder(paper)}>
+                          <FolderOpen className="mr-2 size-4" />
+                          打开文件夹
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem variant="destructive" onClick={() => void handleTrash(paper)}>
+                          <Trash2 className="mr-2 size-4" />
+                          移到回收站
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </div>
