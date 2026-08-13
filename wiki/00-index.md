@@ -50,7 +50,7 @@ SageRead/
 │   └── foliate-js/     # EPUB 渲染内核（johnfactotum/foliate-js 的 vendored fork）
 ├── scripts/            # 开发辅助脚本：15 个 test-*.mjs、62 个 cdp-*.mjs 等
 ├── docs/               # 23 篇设计/演进文档（见下"文档地图"）
-├── fixtures/papers/    # 测试用样例论文（如 zhao2020rational）
+├── fixtures/papers/    # 测试用样例论文（akter2026atscale，CC-BY 开放获取论文的真实管线产物）
 ├── assets/             # README 截图
 ├── package.json        # 根脚本入口（dev/build/...）
 └── biome.json          # 统一代码风格（行宽 120、双引号、Tailwind 类排序）

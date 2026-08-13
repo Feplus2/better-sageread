@@ -3,10 +3,13 @@
 // 验证：sidecar spawn → 事件流 → done → scan_papers_dir 产物可入库（不入库，只读）
 // 运行：node scripts/cdp-test-paper-vlm-reparse.mjs（需 dev 实例以 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 启动）
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LIST_URL = "http://127.0.0.1:9223/json/list";
-// zhao2020 订阅版（带期刊封面）：最能检验封面切除 + VLM 强OCR + 图组重裁
-const PDF = String.raw`F:\MyProjects\zotero-brain\parsed\26NNZJHX\26NNZJHX.pdf`;
+// 仓库内 OA fixture（CC-BY，akter2026atscale）：检验 VLM 强OCR + 图组重裁；
+// 要检验封面切除请自行换一篇带期刊封面的订阅版 PDF（不入库，版权原因）
+const PDF = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures/papers/akter2026atscale/source.pdf");
 
 function loadEnv(path) {
   const env = {};

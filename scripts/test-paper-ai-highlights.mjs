@@ -1,6 +1,6 @@
 // C2「AI 重点标亮」quote → 锚点换算链路实测：
 // esbuild 打包 paper-highlight-locator（纯函数核心）+ paper-anchors + paper-sentences + markdown-sections，
-// 对 fixtures/papers/zhao2020rational/paper.md 构造真实 quote 验证 匹配 + 句吸附 + 锚点序列化。
+// 对 fixtures/papers/akter2026atscale/paper.md 构造真实 quote 验证 匹配 + 句吸附 + 锚点序列化。
 // 运行：node scripts/test-paper-ai-highlights.mjs
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +63,7 @@ function deriveBlockTexts(body) {
     .filter(Boolean);
 }
 
-const markdown = readFileSync(join(root, "fixtures/papers/zhao2020rational/paper.md"), "utf8");
+const markdown = readFileSync(join(root, "fixtures/papers/akter2026atscale/paper.md"), "utf8");
 const { body } = parsePaperSections(markdown);
 const blockTexts = deriveBlockTexts(body);
 console.log(`blocks: ${blockTexts.length}, body chars: ${body.length}`);
@@ -94,7 +94,7 @@ function locate(quote) {
 }
 
 const SENTENCE_A =
-  "However, effective guidelines towards the design and preparation of optimal electrode materials are lacking.";
+  "All-inorganic materials represent the most mature and practical choice as CAMs for next-generation SIBs; however, their family spans a vast and chemically diverse space.";
 
 check("普通整句：命中且吸附为原句本身", () => {
   const hit = locate(SENTENCE_A);
@@ -103,14 +103,14 @@ check("普通整句：命中且吸附为原句本身", () => {
 });
 
 check("句中片段：吸附扩展为完整句", () => {
-  const hit = locate("guidelines towards the design and preparation of optimal electrode materials");
+  const hit = locate("the most mature and practical choice as CAMs for next-generation SIBs");
   assert(hit, "未命中");
   assert(hit.slice === SENTENCE_A, `应吸附为整句：${JSON.stringify(hit.slice)}`);
 });
 
 check("空白变形（换行/多余空格）仍可命中", () => {
   const mangled =
-    "However, effective guidelines towards the design\nand preparation of optimal electrode   materials are lacking.";
+    "All-inorganic materials represent the most mature and practical choice as CAMs for\nnext-generation SIBs;  however, their family spans a vast and chemically diverse space.";
   const hit = locate(mangled);
   assert(hit, "未命中");
   assert(hit.slice === SENTENCE_A, `吸附结果不符：${JSON.stringify(hit.slice)}`);
@@ -118,7 +118,7 @@ check("空白变形（换行/多余空格）仍可命中", () => {
 
 check("带 Markdown 粗体标记的 quote：去标记后命中", () => {
   const hit = locate(
-    "However, **effective guidelines** towards the design and preparation of optimal electrode materials are lacking.",
+    "All-inorganic materials represent the most mature and practical choice as **CAMs** for next-generation SIBs; however, their family spans a vast and chemically diverse space.",
   );
   assert(hit, "未命中");
   assert(hit.slice === SENTENCE_A, `吸附结果不符：${JSON.stringify(hit.slice)}`);
@@ -126,7 +126,7 @@ check("带 Markdown 粗体标记的 quote：去标记后命中", () => {
 
 check("双句 quote：吸附覆盖两句整句", () => {
   const first =
-    "In search for electrodes with good chemical/dynamic stability and high Na storage performance, various P2- and O3-type Na-ion layered oxides have been synthesized and investigated(9, 10).";
+    "The development of high-voltage SIBs heavily relies on the discovery of novel, robust cathode-active materials (CAMs).";
   const hit = locate(`${first} ${SENTENCE_A}`);
   assert(hit, "未命中");
   assert(hit.slice === `${first} ${SENTENCE_A}`, `吸附结果不符：${JSON.stringify(hit.slice)}`);
@@ -144,7 +144,7 @@ check("不存在的 quote → null（丢弃计数路径）", () => {
 
 check("含 $...$ 数学的 quote → null（已知限制：KaTeX 渲染后 raw tex 不在 textContent）", () => {
   const withMath =
-    "Li-ion layered oxides, with the general formula $\\mathrm{LiTMO}_2$ , have represented the dominant family of electrode materials for Li-ion batteries since 1980(4).";
+    "Second, the $Na^{+}$ ion has a larger ionic radius (1.02 Å) compared to that of the $Li^{+}$ (0.76 Å), causing larger volume changes during charge and discharge cycles, resulting in possible deterioration of the structural stability.";
   assert(locate(withMath) === null, "应返回 null（数学 quote 走丢弃计数）");
 });
 
@@ -173,7 +173,7 @@ check("锚点序列化/解析 roundtrip（cfi JSON 形态）", () => {
 
 check("短 quote 也能定位（结论句）", () => {
   const quote =
-    "The cationic potential correctly predicts the stacking structure for these cases, providing a guideline for the development of Na-ion layered oxides.";
+    "Despite these advances, the current workflow is limited to screening existing materials.";
   const hit = locate(quote);
   assert(hit, "未命中");
   assert(hit.slice === quote, `吸附结果不符：${JSON.stringify(hit.slice)}`);
@@ -189,13 +189,15 @@ check("宽松层：quote 末尾缺句号仍命中（严格层失配走标点归�
 
 check("宽松层：弯引号/括号替换为直引号仍命中", () => {
   const hit = locate(
-    "In search for electrodes with good chemical/dynamic stability and high Na storage performance, various P2- and O3-type Na-ion layered oxides have been synthesized and investigated ‘9, 10’.",
+    "The development of high-voltage SIBs heavily relies on the discovery of novel, robust cathode-active materials ‘CAMs’.",
   );
   assert(hit, "未命中（标点变体应经宽松层命中）");
 });
 
-check("宽松层：逗号/句号全缺失的纯词串仍命中", () => {
-  const hit = locate("effective guidelines towards the design and preparation of optimal electrode materials are lacking");
+check("宽松层：标点错位（分号→逗号、逗号缺失）仍命中", () => {
+  // 源文是 "…next-generation SIBs; however, their family…"——quote 把分号换成逗号、删掉原逗号，
+  // 严格层失配后走宽松层（两侧去标点）命中；quote 含标点保证 relaxNeedle ≠ needle
+  const hit = locate("as CAMs for next-generation SIBs, however their family spans a vast and chemically diverse space");
   assert(hit, "未命中");
   assert(hit.slice === SENTENCE_A, `应吸附为整句：${JSON.stringify(hit.slice)}`);
 });

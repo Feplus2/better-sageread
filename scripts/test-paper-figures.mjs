@@ -1,5 +1,5 @@
 // 图表速跳提取器（extractPaperFigures）实测：对三种真实产物跑提取并打印清单 + 基本不变量。
-//   ① 旧格式 fixture（空 alt 碎图组图注同段）  ② MinerU VLM + figure_merger  ③ pipeline 新
+//   ① 仓库 fixture（akter2026atscale，MinerU VLM 产物）  ② MinerU VLM + figure_merger  ③ pipeline 新
 // 不变量：块索引单调递增且不越界（< cutPaperBlocks 块数）；图/表编号各自递增（无重复编号）。
 // 运行：node scripts/test-paper-figures.mjs
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -32,7 +32,7 @@ globalThis.DOMParser = dom.window.DOMParser;
 const { extractPaperFigures, cutPaperBlocks } = await import(pathToFileURL(outfile).href);
 
 const targets = [
-  ["旧格式 fixture", join(root, "fixtures/papers/zhao2020rational/paper.md")],
+  ["仓库 fixture akter2026atscale", join(root, "fixtures/papers/akter2026atscale/paper.md")],
   ["VLM+合并 he2024review", "F:/MyProjects/Papers_Converter/.tmp-merge-test/he2024review/paper.md"],
   ["pipeline 新 he2024", join(root, ".tmp-pipeline-ab/he2024-pipeline新/paper.md")],
 ];

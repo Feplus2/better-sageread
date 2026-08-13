@@ -52,7 +52,7 @@ eq(
   "as follows\n\n$$\n\\mathrm{NaFeO}_{2} \\tag{1}\n$$\n\nwhere the open square",
 );
 
-// 3) 尾编号在公式内（多行围栏变体，zhao2020 形态）→ \tag
+// 3) 尾编号在公式内（多行围栏变体，文献常见形态）→ \tag
 eq(
   "多行围栏尾编号提 tag",
   normalizeDisplayMath("text\n\n$$\n\\Phi_{cation} = \\frac{a}{b} (1)\n$$\n\nnext"),

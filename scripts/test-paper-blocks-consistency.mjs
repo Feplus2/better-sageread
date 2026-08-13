@@ -1,5 +1,5 @@
 // 切块器 ↔ 渲染器一致性测试（翻译管线工程不变量）：
-// react-dom/server 用与 PaperReader 相同的 remark/rehype 链渲染 fixture（zhao2020rational/paper.md），
+// react-dom/server 用与 PaperReader 相同的 remark/rehype 链渲染 fixture（akter2026atscale/paper.md），
 // jsdom 中跑 listBlocks 枚举，与 cutPaperBlocks 输出逐块比对（数量一致、文本归一化后相等）；
 // 再验证译文/对照重建产物的锚点安全性（块枚举不漂移、译文 div 被排除）。
 // 运行：node scripts/test-paper-blocks-consistency.mjs
@@ -87,7 +87,7 @@ function enumerateDomBlocks(markdown) {
   return listBlocks(container);
 }
 
-const fixturePath = join(root, "fixtures/papers/zhao2020rational/paper.md");
+const fixturePath = join(root, "fixtures/papers/akter2026atscale/paper.md");
 const markdown = (await readFile(fixturePath, "utf8")).replace(/\r\n?/g, "\n");
 const cutterBlocks = cutPaperBlocks(markdown);
 const domBlocks = enumerateDomBlocks(markdown);
