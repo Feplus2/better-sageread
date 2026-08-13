@@ -324,7 +324,7 @@ export class FoliateViewerManager {
               bookId: this.config.bookId,
               viewSettings: this.config.globalViewSettings,
               content: data,
-              transformers: ["punctuation", "footnote"],
+              transformers: ["rawmath", "punctuation", "footnote"],
             };
             return Promise.resolve(transformContent(ctx));
           }
