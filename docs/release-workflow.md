@@ -92,9 +92,9 @@ https://github.com/Feplus2/better-sageread/releases
 
 选择适合你系统的版本：
 
-- **macOS Apple Silicon (M 系列)**: `Better.SageRead_x.x.x_aarch64.dmg`
-- **macOS Intel**: `Better.SageRead_x.x.x_x64.dmg`
-- **Windows**: `Better.SageRead_x.x.x_x64-setup.exe`
+- **macOS Apple Silicon (M 系列)**: `Better SageRead_x.x.x_aarch64.dmg`
+- **macOS Intel**: `Better SageRead_x.x.x_x64.dmg`
+- **Windows**: `Better SageRead_x.x.x_x64-setup.exe`（NSIS）或 `Better SageRead_x.x.x_x64_en-US.msi`
 
 > ⚠️ **macOS 未签名**：本版本未用 Apple 开发者证书签名，首次打开会被 Gatekeeper 拦截。
 > 安装后在终端执行一次：`xattr -dr com.apple.quarantine "/Applications/Better SageRead.app"`
@@ -197,7 +197,7 @@ https://github.com/Feplus2/better-sageread/releases
 
 ## 本分支特有事项（2026-08-14 起）
 
-- **identifier 双形态**：仓库内 `tauri.conf.json` 是开发形态 `com.bettersageread.dev`；CI 的 "Sync version" 步骤会改写为发布形态 `com.bettersageread.app`。两个 identifier 的应用数据目录互相隔离（`%APPDATA%\com.bettersageread.dev\` vs `...\.app\`），本机 dev 实例与安装版互不影响。
+- **identifier 双形态**：仓库内 `tauri.conf.json` 是开发形态 `com.bettersageread.dev`；CI 的 "Sync version" 步骤会改写为发布形态 `com.bettersageread.app`。两个 identifier 的应用数据目录互相隔离（`%APPDATA%\com.bettersageread.dev\` vs `...\.app\`），本机 dev 实例与安装版互不影响。**防呆**：本机 `pnpm tauri build` 出的安装包带的是 dev identifier，会与开发实例共享数据目录——日用请装 CI 产物；若必须本机出包日用，构建前先临时把 identifier 改掉（照抄 CI 的 node 命令即可）。
 - **转换器 sidecar 已入库**：`books_converter`/`papers_converter`（各约 55-60MB，Windows x64）直接随 git 分发，Windows 构建开箱即有转换功能。**macOS 暂无转换器构建**：CI 在 mac 构建前会动态摘除这两条 externalBin（release.yml "Strip converter sidecars" 步骤），mac 版转换按钮会报错——属预期，待转换器仓（Papers_Converter / Books_Converter）开源并建 macOS release 后恢复。
 - **updater 密钥自有**：`tauri.conf.json` 的 pubkey 对应私钥在 `~/.tauri/better-sageread.key`（2026-08-14 生成，无密码）。**私钥文件丢了就永远失去自动更新能力**，请离线备份；同时把文件全文配进 GitHub Secrets 的 `TAURI_SIGNING_PRIVATE_KEY`。
 - **fixture 版权清理**：论文测试 fixture 已换成 CC-BY 开放获取论文（`fixtures/papers/akter2026atscale`，附署名 README）；旧 zhao2020rational（订阅期刊全文）已于 2026-08-14 用 git filter-repo 从全部历史中清除。**因此首次推送需要 `git push --force-with-lease origin local:main`**（历史已重写，与远端 main 不再连续）。
