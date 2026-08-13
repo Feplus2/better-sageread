@@ -46,6 +46,8 @@ pub struct ApplyOutcome {
     pub notes_changed: bool,
     /// 实际应用的 books 行数（B 端引导到达的可观测日志用）
     pub books_count: usize,
+    /// 本包内被对端彻底删除的 books id（调用方连带清理本地资产目录与向量分片，防孤儿残留）
+    pub deleted_book_ids: Vec<String>,
 }
 
 /// 设备指针文件 devices/<device_id>.json（各写各的，互不打架）
@@ -805,6 +807,12 @@ pub async fn apply_changeset(pool: &SqlitePool, bytes: &[u8]) -> Result<ApplyOut
             _ => {}
         }
     }
+    // 对端彻底删除的 books：收集 id 供调用方连带清理资产目录/向量分片
+    outcome.deleted_book_ids = applied
+        .iter()
+        .filter(|(t, _, op)| t == "books" && op == "DELETE")
+        .map(|(_, id, _)| id.clone())
+        .collect();
     outcome.book_status_ids.sort();
     outcome.book_status_ids.dedup();
     outcome.thread_ids.sort();
@@ -1026,6 +1034,21 @@ async fn pull_from_devices(
                 Ok(applied) => {
                     if applied.books_count > 0 {
                         log::info!("收到书籍元数据 {} 条", applied.books_count);
+                    }
+                    // 对端彻底删除的书籍：连带清理本地资产目录与向量分片（防孤儿目录/RAG 污染）
+                    if !applied.deleted_book_ids.is_empty() {
+                        if let Ok(data_dir) = app.path().app_data_dir() {
+                            for book_id in &applied.deleted_book_ids {
+                                let dir = data_dir.join("books").join(book_id);
+                                if dir.exists() {
+                                    if let Err(e) = std::fs::remove_dir_all(&dir) {
+                                        log::warn!("清理对端已删书籍目录失败 ({}): {}", book_id, e);
+                                    }
+                                }
+                                crate::core::books::commands::purge_paper_vectors_pub(&data_dir, book_id);
+                            }
+                        }
+                        outcome.deleted_book_ids.extend(applied.deleted_book_ids.iter().cloned());
                     }
                     outcome.count += applied.count;
                     outcome.book_status_ids.extend(applied.book_status_ids);

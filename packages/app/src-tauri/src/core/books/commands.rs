@@ -356,6 +356,11 @@ fn purge_paper_vectors(app_data_dir: &std::path::Path, paper_id: &str) {
     }
 }
 
+/// L2 对端彻底删除时的向量连带清理入口（sync engine 调用；内部幂等告警不阻塞）
+pub(crate) fn purge_paper_vectors_pub(app_data_dir: &std::path::Path, paper_id: &str) {
+    purge_paper_vectors(app_data_dir, paper_id);
+}
+
 fn purge_paper_vectors_inner(db_path: &std::path::Path, paper_id: &str) -> rusqlite::Result<()> {
     // 注册 sqlite-vec 扩展（chunk_embeddings 是 vec0 虚拟表，删除行需要扩展）
     unsafe {
