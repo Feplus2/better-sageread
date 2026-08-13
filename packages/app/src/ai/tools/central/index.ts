@@ -15,6 +15,7 @@ export { switchModelTool } from "./switch-model";
 export { manageThreadsTool } from "./manage-threads";
 export { importFontTool } from "./import-font";
 export { askAppHelpTool } from "./ask-app-help";
+export { searchDevDocsTool } from "./search-dev-docs";
 export { httpRequestTool } from "./http-request";
 export { downloadFileTool } from "./download-file";
 export { extractZipTool } from "./extract-zip";

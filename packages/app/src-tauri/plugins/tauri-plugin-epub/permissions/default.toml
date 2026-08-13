@@ -12,6 +12,8 @@ permissions = [
     "allow-get-chunks-by-range",
     "allow-prepare-manual-files",
     "allow-index-manual",
+    "allow-prepare-wiki-files",
+    "allow-index-wiki",
     "allow-index-paper",
     "allow-search-papers-db",
     "allow-get-paper-chunk-context",

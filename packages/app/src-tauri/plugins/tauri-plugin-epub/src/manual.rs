@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 /// 手册语料库在 books/ 下的保留目录名（即检索时的 book_id）
 pub const MANUAL_BOOK_DIR: &str = "__app_manual__";
-pub const MANUAL_TITLE: &str = "SageRead 使用手册";
-pub const MANUAL_AUTHOR: &str = "SageRead";
+pub const MANUAL_TITLE: &str = "Better SageRead 使用手册";
+pub const MANUAL_AUTHOR: &str = "Better SageRead";
 
 /// 一份手册文件：文件名 + 章节标题（检索时作为 related_chapter_titles 返回）+ 编译期嵌入内容
 pub struct ManualFile {
@@ -24,33 +24,43 @@ pub struct ManualFile {
 pub const MANUAL_FILES: &[ManualFile] = &[
     ManualFile {
         filename: "01-overview.md",
-        title: "总览与图书馆",
+        title: "总览与快速上手",
         content: include_str!("../resources/manual/01-overview.md"),
     },
     ManualFile {
-        filename: "02-reader.md",
-        title: "阅读器",
-        content: include_str!("../resources/manual/02-reader.md"),
+        filename: "02-library.md",
+        title: "图书馆与书籍阅读器",
+        content: include_str!("../resources/manual/02-library.md"),
     },
     ManualFile {
-        filename: "03-ai.md",
-        title: "AI 功能",
-        content: include_str!("../resources/manual/03-ai.md"),
+        filename: "03-papers.md",
+        title: "文献库与论文",
+        content: include_str!("../resources/manual/03-papers.md"),
     },
     ManualFile {
-        filename: "04-sync.md",
+        filename: "04-ai.md",
+        title: "AI 助手与 Agent",
+        content: include_str!("../resources/manual/04-ai.md"),
+    },
+    ManualFile {
+        filename: "05-sync.md",
         title: "备份与同步",
-        content: include_str!("../resources/manual/04-sync.md"),
+        content: include_str!("../resources/manual/05-sync.md"),
     },
     ManualFile {
-        filename: "05-appearance.md",
-        title: "外观与个性化",
-        content: include_str!("../resources/manual/05-appearance.md"),
+        filename: "06-appearance.md",
+        title: "外观、主题与个性化",
+        content: include_str!("../resources/manual/06-appearance.md"),
     },
     ManualFile {
-        filename: "06-faq.md",
-        title: "统计、PDF 转换与常见问题",
-        content: include_str!("../resources/manual/06-faq.md"),
+        filename: "07-converter.md",
+        title: "PDF 转换与 Zotero 导入",
+        content: include_str!("../resources/manual/07-converter.md"),
+    },
+    ManualFile {
+        filename: "08-faq.md",
+        title: "常见问题与故障排查",
+        content: include_str!("../resources/manual/08-faq.md"),
     },
 ];
 
@@ -71,11 +81,24 @@ pub fn manual_content_hash() -> String {
     format!("{hash:016x}")
 }
 
-/// 把手册原文落盘到 mdbook/（幂等：内容一致时跳过写入）
+/// 把手册原文落盘到 mdbook/（幂等：内容一致时跳过写入；顺带清掉已下线章节的历史残留文件，
+/// 否则关键词降级检索与手册页会把旧章节也读出来）
 /// 返回 mdbook 目录路径；索引构建与关键词降级检索都读这里的文件
 pub fn ensure_manual_files(app_data_dir: &Path) -> Result<PathBuf> {
     let mdbook_dir = manual_book_dir(app_data_dir).join("mdbook");
     fs::create_dir_all(&mdbook_dir).context("创建手册目录失败")?;
+
+    let current: std::collections::HashSet<&str> = MANUAL_FILES.iter().map(|f| f.filename).collect();
+    if let Ok(entries) = fs::read_dir(&mdbook_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if let Some(name) = name.to_str() {
+                if name.ends_with(".md") && !current.contains(name) {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
 
     for file in MANUAL_FILES {
         let path = mdbook_dir.join(file.filename);

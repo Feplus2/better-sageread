@@ -10,7 +10,7 @@ import { useTagsOperations } from "@/pages/library/hooks/use-tags-operations";
 import { getTrashedBooks } from "@/services/book-service";
 import { useLibraryStore } from "@/store/library-store";
 import clsx from "clsx";
-import { BarChart3, Brain, ChevronDown, ChevronRight, GraduationCap, Library, Lightbulb, Trash2 } from "lucide-react";
+import { BarChart3, Brain, ChevronDown, ChevronRight, CircleHelp, GraduationCap, Library, Lightbulb, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
@@ -132,6 +132,11 @@ export default function Sidebar() {
       path: "/statistics",
       label: "阅读统计",
       icon: BarChart3,
+    },
+    {
+      path: "/manual",
+      label: "使用手册",
+      icon: CircleHelp,
     },
   ];
 

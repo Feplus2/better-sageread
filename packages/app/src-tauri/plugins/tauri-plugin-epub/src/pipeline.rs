@@ -589,6 +589,9 @@ fn write_metadata_markdown(book_dir: &Path, epub_content: &EpubContent, flat_toc
 /// 与 process_epub_to_db 的区别：无 EPUB 解析/TOC，章节标题直接取手册文件名对应的章节名
 pub async fn process_manual_to_db<P: AsRef<Path>>(
     book_dir: P,
+    corpus_title: &str,
+    corpus_author: &str,
+    files: &[crate::manual::ManualFile],
     opts: ProcessOptions,
 ) -> Result<ProcessReport> {
     let book_dir = book_dir.as_ref();
@@ -598,7 +601,7 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
     let reader = EpubReader::new().context("初始化分片器失败")?;
 
     log::info!(
-        "初始化手册向量化器：embeddings_url={}, model_name={}",
+        "初始化语料向量化器：embeddings_url={}, model_name={}",
         opts.vectorizer.embeddings_url,
         opts.vectorizer.model_name
     );
@@ -632,10 +635,10 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
     let mut total_processed_chunks = 0;
     let mut batch: Vec<DocumentChunk> = Vec::new();
 
-    for file in crate::manual::MANUAL_FILES {
+    for file in files {
         let md_file_path = mdbook_dir.join(file.filename);
         if !md_file_path.exists() {
-            log::warn!("手册文件缺失（跳过）: {:?}", md_file_path);
+            log::warn!("语料文件缺失（跳过）: {:?}", md_file_path);
             continue;
         }
 
@@ -654,15 +657,15 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
             let embedding = match vectorizer.vectorize_text(&chunk_content).await {
                 Ok(emb) => emb,
                 Err(e) => {
-                    log::error!("手册分片向量化失败 ({}: {}): {}", file.filename, chunk_index, e);
+                    log::error!("语料分片向量化失败 ({}: {}): {}", file.filename, chunk_index, e);
                     continue;
                 }
             };
 
             batch.push(DocumentChunk {
                 id: None,
-                book_title: crate::manual::MANUAL_TITLE.to_string(),
-                book_author: crate::manual::MANUAL_AUTHOR.to_string(),
+                book_title: corpus_title.to_string(),
+                book_author: corpus_author.to_string(),
                 paper_id: String::new(), // per-book 库不使用 paper_id
                 md_file_path: absolute_md_path.clone(),
                 file_order_in_book: 0,
@@ -678,7 +681,7 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
 
             if batch.len() >= batch_size {
                 db.insert_chunks_batch(&batch)
-                    .map_err(|e| anyhow::anyhow!("手册分片入库失败: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("语料分片入库失败: {}", e))?;
                 total_processed_chunks += batch.len();
                 batch.clear();
             }
@@ -687,16 +690,16 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
 
     if !batch.is_empty() {
         db.insert_chunks_batch(&batch)
-            .map_err(|e| anyhow::anyhow!("手册分片入库失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("语料分片入库失败: {}", e))?;
         total_processed_chunks += batch.len();
     }
 
-    log::info!("手册索引完成：{} 个分片", total_processed_chunks);
+    log::info!("语料索引完成：{} 个分片", total_processed_chunks);
 
     Ok(ProcessReport {
         db_path,
-        book_title: crate::manual::MANUAL_TITLE.to_string(),
-        book_author: crate::manual::MANUAL_AUTHOR.to_string(),
+        book_title: corpus_title.to_string(),
+        book_author: corpus_author.to_string(),
         total_chunks: total_processed_chunks,
         vector_dimension: actual_dimension,
     })

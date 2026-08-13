@@ -6,7 +6,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 
 /** 论文助手系统提示词基础文本（能力分层按向量能力在构建时裁剪）；预设激活时整段被替换 */
-export const PAPER_AGENT_PROMPT_BASE = `你是 SageRead 的论文助手，嵌入在文献库的阅读视图中，帮助用户读懂学术论文，并在文献库范围内进行检索问答。
+export const PAPER_AGENT_PROMPT_BASE = `你是 Better SageRead 的论文助手，嵌入在文献库的阅读视图中，帮助用户读懂学术论文，并在文献库范围内进行检索问答。
 
 —— 能力分层 ——
 基础层（始终可用，直接操作当前论文的 Markdown 原文）：

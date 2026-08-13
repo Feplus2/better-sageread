@@ -32,6 +32,7 @@ import {
   processPaperTool,
   readLocalFileTool,
   runCommandTool,
+  searchDevDocsTool,
   searchFilesTool,
   switchModelTool,
   trashManagerTool,
@@ -182,7 +183,7 @@ registerTools([
     name: "askAppHelp",
     scope: "shared",
     tool: askAppHelpTool as CoreTool,
-    description: "SageRead 使用帮助问答（检索内置使用手册）",
+    description: "Better SageRead 使用帮助问答（检索内置使用手册）",
   },
 ]);
 
@@ -218,6 +219,12 @@ registerTools([
     scope: "central",
     tool: manageSyncTool as CoreTool,
     description: "备份与同步（立即备份/备份列表/恢复/立即同步/同步偏好）",
+  },
+  {
+    name: "searchDevDocs",
+    scope: "central",
+    tool: searchDevDocsTool as CoreTool,
+    description: "检索开发者 wiki（架构/数据模型/同步协议/Agent 系统/解析管线实现细节）",
   },
   {
     name: "vectorizeBook",

@@ -378,6 +378,73 @@ impl From<DocumentChunk> for DocumentChunkDto {
     }
 }
 
+/* ---------------- 开发者 wiki 语料库（全局助手 searchDevDocs 用） ---------------- */
+
+/// 把 wiki 原文落盘到 {app_data}/books/__repo_wiki__/mdbook/（幂等），返回目录路径。
+#[tauri::command]
+pub async fn prepare_wiki_files<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+) -> Result<String, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::wiki::ensure_wiki_files(&app_data_dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 构建/更新 wiki 向量索引（内容哈希不变且非 force 时跳过，返回 up-to-date）
+#[tauri::command]
+pub async fn index_wiki<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    embeddings_url: String,
+    model: String,
+    api_key: Option<String>,
+    force: Option<bool>,
+) -> Result<IndexResult, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
+    crate::wiki::ensure_wiki_files(&app_data_dir).map_err(|e| e.to_string())?;
+
+    let current_hash = crate::wiki::wiki_content_hash();
+    let db_exists = crate::wiki::wiki_book_dir(&app_data_dir)
+        .join("vectors.sqlite")
+        .exists();
+    let up_to_date = db_exists && crate::wiki::read_indexed_hash(&app_data_dir).as_deref() == Some(&current_hash);
+
+    if up_to_date && !force.unwrap_or(false) {
+        return Ok(IndexResult {
+            success: true,
+            message: "up-to-date".into(),
+            report: None,
+        });
+    }
+
+    let report = process_manual_to_db(
+        crate::wiki::wiki_book_dir(&app_data_dir),
+        crate::wiki::WIKI_TITLE,
+        crate::wiki::WIKI_AUTHOR,
+        crate::wiki::WIKI_FILES,
+        ProcessOptions {
+            batch_size: None,
+            vectorizer: VectorizerConfig {
+                embeddings_url,
+                model_name: model,
+                api_key,
+            },
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    crate::wiki::write_indexed_hash(&app_data_dir, &current_hash).map_err(|e| e.to_string())?;
+
+    Ok(IndexResult {
+        success: true,
+        message: "indexed".into(),
+        report: Some(report.into()),
+    })
+}
+
 /* ---------------- 内置使用手册语料库 ---------------- */
 
 /// 把手册原文落盘到 {app_data}/books/__app_manual__/mdbook/（幂等），返回目录路径。
@@ -423,6 +490,9 @@ pub async fn index_manual<R: Runtime>(
 
     let report = process_manual_to_db(
         crate::manual::manual_book_dir(&app_data_dir),
+        crate::manual::MANUAL_TITLE,
+        crate::manual::MANUAL_AUTHOR,
+        crate::manual::MANUAL_FILES,
         ProcessOptions {
             batch_size: None,
             vectorizer: VectorizerConfig {

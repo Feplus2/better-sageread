@@ -10,6 +10,8 @@ const COMMANDS: &[&str] = &[
     "get_chunks_by_range",
     "prepare_manual_files",
     "index_manual",
+    "prepare_wiki_files",
+    "index_wiki",
     "index_paper",
     "search_papers_db",
     "get_paper_chunk_context",

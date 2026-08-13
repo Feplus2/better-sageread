@@ -5,6 +5,7 @@ import ChatPage from "@/pages/chat";
 import ConverterPage from "@/pages/converter";
 import LibraryPage from "@/pages/library";
 import TrashPage from "@/pages/library/trash";
+import ManualPage from "@/pages/manual";
 import PapersPage from "@/pages/papers";
 import SkillsPage from "@/pages/skills";
 import StatisticsPage from "@/pages/statistics";
@@ -134,6 +135,14 @@ const HomeLayout = () => {
               element={
                 <div className="flex h-full flex-1 flex-col rounded-xl border bg-background shadow-around">
                   <ConverterPage />
+                </div>
+              }
+            />
+            <Route
+              path="/manual"
+              element={
+                <div className="flex h-full flex-1 flex-col rounded-xl border bg-background shadow-around">
+                  <ManualPage />
                 </div>
               }
             />

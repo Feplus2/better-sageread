@@ -21,9 +21,9 @@ function formatResults(items: ManualSearchItem[]) {
 }
 
 export const askAppHelpTool = tool({
-  description: `回答"SageRead 怎么用"类问题：功能在哪、如何操作、设置含义、常见问题。
+  description: `回答"Better SageRead 怎么用"类问题：功能在哪、如何操作、设置含义、常见问题。
 
-🎯 **适用场景**（用户问的是 SageRead 本身，而不是书的内容）：
+🎯 **适用场景**（用户问的是 Better SageRead 本身，而不是书的内容）：
 • "怎么换主题/字体/背景？" "在哪里配置模型？" "同步怎么开？"
 • "备份怎么恢复？" "这个按钮是干什么的？" "能不能……？"
 • 产品功能咨询、操作指引、故障排查

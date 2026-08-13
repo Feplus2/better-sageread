@@ -8,6 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { readDir, readTextFile } from "@tauri-apps/plugin-fs";
 
 export const MANUAL_BOOK_ID = "__app_manual__";
+/** 开发者 wiki 语料库（全局助手 searchDevDocs 检索用） */
+export const WIKI_BOOK_ID = "__repo_wiki__";
 
 export interface VectorModelConfigLike {
   embeddingsUrl: string;
@@ -34,6 +36,11 @@ export async function prepareManualFiles(): Promise<string> {
   return invoke<string>("plugin:epub|prepare_manual_files");
 }
 
+/** wiki 原文落盘（幂等），返回 mdbook 目录路径 */
+export async function prepareWikiFiles(): Promise<string> {
+  return invoke<string>("plugin:epub|prepare_wiki_files");
+}
+
 /** 构建/更新手册向量索引（内容未变且非 force 时后端直接返回 up-to-date） */
 export async function ensureManualIndex(config: VectorModelConfigLike, force = false): Promise<ManualIndexResult> {
   return invoke<ManualIndexResult>("plugin:epub|index_manual", {
@@ -44,14 +51,25 @@ export async function ensureManualIndex(config: VectorModelConfigLike, force = f
   });
 }
 
-/** 语义混合检索（BM25 + 向量，复用书籍同款 search_db） */
-export async function searchManual(
+/** 构建/更新 wiki 向量索引 */
+export async function ensureWikiIndex(config: VectorModelConfigLike, force = false): Promise<ManualIndexResult> {
+  return invoke<ManualIndexResult>("plugin:epub|index_wiki", {
+    embeddingsUrl: config.embeddingsUrl,
+    model: config.model,
+    apiKey: config.apiKey,
+    force,
+  });
+}
+
+/** 语义混合检索（BM25 + 向量，复用书籍同款 search_db；bookId 参数化——手册/wiki 同一通道） */
+export async function searchCorpus(
+  bookId: string,
   query: string,
   limit: number,
   config: VectorModelConfigLike,
 ): Promise<ManualSearchItem[]> {
   return invoke<ManualSearchItem[]>("plugin:epub|search_db", {
-    bookId: MANUAL_BOOK_ID,
+    bookId,
     query,
     limit,
     dimension: config.dimension,
@@ -62,6 +80,11 @@ export async function searchManual(
     vectorWeight: 0.7,
     bm25Weight: 0.3,
   });
+}
+
+/** 手册语义检索（searchCorpus 的手册封装，保持既有调用点不动） */
+export function searchManual(query: string, limit: number, config: VectorModelConfigLike) {
+  return searchCorpus(MANUAL_BOOK_ID, query, limit, config);
 }
 
 /* ---------------- 无向量能力时的关键词降级检索 ---------------- */
@@ -88,8 +111,8 @@ function extractTerms(query: string): string[] {
 }
 
 /** 关键词降级检索：按 Markdown 标题切节，按词项命中计分，返回 top N 节 */
-export async function keywordSearchManual(query: string, limit: number): Promise<ManualSearchItem[]> {
-  const dir = await prepareManualFiles();
+export async function keywordSearchCorpus(prepareDir: () => Promise<string>, query: string, limit: number): Promise<ManualSearchItem[]> {
+  const dir = await prepareDir();
   const entries = await readDir(dir);
   const terms = extractTerms(query);
   const queryLower = query.toLowerCase().trim();
@@ -127,4 +150,14 @@ export async function keywordSearchManual(query: string, limit: number): Promise
     similarity: Math.min(100, s.score * 5),
     md_file_path: `${dir}/${s.file}`,
   }));
+}
+
+/** 手册关键词检索（keywordSearchCorpus 的手册封装，保持既有调用点不动） */
+export function keywordSearchManual(query: string, limit: number) {
+  return keywordSearchCorpus(prepareManualFiles, query, limit);
+}
+
+/** wiki 关键词检索 */
+export function keywordSearchWiki(query: string, limit: number) {
+  return keywordSearchCorpus(prepareWikiFiles, query, limit);
 }

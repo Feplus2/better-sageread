@@ -22,6 +22,7 @@ mod pipeline;
 
 // 内置使用手册（编译期嵌入的 Markdown 资源与索引元信息）
 mod manual;
+mod wiki;
 
 pub use state::EpubState;
 
@@ -40,6 +41,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_chunks_by_range,
             commands::prepare_manual_files,
             commands::index_manual,
+            commands::prepare_wiki_files,
+            commands::index_wiki,
             commands::index_paper,
             commands::search_papers_db,
             commands::get_paper_chunk_context,
