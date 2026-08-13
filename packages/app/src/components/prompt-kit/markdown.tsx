@@ -12,6 +12,7 @@ import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CodeBlock, CodeBlockCode } from "./code-block";
+import { normalizeMathDelimiters } from "./math-delimiters";
 
 export type MarkdownProps = {
   children: string;
@@ -21,7 +22,7 @@ export type MarkdownProps = {
 };
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown);
+  const tokens = marked.lexer(normalizeMathDelimiters(markdown));
   return tokens.map((token) => {
     // remark-math 只把多行 $$…$$ 识别为行间公式，整段一行的 $$…$$ 会被当行内公式。
     // 对"整段只有一行 $$…$$"的段落改写成多行形式，让行间公式正确出 .katex-display。

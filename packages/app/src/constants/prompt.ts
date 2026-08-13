@@ -90,6 +90,10 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   base +=
     "\n\n—— 笔记面板 ——\nmanageNotes：当前书的笔记面板管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。笔记是长文 Markdown 产出（章节总结/读书灵感/人话版解读），与划线标注（notes 工具查询的是后者）是两套概念，不要混写。讨论产出值得留存时，先把整理稿展示给用户讨论，再用 create/update 落笔（会自动弹确认卡由用户过目）；可按当前章节名填 locationTag。";
 
+  // 公式格式（静态追加）：渲染管线吃 $…$ / $$…$$，模型用 \(…\) 会源码外泄（实测 deepseek 解释公式时如此）
+  base +=
+    "\n\n—— 公式格式 ——\n输出数学公式时，行内用 $…$ 包裹，块级用 $$…$$ 包裹（围栏各自独占一行，多行方程组如 \\begin{cases} 也一样）；不要用 \\(…\\) 或 \\[…\\] 定界符。";
+
   let prompt = base;
 
   if (activeSkillNames && activeSkillNames.length > 0) {
