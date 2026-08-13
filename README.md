@@ -18,13 +18,17 @@ Better SageRead 把「读书」和「读论文」放进同一个书架：EPUB �
 
 ## 🎬 功能展示
 
-![文献库](./assets/screenshot-papers.png)
+![文献库：文件夹树与论文卡片](./assets/shot-papers-library.png)
 
-![论文阅读器与 AI 助手](./assets/screenshot-paper-reader.png)
+![论文阅读器：图表速跳面板、KaTeX 公式与 AI 论文助手](./assets/shot-paper-figures.png)
 
-![使用手册](./assets/screenshot-manual.png)
+![Agent 实战：划线标注、生成思维导图并写入 HTML 预览](./assets/shot-paper-agent.png)
 
-![AI 中心](./assets/screenshot-ai-hub.png)
+![AI 把讨论产出直接整理进笔记面板](./assets/shot-paper-notes.png)
+
+![书籍阅读器：公式渲染、照片场景背景与阅读设置](./assets/shot-book-reader.png)
+
+![AI 中心：快捷指令 / 提示词 / 技能库 / MCP 管理](./assets/shot-ai-hub.png)
 
 ---
 
