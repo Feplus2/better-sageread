@@ -7,7 +7,7 @@
 
 **Better SageRead** 是一款本地优先的 EPUB 书籍 + 学术论文阅读器，核心特色是阅读时随时与 AI 对话。它是 [xincmm/sageread](https://github.com/xincmm/sageread) 的独立演进分支（渊源见根目录 `NOTICE`），许可证 AGPL-3.0。
 
-- 平台：macOS（arm64 + x86_64）与 Windows（发布矩阵见 `.github/workflows/release.yml`）
+- 平台：Windows（唯一发布平台，矩阵见 `.github/workflows/release.yml`）；macOS 源码可构建但自 v0.2.0 起暂缓发布（无 Apple 签名证书 + 转换器 sidecar 无 mac 二进制）
 - 数据全部本地存储，AI 服务自行配置（OpenAI/Anthropic 风格端点、OpenRouter、DeepSeek 等），向量模型支持在线 API 与本地 llamacpp（本地仅 macOS）
 - 首次使用引导：设置 → 模型提供商配 LLM → 向量模型配置配 embedding → 书库点"开始向量化"，之后即可用 RAG 对话（README 使用引导节）
 

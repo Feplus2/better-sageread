@@ -14,10 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
+          # macOS 暂缓发布：无 Apple 签名证书 + 转换器 sidecar 无 mac 构建，恢复时把两个 macos-latest 条目加回
+          # （同时需要恢复下方被移除的 "Strip converter sidecars" 与 "Remove existing binary signatures" 两个 mac 步骤，见 git 历史）
           - platform: 'windows-latest'
             args: ''
     runs-on: ${{ matrix.platform }}
@@ -53,20 +51,6 @@ jobs:
         run: |
           node -e "const fs=require('fs');const path='packages/app/src-tauri/tauri.conf.json';const data=JSON.parse(fs.readFileSync(path));data.version='${{ github.ref_name }}'.replace(/^v/,'');data.identifier='com.bettersageread.app';fs.writeFileSync(path,JSON.stringify(data,null,2));"
 
-      # macOS 暂缺转换器 sidecar 构建（PyInstaller 仅出了 Windows 版）：构建前从 externalBin 摘除，
-      # 否则 tauri build 因找不到二进制直接失败。mac 版首版不带 PDF 转换功能，运行时转换会报错提示。
-      - name: Strip converter sidecars (macOS only)
-        if: matrix.platform == 'macos-latest'
-        run: |
-          node -e "const fs=require('fs');const path='packages/app/src-tauri/tauri.conf.json';const data=JSON.parse(fs.readFileSync(path));data.bundle.externalBin=data.bundle.externalBin.filter(b=>!b.includes('books_converter')&&!b.includes('papers_converter'));fs.writeFileSync(path,JSON.stringify(data,null,2));"
-
-      - name: Remove existing binary signatures
-        if: matrix.platform == 'macos-latest'
-        run: |
-          if [ -f packages/app/src-tauri/binaries/woff2_compress ]; then
-            codesign --remove-signature packages/app/src-tauri/binaries/woff2_compress || true
-          fi
-      
       - name: Build and Release
         uses: tauri-apps/tauri-action@v0
         env:

@@ -42,13 +42,13 @@ git push origin vX.X.X
 ### 第二步：GitHub Actions 自动构建
 
 推送 tag 后，GitHub Actions 会：
-- ✅ 构建 macOS (Intel + Apple Silicon)
-- ✅ 构建 Windows
-- ✅ 生成安装包
+- ✅ 构建 Windows（NSIS + MSI + updater 签名）
 - ✅ 生成 `latest.json`（用于自动更新）
 - ✅ 创建 Draft Release（草稿状态）
 
-⏱️ 大约需要 15-30 分钟
+（macOS 自 v0.2.0 起暂缓发布：无 Apple 签名证书且转换器 sidecar 无 mac 构建，恢复方式见文末「本分支特有事项」）
+
+⏱️ 大约需要 10-20 分钟
 
 **查看构建进度**：
 ```
@@ -90,17 +90,9 @@ https://github.com/Feplus2/better-sageread/releases
 
 ## 📦 下载说明
 
-选择适合你系统的版本：
+- **Windows**: `Better SageRead_x.x.x_x64-setup.exe`（NSIS，推荐）或 `Better SageRead_x.x.x_x64_en-US.msi`
 
-- **macOS Apple Silicon (M 系列)**: `Better SageRead_x.x.x_aarch64.dmg`
-- **macOS Intel**: `Better SageRead_x.x.x_x64.dmg`
-- **Windows**: `Better SageRead_x.x.x_x64-setup.exe`（NSIS）或 `Better SageRead_x.x.x_x64_en-US.msi`
-
-> ⚠️ **macOS 未签名**：本版本未用 Apple 开发者证书签名，首次打开会被 Gatekeeper 拦截。
-> 安装后在终端执行一次：`xattr -dr com.apple.quarantine "/Applications/Better SageRead.app"`
->
-> ⚠️ **macOS 版暂不含 PDF 转换功能**（转换器 sidecar 暂无 macOS 构建），书籍/论文转换按钮会报错；
-> 其余功能完整。Windows 版功能完整。
+> macOS 版暂缓发布（未签名 + 转换器无 mac 构建），恢复时间请关注后续版本。
 
 **首次安装用户**：直接下载安装即可  
 **已安装用户**：应用会自动检测并提示更新
@@ -109,11 +101,8 @@ https://github.com/Feplus2/better-sageread/releases
 #### 3.4 检查附件
 
 确认以下文件已上传：
-- ✅ macOS Apple Silicon 安装包 (`.dmg`)
-- ✅ macOS Intel 安装包 (`.dmg`)
-- ✅ Windows 安装包（`.exe`，NSIS + `.msi`）
-- ✅ `latest.json` 文件（关键！）
-- ✅ 各安装包对应的 `.sig` 签名文件（updater 验签用）
+- ✅ Windows 安装包（`.exe` + `.msi`）与对应 `.sig` 签名文件（updater 验签用）
+- ✅ `latest.json` 文件（关键！且 platforms 里应只有 windows 条目）
 
 #### 3.5 发布
 
@@ -198,7 +187,7 @@ https://github.com/Feplus2/better-sageread/releases
 ## 本分支特有事项（2026-08-14 起）
 
 - **identifier 双形态**：仓库内 `tauri.conf.json` 是开发形态 `com.bettersageread.dev`；CI 的 "Sync version" 步骤会改写为发布形态 `com.bettersageread.app`。两个 identifier 的应用数据目录互相隔离（`%APPDATA%\com.bettersageread.dev\` vs `...\.app\`），本机 dev 实例与安装版互不影响。**防呆**：本机 `pnpm tauri build` 出的安装包带的是 dev identifier，会与开发实例共享数据目录——日用请装 CI 产物；若必须本机出包日用，构建前先临时把 identifier 改掉（照抄 CI 的 node 命令即可）。
-- **转换器 sidecar 已入库**：`books_converter`/`papers_converter`（各约 55-60MB，Windows x64）直接随 git 分发，Windows 构建开箱即有转换功能。**macOS 暂无转换器构建**：CI 在 mac 构建前会动态摘除这两条 externalBin（release.yml "Strip converter sidecars" 步骤），mac 版转换按钮会报错——属预期，待转换器仓（Papers_Converter / Books_Converter）开源并建 macOS release 后恢复。
+- **转换器 sidecar 已入库**：`books_converter`/`papers_converter`（各约 55-60MB，Windows x64）直接随 git 分发，Windows 构建开箱即有转换功能。**macOS 自 v0.2.0 起整体暂缓发布**（无 Apple 签名证书 + 转换器无 mac 构建，半成品不如不发）：release.yml 矩阵只剩 windows-latest；恢复时把 mac 矩阵条目与两个 mac 步骤（摘除转换器 externalBin、codesign 摘 woff2 旧签名）从 git 历史（commit e599769）找回即可。
 - **updater 密钥自有**：`tauri.conf.json` 的 pubkey 对应私钥在 `~/.tauri/better-sageread.key`（2026-08-14 生成，无密码）。**私钥文件丢了就永远失去自动更新能力**，请离线备份；同时把文件全文配进 GitHub Secrets 的 `TAURI_SIGNING_PRIVATE_KEY`。
 - **fixture 版权清理**：论文测试 fixture 已换成 CC-BY 开放获取论文（`fixtures/papers/akter2026atscale`，附署名 README）；旧 zhao2020rational（订阅期刊全文）已于 2026-08-14 用 git filter-repo 从全部历史中清除。**因此首次推送需要 `git push --force-with-lease origin local:main`**（历史已重写，与远端 main 不再连续）。
 - **macOS 未签名**：无 Apple 开发者证书，Release Notes 务必带 `xattr -dr com.apple.quarantine` 指引（模板已含）。

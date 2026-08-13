@@ -74,8 +74,8 @@ cd packages/app/src-tauri && cargo test
 ## 5. 发布 workflow（.github/workflows/release.yml）
 
 - 触发：推 `v*` tag 或 `workflow_dispatch` 手动（:3-7）
-- 矩阵（`fail-fast: false`，:14-22）：`macos-latest` + `aarch64-apple-darwin`、`macos-latest` + `x86_64-apple-darwin`、`windows-latest`
-- 步骤：checkout → pnpm 11 → Node lts（pnpm cache）→ Rust stable（mac 装双 target）→ swatinem/rust-cache（只缓存 `packages/app/src-tauri/target`，:44-47）→ `pnpm install` → **Sync version**：node 脚本把 tag 名写进 `tauri.conf.json` 的 version，并把 identifier 从 `.dev` 改成 `com.bettersageread.app`（:52-54）→ mac 上先摘除转换器 externalBin、再 `codesign --remove-signature` 摘掉 woff2 旧签名（:56-72）→ `tauri-apps/tauri-action@v0` 构建（:74-89）
+- 矩阵（`fail-fast: false`，:14-22）：仅 `windows-latest`（macOS 自 v0.2.0 起暂缓发布——无 Apple 证书且转换器无 mac 构建；恢复方式见 runbook）
+- 步骤：checkout → pnpm 11 → Node lts（pnpm cache）→ Rust stable → swatinem/rust-cache（只缓存 `packages/app/src-tauri/target`，:44-47）→ `pnpm install` → **Sync version**：node 脚本把 tag 名写进 `tauri.conf.json` 的 version，并把 identifier 从 `.dev` 改成 `com.bettersageread.app`（:52-54）→ `tauri-apps/tauri-action@v0` 构建（:57-72）
 - 产物：`releaseDraft: true`（草稿，人工补 Release Notes 后发布）、`includeUpdaterJson: true`（生成 `latest.json` 供应用内自动更新）、updater 签名用 secrets 的 `TAURI_SIGNING_PRIVATE_KEY`
 - 注意：`docs/release-workflow.md` 已于 2026-08-14 重写为当前事实（密钥名、仓库链接、mac 摘 sidecar、未签名指引、历史重写后的 force-push 要求），可直接当作发布日 runbook
 
