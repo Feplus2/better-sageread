@@ -54,7 +54,7 @@ pub struct PaperDedupKeys {
     pub year: Option<String>,
 }
 
-/// zotero_collections 行：Zotero collection key → SageRead 文件夹 id 映射
+/// zotero_collections 行：Zotero collection key → Better SageRead 文件夹 id 映射
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoteroCollectionState {
@@ -658,7 +658,7 @@ pub async fn zotero_get_state(app_handle: AppHandle) -> Result<ZoteroStateResult
 
 // ==================== 5/6. 导入状态写入 ====================
 
-/// 记录/更新 Zotero collection → SageRead 文件夹的映射（INSERT OR REPLACE）
+/// 记录/更新 Zotero collection → Better SageRead 文件夹的映射（INSERT OR REPLACE）
 #[tauri::command]
 pub async fn zotero_upsert_collection(
     app_handle: AppHandle,

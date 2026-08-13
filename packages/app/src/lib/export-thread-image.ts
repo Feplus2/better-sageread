@@ -308,7 +308,7 @@ async function renderMessagesToPngBlobFallback(
 
   ctx.font = FONT_META;
   ctx.fillStyle = "#8a7c60";
-  const footerText = truncated ? "对话过长，已截断（完整内容请导出 Markdown）" : "由 SageRead 导出";
+  const footerText = truncated ? "对话过长，已截断（完整内容请导出 Markdown）" : "由 Better SageRead 导出";
   const footerWidth = ctx.measureText(footerText).width;
   ctx.fillText(footerText, (RENDER_WIDTH - footerWidth) / 2, totalHeight - FOOTER_HEIGHT + 14);
 

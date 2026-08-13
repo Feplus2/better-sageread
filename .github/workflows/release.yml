@@ -49,25 +49,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Import macOS certificate
-        if: matrix.platform == 'macos-latest'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
-          security find-identity -v -p codesigning build.keychain
-          security list-keychains -d user -s build.keychain
-
       - name: Sync version
         run: |
-          node -e "const fs=require('fs');const path='packages/app/src-tauri/tauri.conf.json';const data=JSON.parse(fs.readFileSync(path));data.version='${{ github.ref_name }}'.replace(/^v/,'');fs.writeFileSync(path,JSON.stringify(data,null,2));"
+          node -e "const fs=require('fs');const path='packages/app/src-tauri/tauri.conf.json';const data=JSON.parse(fs.readFileSync(path));data.version='${{ github.ref_name }}'.replace(/^v/,'');data.identifier='com.bettersageread.app';fs.writeFileSync(path,JSON.stringify(data,null,2));"
       
       - name: Remove existing binary signatures
         if: matrix.platform == 'macos-latest'
@@ -82,14 +66,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SKIP_SIDECAR_SIGNATURE_CHECK: true
         with:
           projectPath: './packages/app'
           tagName: ${{ github.ref_name }}
-          releaseName: 'SageRead ${{ github.ref_name }}'
+          releaseName: 'Better SageRead ${{ github.ref_name }}'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false

@@ -67,7 +67,7 @@ export default function SecretVault() {
         </p>
         <p className="text-neutral-500 text-xs dark:text-neutral-500">
           注：模型提供商 / PDF 转换 / 网络搜索等专属密钥不在这里显示，它们同样存在系统凭据管理器（可在 Windows
-          凭据管理器中按 com.xincmm.sageread 查看），在各自设置项内显示为「已保存 ·•••」。本保管箱仅管理供 技能 / MCP
+          凭据管理器中按 com.bettersageread.app 查看），在各自设置项内显示为「已保存 ·•••」。本保管箱仅管理供 技能 / MCP
           以占位符引用的通用密钥。
         </p>
       </div>

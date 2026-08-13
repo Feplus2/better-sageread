@@ -102,7 +102,7 @@ export function buildThreadHtml(messages: UIMessage[], meta: { title: string; bo
   <main>
 ${buildMessagesHtml(messages)}
   </main>
-  <footer>由 SageRead 导出</footer>
+  <footer>由 Better SageRead 导出</footer>
 </div>
 </body>
 </html>

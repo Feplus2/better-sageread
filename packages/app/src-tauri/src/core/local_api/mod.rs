@@ -100,7 +100,7 @@ fn resolve_vector_config(app: &AppHandle) -> Result<(String, String, String), St
         .get("selectedVectorModelId")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or("未选择向量模型，请先在 SageRead 设置中选择")?;
+        .ok_or("未选择向量模型，请先在 Better SageRead 设置中选择")?;
     let model = state
         .get("vectorModels")
         .and_then(|v| v.as_array())

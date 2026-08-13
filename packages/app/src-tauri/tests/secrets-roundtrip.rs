@@ -3,7 +3,7 @@
 //! 本测试守住 Cargo.toml 的平台原生后端特性（windows-native/apple-native）不被意外丢掉。
 //! 运行：cargo test --test secrets-roundtrip -- --nocapture
 
-const SERVICE: &str = "com.xincmm.sageread";
+const SERVICE: &str = "com.bettersageread.app";
 
 #[test]
 fn keyring_roundtrip() {

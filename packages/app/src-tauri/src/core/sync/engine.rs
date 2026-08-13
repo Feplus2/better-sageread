@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-/// L2 云端根目录由 models::l2_root 按配置解析（协议版本化：不兼容演进时整体升级 sageread/sync-v2）
+/// L2 云端根目录由 models::l2_root 按配置解析（协议版本化：不兼容演进时整体升级 bettersageread/sync-v2）
 /// 应用前安全快照保留份数
 const SAFETY_SNAPSHOTS_KEEP: usize = 3;
 

@@ -1,18 +1,20 @@
 <div align="center">
 
-# SageRead
+# Better SageRead
 
-**一款支持 AI 对话的电子书阅读器**
+**一款支持 AI 对话的电子书与学术论文阅读器**
 
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](https://github.com/yourusername/sageread) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yourusername/sageread/pulls)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 
 </div>
 
 <br/>
 
-SageRead 是一款电子书阅读器，主要特点是可以在阅读时随时跟 AI 对话。
+> **渊源与致谢**：Better SageRead 基于 xincmm 的开源项目 [SageRead](https://github.com/xincmm/sageread) 发展而来，原作者奠定了核心框架，在此致谢。详见 [NOTICE](NOTICE)。
 
-你可以用它来读电子书，做笔记和高亮标注。不懂的地方直接问 AI，它会根据书籍内容给你解答。支持自定义 AI 提示词，可以让 AI 帮你总结、翻译或做其他事情。所有数据都存在本地，支持自己配置 AI 服务。
+Better SageRead 是一款电子书与学术论文阅读器，主要特点是可以在阅读时随时跟 AI 对话。
+
+你可以用它来读电子书和论文，做笔记和高亮标注。不懂的地方直接问 AI，它会根据书籍内容给你解答。支持自定义 AI 提示词，可以让 AI 帮你总结、翻译或做其他事情。所有数据都存在本地，支持自己配置 AI 服务。
 
 ---
 

@@ -26,12 +26,12 @@ fn resolve_password(submitted: &str, saved: Option<&WebdavConfig>) -> String {
     }
 }
 
-/// 云端目录布局：统一收在 sageread/ 下；旧版为两个并列顶层目录
-const CLOUD_HOME: &str = "sageread";
-const L2_ROOT: &str = "sageread/sync";
-const BACKUP_DIR: &str = "sageread/backups";
-const LEGACY_L2_ROOT: &str = "sageread-sync";
-const LEGACY_BACKUP_DIR: &str = "sageread-backups";
+/// 云端目录布局：统一收在 bettersageread/ 下；旧版为两个并列顶层目录
+const CLOUD_HOME: &str = "bettersageread";
+const L2_ROOT: &str = "bettersageread/sync";
+const BACKUP_DIR: &str = "bettersageread/backups";
+const LEGACY_L2_ROOT: &str = "bettersageread-sync";
+const LEGACY_BACKUP_DIR: &str = "bettersageread-backups";
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;

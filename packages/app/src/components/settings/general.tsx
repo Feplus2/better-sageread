@@ -169,6 +169,17 @@ export default function GeneralSettings() {
               {isCheckingUpdate ? "检查中..." : "检查更新"}
             </Button>
           </div>
+
+          <div className="border-neutral-200 border-t pt-4 dark:border-neutral-700">
+            <span className="text dark:text-neutral-200">Better SageRead</span>
+            <p className="mt-2 text-neutral-600 text-xs leading-relaxed dark:text-neutral-400">
+              基于 xincmm 的开源项目{" "}
+              <a href="https://github.com/xincmm/sageread" className="text-primary underline underline-offset-2">
+                SageRead
+              </a>{" "}
+              发展而来，原作者奠定了核心框架，在此致谢。
+            </p>
+          </div>
         </div>
       </section>
 

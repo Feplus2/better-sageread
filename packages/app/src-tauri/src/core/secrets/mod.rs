@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
 
-const SERVICE: &str = "com.xincmm.sageread";
+const SERVICE: &str = "com.bettersageread.app";
 /// keyring 后端不可用时的降级存储（headless Linux 等场景；主发 Windows/macOS 不会触发）
 const FALLBACK_FILE: &str = "secrets-fallback.json";
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 fn default_remote_dir() -> String {
-    "sageread/backups".to_string()
+    "bettersageread/backups".to_string()
 }
 
 fn default_auto_backup() -> String {
@@ -36,28 +36,28 @@ pub struct WebdavConfig {
     /// L2 同步频率：off / 30s / 5min / 30min
     #[serde(default = "default_sync_frequency")]
     pub sync_frequency: String,
-    /// L2 云端根目录覆盖：None=默认 sageread/sync；
-    /// 服务器拒绝 MOVE（如坚果云 403）时落为旧目录 sageread-sync，保证同步不断
+    /// L2 云端根目录覆盖：None=默认 bettersageread/sync；
+    /// 服务器拒绝 MOVE（如坚果云 403）时落为旧目录 bettersageread-sync，保证同步不断
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub l2_root: Option<String>,
 }
 
 /// L2 云端根目录解析：覆盖值优先，缺省用统一新布局
 pub fn l2_root(config: &WebdavConfig) -> &str {
-    config.l2_root.as_deref().unwrap_or("sageread/sync")
+    config.l2_root.as_deref().unwrap_or("bettersageread/sync")
 }
 
 /// 备份包内的清单文件（manifest.json）
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BackupManifest {
-    pub format: String, // 固定 "sageread-backup"
+    pub format: String, // 固定 "bettersageread-backup"
     pub version: u32,
     pub created_at: i64,
     pub device: String,
     pub app_version: String,
     pub contents: Vec<String>,
     pub db_sha256: String,
-    /// v2 大包资产清单（sha256 内容寻址，存于 sageread/backups/assets/）；v1 备份无此字段
+    /// v2 大包资产清单（sha256 内容寻址，存于 bettersageread/backups/assets/）；v1 备份无此字段
     #[serde(default)]
     pub assets: Vec<AssetRef>,
 }

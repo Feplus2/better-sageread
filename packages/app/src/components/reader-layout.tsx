@@ -392,7 +392,7 @@ export default function ReaderLayout() {
               pointer-events-none：鼠标落到下层 drag region，品牌区也能拖窗 */}
           <div className="-translate-x-1/2 pointer-events-none absolute left-1/2 flex items-center gap-1.5">
             <img src={appIconUrl} alt="" className="size-4" />
-            <span className="font-medium text-neutral-600 text-xs dark:text-neutral-400">SageRead</span>
+            <span className="font-medium text-neutral-600 text-xs dark:text-neutral-400">Better SageRead</span>
           </div>
 
           <div data-tauri-drag-region className="flex flex-1 items-center justify-end gap-1">

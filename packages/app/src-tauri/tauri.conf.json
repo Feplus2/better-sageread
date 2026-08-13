@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "sageread",
+  "productName": "Better SageRead",
   "version": "0.1.1",
-  "identifier": "com.xincmm.sageread.dev",
+  "identifier": "com.bettersageread.dev",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
       {
         "zoomHotkeysEnabled": true,
         "label": "main",
-        "title": "sageread",
+        "title": "Better SageRead",
         "width": 1440,
         "minWidth": 960,
         "minHeight": 720,
@@ -144,15 +144,13 @@
     "resources": [
       "resources/fonts/*"
     ],
-    "macOS": {
-      "signingIdentity": "Developer ID Application: jing wen (9T3JWFM3KT)"
-    }
+    "macOS": {}
   },
   "plugins": {
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/xincmm/sageread/releases/latest/download/latest.json"
+        "https://github.com/Feplus2/sageread/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFNTAwRUM3NDVDQTVGMjkKUldRcFg4cEZ4dzVRL28wSWZ0S3FZdEVkNlFCTUlaYlRaR2ZyOWJoQTNRNm9EdXF5cnhXc1IwU3QK"
     }

@@ -43,7 +43,7 @@ const DEFAULT_CONFIG: WebdavConfig = {
   endpoint: "",
   username: "",
   password: "",
-  remote_dir: "sageread/backups",
+  remote_dir: "bettersageread/backups",
   auto_backup: "off",
   backup_keep: 10,
   l2_enabled: false,
@@ -477,7 +477,7 @@ export default function SyncSettings() {
               <Input
                 value={config.remote_dir}
                 onChange={(e) => updateConfig({ remote_dir: e.target.value })}
-                placeholder="sageread/backups"
+                placeholder="bettersageread/backups"
                 className="mt-1"
               />
             </div>

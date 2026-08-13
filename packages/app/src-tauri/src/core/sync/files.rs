@@ -70,7 +70,7 @@ pub fn compute_sha256(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// 云端文件路径：sageread/sync/files/<sha256前2位>/<sha256>
+/// 云端文件路径：bettersageread/sync/files/<sha256前2位>/<sha256>
 fn cloud_file_path(config: &WebdavConfig, sha256: &str) -> String {
     let prefix = &sha256[..2];
     format!("{}/files/{prefix}/{sha256}", l2_root(config))

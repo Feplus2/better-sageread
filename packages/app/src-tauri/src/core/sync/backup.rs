@@ -478,7 +478,7 @@ pub async fn run_backup(
     // 7. 打包上传小包
     let created_at = chrono::Utc::now().timestamp_millis();
     let manifest = BackupManifest {
-        format: "sageread-backup".to_string(),
+        format: "bettersageread-backup".to_string(),
         version: 3,
         created_at,
         device: device_name(),
@@ -667,7 +667,7 @@ mod tests {
         // 打包
         let db_bytes = fs::read(&staged_db).unwrap();
         let manifest = BackupManifest {
-            format: "sageread-backup".to_string(),
+            format: "bettersageread-backup".to_string(),
             version: 3,
             created_at: 0,
             device: "test".to_string(),
@@ -698,7 +698,7 @@ mod tests {
         let mut manifest_bytes = Vec::new();
         std::io::Read::read_to_end(&mut manifest_file, &mut manifest_bytes).unwrap();
         let parsed: BackupManifest = serde_json::from_slice(&manifest_bytes).unwrap();
-        assert_eq!(parsed.format, "sageread-backup");
+        assert_eq!(parsed.format, "bettersageread-backup");
         assert_eq!(parsed.version, 3);
         assert_eq!(parsed.contents.len(), 2);
         assert_eq!(parsed.assets.len(), 1);

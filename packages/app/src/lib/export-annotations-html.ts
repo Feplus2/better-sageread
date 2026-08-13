@@ -112,7 +112,7 @@ export function buildAnnotationsHtml(
   <main>
 ${buildAnnotationsListHtml(annotations)}
   </main>
-  <footer>由 SageRead 导出</footer>
+  <footer>由 Better SageRead 导出</footer>
 </div>
 ${options?.autoPrint ? "<script>window.addEventListener('load', () => window.print());</script>" : ""}
 </body>

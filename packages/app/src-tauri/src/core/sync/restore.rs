@@ -57,8 +57,8 @@ pub async fn stage_restore(
         .map_err(|e| e.to_string())?;
     let manifest: BackupManifest =
         serde_json::from_slice(&manifest_bytes).map_err(|e| format!("manifest 解析失败: {e}"))?;
-    if manifest.format != "sageread-backup" {
-        return Err("不是有效的 SageRead 备份包".to_string());
+    if manifest.format != "bettersageread-backup" {
+        return Err("不是有效的 Better SageRead 备份包".to_string());
     }
 
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
