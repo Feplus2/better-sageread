@@ -68,7 +68,9 @@ export async function uploadBook(file: File): Promise<SimpleBook> {
     return result;
   } catch (error) {
     console.error("书籍上传失败:", error);
-    throw new Error(`上传失败: ${error instanceof Error ? error.message : "未知错误"}`);
+    // Tauri invoke 的 Err(String) 到前端是纯字符串，不是 Error 实例——必须 String(error) 兜底，
+    // 否则后端原始原因（如"书籍已存在: … (ID: …)"）被吞成"未知错误"，上层分诊无从匹配
+    throw new Error(`上传失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

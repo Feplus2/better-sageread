@@ -7,7 +7,6 @@ import { FILE_ACCEPT_FORMATS } from "@/services/constants";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useLibraryStore } from "@/store/library-store";
 import { getFilename, listFormater } from "@/utils/book";
-import { eventDispatcher } from "@/utils/event";
 
 export function useBookUpload() {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -41,10 +40,7 @@ export function useBookUpload() {
     });
 
     if (supportedFiles.length === 0) {
-      eventDispatcher.dispatch("toast", {
-        message: `未找到支持的文件。支持的格式：${FILE_ACCEPT_FORMATS}`,
-        type: "error",
-      });
+      toast.error(`未找到支持的文件。支持的格式：${FILE_ACCEPT_FORMATS}`);
       return;
     }
 
@@ -85,10 +81,7 @@ export function useBookUpload() {
       setIsUploading(false);
 
       if (failedFiles.length > 0) {
-        eventDispatcher.dispatch("toast", {
-          message: `导入书籍失败：${listFormater(false).format(failedFiles)}`,
-          type: "error",
-        });
+        toast.error(`导入书籍失败：${listFormater(false).format(failedFiles)}`);
       }
 
       if (successBooks.length > 0) {
