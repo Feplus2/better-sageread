@@ -74,14 +74,27 @@ const evalJs = (conn, expression, timeout = 120000) =>
       return r.result?.result?.value;
     });
 
-/** 页面上下文就绪等待（重载窗口期 location.origin 会是 "null"） */
+/** 页面上下文就绪等待（重载窗口期 location.origin 会是 "null"）；随后等后端 DB 就绪 */
 async function waitReady(conn) {
   for (let i = 0; i < 30; i++) {
     const origin = await evalJs(conn, `location.origin`).catch(() => null);
-    if (origin && origin !== "null") return;
+    if (origin && origin !== "null") break;
+    if (i === 29) throw new Error("页面上下文久未就绪");
     await new Promise((r) => setTimeout(r, 2000));
   }
-  throw new Error("页面上下文久未就绪");
+  // 后端就绪：DB 相关命令可用（Rust 重建重启的窗口期会报"数据库未初始化"）
+  for (let i = 0; i < 60; i++) {
+    const readyBackend = await evalJs(conn, `(async () => {
+      try {
+        const { invoke } = await import(location.origin + "/node_modules/.vite/deps/@tauri-apps_api_core.js");
+        await invoke("get_all_threads");
+        return true;
+      } catch { return false; }
+    })()`).catch(() => false);
+    if (readyBackend === true) return;
+    if (i === 59) throw new Error("后端久未就绪");
+    await new Promise((r) => setTimeout(r, 3000));
+  }
 }
 
 // ─── 0. 双端配置一致性（只读，不改动）───
@@ -126,6 +139,17 @@ if (!backupName) process.exit(1);
 
 // ─── 2. dev2 恢复 + 重启 ───
 console.log("\n[2/4] dev2 恢复（随后重启应用）…");
+// 制造资产缺口：删 dev2 上一本书的目录，迫使恢复真下载该捆
+// （校验链路的真覆盖——2026-08-13 教训：全跳过漏掉了"zip 字节哈希 vs 内容哈希"的校验 bug）
+const { execFileSync: execPy } = await import("node:child_process");
+const victimId = execPy("python", ["-X", "utf8", "-c",
+  "import sqlite3,sys;db=sqlite3.connect(sys.argv[1],timeout=5);print(db.execute(\"SELECT id FROM books ORDER BY created_at LIMIT 1\").fetchone()[0])",
+  `${DEV2_HOME}/database/app.db`,
+], { encoding: "utf8" }).trim();
+const { rmSync } = await import("node:fs");
+rmSync(`${DEV2_HOME}/books/${victimId}`, { recursive: true, force: true });
+console.log("（已删 dev2 缺口书:", victimId, "）");
+
 await evalJs(dev2, `(async () => {
   const svc = await import(location.origin + "/src/services/sync-service.ts");
   return await svc.syncRestore(${JSON.stringify(backupName)});

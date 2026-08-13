@@ -2,7 +2,7 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
-import { uploadBook } from "@/services/book-service";
+import { getTrashedBooks, uploadBook } from "@/services/book-service";
 import { FILE_ACCEPT_FORMATS } from "@/services/constants";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useLibraryStore } from "@/store/library-store";
@@ -62,6 +62,21 @@ export function useBookUpload() {
           const newBook = await uploadBook(file);
           successBooks.push(newBook);
         } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          // 重复导入区分在库/在回收站（此前一律静默计入失败列表，用户不知去向——2026-08-13 实证）
+          const dup = msg.match(/已存在:\s*(.+?)\s*\(ID:\s*([0-9a-f]+)\)/);
+          if (dup) {
+            const [, title, id] = dup;
+            const inTrash = await getTrashedBooks()
+              .then((list) => list.some((b) => b.id === id))
+              .catch(() => false);
+            toast.info(
+              inTrash
+                ? `《${title}》已在回收站中，可在「回收站」恢复，无需重复导入`
+                : `《${title}》已在书库中，无需重复导入`,
+            );
+            continue;
+          }
           const baseFilename = getFilename(file.name);
           failedFiles.push(baseFilename);
         }
@@ -85,9 +100,7 @@ export function useBookUpload() {
           .then((config) => {
             if (config?.l2_enabled) {
               for (const book of successBooks) {
-                syncUploadBook(book.id).catch((e) =>
-                  console.warn("书籍文件自动上传失败（忽略）:", book.title, e),
-                );
+                syncUploadBook(book.id).catch((e) => console.warn("书籍文件自动上传失败（忽略）:", book.title, e));
               }
             }
           })

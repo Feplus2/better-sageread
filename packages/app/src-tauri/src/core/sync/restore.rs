@@ -99,14 +99,29 @@ pub async fn stage_restore(
             let bytes = webdav::get_path(config, &remote)
                 .await?
                 .ok_or_else(|| format!("云端资产捆缺失: {}", asset.bundle_remote_name()))?;
-            // 落盘前校验清单哈希：内容寻址名下哈希不匹配即损包，拒绝进 staging（防御性加固）
-            let actual = backup::sha256_bytes(&bytes);
-            if actual != asset.sha256 {
+            // 损包校验：解到临时目录，与清单按内容哈希比对（与备份侧 dir_content_hash 同口径；
+            // 向量库为单文件直比）。不能比 zip 字节哈希——zip 编码与内容哈希恒不等
+            // （2026-08-13 实证：初版误比字节哈希，凡真下载必误报损包）
+            let scratch = staging.join("_verify").join(asset.bundle_remote_name());
+            if scratch.exists() {
+                fs::remove_dir_all(&scratch).map_err(|e| e.to_string())?;
+            }
+            fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+            ZipArchive::new(Cursor::new(&bytes))
+                .map_err(|e| format!("资产捆损坏（{}）: {e}", asset.bundle_remote_name()))?
+                .extract(&scratch)
+                .map_err(|e| format!("资产捆解包失败（{}）: {e}", asset.bundle_remote_name()))?;
+            let verified = if asset.kind == "vectors" {
+                backup::sha256_file(&scratch.join("vectors.sqlite")).ok().as_deref()
+                    == Some(asset.sha256.as_str())
+            } else {
+                backup::dir_content_hash(&scratch).ok().flatten().as_deref() == Some(asset.sha256.as_str())
+            };
+            let _ = fs::remove_dir_all(&scratch);
+            if !verified {
                 return Err(format!(
-                    "资产捆校验失败（{}）：期望 {}，实得 {}。请重试恢复",
-                    asset.bundle_remote_name(),
-                    asset.sha256,
-                    actual
+                    "资产捆校验失败（{}）：内容与清单不符，请重试恢复",
+                    asset.bundle_remote_name()
                 ));
             }
             let staged_asset = staging.join("bundles").join(asset.bundle_remote_name());
