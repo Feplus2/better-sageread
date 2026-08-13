@@ -126,8 +126,10 @@ export default function GeneralSettings() {
       }
     } catch (error) {
       console.error("Check for updates failed:", error);
+      // Tauri 插件错误多为纯字符串（非 Error 实例），直接 String 兜底展示真实原因
+      const detail = error instanceof Error ? error.message : String(error ?? "");
       toast.error("检查更新失败", {
-        description: error instanceof Error ? error.message : "未知错误",
+        description: detail && detail !== "undefined" ? detail : "未知错误",
       });
     } finally {
       setIsCheckingUpdate(false);
