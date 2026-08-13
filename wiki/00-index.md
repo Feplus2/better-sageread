@@ -87,7 +87,7 @@ EPUB 渲染内核，是上游 [johnfactotum/foliate-js](https://github.com/johnf
 
 ## 构建与运行
 
-前置：Node.js（建议 22+，CDP 脚本用到内置 `WebSocket`）、pnpm 9、Rust stable、Tauri 2 系统依赖（Windows 需 WebView2；macOS 需 Xcode CLT）。
+前置：Node.js（建议 22+，CDP 脚本用到内置 `WebSocket`）、pnpm 11（CI 同版本；pnpm 9 与 v11 写的 lockfile 不兼容，会报 `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`）、Rust stable、Tauri 2 系统依赖（Windows 需 WebView2；macOS 需 Xcode CLT）。
 
 ```bash
 pnpm install     # 安装 workspace 依赖（allowBuilds 白名单勿删）
