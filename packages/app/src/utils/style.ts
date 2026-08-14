@@ -243,6 +243,14 @@ const getLayoutStyles = (
   h1, h2, h3, h4, h5, h6 {
     text-align: initial;
   }
+  /* 表格按自然宽度水平居中（窄表不再贴左，宽表受 max-width 约束）；
+   * 旧版转换产物的 width:100% 由本规则（后注入同特异度）覆盖 */
+  table {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
 
   :lang(zh), :lang(ja), :lang(ko) {
     widows: 1;

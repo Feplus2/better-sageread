@@ -677,6 +677,14 @@ foliate-view {
   padding: 2px 0;
 }
 
+/* 论文表格水平居中：窄表按自然宽度居中（.prose table 的 display:block +
+ * overflow-x:auto 保留——宽表出横向滚动条，fit-content + auto margin 收窄居中） */
+.paper-content table {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
 /* 公式编号 \tag 右对齐：渲染实际由 rehype-katex 内嵌的 katex 0.16 执行（编号类名 .tag），
  * 而全量引入的 katex.min.css 来自直接依赖 0.18（类名已更名 .katex-tag）——0.16 的选择器不在册，
  * 编号退化为紧跟公式的静态 span。按 0.16 原规则补登（双类名并写，将来版本对齐后仍有效）。 */
