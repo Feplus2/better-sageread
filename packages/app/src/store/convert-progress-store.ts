@@ -316,7 +316,8 @@ export function setPaperImportRefresh(fn: (() => void) | null) {
 }
 
 /** 启动批量解析导入（PapersPage 弹窗确认与页面拖入共用入口；folderId 在启动时定格） */
-export async function startPaperImportBatch(paths: string[], folderId?: string) {
+export async function startPaperImportBatch(incomingPaths: string[], folderId?: string) {
+  let paths = incomingPaths;
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
   if (tokenError) {
@@ -328,6 +329,32 @@ export async function startPaperImportBatch(paths: string[], folderId?: string) 
   if (paperImport?.status === "running") {
     toast.info("已有解析任务进行中");
     return;
+  }
+
+  // 预转换去重（PDF 内容哈希）：批内重复 + 与库中 source.pdf 相同的——
+  // 不烧解析配额直接跳过；全部重复则连队列都不起
+  try {
+    const { findPaperDuplicates } = await import("@/services/paper-dedup");
+    const dup = await findPaperDuplicates(paths);
+    if (dup.size > 0) {
+      let batchDup = 0;
+      let inLibrary = 0;
+      for (const [, v] of dup) {
+        if (v.kind === "batch") batchDup += 1;
+        else inLibrary += 1;
+      }
+      const parts: string[] = [];
+      if (inLibrary > 0) {
+        const names = [...new Set([...dup.values()].filter((v) => v.kind === "library").map((v) => `《${v.title}》`))];
+        parts.push(`已在库中（PDF 内容一致）：${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 篇` : ""}`);
+      }
+      if (batchDup > 0) parts.push(`批内重复 ${batchDup} 份（只解析首份）`);
+      toast.info(`已跳过 ${dup.size} 份重复 PDF——${parts.join("；")}`, { duration: 6000 });
+      paths = paths.filter((p) => !dup.has(p));
+      if (paths.length === 0) return;
+    }
+  } catch (e) {
+    console.warn("预转换去重失败（继续正常解析）:", e);
   }
 
   paperCancelRequested = false;
