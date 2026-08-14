@@ -5,29 +5,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  type ConvertProgress,
-  cancelConvert,
-  importConvertedEpub,
-  listenConvertProgress,
-  startConvert,
-} from "@/services/converter-service";
-import { type BookConvertEngine, useConverterStore } from "@/store/converter-store";
-import { useLibraryStore } from "@/store/library-store";
+import { useConvertProgressStore } from "@/store/convert-progress-store";
+import { useConverterStore } from "@/store/converter-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BookUp, Check, FileDown, FileText, Loader2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useEffect } from "react";
 
-type ConvertStatus = "idle" | "converting" | "done" | "error";
+/** 运行状态与事件监听都在 convert-progress-store（视图卸载不中断接收）；
+ *  本组件只是表单视图：大页面（/converter）与图书馆弹层共用同一份状态 */
 type StageStatus = "pending" | "active" | "done" | "error";
-
-interface StageState {
-  n: number;
-  name: string;
-  status: StageStatus;
-  elapsed?: number;
-}
 
 const TRANSLATE_OPTIONS = [
   { value: "none", label: "不翻译" },
@@ -40,36 +26,25 @@ const TRANSLATE_OPTIONS = [
   { value: "ko", label: "译为韩文" },
 ];
 
-/** 按是否翻译与引擎构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4） */
-function buildStages(withTranslate: boolean, engine: BookConvertEngine): StageState[] {
-  const stages = [
-    { n: 1, name: engine === "paddleocr" ? "PaddleOCR 解析" : "MinerU 解析" },
-    { n: 2, name: "Hybrid 结构重建" },
-  ];
-  if (withTranslate) stages.push({ n: 3, name: "全书翻译" });
-  stages.push({ n: withTranslate ? 4 : 3, name: "EPUB 生成" });
-  return stages.map((s) => ({ ...s, status: "pending" as StageStatus }));
-}
-
-function StageCircle({ stage }: { stage: StageState }) {
-  if (stage.status === "done") {
+function StageCircle({ status, n }: { status: StageStatus; n: number }) {
+  if (status === "done") {
     return (
       <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <Check className="size-3.5" />
       </span>
     );
   }
-  if (stage.status === "active") {
+  if (status === "active") {
     return (
       <span className="relative flex h-6 w-6 flex-shrink-0">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/30" />
         <span className="relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary bg-background text-primary text-xs">
-          {stage.n}
+          {n}
         </span>
       </span>
     );
   }
-  if (stage.status === "error") {
+  if (status === "error") {
     return (
       <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
         <X className="size-3.5" />
@@ -78,48 +53,33 @@ function StageCircle({ stage }: { stage: StageState }) {
   }
   return (
     <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border text-muted-foreground text-xs">
-      {stage.n}
+      {n}
     </span>
   );
 }
 
 export default function ConverterPage() {
-  const [pdfPath, setPdfPath] = useState<string | null>(null);
-  const [ocr, setOcr] = useState(true);
-  const [translate, setTranslate] = useState("none");
-  const [status, setStatus] = useState<ConvertStatus>("idle");
-  const [percent, setPercent] = useState(0);
-  const [detail, setDetail] = useState("");
-  const [stages, setStages] = useState<StageState[]>([]);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [epubPath, setEpubPath] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
-
-  const statusRef = useRef<ConvertStatus>("idle");
-  const unlistenRef = useRef<(() => void) | null>(null);
-  const { refreshBooks } = useLibraryStore();
+  const bookConvert = useConvertProgressStore((s) => s.bookConvert);
+  const setBookConvertConfig = useConvertProgressStore((s) => s.setBookConvertConfig);
+  const resetBookConvert = useConvertProgressStore((s) => s.resetBookConvert);
+  const startBookConvert = useConvertProgressStore((s) => s.startBookConvert);
+  const cancelBookConvert = useConvertProgressStore((s) => s.cancelBookConvert);
+  const importBookConvertResult = useConvertProgressStore((s) => s.importBookConvertResult);
   const { mineruToken, paddleocrToken, engine } = useConverterStore();
   const hasEngineToken = engine === "paddleocr" ? !!paddleocrToken : !!mineruToken;
 
-  const updateStatus = (s: ConvertStatus) => {
-    statusRef.current = s;
-    setStatus(s);
-  };
+  const { pdfPath, ocr, translate, status, percent, detail, stages, errorMessage, epubPath, importing } = bookConvert;
 
-  // 卸载时解除事件监听
+  // 视图卸载（弹层关闭/路由切走）时若转换仍在进行或有结果未处理 → 最小化为全局右下角小卡
+  // （进度接收在 store 不受影响；小卡点击可回到大窗口，见 global-convert-progress）
   useEffect(() => {
     return () => {
-      unlistenRef.current?.();
+      const s = useConvertProgressStore.getState();
+      if (s.bookConvert.status !== "idle") {
+        useConvertProgressStore.setState({ bookConvertMinimized: true });
+      }
     };
   }, []);
-
-  const resetResult = () => {
-    setPercent(0);
-    setDetail("");
-    setStages([]);
-    setErrorMessage("");
-    setEpubPath(null);
-  };
 
   const handleSelectPdf = async () => {
     try {
@@ -128,99 +88,12 @@ export default function ConverterPage() {
         multiple: false,
       });
       if (typeof selected === "string") {
-        setPdfPath(selected);
-        resetResult();
-        updateStatus("idle");
+        // 换文件 = 丢弃上一轮结果（含解除旧监听）
+        resetBookConvert();
+        setBookConvertConfig({ pdfPath: selected });
       }
     } catch (e) {
       console.warn("选择 PDF 失败:", e);
-    }
-  };
-
-  const markActiveError = () => {
-    setStages((prev) => prev.map((s) => (s.status === "active" ? { ...s, status: "error" as StageStatus } : s)));
-  };
-
-  const handleProgress = (p: ConvertProgress) => {
-    if (p.percent !== undefined) setPercent(p.percent);
-    if (p.detail) setDetail(p.detail);
-    switch (p.type) {
-      case "progress":
-        if (p.stage !== undefined) {
-          setStages((prev) =>
-            prev.map((s) => (s.n === p.stage && s.status !== "done" ? { ...s, status: "active" as StageStatus } : s)),
-          );
-        }
-        break;
-      case "stage_done":
-        if (p.stage !== undefined) {
-          setStages((prev) =>
-            prev.map((s) => (s.n === p.stage ? { ...s, status: "done" as StageStatus, elapsed: p.elapsed } : s)),
-          );
-        }
-        break;
-      case "done":
-        setStages((prev) => prev.map((s) => ({ ...s, status: "done" as StageStatus })));
-        if (p.epub_path) setEpubPath(p.epub_path);
-        setPercent(100);
-        updateStatus("done");
-        break;
-      case "error":
-        markActiveError();
-        setErrorMessage(p.message || "转换失败");
-        updateStatus("error");
-        break;
-      case "terminated":
-        // 进程退出但未收到 done/error（崩溃等），避免界面卡死
-        if (statusRef.current === "converting") {
-          markActiveError();
-          setErrorMessage("转换进程意外退出，请查看日志");
-          updateStatus("error");
-        }
-        break;
-    }
-  };
-
-  const handleStart = async () => {
-    if (!pdfPath) return;
-    resetResult();
-    setStages(buildStages(translate !== "none", engine));
-    updateStatus("converting");
-    try {
-      unlistenRef.current?.();
-      unlistenRef.current = await listenConvertProgress(handleProgress);
-      await startConvert(pdfPath, ocr, translate === "none" ? undefined : translate);
-    } catch (e) {
-      markActiveError();
-      setErrorMessage(e instanceof Error ? e.message : String(e));
-      updateStatus("error");
-    }
-  };
-
-  const handleCancel = async () => {
-    try {
-      await cancelConvert();
-    } catch (e) {
-      console.warn("取消转换失败:", e);
-    }
-    updateStatus("idle");
-    toast.info("已取消转换");
-  };
-
-  const handleImport = async () => {
-    if (!epubPath) return;
-    setImporting(true);
-    try {
-      await importConvertedEpub(epubPath);
-      await refreshBooks();
-      toast.success("已导入图书馆");
-      setPdfPath(null);
-      resetResult();
-      updateStatus("idle");
-    } catch (e) {
-      toast.error(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -286,7 +159,12 @@ export default function ConverterPage() {
                 </Label>
                 <p className="text-muted-foreground text-xs">扫描版建议开启；文字版可关闭以提速</p>
               </div>
-              <Switch id="ocr-switch" checked={ocr} onCheckedChange={setOcr} disabled={converting} />
+              <Switch
+                id="ocr-switch"
+                checked={ocr}
+                onCheckedChange={(checked) => setBookConvertConfig({ ocr: checked })}
+                disabled={converting}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-4 px-4 py-3.5">
@@ -294,7 +172,11 @@ export default function ConverterPage() {
                 <Label className="text-sm">全书翻译</Label>
                 <p className="text-muted-foreground text-xs">使用辅助模型分批翻译（显著增加耗时）</p>
               </div>
-              <Select value={translate} onValueChange={setTranslate} disabled={converting}>
+              <Select
+                value={translate}
+                onValueChange={(v) => setBookConvertConfig({ translate: v })}
+                disabled={converting}
+              >
                 <SelectTrigger className="w-36">
                   <SelectValue />
                 </SelectTrigger>
@@ -317,11 +199,11 @@ export default function ConverterPage() {
               </p>
             )}
             {converting ? (
-              <Button variant="outline" onClick={handleCancel} className="w-full">
+              <Button variant="outline" onClick={() => void cancelBookConvert()} className="w-full">
                 取消转换
               </Button>
             ) : (
-              <Button onClick={handleStart} disabled={!pdfPath || !hasEngineToken} className="w-full">
+              <Button onClick={() => void startBookConvert()} disabled={!pdfPath || !hasEngineToken} className="w-full">
                 <FileDown className="size-4" />
                 开始转换
               </Button>
@@ -368,7 +250,7 @@ export default function ConverterPage() {
                       )}
                     />
                   )}
-                  <StageCircle stage={s} />
+                  <StageCircle status={s.status} n={s.n} />
                   <div className="min-w-0 flex-1 pt-0.5">
                     <div className="flex items-baseline justify-between gap-2">
                       <span
@@ -408,7 +290,7 @@ export default function ConverterPage() {
                     <TooltipContent side="bottom">{epubPath ?? ""}</TooltipContent>
                   </Tooltip>
                 </div>
-                <Button size="sm" onClick={handleImport} disabled={importing}>
+                <Button size="sm" onClick={() => void importBookConvertResult()} disabled={importing}>
                   {importing ? <Loader2 className="size-4 animate-spin" /> : <BookUp className="size-4" />}
                   导入图书馆
                 </Button>

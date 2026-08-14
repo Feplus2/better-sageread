@@ -7,6 +7,7 @@ import { FILE_ACCEPT_FORMATS } from "@/services/constants";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useLibraryStore } from "@/store/library-store";
 import { getFilename, listFormater } from "@/utils/book";
+import { readFile } from "@tauri-apps/plugin-fs";
 
 export function useBookUpload() {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -132,6 +133,26 @@ export function useBookUpload() {
     }
   }, [selectFiles, handleDropedFiles]);
 
+  /** 按磁盘路径导入书籍（Tauri 原生拖放只给路径不给 File 对象；
+   *  复用 importBooks 的重复检测/失败汇总/云端上传链路） */
+  const importBookPaths = useCallback(
+    async (paths: string[]) => {
+      const files: File[] = [];
+      for (const p of paths) {
+        try {
+          const bytes = await readFile(p);
+          files.push(new File([bytes.buffer as ArrayBuffer], p.split(/[\\/]/).pop() ?? p));
+        } catch (error) {
+          console.warn("读取拖入文件失败:", p, error);
+        }
+      }
+      if (files.length > 0) {
+        await importBooks(files);
+      }
+    },
+    [importBooks],
+  );
+
   return {
     isDragOver,
     isUploading,
@@ -141,5 +162,6 @@ export function useBookUpload() {
     handleFileSelect,
     handleDropedFiles,
     triggerFileSelect,
+    importBookPaths,
   };
 }

@@ -11,6 +11,7 @@ import { type BookTagSuggestions, generateTagsForBooks } from "@/services/ai-tag
 import { updateBook } from "@/services/book-service";
 import { createTag, getTags } from "@/services/tag-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
+import { useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLibraryStore } from "@/store/library-store";
 import clsx from "clsx";
 import { FileDown, ListChecks, Plus, Sparkles, Tags, Trash2, Upload as UploadIcon, X } from "lucide-react";
@@ -43,8 +44,12 @@ export default function NewLibraryPage() {
 
   // 书籍多选模式
   const [selectionMode, setSelectionMode] = useState(false);
-  // PDF 转 EPUB 转换器（弹层承载原 /converter 页面；侧边栏导航已收编到图书馆页头按钮）
-  const [converterOpen, setConverterOpen] = useState(false);
+  // PDF 转 EPUB 转换器（弹层承载原 /converter 页面；侧边栏导航已收编到图书馆页头按钮）。
+  // 打开态与最小化态在 convert-progress-store：转换中关窗/点窗外 → 缩为全局右下角小卡
+  // （点击小卡回图书馆还原大窗口），进度接收不随视图卸载中断
+  const converterOpen = useConvertProgressStore((s) => s.bookConvertDialogOpen && !s.bookConvertMinimized);
+  const openBookConvertDialog = useConvertProgressStore((s) => s.openBookConvertDialog);
+  const closeBookConvertDialog = useConvertProgressStore((s) => s.closeBookConvertDialog);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(new Set());
   const [batchTagMode, setBatchTagMode] = useState<"add" | "remove" | null>(null);
   const [isBatchOperating, setIsBatchOperating] = useState(false);
@@ -242,7 +247,7 @@ export default function NewLibraryPage() {
               : tags.find((t) => t.id === selectedTagFromUrl)?.name || "我的图书"}
           </h3>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setConverterOpen(true)}>
+            <Button variant="outline" size="sm" onClick={openBookConvertDialog}>
               <FileDown size={16} />
               PDF 转 EPUB
             </Button>
@@ -439,7 +444,9 @@ export default function NewLibraryPage() {
 
       <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
 
-      <Dialog open={converterOpen} onOpenChange={setConverterOpen}>
+      {/* 点窗外/Esc/关闭按钮统一走 closeBookConvertDialog：转换中或有结果 → 最小化为
+          全局右下角小卡（不丢进度）；空闲 → 彻底关闭 */}
+      <Dialog open={converterOpen} onOpenChange={(open) => (open ? openBookConvertDialog() : closeBookConvertDialog())}>
         <DialogContent className="flex h-[85vh] max-w-4xl flex-col overflow-hidden p-0">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ConverterPage />

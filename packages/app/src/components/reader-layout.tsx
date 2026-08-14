@@ -1,3 +1,4 @@
+import GlobalConvertProgress from "@/components/global-convert-progress";
 import HomeLayout from "@/components/home-layout";
 import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
 import { NotepadContainer } from "@/components/notepad";
@@ -617,6 +618,9 @@ export default function ReaderLayout() {
           })}
         </main>
       </div>
+
+      {/* 全局转换进度层（论文解析卡 + 图书转换小卡；阅读器/聊天页豁免，见组件注释） */}
+      <GlobalConvertProgress />
 
       <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
     </div>
