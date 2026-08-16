@@ -243,6 +243,13 @@ const getLayoutStyles = (
   h1, h2, h3, h4, h5, h6 {
     text-align: initial;
   }
+  /* MathML 块级公式居中：必须显式恢复 UA 的 display: block math——
+   * 旧版转换产物的 EPUB CSS 曾写 display:block（覆盖了 UA 的 block math
+   * 布局，公式贴左），此处统一兜底（见 Books_Converter FIXLOG 病例 016 补记） */
+  math[display="block"] {
+    display: block math;
+    text-align: center;
+  }
   /* 表格按自然宽度水平居中（窄表不再贴左，宽表受 max-width 约束）；
    * 旧版转换产物的 width:100% 由本规则（后注入同特异度）覆盖 */
   table {
