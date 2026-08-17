@@ -24,8 +24,8 @@ export const createPaperContextTool = () =>
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'命中片段缺少实验条件，需要扩展上下文'"),
       chunk_id: z.number().int().min(1).describe("目标分块的数据库ID，来自 paperSearch 结果的 position.chunk_id"),
-      before: z.number().int().min(0).max(10).default(2).describe("向前扩展多少个分块，默认2个"),
-      after: z.number().int().min(0).max(10).default(2).describe("向后扩展多少个分块，默认2个"),
+      before: z.number().int().min(0).max(10).default(3).describe("向前扩展多少个分块，默认3个"),
+      after: z.number().int().min(0).max(10).default(3).describe("向后扩展多少个分块，默认3个"),
     }),
     execute: async ({
       reasoning,
@@ -40,8 +40,8 @@ export const createPaperContextTool = () =>
     }) => {
       const results = (await invoke("plugin:epub|get_paper_chunk_context", {
         chunkId: chunk_id,
-        before: before ?? 2,
-        after: after ?? 2,
+        before: before ?? 3,
+        after: after ?? 3,
       })) as DocumentChunk[];
 
       if (results.length === 0) {

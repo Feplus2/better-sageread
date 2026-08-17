@@ -27,8 +27,8 @@ export const createRagContextTool = (activeBookId: string | undefined) =>
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'需要获取更多上下文来理解用户问题'"),
       chunk_id: z.number().int().min(1).describe("目标分块的数据库ID"),
-      prev_count: z.number().int().min(0).max(10).default(2).describe("获取前面多少个分块，默认2个"),
-      next_count: z.number().int().min(0).max(10).default(2).describe("获取后面多少个分块，默认2个"),
+      prev_count: z.number().int().min(0).max(10).default(3).describe("获取前面多少个分块，默认3个"),
+      next_count: z.number().int().min(0).max(10).default(3).describe("获取后面多少个分块，默认3个"),
     }),
     execute: async ({
       reasoning,
@@ -48,8 +48,8 @@ export const createRagContextTool = (activeBookId: string | undefined) =>
       const results = (await invoke("plugin:epub|get_chunk_with_context", {
         bookId: activeBookId,
         chunkId: chunk_id,
-        prevCount: prev_count ?? 2,
-        nextCount: next_count ?? 2,
+        prevCount: prev_count ?? 3,
+        nextCount: next_count ?? 3,
       })) as DocumentChunk[];
 
       const targetIndex = results.findIndex((chunk) => chunk.id === chunk_id);

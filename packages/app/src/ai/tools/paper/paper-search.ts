@@ -43,7 +43,7 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想比较多篇论文的方法'"),
       query: z.string().min(1).describe("检索问题（论文正文为英文，请用英文专业术语构造，命中率更高）"),
-      topK: z.number().int().min(1).max(30).default(5).describe("返回的片段数量，建议 3-8 个"),
+      topK: z.number().int().min(1).max(30).default(8).describe("返回的片段数量，建议 5-10 个"),
       vectorWeight: z.number().min(0).max(1).default(0.7).describe("向量搜索权重（0-1），概念性查询可调高"),
       bm25Weight: z.number().min(0).max(1).default(0.3).describe("关键词搜索权重（0-1），术语查询可调高"),
       includeReferences: z
@@ -71,7 +71,7 @@ export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
       const results = (await invoke("plugin:epub|search_papers_db", {
         query,
         paperIds: paperIds ?? null,
-        topK: topK ?? 5,
+        topK: topK ?? 8,
         vectorWeight: vectorWeight ?? 0.7,
         bm25Weight: bm25Weight ?? 0.3,
         includeReferences: includeReferences ?? false,

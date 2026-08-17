@@ -39,7 +39,7 @@ export const createRagSearchTool = (activeBookId: string | undefined) =>
         .min(1)
         .describe("调用此工具的原因和目的，例如：'用户询问关于机器学习的问题，需要搜索相关技术内容'"),
       question: z.string().min(1).describe("用户的查询问题，支持自然语言表达，系统将自动选择最佳搜索策略"),
-      limit: z.number().int().min(1).max(20).default(3).describe("返回的内容片段数量，建议3-5个获得平衡的信息覆盖"),
+      limit: z.number().int().min(1).max(20).default(5).describe("返回的内容片段数量，建议 5 个左右；需要更广覆盖可到 10-20"),
       // format: z.boolean().default(true).describe("是否返回格式化的上下文文本，包含搜索统计和位置信息"),
 
       // 高级搜索选项
