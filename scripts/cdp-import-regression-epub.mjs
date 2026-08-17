@@ -51,7 +51,7 @@ await evalJS(`window.__upload = (async () => {
   const bin = atob(window.__b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const file = new File([bytes], "高等数学 第七版 上册（v1.3.1 回归版）.epub", { type: "application/epub+zip" });
+  const file = new File([bytes], "高等数学 第七版 上册（v1.3.2 回归版）.epub", { type: "application/epub+zip" });
   window.__b64 = null;
   try {
     const book = await window.__bs.uploadBook(file);

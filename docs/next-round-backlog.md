@@ -5,6 +5,15 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ---
 
+## 🆕 2026-08-17 发布前实测问题三连（处理中）
+
+1. **Books Converter 无目录书结构散架**：无目录页时 `_light_metadata_pass` 的 LLM 会拿标题列表编造假 toc_entries（条目 page=扫描页为伪造指纹），假锚点在 `_calibrate_levels` 以最高优先级锁死层级。修法：两目录页识别器均未命中 → 丢弃 LLM toc_entries 走形状栈无锚点路径；可选增强 = fitz PDF outline 先验。修复+回归由子任务执行。
+   - 顺带确认：用户实测书为《Integral Calculus Made Easy》(Deepak Bhardwaj, 2006 重排)，页页带版权水印——**官网书籍对比图必须换公版书**（Gutenberg #33283 Calculus Made Easy PDF 已下载至 `.tmp-calc/`）。
+2. **工具返回普遍截断太短**：根因=索引分片 300 token（embedding 上限所迫）+ `readPaperSection` 硬截 6000 且无续读 + `readPaperFull` 硬截 30000 + topK 默认 5。已修（本仓库）：section/full 参数化（maxChars+offset 续读，默认 16000/50000，上限 40000/100000）、paperSearch topK 5→8、ragSearch limit 3→5、context 邻居默认 2→3。tsc 绿。
+3. **Zotero Brain 下载 403**：主因=Unpaywall 占位邮箱被 422 静默杀掉（`.env` 的 `UNPAYWALL_EMAIL` 未填），流量压到出版商直链，Wiley/ACS/Elsevier/MDPI 的 Cloudflare/Akamai 对非浏览器一律 403。修法：默认 UA、Unpaywall 422 可见化、oa_locations 优先 repository 副本、S2 429 退避加长。用户侧待办：填真实邮箱、可选配 CORE_API_KEY。
+
+---
+
 ## ⓪ 复审必修缺陷（2026-08-09 代码复审发现）—— ✅ 2026-08-09 当日全部修复
 
 复审基准：cargo test 35+1 绿、tsc 绿、E1 fixture 16/16 绿；均为静态审查+实测确认的确定性问题。
