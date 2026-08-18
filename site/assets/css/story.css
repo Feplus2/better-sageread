@@ -1,0 +1,202 @@
+/* ============================================================
+   Better SageRead 官网 · 序列帧叙事版
+   美学：西式暖光书房 · 收敛典雅素 —— 纹理/线条/动效取胜，不堆颜色
+   ============================================================ */
+:root{
+  --paper:#f3ecdd;        /* 暖象牙 */
+  --ink:#3d3423;          /* 暖墨 */
+  --ink-2:#6d5f45;
+  --ink-3:#9b8c6e;
+  --line:#d8cdb4;
+  --brass:#8a6d3b;        /* 黄铜点缀（唯一强调色，克制使用） */
+  --card:#faf6ec;
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",serif;
+  --latin:Georgia,"Times New Roman",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scrollbar-width:thin;scrollbar-color:#b3a686 var(--paper)}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+img{display:block}
+a{color:var(--brass);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ---------- 叙事区 ---------- */
+#track{position:relative}
+#stage{position:sticky;top:0;height:100vh;overflow:hidden;background:#e9e0cb}
+#seq{position:absolute;inset:0;width:100%;height:100%}
+#veil{position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg, rgba(243,236,222,0) 30%, rgba(243,236,222,.55) 56%, rgba(243,236,222,.92) 82%)}
+
+/* 左上竖排小签 tab 栏 */
+#tabrail{
+  position:absolute;left:2.2vw;top:6vh;z-index:20;display:flex;gap:2px;
+  align-items:stretch;user-select:none;
+  background:rgba(243,236,222,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border:1px solid rgba(216,205,180,.55);border-radius:10px;padding:6px 8px;
+}
+#tabrail .brandtab{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:6px 4px 10px;margin-right:10px;
+}
+#tabrail .brandtab img{width:34px;height:34px;border-radius:8px;
+  box-shadow:0 3px 10px -4px rgba(61,52,35,.5)}
+#tabrail .brandtab span{writing-mode:vertical-rl;font-family:var(--latin);font-style:italic;
+  font-size:9px;letter-spacing:.24em;color:var(--ink-2)}
+#tabrail button{
+  appearance:none;background:none;border:none;cursor:pointer;
+  writing-mode:vertical-rl;letter-spacing:.32em;font-family:var(--serif);
+  font-size:12px;color:var(--ink-2);padding:8px 5px;
+  border-left:1px solid transparent;transition:color .3s,border-color .3s;
+}
+#tabrail button:hover{color:var(--ink)}
+#tabrail button.on{color:var(--ink);border-left-color:var(--brass);font-weight:600}
+
+/* 文字面板（普通网页版式，右列） */
+.panel{position:absolute;inset:0;display:none}
+.panel.on{display:block}
+.blk{
+  position:absolute;right:5vw;top:50%;width:min(560px,40vw);
+  transform:translateY(-50%);opacity:0;will-change:transform,opacity;
+}
+.blk .cap{font-family:var(--latin);font-style:italic;font-size:11px;
+  letter-spacing:.40em;color:var(--ink-3);text-transform:uppercase}
+.blk h1{font-size:clamp(30px,3.1vw,44px);font-weight:600;line-height:1.5;
+  letter-spacing:.08em;margin-top:18px}
+.blk h2{font-size:clamp(22px,2vw,30px);font-weight:600;line-height:1.6;
+  letter-spacing:.08em;margin-top:14px}
+.blk .rule{width:40px;height:1px;background:var(--ink-3);margin:16px 0;position:relative}
+.blk .rule::after{content:"";position:absolute;left:0;top:-2.5px;width:5px;height:5px;
+  transform:rotate(45deg);background:var(--ink-3)}
+.blk p{font-size:14.5px;line-height:2.2;letter-spacing:.04em;color:var(--ink-2)}
+.blk .brandline{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.blk .brandline img{width:40px;height:40px;border-radius:10px;
+  box-shadow:0 4px 14px -6px rgba(61,52,35,.45)}
+.blk .brandline span{font-family:var(--latin);font-style:italic;font-size:12px;
+  letter-spacing:.30em;color:var(--ink-2)}
+.blk .sub{margin-top:18px;font-size:13px;letter-spacing:.24em;color:var(--ink-2)}
+
+/* 截图卡：左探与场景互锁 */
+.shot{
+  width:120%;margin:22px 0 0 -20%;cursor:zoom-in;
+  border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  background:var(--card);box-shadow:0 18px 44px -22px rgba(61,52,35,.4);
+}
+.shot img{width:100%;height:auto}
+.shot figcaption{font-size:11px;letter-spacing:.14em;color:var(--ink-3);
+  padding:8px 12px;border-top:1px solid var(--line);background:var(--card)}
+.shotduo{display:flex;gap:12px;width:132%;margin:22px 0 0 -26%}
+.shotduo .shot{margin:0;flex:1}
+.shotduo .shot img{width:100%;aspect-ratio:5/4;object-fit:cover;object-position:top}
+
+/* 命令卡 */
+.cmdcard{
+  margin-top:20px;border:1px solid var(--line);border-radius:8px;background:var(--card);
+  padding:14px 16px;position:relative;
+}
+.cmdcard code{font-family:"Cascadia Code",Consolas,monospace;font-size:12.5px;
+  color:var(--ink);word-break:break-all}
+.cmdcard .copybtn{
+  position:absolute;right:10px;top:10px;font-size:11px;letter-spacing:.1em;
+  border:1px solid var(--line);background:var(--paper);color:var(--ink-2);
+  border-radius:4px;padding:3px 9px;cursor:pointer;font-family:var(--serif);
+}
+.cmdcard .copybtn:hover{color:var(--ink);border-color:var(--ink-3)}
+
+/* 滚动提示 */
+#hint{position:absolute;left:50%;bottom:4.5vh;transform:translateX(-50%);z-index:15;
+  text-align:center;color:var(--ink-2);font-size:11px;letter-spacing:.34em;pointer-events:none}
+#hint .wire{width:1px;height:40px;margin:0 auto 10px;background:var(--ink-3);
+  transform-origin:top;animation:wire 2.2s ease-in-out infinite}
+@keyframes wire{0%,100%{transform:scaleY(.35)}55%{transform:scaleY(1)}}
+
+/* ---------- 叙事之后的正常流 ---------- */
+#after{position:relative;z-index:5;background:var(--paper)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 5vw}
+section.block{padding:11vh 0;border-top:1px solid var(--line)}
+.sec-no{font-family:var(--latin);font-style:italic;font-size:12px;letter-spacing:.3em;color:var(--ink-3)}
+.sec-head h2{font-size:clamp(24px,2.4vw,34px);letter-spacing:.1em;margin:12px 0 10px;font-weight:600}
+.sec-head p{color:var(--ink-2);font-size:14.5px;line-height:2}
+.badges{list-style:none;display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.badges li{font-size:11.5px;letter-spacing:.12em;color:var(--ink-2);
+  border:1px solid var(--line);border-radius:99px;padding:4px 12px;background:var(--card)}
+
+/* 获取区（per-tab） */
+.acq{display:none}
+.acq.on{display:block}
+.acq-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:30px}
+@media(max-width:900px){.acq-grid{grid-template-columns:1fr}}
+.dlcard{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:22px 24px}
+.dlcard h3{font-size:16px;letter-spacing:.12em;margin-bottom:14px}
+.dlcard .fine{font-size:12px;color:var(--ink-3);line-height:1.9;margin-top:12px}
+
+/* 按钮 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--ink);padding:11px 20px;border-radius:7px;font-size:14px;
+  letter-spacing:.08em;cursor:pointer;transition:all .25s;text-decoration:none}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:var(--ink);color:var(--paper)}
+.btn-primary:hover{background:#241f15}
+.btn-ghost{background:transparent;color:var(--ink);border-color:var(--ink-3)}
+.btn-ghost:hover{border-color:var(--ink)}
+.btn-block{display:flex;width:100%;margin-top:10px;justify-content:space-between}
+.btn-meta{font-size:11px;opacity:.65;letter-spacing:.04em}
+.btn-mini{padding:6px 12px;font-size:12px;border-radius:5px}
+
+/* 下载表 */
+.table-wrap{overflow-x:auto;margin-top:26px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.dl-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.dl-table th,.dl-table td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line)}
+.dl-table thead th{font-size:11.5px;letter-spacing:.2em;color:var(--ink-3);font-weight:400}
+.dl-table tbody tr:last-child th,.dl-table tbody tr:last-child td{border-bottom:none}
+.dl-table th small{display:block;color:var(--ink-3);font-weight:400;font-size:11px;margin-top:3px}
+.dl-cell{display:flex;gap:8px}
+.badge-soon{font-size:11.5px;color:var(--ink-2);border:1px dashed var(--ink-3);
+  border-radius:99px;padding:3px 11px}
+.table-note{font-size:12px;color:var(--ink-3);margin-top:12px;letter-spacing:.05em}
+
+/* FAQ */
+details{border:1px solid var(--line);border-radius:8px;background:var(--card);
+  padding:16px 20px;margin-top:12px}
+details summary{cursor:pointer;font-size:15px;letter-spacing:.06em;list-style:none;position:relative}
+details summary::after{content:"+";position:absolute;right:4px;top:0;color:var(--ink-3);
+  font-family:var(--latin);font-size:16px}
+details[open] summary::after{content:"–"}
+details p{margin-top:12px;font-size:13.5px;line-height:2.1;color:var(--ink-2)}
+
+/* 页脚 */
+footer{border-top:1px solid var(--line);padding:8vh 0 10vh;background:var(--paper)}
+.footer-inner{text-align:center;font-size:12.5px;color:var(--ink-3);line-height:2.2}
+.footer-inner .fbrand{display:flex;align-items:center;justify-content:center;gap:10px;
+  font-size:14px;color:var(--ink-2);letter-spacing:.14em;margin-bottom:10px}
+.footer-inner .fbrand img{width:26px;height:26px;border-radius:6px}
+
+/* 灯箱 */
+.lightbox{position:fixed;inset:0;z-index:99;background:rgba(30,26,18,.86);
+  display:flex;align-items:center;justify-content:center}
+.lightbox[hidden]{display:none}
+.lightbox figure{max-width:88vw;max-height:88vh}
+.lightbox img{max-width:88vw;max-height:82vh;border-radius:6px}
+.lightbox figcaption{text-align:center;color:#e8e0cd;font-size:12px;letter-spacing:.14em;margin-top:10px}
+.lightbox button{position:absolute;background:none;border:1px solid rgba(232,224,205,.4);
+  color:#e8e0cd;border-radius:50%;width:42px;height:42px;font-size:20px;cursor:pointer}
+.lb-close{top:4vh;right:4vw}
+.lb-prev{left:3vw;top:50%;transform:translateY(-50%)}
+.lb-next{right:3vw;top:50%;transform:translateY(-50%)}
+
+/* 进场 */
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .9s ease,transform .9s cubic-bezier(.2,.7,.2,1)}
+.reveal.visible{opacity:1;transform:none}
+
+/* ---------- 降级（移动端 / 减弱动效 / 无 JS） ----------
+   复用同一 DOM：舞台转静态流，面板顺序铺开，无需重复内容 */
+body.flat #track{height:auto}
+body.flat #stage{position:static;height:auto;overflow:visible;background:transparent}
+body.flat #seq,body.flat #veil,body.flat #hint,body.flat #tabrail{display:none}
+body.flat .panel{display:block;position:static}
+body.flat .blk{position:static;width:auto;max-width:720px;margin:0 auto;padding:8vh 6vw;
+  opacity:1 !important;visibility:visible !important;transform:none !important;
+  border-top:1px solid var(--line)}
+body.flat .panel .blk:first-child{border-top:none}
+body.flat .shot,body.flat .shotduo{width:100%;margin:18px 0 0}
+body.flat .shotduo{flex-direction:column}

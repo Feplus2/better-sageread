@@ -41,3 +41,7 @@ packages/app/src-tauri/plugins/*/permissions/schemas/
 # Books_Converter / Papers_Converter sidecar（PyInstaller 产物，入库随安装包分发；本地 .bak 备份除外）
 packages/app/src-tauri/binaries/*.bak*
 .tools/
+
+# 官网：本地中间产物（demo 帧/源视频母带），不进库不部署
+site/prototype/
+.tmp-site-prototype/

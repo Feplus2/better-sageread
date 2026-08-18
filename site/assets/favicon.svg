@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="4" y="4" width="56" height="56" rx="6" fill="#bc3a1d"/>
+  <rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#f6f2ea" stroke-width="2" opacity=".85"/>
+  <text x="32" y="44" font-family="Georgia, 'Songti SC', 'SimSun', serif" font-size="34" fill="#f6f2ea" text-anchor="middle" font-weight="700">阅</text>
+</svg>

@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Better SageRead · 把论文和书，读进 AI 时代</title>
+<meta name="description" content="本地优先的 AI 阅读器 Better SageRead 及配套开源工具：论文解析、扫描书转换、MCP 服务器、Zotero 文献获取。数据全在你自己的电脑上。">
+<meta property="og:title" content="Better SageRead">
+<meta property="og:description" content="把论文和书，读进 AI 时代——本地优先的阅读、转换与知识库工具。">
+<link rel="icon" href="assets/img/icon.png" type="image/png">
+<link rel="stylesheet" href="assets/css/story.css">
+</head>
+<body>
+
+<!-- ============ 叙事区（sticky 舞台 + 竖排小签） ============ -->
+<div id="track">
+  <div id="stage">
+    <canvas id="seq"></canvas>
+    <div id="veil"></div>
+
+    <nav id="tabrail" aria-label="产品切换">
+      <div class="brandtab">
+        <img src="assets/img/icon.png" alt="Better SageRead 图标">
+        <span>SAGEREAD</span>
+      </div>
+      <button data-tab="sageread" class="on">阅读器</button>
+      <button data-tab="papers">论文转换</button>
+      <button data-tab="books">书籍转换</button>
+      <button data-tab="mcp">开放生态</button>
+      <button data-tab="zotero">文献获取</button>
+    </nav>
+
+    <!-- SageRead 主 tab -->
+    <div class="panel on" id="panel-sageread">
+      <section class="blk" id="blk-hero">
+        <div class="brandline"><img src="assets/img/icon.png" alt=""><span>BETTER&nbsp;SAGEREAD</span></div>
+        <h1>把论文和书，<br>读进 AI 时代。</h1>
+        <div class="rule"></div>
+        <div class="sub">本地优先的 AI 阅读器 · 书与论文同架</div>
+      </section>
+      <section class="blk" id="blk-lib">
+        <div class="cap">01 · Library</div>
+        <h2>书与论文，同架而立。</h2>
+        <div class="rule"></div>
+        <p>EPUB 与论文 PDF 收进同一座书库；<br>进度、批注、笔记，各安其位，随处可续。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-library.webp" alt="图书馆：书籍与论文卡片同架" loading="lazy"><figcaption>图书馆 · 同架而立</figcaption></figure>
+      </section>
+      <section class="blk" id="blk-reader">
+        <div class="cap">02 · Reader</div>
+        <h2>你的书房，你的样子。</h2>
+        <div class="rule"></div>
+        <p>全局主题与动态壁纸，怜烟、蒙德里安，或你自己的设计；<br>渲染精细到每一个公式。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-reader.webp" alt="怜烟主题下的论文阅读：划线、AI 重点与对照翻译" loading="lazy"><figcaption>怜烟主题 · 划线与 AI 重点</figcaption></figure>
+      </section>
+      <section class="blk" id="blk-figures">
+        <div class="cap">03 · Figures</div>
+        <h2>图表速跳，如在目前。</h2>
+        <div class="rule"></div>
+        <p>图注表注列为签，一点即至，译注随行；<br>开组会翻图，不再手忙脚乱。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-figures.webp" alt="图表速跳面板与论文中的大图" loading="lazy"><figcaption>图表速跳 · 一点即至</figcaption></figure>
+      </section>
+      <section class="blk" id="blk-notes">
+        <div class="cap">04 · Notes</div>
+        <h2>落笔有痕。</h2>
+        <div class="rule"></div>
+        <p>侧边栏就是一方完整的 Markdown 笔记，位置标签随行；<br>与 AI 讨论出的灵感，一键写入。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-notes.webp" alt="AI 把讨论产出整理写入笔记面板" loading="lazy"><figcaption>AI 写入笔记 · 灵感不散</figcaption></figure>
+      </section>
+      <section class="blk" id="blk-rag">
+        <div class="cap">05 · Agent</div>
+        <h2>问书有据。</h2>
+        <div class="rule"></div>
+        <p>向量检索盘活整座书库，回答皆有出处；<br>本篇、全库、自定义范围，随问随选。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-rag.webp" alt="向量检索：按相似度返回原文片段" loading="lazy"><figcaption>向量检索 · 回答有据</figcaption></figure>
+      </section>
+      <section class="blk" id="blk-vault">
+        <div class="cap">06 · Yours</div>
+        <h2>数据是你的。</h2>
+        <div class="rule"></div>
+        <p>WebDAV 备份与增量同步，换设备不丢一页；<br>密钥收进系统凭据保管箱，不明文落盘。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-vault.webp" alt="密钥保管箱：密钥存系统凭据管理器" loading="lazy"><figcaption>密钥保管箱 · 不明文落盘</figcaption></figure>
+      </section>
+    </div>
+
+    <!-- Papers Converter -->
+    <div class="panel" id="panel-papers">
+      <section class="blk" id="blk-p-hero">
+        <div class="cap">Papers Converter</div>
+        <h2>论文 PDF，<br>重排为可读的 Markdown。</h2>
+        <div class="rule"></div>
+        <div class="sub">SageRead 论文书架的上游管线 · MIT 开源</div>
+      </section>
+      <section class="blk" id="blk-p-quality">
+        <div class="cap">01 · Quality</div>
+        <h2>大图不再被切碎。</h2>
+        <div class="rule"></div>
+        <p>被 OCR 切散的子图，按坐标光栅重裁拼回原图；<br>公式、表格、图注，各归其位。</p>
+        <div class="shotduo">
+          <figure class="shot g-item"><img src="assets/img/conv-paper-before.webp" alt="转换前：论文原始 PDF 版面" loading="lazy"><figcaption>转换前 · PDF</figcaption></figure>
+          <figure class="shot g-item"><img src="assets/img/conv-paper-after.webp" alt="转换后：Markdown 排版与中译对照" loading="lazy"><figcaption>转换后 · Markdown</figcaption></figure>
+        </div>
+      </section>
+      <section class="blk" id="blk-p-feat">
+        <div class="cap">02 · Features</div>
+        <h2>引擎可换，质量有闸。</h2>
+        <div class="rule"></div>
+        <p>MinerU-VLM 主驱，PaddleOCR 备选，pipeline 兜底；<br>封面误杀、丢页检测，QC 闸门自动降级重处理。</p>
+        <div class="cmdcard">
+          <code>git clone https://github.com/Feplus2/Papers_Converter<br>cd Papers_Converter &amp;&amp; pip install -r requirements.txt</code>
+          <button class="copybtn" data-copy="git clone https://github.com/Feplus2/Papers_Converter">复制</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Books Converter -->
+    <div class="panel" id="panel-books">
+      <section class="blk" id="blk-b-hero">
+        <div class="cap">Books Converter</div>
+        <h2>扫描书，<br>装订成真正的电子书。</h2>
+        <div class="rule"></div>
+        <div class="sub">扫描 PDF → EPUB · MIT 开源 · Windows 免安装</div>
+      </section>
+      <section class="blk" id="blk-b-compare">
+        <div class="cap">01 · Compare</div>
+        <h2>从扫描页，到流动的版面。</h2>
+        <div class="rule"></div>
+        <p>多级目录嵌套归位，公式转为 MathML；<br>页脚注恢复为可点击尾注，跨页断段自动接续。</p>
+        <div class="shotduo">
+          <figure class="shot g-item"><img src="assets/img/conv-book-before.webp" alt="转换前：PDF 原始版面" loading="lazy"><figcaption>转换前 · PDF</figcaption></figure>
+          <figure class="shot g-item"><img src="assets/img/conv-book-after.webp" alt="转换后：EPUB 版面，公式居中渲染" loading="lazy"><figcaption>转换后 · EPUB</figcaption></figure>
+        </div>
+      </section>
+      <section class="blk" id="blk-b-feat">
+        <div class="cap">02 · Features</div>
+        <h2>双引擎，免显卡。</h2>
+        <div class="rule"></div>
+        <p>MinerU 与 PaddleOCR-VL 一键切换，全走云端 API；<br>实测 561 页七层结构，76 秒重建，成本约 ¥0.15。</p>
+        <div class="cmdcard">
+          <code>图形界面版（GUI）与命令行版（CLI）<br>见下方「全部下载」· 解压即用</code>
+          <button class="copybtn" data-goto="#downloads">去下载</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- sageread-mcp -->
+    <div class="panel" id="panel-mcp">
+      <section class="blk" id="blk-m-hero">
+        <div class="cap">sageread-mcp</div>
+        <h2>把整个书库，<br>开放给外部 Agent。</h2>
+        <div class="rule"></div>
+        <div class="sub">只读 MCP 服务器 · MIT 开源</div>
+      </section>
+      <section class="blk" id="blk-m-tools">
+        <div class="cap">01 · Tools</div>
+        <h2>你的 Agent，读懂你的书房。</h2>
+        <div class="rule"></div>
+        <p>书库不只住在应用里——接上这条命令，Claude Desktop、Cherry Studio，<br>或任何 MCP 客户端，都能检索你的书库、读论文、调取笔记与对话：<br>19 个只读工具，任你在外面的 Agent 差遣。</p>
+        <p>数据库只读打开，密钥不出应用；引用导出八格式：<br>BibTeX · GB/T 7714 · APA · MLA · Chicago · IEEE · Vancouver · RIS。</p>
+      </section>
+      <section class="blk" id="blk-m-setup">
+        <div class="cap">02 · Setup</div>
+        <h2>npx 一句话的事。</h2>
+        <div class="rule"></div>
+        <div class="cmdcard">
+          <code>npx -y sageread-mcp</code>
+          <button class="copybtn" data-copy="npx -y sageread-mcp">复制</button>
+        </div>
+        <p style="margin-top:14px">Claude Desktop / Cherry Studio 等任何 MCP 客户端通用；<br>配置示例见 <a href="https://github.com/Feplus2/sageread-mcp" target="_blank" rel="noopener">GitHub 仓库</a>。</p>
+      </section>
+    </div>
+
+    <!-- Zotero Brain 精简版 -->
+    <div class="panel" id="panel-zotero">
+      <section class="blk" id="blk-z-hero">
+        <div class="cap">Zotero Brain · 精简版</div>
+        <h2>找到、下载、入库，<br>只做这一件事。</h2>
+        <div class="rule"></div>
+        <div class="sub">极简 Zotero MCP · MIT 开源</div>
+      </section>
+      <section class="blk" id="blk-z-flow">
+        <div class="cap">01 · Workflow</div>
+        <h2>八源发现，七级瀑布。</h2>
+        <div class="rule"></div>
+        <p>OpenAlex · arXiv · Crossref · Semantic Scholar 等八源检索，附在库标记；<br>Unpaywall → arXiv → CORE 逐级回落下载，自动建条目入 Collection。</p>
+        <p style="font-size:12.5px;color:var(--ink-3)">Sci-Hub 级默认关闭，可自行开启，责任自负。</p>
+      </section>
+      <section class="blk" id="blk-z-setup">
+        <div class="cap">02 · Setup</div>
+        <h2>两分钟接入。</h2>
+        <div class="rule"></div>
+        <p>SageRead「AI 中心 → 添加服务器」：命令 <code>uv</code>，<br>参数 <code>run --directory &lt;仓库目录&gt; mcp_server.py</code>；<br>环境变量 ZOTERO_API_KEY / USER_ID 用 secret 引用——<br>真值只进密钥保管箱，不落明文。</p>
+        <figure class="shot g-item"><img src="assets/img/shot-zotero-config.webp" alt="在 AI 中心配置 zotero-brain MCP 服务器：stdio 命令与 secret 环境变量" loading="lazy"><figcaption>AI 中心 · 配置 zotero-brain</figcaption></figure>
+      </section>
+    </div>
+
+    <div id="hint"><div class="wire"></div>向下滚动</div>
+  </div>
+</div>
+
+<!-- ============ 叙事之后：获取 + 下载 + FAQ + 页脚 ============ -->
+<main id="after">
+
+  <!-- per-tab 获取卡 -->
+  <section class="acq on" data-for="sageread">
+    <div class="wrap">
+      <header class="sec-head">
+        <span class="sec-no">Better SageRead</span>
+        <h2>现在开始。</h2>
+        <p>Windows 10 / 11 x64 · AGPL-3.0 开源 · 首次启动按应用内手册配置模型 API Key 即可。</p>
+      </header>
+      <div class="acq-grid">
+        <div class="dlcard">
+          <h3>下载安装包</h3>
+          <a class="btn btn-primary btn-block" data-dl="sageread-setup" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64-setup.exe">
+            <span>安装版 setup.exe（推荐）</span><small class="btn-meta">v0.2.0 · 135.5 MB</small></a>
+          <a class="btn btn-ghost btn-block" data-dl="sageread-msi" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64_en-US.msi">
+            <span>MSI 安装包</span><small class="btn-meta">v0.2.0 · 138.4 MB</small></a>
+          <p class="fine">GitHub 已下载 <b data-gh-count="sageread">4</b> 次 · <a href="https://github.com/Feplus2/better-sageread" target="_blank" rel="noopener">源代码</a></p>
+        </div>
+        <div class="dlcard">
+          <h3>搭配使用</h3>
+          <p class="fine" style="margin-top:0">论文解析需 MinerU Token（免费申请）；向量检索需自备 embedding 服务；<br>扫描书转换见「书籍转换」小签。<br>安装时如遇 SmartScreen 提示，点「更多信息 → 仍要运行」。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="acq" data-for="papers">
+    <div class="wrap">
+      <header class="sec-head">
+        <span class="sec-no">Papers Converter</span>
+        <h2>源码即装即用。</h2>
+        <p>Python 3.10+ · MIT 开源 · 也内置于 Better SageRead，导入论文时自动调用。</p>
+      </header>
+      <div class="acq-grid">
+        <div class="dlcard">
+          <h3>获取源码</h3>
+          <div class="cmdcard"><code>git clone https://github.com/Feplus2/Papers_Converter</code>
+            <button class="copybtn" data-copy="git clone https://github.com/Feplus2/Papers_Converter">复制</button></div>
+          <p class="fine"><a href="https://github.com/Feplus2/Papers_Converter" target="_blank" rel="noopener">github.com/Feplus2/Papers_Converter</a> · 致谢 MinerU</p>
+        </div>
+        <div class="dlcard"><h3>引擎</h3>
+          <p class="fine" style="margin-top:0">MinerU 为主（Token 免费申请），PaddleOCR-VL 备选（每日免费额度），pipeline 本地兜底；GLM 引擎已下线。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="acq" data-for="books">
+    <div class="wrap">
+      <header class="sec-head">
+        <span class="sec-no">Books Converter</span>
+        <h2>解压即用。</h2>
+        <p>Windows x64 免安装 · MIT 开源 · OCR 走云端，无需本地显卡。</p>
+      </header>
+      <div class="acq-grid">
+        <div class="dlcard">
+          <h3>下载压缩包</h3>
+          <a class="btn btn-primary btn-block" data-dl="books-converter-gui" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/Books_Converter-v1.3-win64.zip">
+            <span>图形界面版（推荐）</span><small class="btn-meta">v1.3 · 62.0 MB</small></a>
+          <a class="btn btn-ghost btn-block" data-dl="books-converter-cli" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/books_converter-cli-v1.3-win64.zip">
+            <span>命令行 CLI 版</span><small class="btn-meta">v1.3 · 57.7 MB</small></a>
+          <p class="fine">GitHub 已下载 <b data-gh-count="books-converter">7</b> 次 · <a href="https://github.com/Feplus2/Books_Converter" target="_blank" rel="noopener">源代码</a></p>
+        </div>
+        <div class="dlcard"><h3>提示</h3>
+          <p class="fine" style="margin-top:0">GUI 版图形界面零门槛；CLI 版适合批量与脚本化。转换产物可直接导入 SageRead 图书馆。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="acq" data-for="mcp">
+    <div class="wrap">
+      <header class="sec-head">
+        <span class="sec-no">sageread-mcp</span>
+        <h2>一句话接入。</h2>
+        <p>npm 包 · MIT 开源 · 需本机已安装 Better SageRead 并有书库数据。</p>
+      </header>
+      <div class="acq-grid">
+        <div class="dlcard">
+          <h3>启动命令</h3>
+          <div class="cmdcard"><code>npx -y sageread-mcp</code>
+            <button class="copybtn" data-copy="npx -y sageread-mcp">复制</button></div>
+          <p class="fine"><a href="https://github.com/Feplus2/sageread-mcp" target="_blank" rel="noopener">github.com/Feplus2/sageread-mcp</a> · <a href="https://www.npmjs.com/package/sageread-mcp" target="_blank" rel="noopener">npm</a></p>
+        </div>
+        <div class="dlcard"><h3>客户端配置</h3>
+          <p class="fine" style="margin-top:0">Claude Desktop / Cherry Studio 的 MCP 配置中加入该命令即可；仓库 README 有逐客户端示例。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="acq" data-for="zotero">
+    <div class="wrap">
+      <header class="sec-head">
+        <span class="sec-no">Zotero Brain · 精简版</span>
+        <h2>uvx 直跑。</h2>
+        <p>Python 包 · MIT 开源 · 与 SageRead 的 Zotero 导入配合使用。</p>
+      </header>
+      <div class="acq-grid">
+        <div class="dlcard">
+          <h3>启动命令</h3>
+          <div class="cmdcard"><code>uvx --from git+https://github.com/Feplus2/zotero-brain-slim zotero-brain</code>
+            <button class="copybtn" data-copy="uvx --from git+https://github.com/Feplus2/zotero-brain-slim zotero-brain">复制</button></div>
+          <p class="fine"><a href="https://github.com/Feplus2/zotero-brain-slim" target="_blank" rel="noopener">github.com/Feplus2/zotero-brain-slim</a></p>
+        </div>
+        <div class="dlcard"><h3>合规提示</h3>
+          <p class="fine" style="margin-top:0">Sci-Hub 下载级默认关闭；如需开启请自行设置环境变量并自负其责。优先使用各开放获取源。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 全部下载 -->
+  <section id="downloads" class="block"><div class="wrap">
+    <header class="sec-head">
+      <span class="sec-no">Downloads</span>
+      <h2>全部下载</h2>
+      <p>「高速下载」面向国内（腾讯云 COS），海外或通道维护期间请用 GitHub 直连，两者文件完全一致。
+        版本号与下载量自动同步 GitHub Release（累计 <b data-total-downloads>11</b> 次）。</p>
+      <p class="os-note" data-os-note hidden>当前系统不是 Windows——安装包面向 Windows，其余工具（源码 / npm / uvx）跨平台。</p>
+    </header>
+    <div class="table-wrap">
+      <table class="dl-table">
+        <thead><tr><th>工具</th><th>版本</th><th>平台</th><th>大小</th><th>下载</th><th>累计</th></tr></thead>
+        <tbody>
+          <tr>
+            <th scope="row">Better SageRead<small>安装版 setup.exe</small></th>
+            <td data-version-badge="sageread">v0.2.0</td><td>Windows x64</td>
+            <td data-size="sageread-setup">135.5 MB</td>
+            <td class="dl-cell" data-dl-cell="sageread-setup">
+              <a class="btn btn-mini btn-primary" data-dl="sageread-setup" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64-setup.exe">高速下载</a>
+              <a class="btn btn-mini btn-ghost" data-dl="sageread-setup" data-gh-link="sageread-setup" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64-setup.exe" target="_blank" rel="noopener">GitHub</a>
+            </td>
+            <td data-gh-count="sageread">4</td>
+          </tr>
+          <tr>
+            <th scope="row">Better SageRead<small>MSI 安装包</small></th>
+            <td data-version-badge="sageread">v0.2.0</td><td>Windows x64</td>
+            <td data-size="sageread-msi">138.4 MB</td>
+            <td class="dl-cell" data-dl-cell="sageread-msi">
+              <a class="btn btn-mini btn-primary" data-dl="sageread-msi" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64_en-US.msi">高速下载</a>
+              <a class="btn btn-mini btn-ghost" data-dl="sageread-msi" data-gh-link="sageread-msi" href="https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64_en-US.msi" target="_blank" rel="noopener">GitHub</a>
+            </td>
+            <td data-gh-count="sageread">4</td>
+          </tr>
+          <tr>
+            <th scope="row">Books Converter<small>图形界面版</small></th>
+            <td data-version-badge="books-converter">v1.3</td><td>Windows x64 免安装</td>
+            <td data-size="books-converter-gui">62.0 MB</td>
+            <td class="dl-cell" data-dl-cell="books-converter-gui">
+              <a class="btn btn-mini btn-primary" data-dl="books-converter-gui" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/Books_Converter-v1.3-win64.zip">高速下载</a>
+              <a class="btn btn-mini btn-ghost" data-dl="books-converter-gui" data-gh-link="books-converter-gui" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/Books_Converter-v1.3-win64.zip" target="_blank" rel="noopener">GitHub</a>
+            </td>
+            <td data-gh-count="books-converter">7</td>
+          </tr>
+          <tr>
+            <th scope="row">Books Converter<small>命令行 CLI 版</small></th>
+            <td data-version-badge="books-converter">v1.3</td><td>Windows x64 免安装</td>
+            <td data-size="books-converter-cli">57.7 MB</td>
+            <td class="dl-cell" data-dl-cell="books-converter-cli">
+              <a class="btn btn-mini btn-primary" data-dl="books-converter-cli" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/books_converter-cli-v1.3-win64.zip">高速下载</a>
+              <a class="btn btn-mini btn-ghost" data-dl="books-converter-cli" data-gh-link="books-converter-cli" href="https://github.com/Feplus2/Books_Converter/releases/download/v1.3/books_converter-cli-v1.3-win64.zip" target="_blank" rel="noopener">GitHub</a>
+            </td>
+            <td data-gh-count="books-converter">7</td>
+          </tr>
+          <tr>
+            <th scope="row">Papers Converter<small>源码（pip 安装）</small></th>
+            <td>main</td><td>跨平台</td><td>—</td>
+            <td class="dl-cell"><a class="btn btn-mini btn-primary" href="https://github.com/Feplus2/Papers_Converter" target="_blank" rel="noopener">GitHub 仓库</a></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <th scope="row">sageread-mcp<small>npm 包 · 19 个工具</small></th>
+            <td>0.1.0</td><td>跨平台</td><td>—</td>
+            <td class="dl-cell"><a class="btn btn-mini btn-primary" href="https://www.npmjs.com/package/sageread-mcp" target="_blank" rel="noopener">npm</a>
+              <a class="btn btn-mini btn-ghost" href="https://github.com/Feplus2/sageread-mcp" target="_blank" rel="noopener">GitHub</a></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <th scope="row">Zotero Brain 精简版<small>uvx 直跑 · 6 个工具</small></th>
+            <td>main</td><td>跨平台</td><td>—</td>
+            <td class="dl-cell"><a class="btn btn-mini btn-primary" href="https://github.com/Feplus2/zotero-brain-slim" target="_blank" rel="noopener">GitHub 仓库</a></td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note" data-mirror-note hidden>「高速下载」由腾讯云 COS 提供；链接失效时请暂时使用 GitHub 通道。</p>
+    <p class="table-note" data-no-mirror-note>「高速下载」通道部署中——暂时请使用 GitHub 通道（国内可配合镜像加速使用）。</p>
+  </div></section>
+
+  <!-- FAQ -->
+  <section id="faq" class="block"><div class="wrap">
+    <header class="sec-head">
+      <span class="sec-no">FAQ</span>
+      <h2>常见问题</h2>
+    </header>
+    <details open>
+      <summary>安装时 Windows 提示「已保护你的电脑」？</summary>
+      <p>安装包未购买代码签名证书，SmartScreen 会拦截。点击「更多信息 → 仍要运行」即可。介意的话可从 GitHub Release 核对文件。</p>
+    </details>
+    <details>
+      <summary>需要什么前提条件？</summary>
+      <p>Better SageRead 面向 Windows 10/11 64 位；AI 能力需自备模型 API Key（如 DeepSeek，按量付费）；论文解析与扫描书转换需在 <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net</a> 免费申请 Token。所有数据与密钥都保存在本机。四个组件工具跨平台。</p>
+    </details>
+    <details>
+      <summary>我的笔记和数据会被上传吗？</summary>
+      <p>不会。本地优先：数据库、书籍、向量库全部在本机；备份走你自己的 WebDAV（如坚果云）；API Key 存系统凭据保管箱，不明文落盘。本站也无 Cookie、无访问跟踪。</p>
+    </details>
+    <details>
+      <summary>这套工具都是开源的吗？</summary>
+      <p>是。Better SageRead 基于 <a href="https://github.com/xincmm/sageread" target="_blank" rel="noopener">xincmm/SageRead</a> 发展而来，遵循 AGPL-3.0；Books Converter、Papers Converter、sageread-mcp、Zotero Brain 精简版均为 MIT。</p>
+    </details>
+    <details>
+      <summary>截图里展示的论文和书是哪些？</summary>
+      <p>论文为 Mukovnikov &amp; Sousa《Gravitational waves from cosmic strings with friction》，<a href="https://arxiv.org/abs/2605.22944" target="_blank" rel="noopener">arXiv:2605.22944</a>，CC BY 4.0；书籍转换演示为公版书。在此致谢作者与开放许可。</p>
+    </details>
+    <details>
+      <summary>以后怎么知道出了新版？</summary>
+      <p>本页版本号自动同步 GitHub Release；Better SageRead 与 Books Converter 应用内也有「检查更新」。旧版升级直接安装新版即可。</p>
+    </details>
+  </div></section>
+
+  <footer><div class="wrap footer-inner">
+    <p class="fbrand"><img src="assets/img/icon.png" alt=""> Better SageRead · 一间书房，五种利器</p>
+    <p>感谢 <a href="https://github.com/xincmm/sageread" target="_blank" rel="noopener">xincmm/SageRead</a> 奠定核心框架 · 站内截图所示论文 arXiv:2605.22944（CC BY 4.0）· 本站为纯静态页面，不使用 Cookie 与跟踪器</p>
+    <p>© 2026 Feplus2 · <a href="https://github.com/Feplus2" target="_blank" rel="noopener">GitHub</a> · 问题反馈请提 Issue</p>
+    <!-- 备案号占位：备案下来后在此填入「xICP备xxxxxxxx号」并链接至 beian.miit.gov.cn -->
+  </div></footer>
+</main>
+
+<!-- 灯箱 -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="截图放大查看" hidden>
+  <button class="lb-close" aria-label="关闭">×</button>
+  <button class="lb-prev" aria-label="上一张">‹</button>
+  <figure><img src="" alt=""><figcaption></figcaption></figure>
+  <button class="lb-next" aria-label="下一张">›</button>
+</div>
+
+<script src="assets/js/config.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/story.js"></script>
+</body>
+</html>
