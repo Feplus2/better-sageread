@@ -27,19 +27,19 @@ window.SITE_CONFIG = {
           id: "setup",
           pick: "-setup.exe",
           label: "安装版 setup.exe（推荐）",
-          version: "v0.2.0",
-          size: "135.5 MB",
+          version: "v0.2.1",
+          size: "135.6 MB",
           count: 4,
-          url: "https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64-setup.exe",
+          url: "https://github.com/Feplus2/better-sageread/releases/download/v0.2.1/Better.SageRead_0.2.1_x64-setup.exe",
         },
         {
           id: "msi",
           pick: "x64_en-US.msi",
           label: "MSI 安装包",
-          version: "v0.2.0",
-          size: "138.4 MB",
+          version: "v0.2.1",
+          size: "138.5 MB",
           count: 0,
-          url: "https://github.com/Feplus2/better-sageread/releases/download/v0.2.0/Better.SageRead_0.2.0_x64_en-US.msi",
+          url: "https://github.com/Feplus2/better-sageread/releases/download/v0.2.1/Better.SageRead_0.2.1_x64_en-US.msi",
         },
       ],
     },
@@ -51,36 +51,39 @@ window.SITE_CONFIG = {
           id: "gui",
           pick: "Converter-v",
           label: "图形界面版（推荐）",
-          version: "v1.3",
-          size: "62.0 MB",
+          version: "v1.3.3",
+          size: "63.3 MB",
           count: 5,
-          url: "https://github.com/Feplus2/Books_Converter/releases/download/v1.3/Books_Converter-v1.3-win64.zip",
+          url: "https://github.com/Feplus2/Books_Converter/releases/download/v1.3.3/Books_Converter-v1.3.3-win64.zip",
         },
         {
           id: "cli",
           pick: "-cli-",
           label: "命令行 CLI 版",
-          version: "v1.3",
+          version: "v1.3.3",
           size: "57.7 MB",
           count: 2,
-          url: "https://github.com/Feplus2/Books_Converter/releases/download/v1.3/books_converter-cli-v1.3-win64.zip",
+          url: "https://github.com/Feplus2/Books_Converter/releases/download/v1.3.3/books_converter-cli-v1.3.3-win64.zip",
         },
       ],
     },
 
+    /* 以下三个为纯源码组件：下载表里是硬编码的仓库/npm 直链（无安装包、
+     * 不传 COS），repo 保持 null——app.js 的 applyProduct 依赖 assets 数组，
+     * 源码行没有资产可匹配，置空即跳过动态逻辑。status 仅作占位备注。 */
     "papers-converter": {
-      repo: null,          /* 发布后改成 "Feplus2/Papers_Converter" */
-      status: "开源准备中",
+      repo: null,
+      status: "源码发布（pip / git 安装）",
     },
 
     "sageread-mcp": {
-      repo: null,          /* 发布后改成 "Feplus2/sageread-mcp" */
-      status: "开源准备中",
+      repo: null,
+      status: "npm 包（npx 直跑）",
     },
 
     "zotero-brain-slim": {
-      repo: null,          /* 发布后改成 "Feplus2/zotero-brain-slim"（或对应仓库） */
-      status: "发布准备中",
+      repo: null,
+      status: "v1.0.0 源码发布（uvx 直跑）",
     },
   },
 };
