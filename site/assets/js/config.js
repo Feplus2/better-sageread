@@ -8,7 +8,7 @@ window.SITE_CONFIG = {
    *   "https://sageread-1250000000.cos.ap-guangzhou.myqcloud.com"
    * 留空（默认）时，页面只显示 GitHub 直连按钮，网站照常可用。
    * 详细步骤见 DEPLOY.md 第 2 步。 */
-  cosBase: "",
+  cosBase: "https://sageread-dl-1444623537.cos.ap-guangzhou.myqcloud.com",
 
   /* 下载计数边缘函数地址（可选）。部署 edge-functions/dl.js 后填，
    * 如 "https://xxx.edgeone.app/api/dl"。留空则不统计「高速下载」点击，
