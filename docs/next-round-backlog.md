@@ -5,7 +5,7 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ---
 
-## 🆕 2026-08-17 发布前实测问题三连（处理中）
+## 🆕 2026-08-17 发布前实测问题三连 —— ✅ 已全部修复并发布（v0.2.1 / v1.3.3 / v1.0.0，2026-08-18）
 
 1. **Books Converter 无目录书结构散架**：无目录页时 `_light_metadata_pass` 的 LLM 会拿标题列表编造假 toc_entries（条目 page=扫描页为伪造指纹），假锚点在 `_calibrate_levels` 以最高优先级锁死层级。修法：两目录页识别器均未命中 → 丢弃 LLM toc_entries 走形状栈无锚点路径；可选增强 = fitz PDF outline 先验。修复+回归由子任务执行。
    - 顺带确认：用户实测书为《Integral Calculus Made Easy》(Deepak Bhardwaj, 2006 重排)，页页带版权水印——**官网书籍对比图必须换公版书**（Gutenberg #33283 Calculus Made Easy PDF 已下载至 `.tmp-calc/`）。
@@ -14,7 +14,21 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ---
 
-## ⓪ 复审必修缺陷（2026-08-09 代码复审发现）—— ✅ 2026-08-09 当日全部修复
+## 🆕 2026-08-18 发版与官网上线 —— 主线已闭环，余下全是等备案的外部依赖
+
+**已发布**：Better SageRead v0.2.1（CI 构建 + updater JSON）、Books_Converter v1.3.3（GUI/CLI 双包）、zotero-brain-slim v1.0.0（首个发布）。Papers_Converter / sageread-mcp 为纯源码组件，无 Release 属正常。
+
+**官网**：`site/` 已入库主仓库（EdgeOne Pages 根目录 `site`，push 即自动部署）；`cosBase` 已接腾讯云 COS（`sageread-dl-1444623537` / ap-guangzhou，四包已验证可下载）。下载表版本号经 `dl.js` 实时同步 GitHub Release，发新版无需改站。EdgeOne 默认 `*.edgeone.cool` 仅 3 小时预览链接（401 属正常），正式访问须绑自定义域名。
+
+**COS 自动同步 CI**：`cos-sync.yml`（两仓库同款）监听 Release 发布自动传包；Secrets 用 CAM 子用户密钥（仅 COS 权限）。踩坑记录：① `gh release download` 必须带 `--repo`；② 跨境默认端点会 UserNetworkTooSlow（51 分钟断连），已对桶开启**全球加速**并改走 `cos.accelerate.myqcloud.com`；③ coscmd `-e` 端点**不带桶名**（自动前置，带全域名会双拼）。实测 SagRead/Books 双通道均 2 分钟内同步完成。
+
+**计数函数**：`site/edge-functions/api/dl.js` 按新版 Makers 目录约定随 push 自动部署（路由 /api/dl；旧 addEventListener 写法新版不支持）。**待用户**：控制台 KV Storage → Apply now（申请制）→ 建命名空间 → 项目绑定变量名 `DL_KV` → config.js 填 counterEndpoint。
+
+**备案线（用户推进中）**：bettersageread.cn 已购；已租 4 个月境内轻量服务器当备案门票（EO Pages 不是备案资源）；备案备注文案已交付。备案通过后：① Pages 绑自定义域名并开中国大陆节点（过渡期可选"全球不含大陆"免备案先用）；② index.html 页脚填备案号（有占位注释）；③ 30 日内公安联网备案。
+
+**上线前清理（未做）**：根目录 `.tmp-*`（含 `.tmp-cos-upload/` 四包汇集、`.tmp-site-prototype/` 旧 demo 母带）、Books_Converter 下 `_*.py` 一次性脚本（_release/_watch/_setup_secrets/_enable_accel 等）。`.tmp-cos-upload` 删前确认 COS 桶已有同名文件。
+
+---
 
 复审基准：cargo test 35+1 绿、tsc 绿、E1 fixture 16/16 绿；均为静态审查+实测确认的确定性问题。
 修复后复验：cargo test 35+1 绿、cargo check 干净（仅插件既有警告）、tsc 绿、biome 19 个改动文件全绿。
