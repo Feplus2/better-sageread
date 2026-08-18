@@ -78,7 +78,8 @@ git push
    之后每次 `git push`，网站自动重新部署。
 
 > 备选：不想连 GitHub 也可以在创建项目时选「直接上传」，把 `site/` 文件夹
-> （不含 `DEPLOY.md` 和 `edge-functions/`）拖进去。缺点是以后更新要手动重传。
+> （不含 `DEPLOY.md`；`edge-functions/` 是下载计数函数，不需要可删掉）拖进去。
+> 缺点是以后更新要手动重传。
 
 ## 4. 以后怎么发新版（一个动作）
 
@@ -96,11 +97,17 @@ git push
 默认只展示 GitHub 的下载数（走 GitHub 按钮的自动统计）。
 想连「高速下载」按钮的点击也统计：
 
-1. EdgeOne Pages 控制台 → 你的项目 → **函数 / 边缘函数** → 新建，
-   路由填 `/api/dl`，把 `site/edge-functions/dl.js` 的内容粘贴进去，保存。
-2. 按提示**绑定 KV 存储**（用默认命名空间）。
-3. 把 `config.js` 的 `counterEndpoint` 填为 `"https://bettersageread.cn/api/dl"`（换成你的域名）。
-4. 重新部署。之后访问 `https://bettersageread.cn/api/dl?stats=1` 可随时查看各按钮计数，
+计数函数已按新版 Makers 目录约定放在 `site/edge-functions/api/dl.js`，
+**随 git push 自动部署**（路由 = `/api/dl`，无需在控制台粘贴代码）。
+你只需在控制台完成 KV 的一次性配置：
+
+1. Makers 控制台顶部导航 → **KV Storage** → **Apply now**
+   （需填写用途申请并等审批通过；用途照实写"网站下载次数统计"即可）。
+2. **Create Namespace**（名称随意，如 `sageread-site`）。
+3. 进入本项目 → 左侧 **KV Storage** → **Bind Namespace**，
+   变量名必须填 `DL_KV`（代码按此名读取）。
+4. 把 `config.js` 的 `counterEndpoint` 填为 `"https://bettersageread.cn/api/dl"`（换成你的域名），push。
+5. 之后访问 `https://bettersageread.cn/api/dl?stats=1` 可随时查看各按钮计数，
    网页上的「累计」数字也会自动合并两个渠道。
 
 ## 6. 绑定自己的域名（正式上线的必要步骤）
