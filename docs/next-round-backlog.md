@@ -159,9 +159,17 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ---
 
-## ⑥ 远景：论文交叉引用超链接重建（2026-08-17 提出，待讨论）
+## ⑥ 远景：论文交叉引用超链接重建（2026-08-17 提出）—— ✅ 已拍板立项（2026-08-19）
 
-**问题**：源 PDF 里"见图 3 / 表 2 / [12]"这类交叉引用是可点击跳转的，
+**施工计划见 `docs/paper-link-rebuild-plan.md`**：P1 保留 PDF 原生链接
+（fitz link annotations + 锚点映射）→ P2 参考文献增强链（结构化解析 +
+元数据 + 在库检查 + 获取/落地页兜底，含 zotero-brain no_pdf 结构化返回改造）
+→ P3 语义重建（无链接论文保守补链 + 图书脚注 epub:type 语义化弹注）。
+机制结论：PDF 跳转信息存于 link annotations（独立于文字层），OCR 解析
+全部丢失但可用 PyMuPDF `page.get_links()` 确定性捡回；EPUB 侧
+`epub:type=noteref` 语义化后 foliate 弹注白捡。
+
+**问题**（原始记录）：源 PDF 里"见图 3 / 表 2 / [12]"这类交叉引用是可点击跳转的，
 解析成 Markdown 后全部丢失。竞品 ScholarRead 在解析后的文本里保留了
 这个能力（机制未知）。
 
@@ -187,3 +195,15 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 - ✅ mindmap 暗色黑字修复（markmap 内置 CSS 写死 `--markmap-text-color:#333`，按主题覆盖）+ 工具栏暗色可见性
 - ✅ mindmap zoom/pan 显式声明（滚轮=缩放、拖拽平移本就支持）
+
+---
+
+## 已知问题（待复现排查）
+
+- **更新后快捷方式重复**（2026-08-19 用户报告，v0.2.0→v0.2.1 NSIS 更新后出现）：
+  桌面出现两个一模一样的 "Better SageRead" 快捷方式，指向同一路径；
+  开始菜单当时数量不明（用户删了一个桌面图标后开始菜单只剩一个）。
+  tauri.conf.json 的 productName/identifier 两版一致，静态排查未果。
+  **约定：下次更新复现时用户保留现场（不删），交由开发侧排查两个 .lnk 的
+  实际路径与来源（NSIS 脚本 start menu/desktop 创建逻辑、updater 静默安装参数）。**
+  相关修复已做：检查更新改为确认框（commit 907fc8d，v0.2.2 起生效）。
