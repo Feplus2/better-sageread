@@ -133,6 +133,8 @@ export interface PaperReaderProps {
   onAnnotationFocused?: () => void;
   /** 显示模式（原文/译文/逐段对照）；译文模式下标注降级为块级着色、禁止新建标注 */
   viewMode?: PaperViewMode;
+  /** 点击参考文献区条目（含 #ref-N 锚点的块）时上抛：refId 与条目块位置（P2 条目卡片用） */
+  onReferenceClick?: (refId: string, rect: DOMRect) => void;
   /** 元数据译文（metadata.json 的 title_zh/abstract_zh），非原文模式时展示 */
   translatedMeta?: { title_zh?: string; abstract_zh?: string } | null;
   /** T2 译文上下文（译文文本 + 句对齐表）：英文标注的中文侧映射高亮、中文划词标亮、译文 hover */
@@ -822,6 +824,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     translatedMeta,
     translation = null,
     sourceBlocks = null,
+    onReferenceClick,
   },
   ref,
 ) {
@@ -1879,6 +1882,24 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     setPopupState(null);
   }, [onQuoteToChat, setPopupState]);
 
+  // 参考文献条目点击（P2）：命中含 #ref-N 锚点的块上抛开卡片；
+  // 链接/图片/代码块/按钮保持原行为（P1 的 #ref-N 正文链接走 PaperLink 路径，与本代理互不干扰）
+  const handleContentClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (!onReferenceClick) return;
+      const container = contentRef.current;
+      const target = event.target;
+      if (!container || !(target instanceof Element) || !container.contains(target)) return;
+      if (target.closest("a[href], img, pre, button")) return;
+      const block = target.closest("p, li");
+      if (!block || !container.contains(block)) return;
+      const anchor = block.querySelector('a[id^="ref-"]');
+      if (!anchor?.id) return;
+      onReferenceClick(anchor.id, block.getBoundingClientRect());
+    },
+    [onReferenceClick],
+  );
+
   return (
     <>
       <div
@@ -1889,6 +1910,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         onMouseLeave={clearHover}
         onContextMenu={handleContextMenu}
         onScroll={handleScroll}
+        onClick={handleContentClick}
       >
         <div
           ref={contentRef}

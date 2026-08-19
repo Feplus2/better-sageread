@@ -317,3 +317,131 @@ export async function vectorizePaper(paper: { id: string; title: string; author:
   await updateBookVectorizationMeta(paper.id, { status: "failed", finishedAt: Date.now() });
   throw new Error(res?.message || "向量化失败");
 }
+
+/** 单篇 PDF 解析入库的结算结果（importPaperPdf 返回；AI 工具与参考文献卡片两条链路共用） */
+export interface PaperPdfImportOutcome {
+  success: boolean;
+  message: string;
+  paper?: { id?: string; title: string; author?: string };
+  degenerate?: boolean;
+  incomplete?: boolean;
+}
+
+/** 解析超时上限：论文解析（OCR/VLM）耗时可达十分钟级 */
+const PAPER_PARSE_TIMEOUT_MS = 15 * 60 * 1000;
+
+type PaperPdfImportResult =
+  | { kind: "done"; progress: PaperConvertProgress }
+  | { kind: "error"; message: string }
+  | { kind: "cancelled" };
+
+/**
+ * 解析单篇 PDF 论文并导入文献库（共享链路：AI 工具 importPaper 与 P2 参考文献卡片「获取 PDF」）。
+ * 链路：基本校验 → listenPaperConvertProgress → startPaperPdfImport → 等 done/error/terminated
+ * → importPapers 落库 → 按标题/slug 反查入库 paper。
+ */
+export async function importPaperPdf(
+  filePath: string,
+  folderId?: string,
+  abortSignal?: AbortSignal,
+): Promise<PaperPdfImportOutcome> {
+  // 1. 基本校验
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  if (ext !== "pdf") {
+    return { success: false, message: `仅支持 PDF 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。` };
+  }
+  const exists = await invoke<boolean>("path_exists", { path: filePath }).catch(() => false);
+  if (!exists) {
+    return { success: false, message: `文件不存在：${filePath}` };
+  }
+  const { paperEngine } = useConverterStore.getState();
+  const tokenError = paperEngineTokenError(paperEngine);
+  if (tokenError) {
+    return { success: false, message: tokenError };
+  }
+
+  // 2. 监听进度 → 启动解析 → 等结算（中止信号联动 cancel）
+  // 先注册监听再启动解析：避免 listen 就绪前后端发出的事件丢失；
+  // 按 pdf_path 过滤事件归属：并发/连续导入时只结算本任务的 done/error/terminated
+  let outcome: PaperPdfImportResult = { kind: "error", message: "解析超时" };
+  let unlisten: (() => void) | null = null;
+  let settled = false;
+  let resolveDone: () => void = () => {};
+  const donePromise = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const settle = (o: PaperPdfImportResult) => {
+    if (settled) return;
+    settled = true;
+    outcome = o;
+    resolveDone();
+  };
+  try {
+    unlisten = await listenPaperConvertProgress((progress) => {
+      if (progress.pdf_path !== filePath) return;
+      if (progress.type === "done" && progress.paper_dir) {
+        settle({ kind: "done", progress });
+      } else if (progress.type === "error") {
+        settle({ kind: "error", message: progress.message ?? "解析失败" });
+      } else if (progress.type === "terminated") {
+        settle(progress.success === false ? { kind: "error", message: "解析进程异常退出" } : { kind: "cancelled" });
+      }
+    });
+  } catch {
+    settle({ kind: "error", message: "进度监听注册失败" });
+  }
+  if (!settled) {
+    void startPaperPdfImport(filePath).catch((error) =>
+      settle({ kind: "error", message: error instanceof Error ? error.message : String(error) }),
+    );
+  }
+
+  const onAbort = () => {
+    void cancelPaperPdfImport().catch(() => {});
+  };
+  abortSignal?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(onAbort, PAPER_PARSE_TIMEOUT_MS);
+  try {
+    await donePromise;
+  } finally {
+    clearTimeout(timer);
+    abortSignal?.removeEventListener("abort", onAbort);
+    unlisten?.();
+  }
+
+  if (outcome.kind === "cancelled") {
+    return { success: false, message: "解析已取消（用户中止或超时）" };
+  }
+  if (outcome.kind === "error") {
+    return { success: false, message: `论文解析失败：${outcome.message}` };
+  }
+
+  // 3. 入库
+  const { progress } = outcome;
+  try {
+    const result = await importPapers(progress.paper_dir as string, folderId);
+    if (result.failed.length > 0) {
+      return { success: false, message: `解析成功但入库失败：${result.failed[0].error}` };
+    }
+    // 定位入库后的 paper（标题匹配，退化用 slug）
+    const papers = await listPapers();
+    const imported =
+      papers.find((p) => progress.title && p.title === progress.title) ??
+      papers.find((p) => progress.slug && p.title.includes(progress.slug)) ??
+      null;
+    return {
+      success: true,
+      message:
+        result.imported > 0
+          ? `论文《${progress.title ?? progress.slug}》已解析并导入文献库`
+          : `论文《${progress.title ?? progress.slug}》已入库过（内容未变化）`,
+      paper: imported
+        ? { id: imported.id, title: imported.title, author: imported.author }
+        : { title: progress.title ?? (progress.slug as string) },
+      degenerate: progress.degenerate === true,
+      incomplete: progress.incomplete === true,
+    };
+  } catch (error) {
+    return { success: false, message: `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}` };
+  }
+}

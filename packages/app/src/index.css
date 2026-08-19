@@ -828,3 +828,21 @@ foliate-view {
 .chat-md h3:hover {
   border-bottom-color: var(--chat-heading-rule-hover, var(--chat-heading-rule, transparent));
 }
+
+/* 参考文献条目（P2 条目卡片）：含 #ref-N 锚点的条目可点击，悬停给背景提示 */
+.paper-content p:has(a[id^="ref-"]),
+.paper-content li:has(a[id^="ref-"]) {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.paper-content p:has(a[id^="ref-"]):hover,
+.paper-content li:has(a[id^="ref-"]):hover {
+  background-color: oklch(0.96 0 0);
+}
+
+.dark .paper-content p:has(a[id^="ref-"]):hover,
+.dark .paper-content li:has(a[id^="ref-"]):hover {
+  background-color: oklch(0.24 0 0);
+}

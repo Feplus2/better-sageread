@@ -228,3 +228,49 @@ export function parseMcpToolName(
   if (idx <= 0) return null;
   return { serverKey: rest.slice(0, idx), originalTool: rest.slice(idx + 1) };
 }
+
+/** 找已配置且启用的 Zotero Brain server（按名字含 zotero 判定，P2 参考文献卡片「获取 PDF」用） */
+export function findZoteroBrainServer(): McpServer | undefined {
+  return useMcpStore.getState().servers.find((s) => s.enabled && s.name.toLowerCase().includes("zotero"));
+}
+
+/**
+ * 非聊天场景直调 MCP 工具（最小封装）：单 server 连接 → 拉工具 → 执行 → 关闭。
+ * 聊天链路（getMcpToolsForScope）不变；stdio server 沿用同款启动确认卡。
+ * execute 带独立超时（默认 3 分钟，覆盖多源下载瀑布），防 server 中途死亡导致悬挂。
+ */
+export async function callMcpServerTool(
+  server: McpServer,
+  toolName: string,
+  args: Record<string, unknown>,
+  executeTimeoutMs = 180_000,
+): Promise<unknown> {
+  if (server.transport === "stdio") await confirmStdioLaunch(server);
+  const client = await withTimeout(connectServer(server), CONNECT_TIMEOUT_MS, `连接「${server.name}」`);
+  try {
+    const toolSet = await withTimeout(client.tools(), CONNECT_TIMEOUT_MS, `拉取「${server.name}」工具列表`);
+    const tool = toolSet[toolName] as CoreTool | undefined;
+    if (!tool || typeof tool.execute !== "function") {
+      throw new Error(`「${server.name}」未提供工具 ${toolName}`);
+    }
+    return await withTimeout(
+      tool.execute(args, { toolCallId: `direct-${Date.now()}`, messages: [] } as any),
+      executeTimeoutMs,
+      `执行「${server.name}」的 ${toolName}`,
+    );
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+/** MCP 工具返回值（TextContent 数组）→ 解析 JSON 负载；非 JSON 原样返回文本 */
+export function parseMcpToolJson(result: unknown): any {
+  const content = (result as any)?.content;
+  const text = Array.isArray(content) ? content.find((c) => c?.type === "text")?.text : undefined;
+  if (typeof text !== "string") return result;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}

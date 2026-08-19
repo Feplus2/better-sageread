@@ -13,6 +13,7 @@ import PaperReader, {
   type PaperTranslationContext,
   type TocItem,
 } from "@/pages/paper-reader/paper-reader";
+import { PaperReferenceCard } from "@/pages/paper-reader/paper-reference-card";
 import { usePaperAnnotations } from "@/pages/paper-reader/use-paper-annotations";
 import { PaperChatPanel } from "@/pages/papers/paper-chat-panel";
 import { getBookStatus, updateBookStatus } from "@/services/book-service";
@@ -23,6 +24,12 @@ import {
   inspectPaperAlignment,
 } from "@/services/paper-alignment-service";
 import { registerPaperQuoteLocator } from "@/services/paper-locate-service";
+import {
+  type PaperReference,
+  type ReferenceEnrichment,
+  parseReferencesJson,
+  serializeReferences,
+} from "@/services/paper-reference-service";
 import { type Folder, type PaperFolderEntry, getPaperFolderMap, listFolders } from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
@@ -37,7 +44,7 @@ import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { Resizable } from "re-resizable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -83,6 +90,11 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   // 论文导出对话框（数据在本视图，入口在顶栏）
   const [exportOpen, setExportOpen] = useState(false);
+  // P2 参考文献条目卡片：references.json 条目（无产物的旧论文为 null，条目不可点）+ 打开的卡片锚点
+  const [references, setReferences] = useState<PaperReference[] | null>(null);
+  // references.json 的包装形态（{version, source, count, references}），写回缓存时保留外层字段
+  const [referencesWrapper, setReferencesWrapper] = useState<Record<string, any> | null>(null);
+  const [refCard, setRefCard] = useState<{ refId: string; rect: DOMRect } | null>(null);
   const paperReaderRef = useRef<PaperReaderHandle>(null);
   // 论文标注（book_notes 表复用）：CRUD 后 invalidate，下传给 PaperReader 与 PaperNotepadPanel
   const {
@@ -277,6 +289,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      setReferences(null);
+      setRefCard(null);
       try {
         const base = await appDataDir();
         const dir = await join(base, "books", paperId);
@@ -284,6 +298,20 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
         if (cancelled) return;
         setPaperDir(dir);
         setMarkdown(content);
+        // P2 参考文献条目（references.json，Papers_Converter 增量产物；无此文件的旧论文为 null，一切照旧）
+        try {
+          const refsRaw = await readTextFile(await join(dir, "references.json"));
+          const refsDoc = parseReferencesJson(refsRaw);
+          if (!cancelled) {
+            setReferences(refsDoc?.entries ?? null);
+            setReferencesWrapper(refsDoc?.wrapper ?? null);
+          }
+        } catch {
+          if (!cancelled) {
+            setReferences(null);
+            setReferencesWrapper(null);
+          }
+        }
       } catch (error) {
         if (cancelled) return;
         console.error("打开论文失败:", error);
@@ -382,6 +410,51 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     () => registerPaperQuoteLocator(paperId, handleCitationQuoteLocate),
     [paperId, handleCitationQuoteLocate, citationLocatorReady],
   );
+
+  // P2 参考文献条目卡片：点击含 #ref-N 锚点的条目块 → 开卡（无 references.json 仅提示，不报错）
+  const handleReferenceClick = useCallback(
+    (refId: string, rect: DOMRect) => {
+      if (!references) {
+        toast.info("该论文没有参考文献结构化数据（references.json），请用新版转换器重转");
+        return;
+      }
+      const n = Number(refId.replace(/^ref-/, ""));
+      if (!references.some((r) => r.n === n)) {
+        toast.info(`参考文献条目 [${refId.replace(/^ref-/, "")}] 无结构化数据`);
+        return;
+      }
+      setRefCard({ refId, rect });
+    },
+    [references],
+  );
+
+  // 切走 tab 即关掉悬浮卡片（虚拟锚点指向的条目块已不可见，留着会浮在新 tab 内容上）
+  const activeTabId = useLayoutStore((s) => s.activeTabId);
+  useEffect(() => {
+    if (activeTabId !== `paper-${paperId}`) setRefCard(null);
+  }, [activeTabId, paperId]);
+
+  // 元数据补全写回：更新状态 + 落盘 references.json（同一篇不重复请求，P2.2 缓存口径；
+  // 包装形态经 serializeReferences 保留 version/source/count 外层字段）
+  const handleReferenceEnriched = useCallback(
+    (n: number, enrichment: ReferenceEnrichment) => {
+      setReferences((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((r) => (r.n === n ? { ...r, enrichment } : r));
+        if (paperDir) {
+          writeTextFile(`${paperDir}/references.json`, serializeReferences(next, referencesWrapper)).catch((error) =>
+            console.warn("references.json 缓存写回失败:", error),
+          );
+        }
+        return next;
+      });
+    },
+    [paperDir, referencesWrapper],
+  );
+
+  // 当前卡片条目（refId 形如 ref-12；条目缺失时不渲染卡片）
+  const refCardEntry =
+    refCard && references ? (references.find((r) => r.n === Number(refCard.refId.replace(/^ref-/, ""))) ?? null) : null;
 
   // 笔记位置捕获：当前 heading → { tag=文本, cfi=slug 锚点, block=TOC 序号（阅读流排序键） }
   const noteLocation = useMemo<NoteLocation | null>(() => {
@@ -589,6 +662,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
               translatedMeta={translatedMeta}
               translation={readerTranslation}
               sourceBlocks={sourceBlocks}
+              onReferenceClick={handleReferenceClick}
             />
           </div>
         )}
@@ -614,6 +688,16 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           currentViewMode={viewMode}
         />
       )}
+
+      {/* P2 参考文献条目卡片（references.json 存在且点击含锚点条目时打开） */}
+      <PaperReferenceCard
+        reference={refCardEntry}
+        anchorRect={refCard?.rect ?? null}
+        onOpenChange={(open) => {
+          if (!open) setRefCard(null);
+        }}
+        onEnriched={handleReferenceEnriched}
+      />
     </div>
   );
 }
