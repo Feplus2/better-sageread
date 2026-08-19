@@ -1,6 +1,12 @@
 # 链接重建施工计划（论文原生链接 / 参考文献增强 / 语义重建）
 
 > 2026-08-19 用户拍板立项。对应 `next-round-backlog.md` 远景项⑥。
+> **进度：P1 已完成（2026-08-19）**——转换器侧（Papers_Converter `31c2845`+`1b8a50a`：
+> link_extractor.py 新模块 + renderer 锚点发射 + `--no-links` 开关；宇宙弦注入 301 条
+> 链接/85 锚点，剥除链接语法后与无链接版逐字节一致；单测 22 例+既有 4 套全绿）；
+> 阅读器侧（SageRead `bd69079`+`b10b870`：fragment 链接拦截 + getElementById 定位 +
+> 闪烁强调 + 懒加载漂移三轮校正；真实产出 CDP 实测 8/8 链接精确落点）。存量论文需
+> 重转获得链接。
 > 目标读者：接手施工的 Agent——本文档给出全部集成点、数据形状与验收标准，
 > 照做即可，不要自由发挥。涉及仓库：`F:/MyProjects/Papers_Converter`、
 > `F:/MyProjects/SageRead`、`F:/MyProjects/Books_Converter`、
