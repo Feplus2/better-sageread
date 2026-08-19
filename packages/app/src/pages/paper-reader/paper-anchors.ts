@@ -157,6 +157,18 @@ export function anchorToRanges(container: Element, anchor: PaperAnchor): Range[]
 
 /** text quote 兜底：容器全文（跨文本节点、跨块）查找首个匹配，命中返回 Range */
 export function findQuoteRange(container: Element, quote: string): Range | null {
+  return findQuoteRangeExcluding(container, quote, null);
+}
+
+/**
+ * findQuoteRange 排除变体：跳过边界点落在 excludeSelector 匹配元素内的命中
+ * （文内 # 链接跳转兜底：链接文字的首个命中往往是被点击的链接自身或正文公式，需跳过）。
+ */
+export function findQuoteRangeExcluding(
+  container: Element,
+  quote: string,
+  excludeSelector: string | null,
+): Range | null {
   const needle = quote.trim().toLowerCase();
   if (!needle) return null;
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -168,8 +180,7 @@ export function findQuoteRange(container: Element, quote: string): Range | null 
     combined += node.data;
     node = walker.nextNode() as Text | null;
   }
-  const index = combined.toLowerCase().indexOf(needle);
-  if (index === -1) return null;
+  const haystack = combined.toLowerCase();
   const locate = (target: number): { node: Text; offset: number } | null => {
     let chars = 0;
     for (const n of nodes) {
@@ -179,13 +190,23 @@ export function findQuoteRange(container: Element, quote: string): Range | null 
     }
     return null;
   };
-  const start = locate(index);
-  const end = locate(index + needle.length);
-  if (!start || !end) return null;
-  const range = document.createRange();
-  range.setStart(start.node, start.offset);
-  range.setEnd(end.node, end.offset);
-  return range;
+  const excluded = (point: { node: Text } | null) =>
+    excludeSelector !== null && point?.node.parentElement?.closest(excludeSelector) != null;
+  let searchFrom = 0;
+  while (searchFrom <= haystack.length - needle.length) {
+    const index = haystack.indexOf(needle, searchFrom);
+    if (index === -1) return null;
+    const start = locate(index);
+    const end = locate(index + needle.length);
+    if (start && end && !excluded(start) && !excluded(end)) {
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      return range;
+    }
+    searchFrom = index + 1;
+  }
+  return null;
 }
 
 /** 选区前后各截取约 length 字符的上下文（空白折叠，供侧栏 "…before + quote + after…" 展示） */

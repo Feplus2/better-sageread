@@ -23,6 +23,7 @@ import {
   extractContext,
   findBlockForNode,
   findQuoteRange,
+  findQuoteRangeExcluding,
   listBlocks,
   offsetFromBlockStart,
   parseAnchor,
@@ -426,8 +427,8 @@ function buildVirtualLiveSrc(sourceText: string): Element {
   return div;
 }
 
-/** 自定义 a：http(s) 外链交给默认浏览器（Tauri opener），页内锚点在滚动容器内定位 */
-function createPaperLinkComponent(scrollRef: React.RefObject<HTMLDivElement | null>): Components["a"] {
+/** 自定义 a：http(s) 外链交给默认浏览器（Tauri opener）；页内 # 锚点交给 onNavigateFragment（id 定位 + quote 兜底，P1 链接重建） */
+function createPaperLinkComponent(onNavigateFragment: (id: string, linkText: string) => boolean): Components["a"] {
   return function PaperLink({ href, children, ...props }) {
     const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
       if (!href) return;
@@ -438,9 +439,7 @@ function createPaperLinkComponent(scrollRef: React.RefObject<HTMLDivElement | nu
       }
       if (href.startsWith("#")) {
         event.preventDefault();
-        const root = scrollRef.current;
-        const el = document.getElementById(decodeURIComponent(href.slice(1)));
-        if (root && el) scrollElementInContainer(root, el);
+        onNavigateFragment(decodeURIComponent(href.slice(1)), event.currentTarget.textContent ?? "");
       }
     };
     return (
@@ -1109,14 +1108,6 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 图片点开预览（大图 + 复制/保存）
   const [imagePreview, setImagePreview] = useState<{ src: string; alt: string } | null>(null);
 
-  const components = useMemo<Partial<Components>>(
-    () => ({
-      img: createPaperImageComponent(paperDir, blobCacheRef.current, setImagePreview),
-      a: createPaperLinkComponent(scrollRef),
-    }),
-    [paperDir],
-  );
-
   // 渲染完成后从 DOM 收集标题生成 TOC（id 与 rehype-slug 产物天然一致），并上报给顶栏下拉。
   // 译文 div 的公式已在重建时烘焙为 .katex 元素（renderTranslationHtml），不再用 auto-render
   // 改 React 管理的 DOM（那会让译文 div 与 React 重渲染冲突、内容损坏）。
@@ -1239,6 +1230,45 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     img.classList.add("paper-image-jump-flash");
     return true;
   }, []);
+
+  // 文内 # 链接跳转（P1 链接重建：#ref-N / #fig-N / #tab-N / #sec-*）：
+  // 优先 id 锚点定位 + 闪烁（转换器注入的行内 <a id> 经 rehype-raw 落在 DOM）；
+  // 锚点缺失（旧论文未重转/转换器放弃该链）时退到 quote 全文查找兜底——链接文字的
+  // 首个命中常是被点击的链接自身或正文公式，须跳过链接/KaTeX/元数据块内的命中；
+  // 都失败返回 false，调用方静默不跳（不打断阅读）。
+  const scrollToFragment = useCallback(
+    (id: string, linkText: string): boolean => {
+      const container = contentRef.current;
+      const root = scrollRef.current;
+      if (!container || !root || !id) return false;
+      const el = document.getElementById(id);
+      if (el && container.contains(el)) {
+        scrollElementInContainer(root, el, root.clientHeight / 4);
+        // 空锚点（<a id="ref-N"></a> 无文本）闪宿主块（整条参考文献/图表块），有文本的锚点闪自身
+        const target = el.textContent?.trim() ? el : (findBlockForNode(container, el) ?? el);
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        flashRanges([range]);
+        return true;
+      }
+      const range = findQuoteRangeExcluding(container, linkText, "a, .katex, [data-paper-metadata]");
+      if (!range) return false;
+      const top =
+        range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3;
+      root.scrollTo({ top, behavior: "smooth" });
+      flashRanges([range]);
+      return true;
+    },
+    [flashRanges],
+  );
+
+  const components = useMemo<Partial<Components>>(
+    () => ({
+      img: createPaperImageComponent(paperDir, blobCacheRef.current, setImagePreview),
+      a: createPaperLinkComponent(scrollToFragment),
+    }),
+    [paperDir, scrollToFragment],
+  );
 
   // C2 AI 标亮：侧栏"AI 重点"生成时的批量 quote → 锚点换算（在当前渲染 DOM 上同步执行）
   const locateQuotes = useCallback((quotes: string[]): (PaperHighlightLocation | null)[] => {
