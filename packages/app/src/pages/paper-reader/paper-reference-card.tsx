@@ -20,7 +20,7 @@ import { startPaperAcquireImport } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useMcpStore } from "@/store/mcp-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { BookOpen, Download, ExternalLink } from "lucide-react";
+import { BookOpen, Download, ExternalLink, Loader } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 /** 虚拟锚点（Radix Popover.Anchor 的 virtualRef 约定形状）：定位到被点击的条目块 */
