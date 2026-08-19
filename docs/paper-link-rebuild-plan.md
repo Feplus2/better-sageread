@@ -93,21 +93,34 @@ page.get_links()
 目标交互（对齐 ScholarRead）：点击参考文献条目 → 卡片展示标题/作者/摘要
 → 标注"已在库中"或给出 [获取 PDF] / [访问页面]。
 
+> **关键澄清（2026-08-19 用户问答）**：P2 不依赖 PDF 原生链接。条目文本本身
+> （作者/标题/期刊/年卷页/DOI 字符串）就是充分信息源——有 DOI 则
+> `https://doi.org/{doi}` 即发布页，无 DOI 则标题搜 OpenAlex/S2 拿 landing
+> page。P1 保留的条目内 DOI 超链只是锦上添花。**因此"PDF 无链接的参考文献"
+> 照常全量支持**，暂缓的只是 P3（正文无链接引用的语义重建）。
+
 ### P2.1 条目结构化（Papers_Converter，转换期）
 
 - 规则预切分参考文献区为条目列表（`[N]`/`N.` 行首编号、悬挂缩进启发式），
   再交辅助模型批量提取字段（**禁思考**，输出 JSON 数组）：
   `{n, raw, title, authors[], year, venue, doi?}`；
-- 产物 `references.json` 落在论文目录（与 paper.md 同级）；
+- DOI 另设**确定性正则层**（`10\.\d{4,9}/\S+` 从 raw 提取）与 LLM 结果互校，
+  冲突以正则为准（DOI 字符集明确，正则零幻觉）；
+- 产物 `references.json` 落在论文目录（与 paper.md 同级），纯增量产物，
+  paper.md 一个字节不动（零丢失口径天然成立）；
 - LLM 失败/条目数与规则切分差 >20% → 整段降级为规则切分（title=raw），
   不阻塞转换。
 
 ### P2.2 元数据补全与在库检查（SageRead，运行期懒加载）
 
+- UI 形态：参考文献区条目可点 → **卡片浮层**（复用 annotation-popover 同款
+  模式），展示结构化字段 + 解析状态；
 - 有 DOI → Crossref `api.crossref.org/works/{doi}`；无 DOI → OpenAlex 标题搜索
   （`api.openalex.org/works?search=`，取 title 相似度 ≥0.9 的首条）；
-- 摘要取 OpenAlex `abstract_inverted_index` 重建；结果缓存进 references.json；
-- 在库检查：DOI 精确匹配 → 标题归一化模糊匹配本地库 metadata。
+- 摘要取 OpenAlex `abstract_inverted_index` 重建；**解析结果写回缓存进
+  references.json**（本地优先，同一篇不重复请求）；
+- 在库检查：DOI 精确匹配 → 标题归一化模糊匹配本地库 metadata；
+- 解析失败降级：卡片仍展示 raw 条目文本 + 提供搜索兜底（Scholar 查询链接）。
 
 ### P2.3 获取闭环（zotero-brain-slim 改造 + 前端）
 
@@ -119,8 +132,12 @@ page.get_links()
   → OpenAlex `primary_location.landing_page_url` → `https://doi.org/{doi}`；
 - 找到 PDF 但校验失败等中间态也尽量带 landing_page。
 
-**前端**：参考文献卡片按钮——[获取 PDF]（调 Zotero Brain；成功则走导入流程）
-/ [访问页面]（landing_page，新窗口）。在库则显示[打开]直跳阅读。
+**前端**：参考文献卡片按钮——
+- 在库 → [打开] 直跳阅读（复用引用标修复的 openPaper + 定位总线）；
+- 不在库 → [获取 PDF] + [访问页面]（landing_page 新窗口，**始终存在**）；
+- [获取 PDF] 依赖用户已配置 Zotero Brain MCP：已配置则调用并把成功产物
+  走导入流程；**未配置则按钮置灰并提示配置路径**（AI 中心 → MCP），
+  不装死。[访问页面] 不依赖任何配置。
 
 ### P2.4 P2 验收
 
@@ -130,7 +147,7 @@ page.get_links()
 
 ---
 
-## P3 语义重建（无原生链接场景，最后做、保守做）
+## P3 语义重建（无原生链接场景）—— ⏸ 用户拍板暂缓（2026-08-19，误匹配风险/收益比不划算），保留方案备查
 
 ### P3.1 论文（扫描版/无注释 PDF）
 
