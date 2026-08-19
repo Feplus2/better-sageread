@@ -1402,7 +1402,8 @@ export default function PapersPage() {
           <span className="text-neutral-500 text-sm dark:text-neutral-400">共 {visiblePapers.length} 篇</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleImportPdf} disabled={importing || paperImportRunning || batchRunning != null}>
+          {/* 解析运行中不禁用：提交进全局队列排队（convert-progress-store 串行接续） */}
+          <Button onClick={handleImportPdf} disabled={importing || batchRunning != null}>
             <FileDown className="size-4" />
             导入 PDF
           </Button>

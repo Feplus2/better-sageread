@@ -29,7 +29,12 @@ function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
   useEffect(() => {
     if (paperImport.status !== "success") return;
     if (paperImport.failedCount > 0) return;
-    const timer = setTimeout(() => dismissPaperImport(), 6000);
+    const timer = setTimeout(() => {
+      // 定时器到期时状态可能已被接续的下一篇换成 running——dismiss 对 running 等于取消，
+      // 必须只在仍是 success 时执行（队列化后接续间隔可能超过 6s，2026-08-20 实测误杀下一篇）
+      const current = useConvertProgressStore.getState().paperImport;
+      if (current?.status === "success") dismissPaperImport();
+    }, 6000);
     return () => clearTimeout(timer);
   }, [paperImport.status, paperImport.failedCount]);
 
@@ -37,9 +42,10 @@ function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
     <div className="pointer-events-auto w-80 rounded-xl border bg-background p-3.5 shadow-lg">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="min-w-0 flex-1 truncate font-medium text-sm">{paperImport.fileName}</span>
-        {paperImport.total > 1 && (
+        {(paperImport.total > 1 || paperImport.queuedCount > 0) && (
           <span className="shrink-0 text-muted-foreground text-xs">
             第 {paperImport.index}/{paperImport.total} 篇
+            {paperImport.queuedCount > 0 && `（待 ${paperImport.queuedCount} 篇）`}
           </span>
         )}
         <button
