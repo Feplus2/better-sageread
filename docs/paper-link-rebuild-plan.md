@@ -7,6 +7,12 @@
 > 阅读器侧（SageRead `bd69079`+`b10b870`：fragment 链接拦截 + getElementById 定位 +
 > 闪烁强调 + 懒加载漂移三轮校正；真实产出 CDP 实测 8/8 链接精确落点）。存量论文需
 > 重转获得链接。
+> **P2 已完成（2026-08-19）**——Papers_Converter `34edd11`（reference_parser.py：
+> 规则切分+LLM 字段+DOI 正则互校，8 篇条目数全对、有 DOI 条目提取率 100%，
+> paper.md 逐字节不动）；zotero-brain-slim `49eea4b`（no_pdf 结构化返回 +
+> landing_page 三级兜底，非 OA/OA 双路径真实网络实测）；SageRead `5e1590a`
+> （条目卡片 + Crossref/OpenAlex 补全写回缓存 + 在库检查 + 打开/获取/访问页面，
+> MCP 非聊天直调最小封装，CDP 全场景实测）。
 > 目标读者：接手施工的 Agent——本文档给出全部集成点、数据形状与验收标准，
 > 照做即可，不要自由发挥。涉及仓库：`F:/MyProjects/Papers_Converter`、
 > `F:/MyProjects/SageRead`、`F:/MyProjects/Books_Converter`、
