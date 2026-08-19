@@ -1231,6 +1231,33 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     return true;
   }, []);
 
+  // 文内链接定位滚动（带漂移校正）：懒加载图片在平滑滚动途中/之后加载完成会引起布局位移、
+  // 目标随之漂出视口（真实转换器产出实测远端链接首击偏差可达 ~1-3k px）。滚动后做三轮延迟复检，
+  // 目标偏离阈值即校正；用户手动滚动/点击视为接管，立即放弃校正。
+  const scrollToElWithCorrection = useCallback((el: Element, offset: number) => {
+    const root = scrollRef.current;
+    if (!root) return;
+    scrollElementInContainer(root, el, offset);
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+    };
+    root.addEventListener("wheel", cancel, { passive: true });
+    root.addEventListener("pointerdown", cancel);
+    window.setTimeout(() => {
+      root.removeEventListener("wheel", cancel);
+      root.removeEventListener("pointerdown", cancel);
+    }, 3400);
+    for (const delay of [600, 1500, 3000]) {
+      window.setTimeout(() => {
+        const current = scrollRef.current;
+        if (cancelled || !current || !el.isConnected) return;
+        const delta = el.getBoundingClientRect().top - current.getBoundingClientRect().top - offset;
+        if (Math.abs(delta) > 40) scrollElementInContainer(current, el, offset);
+      }, delay);
+    }
+  }, []);
+
   // 文内 # 链接跳转（P1 链接重建：#ref-N / #fig-N / #tab-N / #sec-*）：
   // 优先 id 锚点定位 + 闪烁（转换器注入的行内 <a id> 经 rehype-raw 落在 DOM）；
   // 锚点缺失（旧论文未重转/转换器放弃该链）时退到 quote 全文查找兜底——链接文字的
@@ -1243,12 +1270,31 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       if (!container || !root || !id) return false;
       const el = document.getElementById(id);
       if (el && container.contains(el)) {
-        scrollElementInContainer(root, el, root.clientHeight / 4);
-        // 空锚点（<a id="ref-N"></a> 无文本）闪宿主块（整条参考文献/图表块），有文本的锚点闪自身
-        const target = el.textContent?.trim() ? el : (findBlockForNode(container, el) ?? el);
+        scrollToElWithCorrection(el, root.clientHeight / 4);
+        // 闪烁目标：有文本的锚点闪自身；空锚点（<a id> 无文本）闪宿主块（参考文献条目/图注段）；
+        // 宿主块也是空段（eq/sec 锚点独占一空 <p>）闪紧随的下一内容元素（公式块/标题；
+        // 对照模式下跳过夹在中间的译文 div）
+        const host = findBlockForNode(container, el) ?? el.parentElement;
+        let target: Element;
+        if (el.textContent?.trim()) {
+          target = el;
+        } else if (host && (host.textContent ?? "").trim()) {
+          target = host;
+        } else {
+          let next = host?.nextElementSibling ?? null;
+          while (next?.hasAttribute("data-translation")) next = next.nextElementSibling;
+          target = next ?? host ?? el;
+        }
         const range = document.createRange();
         range.selectNodeContents(target);
         flashRanges([range]);
+        // 目标块含图片时叠加图表速跳的 outline 闪烁（CSS Highlight 不绘制图片等替换元素）
+        const img = target.querySelector("img");
+        if (img) {
+          img.classList.remove("paper-image-jump-flash");
+          void (img as HTMLElement).offsetWidth; // 强制回流以重启动画
+          img.classList.add("paper-image-jump-flash");
+        }
         return true;
       }
       const range = findQuoteRangeExcluding(container, linkText, "a, .katex, [data-paper-metadata]");
@@ -1259,7 +1305,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       flashRanges([range]);
       return true;
     },
-    [flashRanges],
+    [flashRanges, scrollToElWithCorrection],
   );
 
   const components = useMemo<Partial<Components>>(
