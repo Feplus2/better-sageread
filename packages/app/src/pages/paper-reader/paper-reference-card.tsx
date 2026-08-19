@@ -1,4 +1,3 @@
-import { callMcpServerTool, findZoteroBrainServer, parseMcpToolJson } from "@/ai/mcp/mcp-manager";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -6,7 +5,7 @@ import { requestPaperQuoteLocate } from "@/services/paper-locate-service";
 /**
  * 参考文献条目卡片（P2.2/P2.3 前端）：点击参考文献区条目弹出。
  * 展示 references.json 结构化字段 + 懒补全元数据（Crossref/OpenAlex，写回缓存）+ 在库状态；
- * 动作：在库 [打开]（openPaper + quote 定位总线）/ 不在库 [获取 PDF]（Zotero Brain MCP 直调）
+ * 动作：在库 [打开]（openPaper + quote 定位总线）/ 不在库 [获取 PDF]（全链路沉全局转换进度层）
  * + [访问页面]（landing_page → doi.org → Scholar 兜底，永远可用）。
  */
 import {
@@ -15,16 +14,14 @@ import {
   type ReferenceEnrichment,
   checkReferenceInLibrary,
   enrichReference,
-  invalidateLibraryPaperIndex,
   referenceLandingUrl,
 } from "@/services/paper-reference-service";
-import { importPaperPdf } from "@/services/paper-service";
+import { startPaperAcquireImport } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useMcpStore } from "@/store/mcp-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { BookOpen, Download, ExternalLink, Loader } from "lucide-react";
+import { BookOpen, Download, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 
 /** 虚拟锚点（Radix Popover.Anchor 的 virtualRef 约定形状）：定位到被点击的条目块 */
 interface VirtualAnchor {
@@ -41,12 +38,6 @@ interface PaperReferenceCardProps {
   onEnriched: (n: number, enrichment: ReferenceEnrichment) => void;
 }
 
-/** 获取 PDF 的失败展示态（Zotero Brain no_pdf 结构化返回 / 旧版 message 返回都接） */
-interface AcquireFailure {
-  message: string;
-  landingPage?: string;
-}
-
 export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnriched }: PaperReferenceCardProps) {
   const open = reference !== null && anchorRect !== null;
   // 补全结果：优先 references.json 缓存（enrichment 字段），否则开卡时懒请求
@@ -54,8 +45,6 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
   const [enriching, setEnriching] = useState(false);
   const [enrichFailed, setEnrichFailed] = useState(false);
   const [inLibrary, setInLibrary] = useState<LibraryPaperHit | null>(null);
-  const [acquiring, setAcquiring] = useState(false);
-  const [acquireFailure, setAcquireFailure] = useState<AcquireFailure | null>(null);
   // 订阅 store 而非一次性读取：zustand 持久化经 tauriStorage 异步水合，useMemo 会在水合前误判未配置
   const zoteroAvailable = useMcpStore((s) =>
     s.servers.some((server) => server.enabled && server.name.toLowerCase().includes("zotero")),
@@ -71,7 +60,6 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
     if (!reference) return;
     setEnrichment(reference.enrichment ?? null);
     setEnrichFailed(false);
-    setAcquireFailure(null);
     if (reference.enrichment) return;
     let cancelled = false;
     setEnriching(true);
@@ -130,43 +118,15 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
     openUrl(landingUrl).catch((error) => console.warn("打开落地页失败:", landingUrl, error));
   };
 
-  const handleAcquirePdf = async () => {
-    const server = findZoteroBrainServer();
-    if (!server || acquiring) return;
-    setAcquiring(true);
-    setAcquireFailure(null);
-    try {
-      const raw = await callMcpServerTool(server, "download_paper", {
-        doi,
-        title: title ?? reference.raw.slice(0, 80),
-        url: landingUrl,
-      });
-      const result = parseMcpToolJson(raw);
-      const pdfPath = result?.pdf_path;
-      if (result?.success && typeof pdfPath === "string" && pdfPath) {
-        toast.success("PDF 已下载，开始解析导入文献库…");
-        onOpenChange(false);
-        // 解析入库是分钟级链路：后台跑，完成/失败 toast 通知
-        void importPaperPdf(pdfPath).then((outcome) => {
-          if (outcome.success) {
-            invalidateLibraryPaperIndex();
-            toast.success(outcome.message);
-          } else {
-            toast.error(outcome.message);
-          }
-        });
-        return;
-      }
-      // 失败：兼容 zotero-brain 改造的 {status:"no_pdf", landing_page, tried, reason} 与旧版 {message}
-      setAcquireFailure({
-        message: result?.reason ?? result?.message ?? "全部下载源失败",
-        landingPage: result?.landing_page,
-      });
-    } catch (error) {
-      setAcquireFailure({ message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setAcquiring(false);
-    }
+  const handleAcquirePdf = () => {
+    // 全链路（Zotero Brain 下载 → 解析 → 入库）沉到全局转换进度层：
+    // 下载阶段也进右下角进度卡（阅读/聊天页豁免，与既有可见性规则一致），结果 toast 通知
+    void startPaperAcquireImport({
+      doi,
+      title: title ?? reference.raw.slice(0, 80),
+      url: landingUrl,
+    });
+    onOpenChange(false);
   };
 
   return (
@@ -244,14 +204,6 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
             <p className="break-words border-neutral-200 border-l-2 pl-2 text-neutral-500 text-xs leading-relaxed dark:border-neutral-700 dark:text-neutral-400">
               {reference.raw}
             </p>
-
-            {/* 获取 PDF 失败：no_pdf 结构化结果 + 访问页面引导 */}
-            {acquireFailure && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-700 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-                未能获取 PDF：{acquireFailure.message}
-                {acquireFailure.landingPage && "，可经「访问页面」人工下载"}
-              </div>
-            )}
           </div>
 
           {/* 动作行：在库 [打开]；不在库 [获取 PDF] + [访问页面]（后者永远可用） */}
@@ -270,10 +222,10 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
                       size="sm"
                       variant="soft"
                       className="h-7 text-xs"
-                      disabled={!zoteroAvailable || acquiring}
+                      disabled={!zoteroAvailable}
                       onClick={handleAcquirePdf}
                     >
-                      {acquiring ? <Loader className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                      <Download className="size-3.5" />
                       获取 PDF
                     </Button>
                   </span>

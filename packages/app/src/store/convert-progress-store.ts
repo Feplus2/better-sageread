@@ -9,6 +9,7 @@
  * 仅在全局助手聊天页与书籍/论文阅读器三个视图豁免（避免遮挡正文）。
  */
 
+import { callMcpServerTool, findZoteroBrainServer, parseMcpToolJson } from "@/ai/mcp/mcp-manager";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
 import {
   type ConvertProgress,
@@ -17,6 +18,7 @@ import {
   listenConvertProgress,
   startConvert,
 } from "@/services/converter-service";
+import { invalidateLibraryPaperIndex } from "@/services/paper-reference-service";
 import {
   type PaperConvertProgress,
   cancelPaperPdfImport,
@@ -346,7 +348,9 @@ export async function startPaperImportBatch(incomingPaths: string[], folderId?: 
       const parts: string[] = [];
       if (inLibrary > 0) {
         const names = [...new Set([...dup.values()].filter((v) => v.kind === "library").map((v) => `《${v.title}》`))];
-        parts.push(`已在库中（PDF 内容一致）：${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 篇` : ""}`);
+        parts.push(
+          `已在库中（PDF 内容一致）：${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 篇` : ""}`,
+        );
       }
       if (batchDup > 0) parts.push(`批内重复 ${batchDup} 份（只解析首份）`);
       toast.info(`已跳过 ${dup.size} 份重复 PDF——${parts.join("；")}`, { duration: 6000 });
@@ -445,8 +449,15 @@ export async function startPaperImportBatch(incomingPaths: string[], folderId?: 
   }
 }
 
-/** 解析单篇并等待结算：注册进度监听 → 启动转换 → done 后入库；失败/取消也正常结算（队列据此推进） */
-async function runOnePdf(pdfPath: string, index: number, total: number, folderId?: string): Promise<PdfOutcome> {
+/** 解析单篇并等待结算：注册进度监听 → 启动转换 → done 后入库；失败/取消也正常结算（队列据此推进）。
+ * stageOffset：调用方在解析阶段前插了前置段（如获取 PDF 的下载段）时，进度事件的阶段号按偏移对齐。 */
+async function runOnePdf(
+  pdfPath: string,
+  index: number,
+  total: number,
+  folderId?: string,
+  stageOffset = 0,
+): Promise<PdfOutcome> {
   const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
   let filePercent = 0;
   const weighted = (p: number) => Math.round(((index - 1 + p / 100) / total) * 100);
@@ -471,13 +482,14 @@ async function runOnePdf(pdfPath: string, index: number, total: number, folderId
     unlisten = await listenPaperConvertProgress(async (progress: PaperConvertProgress) => {
       if (progress.type === "progress" || progress.type === "stage_done") {
         if (progress.percent != null) filePercent = progress.percent;
+        const stage = progress.stage === undefined ? undefined : progress.stage + stageOffset;
         setPaperImport((prev) =>
           prev && prev.status === "running"
             ? {
                 ...prev,
                 percent: weighted(filePercent),
                 detail: progress.detail ?? prev.detail,
-                stages: markStages(prev.stages, progress.stage, progress.type === "stage_done" ? "done" : "active"),
+                stages: markStages(prev.stages, stage, progress.type === "stage_done" ? "done" : "active"),
               }
             : prev,
         );
@@ -583,4 +595,84 @@ export function dismissPaperImport() {
     return;
   }
   useConvertProgressStore.setState({ paperImport: null });
+}
+
+/**
+ * P2 参考文献卡片「获取 PDF」全链路入口：Zotero Brain 下载 → 解析 → 入库。
+ * 下载可能分钟级（多源瀑布），作为前置阶段进全局进度卡（可见性规则与转换进度层一致：
+ * 右下角常驻，阅读/聊天视图豁免）；解析复用 runOnePdf（事件阶段号 +1 对齐前置下载段）。
+ * 失败落在进度卡 error 态并 toast（阅读器内 toast 可见，不依赖豁免视图的卡片）。
+ */
+export async function startPaperAcquireImport(input: { doi?: string; title: string; url?: string }): Promise<void> {
+  const setPaperImport = (updater: (prev: PaperImportState | null) => PaperImportState | null) =>
+    useConvertProgressStore.setState((s) => ({ paperImport: updater(s.paperImport) }));
+  if (useConvertProgressStore.getState().paperImport?.status === "running") {
+    toast.info("已有解析任务进行中");
+    return;
+  }
+  const fail = (message: string) => {
+    setPaperImport((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "error",
+            error: message,
+            stages: prev.stages.map((s) => (s.status === "active" ? { ...s, status: "error" as PdfStageStatus } : s)),
+          }
+        : prev,
+    );
+    toast.error(message);
+  };
+
+  // 阶段流水线：1=Zotero Brain 下载（active），2-5=解析四阶段（事件 stage 经 runOnePdf 偏移对齐）
+  setPaperImport(() => ({
+    status: "running",
+    fileName: input.title || input.doi || "参考文献",
+    percent: 0,
+    detail: "经 Zotero Brain 下载 PDF…",
+    stages: [
+      { n: 1, name: "Zotero Brain 下载 PDF", status: "active" as PdfStageStatus },
+      ...buildPdfStages().map((s) => ({ ...s, n: s.n + 1 })),
+    ],
+    index: 1,
+    total: 1,
+    importedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    failedNames: [],
+  }));
+
+  const server = findZoteroBrainServer();
+  if (!server) {
+    fail("未配置 Zotero Brain MCP，请到 AI 中心 → MCP 配置后重试");
+    return;
+  }
+  // 阅读/聊天视图豁免进度卡：启动即 toast 让当前视图有即时反馈
+  toast.info("已开始获取 PDF（Zotero Brain 下载中），完成后自动解析入库");
+  let pdfPath: string;
+  try {
+    const raw = await callMcpServerTool(server, "download_paper", {
+      doi: input.doi,
+      title: input.title,
+      url: input.url,
+    });
+    const result = parseMcpToolJson(raw);
+    if (!result?.success || typeof result?.pdf_path !== "string" || !result.pdf_path) {
+      // 兼容 no_pdf 结构化返回（reason/tried/landing_page）与旧版 {message}
+      const reason = result?.reason ?? result?.message ?? "全部下载源失败";
+      fail(`未能获取 PDF：${reason}${result?.landing_page ? "，可经「访问页面」人工下载" : ""}`);
+      return;
+    }
+    pdfPath = result.pdf_path;
+  } catch (error) {
+    fail(`获取 PDF 失败：${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  setPaperImport((prev) =>
+    prev ? { ...prev, detail: "PDF 下载完成，开始解析…", stages: markStages(prev.stages, 1, "done") } : prev,
+  );
+  const outcome = await runOnePdf(pdfPath, 1, 1, undefined, 1);
+  // 新入库论文加入在库检查索引（引用卡片「打开」即时可见）
+  if (outcome === "imported") invalidateLibraryPaperIndex();
 }
