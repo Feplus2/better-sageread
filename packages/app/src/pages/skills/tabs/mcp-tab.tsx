@@ -2,15 +2,18 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MarketInstallPrefill } from "@/services/mcp-registry-service";
+import { secretListUser } from "@/services/secret-service";
 import { SKILL_SCOPE_LABELS } from "@/services/skill-service";
 import { type McpServer, useMcpStore } from "@/store/mcp-store";
 import type { AgentScope } from "@/store/quick-command-store";
 import { KeyRound, Pencil, Plug, Plus, Server, ShoppingBag, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScopeCheckboxes } from "../components/scope-checkboxes";
 import { McpMarketDialog } from "./mcp-market-dialog";
 
@@ -28,6 +31,93 @@ function rowsToRecord(rows: KvRow[]): Record<string, string> | undefined {
     if (row.key.trim()) out[row.key.trim()] = row.value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 密钥占位符插入按钮：弹出密钥保管箱已有秘钥列表，点选填入 {{secret:NAME}}；底部可新建占位符 */
+function SecretInsertButton({ onInsert }: { onInsert: (placeholder: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [secrets, setSecrets] = useState<string[] | null>(null);
+  const [newName, setNewName] = useState("");
+  // 保管箱名称约束（secret_user_set 后端口径）
+  const newNameValid = /^[A-Za-z0-9_-]{1,64}$/.test(newName.trim());
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    secretListUser()
+      .then((names) => {
+        if (!cancelled) setSecrets(names);
+      })
+      .catch(() => {
+        if (!cancelled) setSecrets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const insert = (name: string) => {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) return;
+    onInsert(`{{secret:${name}}}`);
+    setNewName("");
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" className="size-7 flex-shrink-0">
+              <KeyRound className="size-3.5" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">插入密钥保管箱引用（真值存保管箱，不落配置）</TooltipContent>
+      </Tooltip>
+      <PopoverContent side="bottom" align="end" className="w-64 p-2">
+        {secrets === null ? (
+          <p className="px-1 py-2 text-muted-foreground text-xs">加载中…</p>
+        ) : secrets.length === 0 ? (
+          <p className="px-1 py-2 text-muted-foreground text-xs">保管箱暂无密钥，可先在 设置 → 密钥保管箱 添加</p>
+        ) : (
+          <div className="max-h-48 overflow-auto">
+            {secrets.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent"
+                onClick={() => insert(name)}
+              >
+                <KeyRound className="size-3 flex-shrink-0 text-muted-foreground" />
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex items-center gap-1.5 border-t pt-2">
+          <Input
+            className="h-7 flex-1 font-mono text-xs"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="新建占位符名称"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newNameValid) insert(newName.trim());
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={!newNameValid}
+            onClick={() => insert(newName.trim())}
+          >
+            插入
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /** 键值对编辑器：env（stdio）与 headers（远程）共用；secretHelper 为 headers 提供占位符插入 */
@@ -64,16 +154,9 @@ function KvEditor({
             placeholder={valuePlaceholder}
           />
           {secretHelper && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7 flex-shrink-0"
-              title="插入密钥占位符 {{secret:NAME}}（真值存密钥保管箱，不落配置）"
-              onClick={() => update(i, { value: row.value ? `${row.value}{{secret:NAME}}` : "{{secret:NAME}}" })}
-            >
-              <KeyRound className="size-3.5" />
-            </Button>
+            <SecretInsertButton
+              onInsert={(placeholder) => update(i, { value: row.value ? `${row.value}${placeholder}` : placeholder })}
+            />
           )}
           <Button
             type="button"
