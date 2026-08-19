@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsChatPage } from "@/hooks/use-is-chat-page";
+import { cn } from "@/lib/utils";
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
 import { useChatReaderStore } from "@/store/chat-reader-store";
 import { useThemeStore } from "@/store/theme-store";
@@ -21,9 +22,19 @@ export function AnnotationPopover({ chunkId, children }: { chunkId: string; chil
   const activeBookId = isChatPage ? chatActiveBookId : readerBookId;
 
   const { swapSidebars } = useThemeStore();
-  const { loading, chunkData, error, searching, fetchChunkData, searchAndNavigate, resetError } = useAnnotationSearch();
+  const { loading, chunkData, error, searching, source, fetchChunkData, searchAndNavigate, resetError } =
+    useAnnotationSearch();
 
   const shouldShowRight = isChatPage || swapSidebars;
+  // 跳转按钮：论文来源任何页面可跳（openPaper + quote 定位总线）；书籍来源维持原行为（全局聊天页隐藏，
+  // 因为 foliate view 只活在书籍 tab 内）
+  const canNavigate = source?.kind === "paper" || !isChatPage;
+  // 弹窗标题：论文显示《论文标题》小节，书籍维持章节名
+  const headingText = chunkData
+    ? source?.kind === "paper"
+      ? `《${chunkData.book_title}》${chunkData.related_chapter_titles ? ` ${chunkData.related_chapter_titles}` : ""}`
+      : chunkData.related_chapter_titles
+    : "";
 
   const handleSearchInReader = useCallback(async () => {
     const success = await searchAndNavigate();
@@ -112,27 +123,39 @@ export function AnnotationPopover({ chunkId, children }: { chunkId: string; chil
         side={shouldShowRight ? "right" : "left"}
         align="center"
         sideOffset={sideOffset}
-        className="max-h-96 w-80 overflow-auto p-0"
+        className={cn(
+          "max-h-96 overflow-auto p-0",
+          // 有内容才撑固定宽；加载/空态/错误随内容自适应，不再撑 w-80 大框
+          chunkData ? "w-80" : "w-auto max-w-72",
+        )}
       >
         {loading ? (
-          <div className="flex items-center justify-center py-4">
-            <div className="text-muted-foreground text-sm">加载中...</div>
+          <div className="flex items-center justify-center px-4 py-3">
+            <div className="whitespace-nowrap text-muted-foreground text-sm">加载中...</div>
           </div>
         ) : error ? (
-          <div className="p-3 text-red-600 text-sm dark:text-red-400">错误: {error}</div>
+          <div className="flex items-center gap-2 p-3 text-sm">
+            <span className="text-red-600 dark:text-red-400">{error}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 flex-shrink-0 rounded-full px-2 text-xs"
+              onClick={() => fetchChunkData(chunkId)}
+            >
+              重试
+            </Button>
+          </div>
         ) : chunkData ? (
           <div className="flex max-h-[320px] flex-col overflow-hidden bg-muted/80">
             <div className="border-b px-3 py-1 pr-2">
               <div className="flex items-center justify-between">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="mr-2 flex-1 truncate font-medium text-foreground">
-                      {chunkData.related_chapter_titles}
-                    </div>
+                    <div className="mr-2 flex-1 truncate font-medium text-foreground">{headingText}</div>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">{chunkData.related_chapter_titles}</TooltipContent>
+                  <TooltipContent side="bottom">{headingText}</TooltipContent>
                 </Tooltip>
-                {!isChatPage && (
+                {canNavigate && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -166,7 +189,7 @@ export function AnnotationPopover({ chunkId, children }: { chunkId: string; chil
             </div>
           </div>
         ) : (
-          <div className="p-3 text-muted-foreground text-sm">点击查看原文内容</div>
+          <div className="whitespace-nowrap p-3 text-muted-foreground text-sm">未找到原文片段，可能已重新向量化</div>
         )}
       </PopoverContent>
     </Popover>

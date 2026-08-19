@@ -22,6 +22,7 @@ import {
   alignPaperTranslation,
   inspectPaperAlignment,
 } from "@/services/paper-alignment-service";
+import { registerPaperQuoteLocator } from "@/services/paper-locate-service";
 import { type Folder, type PaperFolderEntry, getPaperFolderMap, listFolders } from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
@@ -364,6 +365,22 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       toast.info("未能在正文中定位该图表");
     },
     [translationMap],
+  );
+
+  // 聊天引用标跳转（paper-locate-service）：注册本论文的 quote 定位器。
+  // reader 未就绪（markdown 加载中/视图休眠）返回 false，请求在总线挂起；
+  // 就绪态变化时重注册触发挂起请求重放；就绪但 quote 未命中给轻提示（消费掉，不再重放）
+  const handleCitationQuoteLocate = useCallback((quote: string) => {
+    const reader = paperReaderRef.current;
+    if (!reader) return false;
+    if (!reader.scrollToQuote(quote)) toast.info("未能在正文中定位该引用片段");
+    return true;
+  }, []);
+  const citationLocatorReady = markdown !== null && !viewSleeping;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: citationLocatorReady 是刻意的触发依赖——就绪态变化时重注册定位器，冲刷总线里挂起的引用标定位请求
+  useEffect(
+    () => registerPaperQuoteLocator(paperId, handleCitationQuoteLocate),
+    [paperId, handleCitationQuoteLocate, citationLocatorReady],
   );
 
   // 笔记位置捕获：当前 heading → { tag=文本, cfi=slug 锚点, block=TOC 序号（阅读流排序键） }

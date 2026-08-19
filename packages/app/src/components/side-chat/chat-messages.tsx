@@ -1,3 +1,4 @@
+import { CitationMapContext, buildCitationMap } from "@/components/markdown/citation-source";
 import { ChatContainerContent, ChatContainerScrollAnchor } from "@/components/prompt-kit/chat-container";
 import { Message, MessageAction, MessageActions, MessageContent } from "@/components/prompt-kit/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
@@ -531,10 +532,15 @@ export function ChatMessages({
 
     flushText();
 
+    // 引用标来源映射：从本消息持久化的工具结果重建（paperSearch/ragSearch 等 output），
+    // 随 React context 下发给正文里的 [N] 引用标弹窗；无工具结果为 null（弹窗走面板/store 兜底）
+    const citationMap = buildCitationMap(parts);
     return (
-      <div className="flex flex-col gap-1" data-message-id={messageId}>
-        {elements}
-      </div>
+      <CitationMapContext.Provider value={citationMap}>
+        <div className="flex flex-col gap-1" data-message-id={messageId}>
+          {elements}
+        </div>
+      </CitationMapContext.Provider>
     );
   };
 

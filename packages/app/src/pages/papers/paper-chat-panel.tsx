@@ -1,3 +1,4 @@
+import { CitationFallbackContext, type CitationSource } from "@/components/markdown/citation-source";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
 import { ScrollButton } from "@/components/prompt-kit/scroll-button";
@@ -91,6 +92,11 @@ export function PaperChatPanel({
   const { autoScroll } = useThemeStore();
   const [currentThread, setCurrentThread] = useState<Thread | null>(null);
   const [scope, setScope] = useState<PaperChatScope>({ kind: "paper" });
+  // 引用标兜底来源：本面板内未被消息映射命中的 [N] 一律按当前论文取数/跳转
+  const citationFallback = useMemo<CitationSource>(
+    () => ({ kind: "paper", paperId, title: paperTitle }),
+    [paperId, paperTitle],
+  );
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [customChecked, setCustomChecked] = useState<Set<string>>(new Set());
   // 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款 MindmapDialog）
@@ -261,209 +267,211 @@ export function PaperChatPanel({
   );
 
   return (
-    <main id="paper-chat-panel" data-region="chat-panel" className="relative flex h-full flex-col overflow-hidden">
-      {/* 头部：模型/检索作用域选择器 + 对话操作（结构与书籍 SideChat 头部一致；
+    <CitationFallbackContext.Provider value={citationFallback}>
+      <main id="paper-chat-panel" data-region="chat-panel" className="relative flex h-full flex-col overflow-hidden">
+        {/* 头部：模型/检索作用域选择器 + 对话操作（结构与书籍 SideChat 头部一致；
           面板折叠开关由 PaperHeaderBar 统一负责，书籍同款） */}
-      <div className="ml-1 flex-shrink-0 border-neutral-300 dark:border-neutral-700">
-        <div className="flex h-8 items-center justify-between">
-          <div className="flex min-w-0 items-center gap-2 pl-0.5">
-            <ModelSelector
-              selectedModel={selectedModel}
-              onModelSelect={setSelectedModel}
-              className="z-40 w-[10rem] min-w-0 flex-shrink"
-            />
-            <Select value={scopeValue} onValueChange={handleScopeChange}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <SelectTrigger className="h-7 w-[9.5rem] min-w-0 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">paperSearch 的检索范围（需已向量化）</TooltipContent>
-              </Tooltip>
-              <SelectContent>
-                <SelectItem value="paper">本篇论文</SelectItem>
-                {containingFolders.map((folder) => (
-                  <SelectItem key={folder.id} value={`folder:${folder.id}`}>
-                    文件夹：{folder.name}（含子文件夹）
+        <div className="ml-1 flex-shrink-0 border-neutral-300 dark:border-neutral-700">
+          <div className="flex h-8 items-center justify-between">
+            <div className="flex min-w-0 items-center gap-2 pl-0.5">
+              <ModelSelector
+                selectedModel={selectedModel}
+                onModelSelect={setSelectedModel}
+                className="z-40 w-[10rem] min-w-0 flex-shrink"
+              />
+              <Select value={scopeValue} onValueChange={handleScopeChange}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SelectTrigger className="h-7 w-[9.5rem] min-w-0 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">paperSearch 的检索范围（需已向量化）</TooltipContent>
+                </Tooltip>
+                <SelectContent>
+                  <SelectItem value="paper">本篇论文</SelectItem>
+                  {containingFolders.map((folder) => (
+                    <SelectItem key={folder.id} value={`folder:${folder.id}`}>
+                      文件夹：{folder.name}（含子文件夹）
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="all">全部文献</SelectItem>
+                  <SelectItem value="custom">
+                    自定义文件夹…{scope.kind === "custom" ? `（已选 ${scope.folderIds.length}）` : ""}
                   </SelectItem>
-                ))}
-                <SelectItem value="all">全部文献</SelectItem>
-                <SelectItem value="custom">
-                  自定义文件夹…{scope.kind === "custom" ? `（已选 ${scope.folderIds.length}）` : ""}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-shrink-0 items-center gap-0">
-            {messages.length > 0 && !showThreads && (
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-0">
+              {messages.length > 0 && !showThreads && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent ${
+                        selectionMode ? "bg-accent dark:bg-accent" : ""
+                      }`}
+                      onClick={toggleSelectionMode}
+                    >
+                      <ListChecks className="h-5 w-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">选择导出</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent ${
-                      selectionMode ? "bg-accent dark:bg-accent" : ""
-                    }`}
-                    onClick={toggleSelectionMode}
+                    className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
+                    onClick={handleNewThread}
                   >
-                    <ListChecks className="h-5 w-5" />
+                    <MessageCirclePlus className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">选择导出</TooltipContent>
+                <TooltipContent side="bottom">新对话</TooltipContent>
               </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
-                  onClick={handleNewThread}
-                >
-                  <MessageCirclePlus className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">新对话</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
-                  onClick={handleShowThreads}
-                >
-                  <History className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">历史对话</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
-
-      {showThreads ? (
-        <div className="min-h-0 flex-1">
-          <ChatThreads
-            key={`threads-${threadsKey}`}
-            bookId={paperId}
-            onBack={handleBackFromThreads}
-            onSelectThread={handleSelectThread}
-          />
-        </div>
-      ) : messages.length === 0 && isInit.current ? (
-        <EmptyState />
-      ) : (
-        <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll}>
-          <ChatMessages
-            messages={messages}
-            status={status}
-            error={displayError}
-            autoScroll={autoScroll}
-            scrollKey={currentThread?.id ?? "__init__"}
-            bookId={currentThread?.book_id ?? paperId ?? null}
-            onReasoningTimesUpdate={handleReasoningTimesUpdate}
-            onRetry={handleRetry}
-            canRetry={canRetry}
-            onAskSelection={handleAskSelection}
-            onViewToolDetail={handleViewToolDetail}
-            selectionMode={selectionMode}
-            selectedIds={selectedIds}
-            onToggleSelect={handleToggleSelect}
-          />
-          <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
-            <div className="pointer-events-auto">
-              <ScrollButton />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="z-40 size-7 shrink-0 rounded-full hover:bg-accent dark:hover:bg-accent"
+                    onClick={handleShowThreads}
+                  >
+                    <History className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">历史对话</TooltipContent>
+              </Tooltip>
             </div>
           </div>
-        </ChatContainerRoot>
-      )}
+        </div>
 
-      {selectionMode && !showThreads && (
-        <SelectionExportBar
-          selectedCount={selectedIds.size}
-          onExportMarkdown={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
-          onExportHtml={() => void exportMessagesToHtml(getSelectedMessages(), buildSelectionMeta())}
-          onExportImage={() => void exportMessagesToImage(getSelectedMessages(), buildSelectionMeta())}
-          onCancel={exitSelectionMode}
-        />
-      )}
-
-      {!showThreads && (
-        <>
-          <AgentConfirmCard />
-          <ChatInputArea
-            input={input}
-            setInput={setInput}
-            references={references}
-            onRemoveReference={handleRemoveReference}
-            images={images}
-            onRemoveImage={handleRemoveImage}
-            onAddImageFiles={handleAddImageFiles}
-            onInputEl={registerInputEl}
-            onSubmit={handleSubmit}
-            onStop={stop}
-            status={status}
-            activeBookId={paperId}
-            setActiveBookId={() => {}}
-            agentScope="paper"
-          />
-        </>
-      )}
-
-      {/* 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款） */}
-      <MindmapDialog open={showToolDetailDialog} onOpenChange={setShowToolDetailDialog} toolPart={toolDetail} />
-
-      {/* 自定义文件夹对话框（复选，含后代文件夹） */}
-      <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>自定义检索范围</DialogTitle>
-          </DialogHeader>
-          <p className="px-4 pt-2 text-neutral-500 text-xs dark:text-neutral-400">
-            勾选一个或多个文件夹，检索范围为其中全部论文（含子文件夹）
-          </p>
-          <div className="max-h-72 overflow-y-auto px-2 py-2">
-            {folderTree.length === 0 ? (
-              <p className="py-6 text-center text-neutral-400 text-sm">还没有文件夹，请先在文献库列表页创建</p>
-            ) : (
-              flattenTree(folderTree).map(({ node, depth }) => (
-                <label
-                  key={node.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/60"
-                  style={{ marginInlineStart: `${depth * 16}px` }}
-                >
-                  <Checkbox
-                    checked={customChecked.has(node.id)}
-                    onCheckedChange={(checked) => {
-                      setCustomChecked((prev) => {
-                        const next = new Set(prev);
-                        if (checked === true) {
-                          next.add(node.id);
-                        } else {
-                          next.delete(node.id);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                  <FolderIcon className="size-3.5 shrink-0 text-neutral-400" />
-                  <span className="truncate">{node.name}</span>
-                </label>
-              ))
-            )}
+        {showThreads ? (
+          <div className="min-h-0 flex-1">
+            <ChatThreads
+              key={`threads-${threadsKey}`}
+              bookId={paperId}
+              onBack={handleBackFromThreads}
+              onSelectThread={handleSelectThread}
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCustomDialogOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleCustomConfirm} disabled={customChecked.size === 0}>
-              确定
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </main>
+        ) : messages.length === 0 && isInit.current ? (
+          <EmptyState />
+        ) : (
+          <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll}>
+            <ChatMessages
+              messages={messages}
+              status={status}
+              error={displayError}
+              autoScroll={autoScroll}
+              scrollKey={currentThread?.id ?? "__init__"}
+              bookId={currentThread?.book_id ?? paperId ?? null}
+              onReasoningTimesUpdate={handleReasoningTimesUpdate}
+              onRetry={handleRetry}
+              canRetry={canRetry}
+              onAskSelection={handleAskSelection}
+              onViewToolDetail={handleViewToolDetail}
+              selectionMode={selectionMode}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+            />
+            <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
+              <div className="pointer-events-auto">
+                <ScrollButton />
+              </div>
+            </div>
+          </ChatContainerRoot>
+        )}
+
+        {selectionMode && !showThreads && (
+          <SelectionExportBar
+            selectedCount={selectedIds.size}
+            onExportMarkdown={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
+            onExportHtml={() => void exportMessagesToHtml(getSelectedMessages(), buildSelectionMeta())}
+            onExportImage={() => void exportMessagesToImage(getSelectedMessages(), buildSelectionMeta())}
+            onCancel={exitSelectionMode}
+          />
+        )}
+
+        {!showThreads && (
+          <>
+            <AgentConfirmCard />
+            <ChatInputArea
+              input={input}
+              setInput={setInput}
+              references={references}
+              onRemoveReference={handleRemoveReference}
+              images={images}
+              onRemoveImage={handleRemoveImage}
+              onAddImageFiles={handleAddImageFiles}
+              onInputEl={registerInputEl}
+              onSubmit={handleSubmit}
+              onStop={stop}
+              status={status}
+              activeBookId={paperId}
+              setActiveBookId={() => {}}
+              agentScope="paper"
+            />
+          </>
+        )}
+
+        {/* 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款） */}
+        <MindmapDialog open={showToolDetailDialog} onOpenChange={setShowToolDetailDialog} toolPart={toolDetail} />
+
+        {/* 自定义文件夹对话框（复选，含后代文件夹） */}
+        <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>自定义检索范围</DialogTitle>
+            </DialogHeader>
+            <p className="px-4 pt-2 text-neutral-500 text-xs dark:text-neutral-400">
+              勾选一个或多个文件夹，检索范围为其中全部论文（含子文件夹）
+            </p>
+            <div className="max-h-72 overflow-y-auto px-2 py-2">
+              {folderTree.length === 0 ? (
+                <p className="py-6 text-center text-neutral-400 text-sm">还没有文件夹，请先在文献库列表页创建</p>
+              ) : (
+                flattenTree(folderTree).map(({ node, depth }) => (
+                  <label
+                    key={node.id}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/60"
+                    style={{ marginInlineStart: `${depth * 16}px` }}
+                  >
+                    <Checkbox
+                      checked={customChecked.has(node.id)}
+                      onCheckedChange={(checked) => {
+                        setCustomChecked((prev) => {
+                          const next = new Set(prev);
+                          if (checked === true) {
+                            next.add(node.id);
+                          } else {
+                            next.delete(node.id);
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                    <FolderIcon className="size-3.5 shrink-0 text-neutral-400" />
+                    <span className="truncate">{node.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCustomDialogOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={handleCustomConfirm} disabled={customChecked.size === 0}>
+                确定
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </main>
+    </CitationFallbackContext.Provider>
   );
 }
