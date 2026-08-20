@@ -166,7 +166,8 @@ export async function reparsePapers(
   return report;
 }
 
-/** 单篇替换：注入 zotero_key → 扫描新产物 → 合并保留 zotero 字段 → replace_paper_content；返回是否仍疑似退化 */
+/** 单篇替换：注入 zotero_key → 扫描新产物 → 合并保留 zotero 字段 → replace_paper_content →
+ * references.json 同步（新产物有才拷入；没有则清掉旧文件，避免与新正文错配）。返回是否仍疑似退化 */
 async function replaceWithConverted(item: ReparseItem, paperDir: string, oldMeta?: PaperMetadata): Promise<boolean> {
   if (oldMeta?.zotero_key) {
     await invoke("inject_zotero_key", {
@@ -184,6 +185,20 @@ async function replaceWithConverted(item: ReparseItem, paperDir: string, oldMeta
   if (oldMeta?.zotero_pdf_path) metadata.zotero_pdf_path = oldMeta.zotero_pdf_path;
   await invoke("replace_paper_content", { paperId: item.id, sourceDir: paperDir, metadata });
 
+  // references.json 随产物同步（replace_paper_content 不覆盖它；新产物缺失时清旧防错配）
+  try {
+    const refsSrc = await join(paperDir, "references.json");
+    const refsDst = await join(await appDataDir(), "books", item.id, "references.json");
+    const { exists, readFile, remove, writeFile } = await import("@tauri-apps/plugin-fs");
+    if (await exists(refsSrc).catch(() => false)) {
+      await writeFile(refsDst, await readFile(refsSrc));
+    } else {
+      await remove(refsDst).catch(() => {});
+    }
+  } catch (error) {
+    console.warn(`同步 references.json 失败（不影响重解析）: ${item.id}`, error);
+  }
+
   // 退化循环检测（引擎换了仍可能失控，提示用户再换引擎）
   try {
     const raw = await readTextFile(await join(paperDir, "paper.md"));
@@ -191,4 +206,13 @@ async function replaceWithConverted(item: ReparseItem, paperDir: string, oldMeta
   } catch {
     return false;
   }
+}
+
+/** 队列化重解析（convert-progress-store drain）的单篇产物替换入口 */
+export function replacePaperWithConverted(
+  item: ReparseItem,
+  paperDir: string,
+  oldMeta?: PaperMetadata,
+): Promise<boolean> {
+  return replaceWithConverted(item, paperDir, oldMeta);
 }

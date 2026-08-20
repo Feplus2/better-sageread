@@ -30,13 +30,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
 import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
 import { updateBookStatus } from "@/services/book-service";
-import { reparsePapers } from "@/services/paper-reparse-service";
 import {
   type Folder,
   type FolderTreeNode,
   type PaperFolderEntry,
   buildFolderTree,
-  cancelPaperPdfImport,
   createFolder,
   deleteFolder,
   getPaperFolderMap,
@@ -52,7 +50,13 @@ import {
 import { translatePaper } from "@/services/paper-translation-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
-import { setPaperImportRefresh, startPaperImportBatch, useConvertProgressStore } from "@/store/convert-progress-store";
+import {
+  isPaperQueuedOrRunning,
+  setPaperImportRefresh,
+  startPaperImportBatch,
+  startPaperReparse,
+  useConvertProgressStore,
+} from "@/store/convert-progress-store";
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import type { PapersSortByType } from "@/types/settings";
@@ -1187,8 +1191,26 @@ export default function PapersPage() {
 
   /** 批量翻译：复用单篇入口 translatePaper（幂等续翻），逐篇顺序执行，AbortController 可取消 */
   const handleBatchTranslate = async (papers?: BookWithStatus[]) => {
-    const queue = papers ?? selectedPapers;
-    if (batchLocked || queue.length === 0) return;
+    const requested = papers ?? selectedPapers;
+    if (requested.length === 0) return;
+    // 翻译通道自身串行（既有行为）：批量管理任务（翻译/向量化/重解析占用 LLM 或转换资源）在跑则提示
+    if (batchRunning != null) {
+      toast.info("已有批量任务进行中");
+      return;
+    }
+    // 撞车过滤：目标论文正在解析队列中/正在解析（内容将被替换）时跳过并说明
+    const collided = requested.filter((p) => isPaperQueuedOrRunning(p.id));
+    const queue = requested.filter((p) => !isPaperQueuedOrRunning(p.id));
+    if (collided.length > 0) {
+      toast.info(
+        `已跳过 ${collided.length} 篇解析中的论文：${collided
+          .slice(0, 3)
+          .map((p) => `《${p.title}》`)
+          .join("")}${collided.length > 3 ? " 等" : ""}，完成后再翻译`,
+        { duration: 6000 },
+      );
+    }
+    if (queue.length === 0) return;
     if (!getUtilityModel()) {
       toast.error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
       return;
@@ -1277,10 +1299,11 @@ export default function PapersPage() {
     await loadAll();
   };
 
-  /** 批量重新解析：源 PDF 重走 Papers_Converter 并整体替换产物（保留 id/归属/对话/标注，高亮可能漂移） */
+  /** 重新解析：确认后逐篇进 convert-progress-store 全局队列（与解析/获取 PDF 同列串行；
+   *  保留 id/归属/对话/标注的产物整体替换语义在队列的 reparse 项里）。运行中可加队 */
   const handleBatchReparse = async (papers?: BookWithStatus[]) => {
     const queue = papers ?? selectedPapers;
-    if (batchLocked || queue.length === 0) return;
+    if (queue.length === 0) return;
     const tokenError = paperEngineTokenError(paperEngine);
     if (tokenError) {
       toast.error(tokenError);
@@ -1290,89 +1313,20 @@ export default function PapersPage() {
     try {
       confirmed = await ask(
         `将用最新解析引擎重新解析选中的 ${queue.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
-        { title: queue.length > 1 ? "批量重新解析" : "重新解析", kind: "warning" },
+        { title: queue.length > 1 ? `重新解析（${queue.length} 篇）` : "重新解析", kind: "warning" },
       );
     } catch (error) {
       console.error("确认对话框失败:", error);
     }
     if (!confirmed) return;
-    batchCancelRef.current = false;
-    setBatchCancelling(false);
-    setBatchRunning("reparse");
-    const total = queue.length;
-    let filePercent = 0;
-    setBatchProgress({
-      kind: "reparse",
-      status: "running",
-      index: 0,
-      total,
-      title: "",
-      detail: "准备解析…",
-      percent: 0,
-      doneCount: 0,
-      failedCount: 0,
-      skippedCount: 0,
-      failedNames: [],
-    });
-    let cancelled = false;
-    const failedNames: string[] = [];
-    let done = 0;
-    let suspectCount = 0;
-    try {
-      const report = await reparsePapers(
-        queue.map((p) => ({ id: p.id, title: p.title })),
-        metaMap,
-        {
-          onItemStart: (index, _total, item) => {
-            filePercent = 0;
-            setBatchProgress((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    index,
-                    title: item.title,
-                    detail: "等待解析…",
-                    percent: Math.round((index / prev.total) * 100),
-                  }
-                : prev,
-            );
-          },
-          onItemProgress: (p) => {
-            if (p.percent != null) filePercent = p.percent;
-            setBatchProgress((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    detail: p.detail ?? p.stage_name ?? prev.detail,
-                    percent: Math.min(100, Math.round(((prev.index + filePercent / 100) / prev.total) * 100)),
-                  }
-                : prev,
-            );
-          },
-          isCancelled: () => batchCancelRef.current,
-        },
-      );
-      cancelled = report.cancelled;
-      done = report.done.length;
-      failedNames.push(...report.failed.map((f) => f.title));
-      suspectCount = report.suspect.length;
-      for (const item of report.done) metaCacheRef.current.delete(item.id);
-    } catch (error) {
-      console.error("批量重新解析失败:", error);
-      failedNames.push(...queue.slice(done).map((p) => p.title));
-    } finally {
-      setBatchRunning(null);
+    let queued = 0;
+    for (const paper of queue) {
+      if (startPaperReparse({ id: paper.id, title: paper.title })) queued += 1;
     }
-    const remaining = total - done - failedNames.length;
-    const suspectNote = suspectCount > 0 ? `；${suspectCount} 篇仍疑似解析异常（建议换引擎再试）` : "";
-    finishBatch(
-      cancelled
-        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理${suspectNote}`
-        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}${suspectNote}`,
-      failedNames,
-      cancelled,
-    );
-    await loadAll();
+    if (queued > 0) {
+      toast.success(`已加入解析队列：${queued} 篇`);
+      if (manageMode && selectedIds.size > 0) setManageMode(false);
+    }
   };
 
   /** 批量任务取消：向量化当前篇跑完即停；翻译 abort；重新解析 kill 当前篇子进程（terminated 事件结算） */
@@ -1381,7 +1335,6 @@ export default function PapersPage() {
     setBatchCancelling(true);
     setBatchProgress((prev) => (prev ? { ...prev, detail: "正在取消…" } : prev));
     if (batchRunning === "translate") batchTranslateAbortRef.current?.abort();
-    if (batchRunning === "reparse") cancelPaperPdfImport().catch(() => {});
   };
 
   /** 关闭批量进度卡（running 时等同取消） */
@@ -1541,7 +1494,7 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={batchLocked || selectedIds.size === 0}
+                    disabled={selectedIds.size === 0}
                     onClick={handleBatchTranslate}
                   >
                     <Languages className="size-4" />
@@ -1551,7 +1504,7 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={batchLocked || selectedIds.size === 0}
+                    disabled={selectedIds.size === 0}
                     onClick={handleBatchReparse}
                   >
                     <RefreshCw className="size-4" />
@@ -1846,11 +1799,11 @@ export default function PapersPage() {
                           )}
                           {isVectorized ? "重新向量化" : "向量化"}
                         </ContextMenuItem>
-                        <ContextMenuItem disabled={batchLocked} onClick={() => void handleBatchTranslate([paper])}>
+                        <ContextMenuItem onClick={() => void handleBatchTranslate([paper])}>
                           <Languages className="mr-2 size-4" />
                           翻译
                         </ContextMenuItem>
-                        <ContextMenuItem disabled={batchLocked} onClick={() => void handleBatchReparse([paper])}>
+                        <ContextMenuItem onClick={() => void handleBatchReparse([paper])}>
                           <RefreshCw className="mr-2 size-4" />
                           重新解析
                         </ContextMenuItem>

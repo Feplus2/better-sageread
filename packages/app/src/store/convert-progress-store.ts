@@ -10,7 +10,7 @@
  */
 
 import { callMcpServerTool, findZoteroBrainServer, parseMcpToolJson } from "@/ai/mcp/mcp-manager";
-import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { type PaperMetadata, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
 import {
   type ConvertProgress,
   cancelConvert,
@@ -19,6 +19,7 @@ import {
   startConvert,
 } from "@/services/converter-service";
 import { invalidateLibraryPaperIndex } from "@/services/paper-reference-service";
+import { replacePaperWithConverted, resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import {
   type PaperConvertProgress,
   cancelPaperPdfImport,
@@ -30,7 +31,7 @@ import {
 import { useConverterStore } from "@/store/converter-store";
 import { useLibraryStore } from "@/store/library-store";
 import { findDegenerateLoop } from "@/utils/degenerate";
-import { join } from "@tauri-apps/api/path";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -313,7 +314,8 @@ function handleBookProgress(p: ConvertProgress) {
 // Rust 侧 convert_paper_pdf 是单子进程，解析段严格串行；获取 PDF 的下载段
 // 不占解析子进程，但为状态机简单也随队列串行（下载完即在本 item 内接续解析）。
 // ----------------------------------------------------------------------
-/** 工作项：parse = 本地 PDF 解析入库；acquire = Zotero Brain 下载后解析入库（P2 参考文献卡片） */
+/** 工作项：parse = 本地 PDF 解析入库；acquire = Zotero Brain 下载后解析入库（P2 参考文献卡片）；
+ * reparse = 在库论文源 PDF 重解析并整体替换产物（保留 id/归属/对话/标注） */
 type PaperWorkItem =
   | { kind: "parse"; pdfPath: string; folderId?: string }
   | {
@@ -325,9 +327,12 @@ type PaperWorkItem =
       displayName?: string;
       url?: string;
       arxivId?: string;
-    };
+    }
+  | { kind: "reparse"; paperId: string; title: string };
 
 let paperQueue: PaperWorkItem[] = [];
+/** 正在执行的队列项（重复入队判定用；item 结算后清空） */
+let paperCurrentItem: PaperWorkItem | null = null;
 let paperDraining = false;
 let paperCancelRequested = false;
 let paperCurrentSettle: (() => void) | null = null;
@@ -438,6 +443,39 @@ export function startPaperAcquireImport(input: {
   void drainPaperQueue();
 }
 
+/** 该论文是否在解析队列中（排队或正在解析）——重解析防重入/翻译撞车判定共用 */
+export function isPaperQueuedOrRunning(paperId: string): boolean {
+  if (paperCurrentItem?.kind === "reparse" && paperCurrentItem.paperId === paperId) return true;
+  return paperQueue.some((item) => item.kind === "reparse" && item.paperId === paperId);
+}
+
+/** 在库论文重解析入队（PapersPage「重新解析」统一入口）：保留 id/归属/对话/标注的产物整体替换。
+ *  重复入队返回 false（调用方给"已在队列"提示）。 */
+export function startPaperReparse(input: { id: string; title: string }): boolean {
+  const { paperEngine } = useConverterStore.getState();
+  const tokenError = paperEngineTokenError(paperEngine);
+  if (tokenError) {
+    toast.error(tokenError);
+    return false;
+  }
+  if (isPaperQueuedOrRunning(input.id)) {
+    toast.info(`《${input.title}》已在解析队列中`);
+    return false;
+  }
+  const wasDraining = paperDraining;
+  paperQueue.push({ kind: "reparse", paperId: input.id, title: input.title });
+  setPaperImportState((prev) =>
+    prev && prev.status === "running"
+      ? { ...prev, total: prev.index + paperQueue.length, queuedCount: paperQueue.length }
+      : prev,
+  );
+  if (wasDraining) {
+    toast.info(`已加入解析队列（待处理 ${paperQueue.length} 篇）`);
+  }
+  void drainPaperQueue();
+  return true;
+}
+
 /** 队列泵：无泵在跑时启动一个，逐 item 串行结算；运行中新提交由循环自然拾取 */
 async function drainPaperQueue() {
   if (paperDraining) return;
@@ -453,6 +491,7 @@ async function drainPaperQueue() {
     while (paperQueue.length > 0) {
       if (paperCancelRequested) break;
       const item = paperQueue.shift() as PaperWorkItem;
+      paperCurrentItem = item;
       const total = completed + 1 + paperQueue.length;
       const fileName =
         item.kind === "parse"
@@ -505,6 +544,8 @@ async function drainPaperQueue() {
           );
           outcome = await runOnePdf(dl.pdfPath, completed + 1, total, undefined, 1);
         }
+      } else if (item.kind === "reparse") {
+        outcome = await runReparseItem(item, completed + 1, total);
       } else {
         outcome = await runOnePdf(item.pdfPath, completed + 1, total, item.folderId, 0);
       }
@@ -521,12 +562,14 @@ async function drainPaperQueue() {
         paperCancelRequested = true;
       }
       completed += 1;
+      paperCurrentItem = null;
       // 取消语义：取消按钮 = 取消当前篇 + 清空队列（清空在 cancelPaperImport 做；
       // 此后新提交的是新意图，保留在队列里，finally 段重新起泵续跑）
       if (paperCancelRequested) break;
     }
   } finally {
     paperDraining = false;
+    paperCurrentItem = null;
   }
 
   // 全部（或取消前已完成部分）结算后刷新列表（页面不在场时跳过，重进自会加载）
@@ -584,6 +627,55 @@ async function drainPaperQueue() {
   }
 }
 
+/** reparse 项执行：解析源 PDF（zotero 回链 → 书库 source.pdf）→ runOnePdf → 产物整体替换（保留 id/归属/对话/标注） */
+async function runReparseItem(
+  item: { kind: "reparse"; paperId: string; title: string },
+  index: number,
+  total: number,
+): Promise<PdfOutcome> {
+  // 旧元数据（zotero_key/zotero_pdf_path 回链字段在替换产物时要保留）
+  let meta: PaperMetadata | null = null;
+  try {
+    meta = JSON.parse(await readTextFile(await join(await appDataDir(), "books", item.paperId, "metadata.json")));
+  } catch {
+    // 无 metadata.json：走书库 source.pdf 兜底
+  }
+  const pdfPath = await resolvePaperSourcePdf(item.paperId, meta);
+  if (!pdfPath) {
+    const message = `《${item.title}》找不到源 PDF，无法重新解析`;
+    setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+    toast.error(message);
+    return "failed";
+  }
+  return runOnePdf(pdfPath, index, total, undefined, 0, async (progress) => {
+    const suspect = await replacePaperWithConverted(
+      { id: item.paperId, title: item.title },
+      progress.paper_dir as string,
+      meta ?? undefined,
+    );
+    setPaperImportState((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "success",
+            percent: 100,
+            title: item.title,
+            detail: `已更新《${item.title}》`,
+            stages: prev.stages.map((s) => ({ ...s, status: "done" as PdfStageStatus })),
+          }
+        : prev,
+    );
+    toast.success(`重新解析完成：《${item.title}》`);
+    // 完整性/退化警告与原批量路径同口径（converter 守卫 + 本地检测双通道）
+    if (suspect || progress.degenerate === true || progress.incomplete === true) {
+      toast.warning(`《${item.title}》重解析后检测到内容异常（退化循环或内容缺失），建议换引擎重试`, {
+        duration: 8000,
+      });
+    }
+    return "imported";
+  });
+}
+
 /** acquire 项的下载段：MCP 直调 Zotero Brain；取消在下载中即时结算（MCP 调用不可中止，晚到结果被丢弃） */
 async function downloadReferencePdf(item: {
   doi?: string;
@@ -631,13 +723,15 @@ async function downloadReferencePdf(item: {
 }
 
 /** 解析单篇并等待结算：注册进度监听 → 启动转换 → done 后入库；失败/取消也正常结算（队列据此推进）。
- * stageOffset：调用方在解析阶段前插了前置段（如获取 PDF 的下载段）时，进度事件的阶段号按偏移对齐。 */
+ * stageOffset：调用方在解析阶段前插了前置段（如获取 PDF 的下载段）时，进度事件的阶段号按偏移对齐。
+ * onParsed：自定义 done 落库逻辑（reparse 的产物整体替换）；缺省走 importPapers 新建条目 */
 async function runOnePdf(
   pdfPath: string,
   index: number,
   total: number,
   folderId?: string,
   stageOffset = 0,
+  onParsed?: (progress: PaperConvertProgress) => Promise<PdfOutcome>,
 ): Promise<PdfOutcome> {
   const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
   let filePercent = 0;
@@ -680,6 +774,18 @@ async function runOnePdf(
         return;
       }
       if (progress.type === "done" && progress.paper_dir) {
+        // 自定义落库路径（重解析的产物整体替换）：委托给调用方的 onParsed
+        if (onParsed) {
+          try {
+            settle(await onParsed(progress));
+          } catch (error) {
+            const message = `解析成功但落库失败：${error instanceof Error ? error.message : String(error)}`;
+            setPaperImport((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+            toast.error(`「${fileName}」${message}`);
+            settle("failed");
+          }
+          return;
+        }
         try {
           const result = await importPapers(progress.paper_dir, folderId);
           // 静默失败闸：importPapers 把单篇失败收进 result.failed（不抛），此前只判 skipped
