@@ -111,6 +111,30 @@ function stripXml(text: string): string {
     .trim();
 }
 
+/** 429/5xx 退避重试（Semantic Scholar 未认证限流 ~1 req/s，实测连点卡片大量 429）：
+ *  Retry-After 头优先，缺失按 2s/5s 递增，至多重试 2 次；
+ *  网络层错误（代理/GFW 间歇断连，实测同样高发）也按同表退避重试。
+ *  补全本是开卡后的异步路径，退避等待不阻塞卡片展示。 */
+async function fetchWithBackoff(url: string): Promise<Response | null> {
+  const fallbackDelays = [2000, 5000];
+  let lastError = false;
+  for (let attempt = 0; ; attempt++) {
+    let res: Response | null = null;
+    try {
+      res = await fetchWithTimeout(url, {}, 15000);
+    } catch {
+      lastError = true;
+    }
+    if (res?.ok) return res;
+    const retryable = lastError || (res !== null && (res.status === 429 || res.status >= 500));
+    if (!retryable || attempt >= fallbackDelays.length) return null;
+    const retryAfter = res ? Number(res.headers.get("retry-after")) : Number.NaN;
+    const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : fallbackDelays[attempt];
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 15000)));
+    lastError = false;
+  }
+}
+
 /** OpenAlex work 对象 → 补全结果 */
 function openAlexToEnrichment(w: any): ReferenceEnrichment {
   return {
@@ -135,14 +159,12 @@ async function fetchOpenAlexByDoi(doi: string): Promise<any | null> {
   return await res.json();
 }
 
-async function enrichFromCrossref(doi: string): Promise<ReferenceEnrichment | null> {
-  const res = await fetchWithTimeout(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {}, 12000);
-  if (!res.ok) return null;
-  const m = (await res.json())?.message;
-  if (!m) return null;
+/** Crossref work message → 补全结果（doi 直查与 bibliographic 模糊兜底共用构造） */
+async function crossrefMessageToEnrichment(m: any): Promise<ReferenceEnrichment> {
+  const doi = m.DOI as string | undefined;
   let abstract = typeof m.abstract === "string" ? stripXml(m.abstract) : undefined;
   // Crossref 多数记录无摘要：按 DOI 补查 OpenAlex 的 abstract_inverted_index（P2.2 摘要口径）
-  if (!abstract) {
+  if (!abstract && doi) {
     try {
       const w = await fetchOpenAlexByDoi(doi);
       abstract = rebuildAbstract(w?.abstract_inverted_index);
@@ -158,22 +180,30 @@ async function enrichFromCrossref(doi: string): Promise<ReferenceEnrichment | nu
       : undefined,
     year: m.issued?.["date-parts"]?.[0]?.[0]?.toString(),
     venue: m["container-title"]?.[0],
-    doi: m.DOI ?? doi,
+    doi,
     abstract,
-    landingPage: m.resource?.primary?.URL ?? m.URL ?? `https://doi.org/${doi}`,
+    landingPage: m.resource?.primary?.URL ?? m.URL ?? (doi ? `https://doi.org/${doi}` : undefined),
     fetchedAt: Date.now(),
   };
+}
+
+async function enrichFromCrossref(doi: string): Promise<ReferenceEnrichment | null> {
+  const res = await fetchWithTimeout(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {}, 12000);
+  if (!res.ok) return null;
+  const m = (await res.json())?.message;
+  if (!m) return null;
+  return crossrefMessageToEnrichment(m);
 }
 
 /** Semantic Scholar 按 arXiv 号直查（export.arxiv.org 无 CORS 头被 webview 拦，实测；S2 发 ACAO:*）。
  *  arXiv id 本身是精确标识，无需标题相似度校验。 */
 async function enrichFromSemanticScholar(arxivId: string): Promise<ReferenceEnrichment | null> {
-  const res = await fetchWithTimeout(
-    `https://api.semanticscholar.org/graph/v1/paper/arXiv:${encodeURIComponent(arxivId)}?fields=title,authors,year,venue,abstract,externalIds`,
-    {},
-    12000,
+  const res = await fetchWithBackoff(
+    // arXiv id 不 encodeURIComponent：%2F 编码斜杠经系统代理时 webview fetch 间歇性直接抛
+    // Failed to fetch（实测 raw 3/3 通、%2F 3/3 抛）；arXiv id 字符集（字母/数字/斜杠/点/横线）本身安全
+    `https://api.semanticscholar.org/graph/v1/paper/arXiv:${encodeURI(arxivId.trim())}?fields=title,authors,year,venue,abstract,externalIds`,
   );
-  if (!res.ok) return null;
+  if (!res) return null;
   const w = await res.json();
   if (!w?.title) return null;
   return {
@@ -203,13 +233,64 @@ async function enrichFromOpenAlex(title: string): Promise<ReferenceEnrichment | 
   return best ? openAlexToEnrichment(best) : null;
 }
 
-/** 懒补全：DOI 走 Crossref（摘要缺时补 OpenAlex）→ arXiv 号走 Semantic Scholar → 标题走 OpenAlex 搜索 */
+/** raw 中抽取 4 位年份（19xx/20xx 首个） */
+function extractYear(raw: string): string | null {
+  const m = raw.match(/\b(?:19|20)\d{2}\b/);
+  return m ? m[0] : null;
+}
+
+/**
+ * 无标识符条目的最后兜底（老 APS 版式 title=null 无 doi/arxiv）：Crossref bibliographic 模糊匹配。
+ * 模糊匹配错配比没有更糟，接受判据必须保守——候选需同时满足：
+ *  (a) 年份与 raw 中抽取的 4 位年份一致（raw 无年份则该条豁免）；
+ *  (b) 至少一个作者姓（family）出现在 raw 中；
+ *  (c) container-title 与 raw 词级重合（APS 缩写按前缀算，如 Phys↔physical）或首名 score ≥ 次名 1.5 倍。
+ */
+async function enrichFromBibliographic(raw: string): Promise<ReferenceEnrichment | null> {
+  const year = extractYear(raw);
+  const res = await fetchWithTimeout(
+    `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(raw)}&rows=3`,
+    {},
+    15000,
+  );
+  if (!res.ok) return null;
+  const items = (await res.json())?.message?.items;
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const rawLower = raw.toLowerCase();
+  const rawWords = rawLower.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const top = items[0];
+  const second = items[1];
+  const scoreGap =
+    typeof top?.score === "number" && typeof second?.score === "number" && top.score >= second.score * 1.5;
+  const accepted = items.find((w) => {
+    if (!w) return false;
+    // (a) 年份一致
+    const wYear = w.issued?.["date-parts"]?.[0]?.[0]?.toString();
+    if (year && wYear !== year) return false;
+    // (b) 作者姓出现在 raw
+    const families = Array.isArray(w.author)
+      ? w.author.map((a: any) => String(a?.family ?? "").toLowerCase()).filter(Boolean)
+      : [];
+    if (families.length === 0 || !families.some((f: string) => rawLower.includes(f))) return false;
+    // (c) venue 词级重合（前缀算重合）或 score 显著领先
+    const containerWords = String(w["container-title"]?.[0] ?? "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3);
+    const venueOverlap = containerWords.some((cw) => rawWords.some((rw) => cw.startsWith(rw) || rw.startsWith(cw)));
+    return venueOverlap || scoreGap;
+  });
+  return accepted ? crossrefMessageToEnrichment(accepted) : null;
+}
+
+/** 懒补全：DOI 走 Crossref（摘要缺时补 OpenAlex）→ arXiv 号走 Semantic Scholar → 标题走 OpenAlex 搜索
+ *  → 全无用 Crossref bibliographic 保守模糊兜底 */
 export async function enrichReference(ref: PaperReference): Promise<ReferenceEnrichment | null> {
   try {
     if (ref.doi) return await enrichFromCrossref(ref.doi);
     if (ref.arxiv_id) return await enrichFromSemanticScholar(ref.arxiv_id);
     if (ref.title) return await enrichFromOpenAlex(ref.title);
-    return null;
+    return await enrichFromBibliographic(ref.raw);
   } catch (error) {
     console.warn(`参考文献元数据补全失败（[${ref.n}] ${ref.title ?? ref.raw.slice(0, 40)}）:`, error);
     return null;
