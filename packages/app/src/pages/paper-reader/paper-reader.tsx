@@ -6,7 +6,7 @@ import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Quote, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Quote, Undo2, X } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -1234,15 +1234,116 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     }
   }, [paperDir]);
 
-  // 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移）
-  const scrollToHeading = useCallback((id: string): boolean => {
-    setActiveHeadingId(id);
+  // ─── 转跳历史（「返回上处」浮动按钮）───
+  // 栈记录转跳前 scrollTop（上限 20）；转跳/返回后等滚动稳定定格基线；
+  // 之后用户手势滚动（wheel/触摸/滚动条拖拽）超 DWELL_THRESHOLD 视为驻留新位置，清栈隐按钮。
+  const JUMP_STACK_MAX = 20;
+  /** 驻留判定阈值：约 5-8 行正文高度（~930px 视口的 ~15%），小到一次顺手微调不会误触 */
+  const DWELL_THRESHOLD = 140;
+  const jumpStackRef = useRef<number[]>([]);
+  const [showJumpBack, setShowJumpBack] = useState(false);
+  /** 驻留判定基线 scrollTop（滚动稳定后定格；null = 尚未定格，不做驻留判定） */
+  const baselineRef = useRef<number | null>(null);
+  /** 基线定格后是否发生过用户滚动手势（区分用户滚动与程序滚动：平滑滚动/漂移校正不置位） */
+  const userGestureRef = useRef(false);
+  const baselineWatchRef = useRef<number | null>(null);
+
+  /** 转跳/返回后定格基线：轮询滚动位置，稳定两拍（或用户手势接管/4s 超时）即定格 */
+  const armJumpBaseline = useCallback(() => {
     const root = scrollRef.current;
-    const el = document.getElementById(id);
-    if (!root || !el) return false;
-    scrollElementInContainer(root, el);
-    return true;
+    if (!root) return;
+    if (baselineWatchRef.current !== null) window.clearInterval(baselineWatchRef.current);
+    const started = Date.now();
+    let last = root.scrollTop;
+    let stable = 0;
+    baselineWatchRef.current = window.setInterval(() => {
+      const scroller = scrollRef.current;
+      if (!scroller) {
+        if (baselineWatchRef.current !== null) window.clearInterval(baselineWatchRef.current);
+        baselineWatchRef.current = null;
+        return;
+      }
+      const cur = scroller.scrollTop;
+      // 用户在滚动稳定前接管（转跳途中改主意）：以接管点直接定格基线
+      if (userGestureRef.current || Math.abs(cur - last) < 2) stable += 1;
+      else stable = 0;
+      last = cur;
+      if (userGestureRef.current || stable >= 2 || Date.now() - started > 4000) {
+        baselineRef.current = cur;
+        if (baselineWatchRef.current !== null) window.clearInterval(baselineWatchRef.current);
+        baselineWatchRef.current = null;
+      }
+    }, 150);
   }, []);
+
+  /** 转跳成功时记录当前位置并入栈（调用点必须在发起滚动之前） */
+  const recordJump = useCallback(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const stack = jumpStackRef.current;
+    stack.push(root.scrollTop);
+    if (stack.length > JUMP_STACK_MAX) stack.shift();
+    userGestureRef.current = false;
+    baselineRef.current = null;
+    setShowJumpBack(true);
+    armJumpBaseline();
+  }, [armJumpBaseline]);
+
+  // 用户滚动手势标记：wheel/触摸直接置位；滚动条拖拽（指针落在滚动条带上，target 即容器自身）同样置位
+  const markUserGesture = useCallback(() => {
+    userGestureRef.current = true;
+  }, []);
+  const handleScrollbarPointerDown = useCallback((event: React.PointerEvent) => {
+    const root = scrollRef.current;
+    if (!root || event.target !== root) return;
+    // 命中容器自身 = 点在内容之外的区域（滚动条/边缘）；按滚动条带（右侧 18px）过滤内容区留白误点
+    if (event.clientX >= root.getBoundingClientRect().right - 18) userGestureRef.current = true;
+  }, []);
+
+  // 返回上一处：pop 栈顶平滑滚回；栈空隐藏，未空保留按钮并重定格基线
+  const handleJumpBack = useCallback(() => {
+    const root = scrollRef.current;
+    const prev = jumpStackRef.current.pop();
+    if (!root || prev === undefined) {
+      setShowJumpBack(false);
+      return;
+    }
+    userGestureRef.current = false;
+    baselineRef.current = null;
+    root.scrollTo({ top: prev, behavior: "smooth" });
+    armJumpBaseline();
+    if (jumpStackRef.current.length === 0) setShowJumpBack(false);
+  }, [armJumpBaseline]);
+
+  // 切换论文（含休眠重挂）清空栈并隐藏按钮
+  // biome-ignore lint/correctness/useExhaustiveDependencies: paperDir 是刻意的触发依赖（切论文清空转跳栈）
+  useEffect(() => {
+    jumpStackRef.current = [];
+    setShowJumpBack(false);
+    baselineRef.current = null;
+  }, [paperDir]);
+  useEffect(
+    () => () => {
+      if (baselineWatchRef.current !== null) window.clearInterval(baselineWatchRef.current);
+    },
+    [],
+  );
+
+  // 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移）；
+  // 顶部 TOC 跳转也是转跳（同一滚动容器），纳入历史
+  const scrollToHeading = useCallback(
+    (id: string): boolean => {
+      setActiveHeadingId(id);
+      const root = scrollRef.current;
+      // 多 tab 并存时同 id 元素在其他 tab 的 DOM 里也存在，必须按本容器取（2026-08-20 实测串 tab）
+      const el = contentRef.current?.querySelector(`[id="${CSS.escape(id)}"]`);
+      if (!root || !el) return false;
+      recordJump();
+      scrollElementInContainer(root, el);
+      return true;
+    },
+    [recordJump],
+  );
 
   // 定位闪烁强调（标注定位 / 图表速跳共用）：paper-anno-current 高亮闪 3 次后清除
   const flashTimerRef = useRef<number | null>(null);
@@ -1282,26 +1383,31 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       if (!range) return false;
       const top =
         range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3;
+      recordJump();
       root.scrollTo({ top, behavior: "smooth" });
       flashRanges([range]);
       return true;
     },
-    [flashRanges],
+    [flashRanges, recordJump],
   );
 
   // 图表速跳：按图片相对路径定位（img data-paper-src；CSS Highlight 对替换元素不可见，用 outline 动画闪烁）
-  const scrollToImage = useCallback((src: string): boolean => {
-    const container = contentRef.current;
-    const root = scrollRef.current;
-    if (!container || !root) return false;
-    const img = container.querySelector(`img[data-paper-src="${CSS.escape(src)}"]`);
-    if (!root || !img) return false;
-    scrollElementInContainer(root, img, root.clientHeight / 4);
-    img.classList.remove("paper-image-jump-flash");
-    void (img as HTMLElement).offsetWidth; // 强制回流以重启动画（连续点同一图也会闪）
-    img.classList.add("paper-image-jump-flash");
-    return true;
-  }, []);
+  const scrollToImage = useCallback(
+    (src: string): boolean => {
+      const container = contentRef.current;
+      const root = scrollRef.current;
+      if (!container || !root) return false;
+      const img = container.querySelector(`img[data-paper-src="${CSS.escape(src)}"]`);
+      if (!root || !img) return false;
+      recordJump();
+      scrollElementInContainer(root, img, root.clientHeight / 4);
+      img.classList.remove("paper-image-jump-flash");
+      void (img as HTMLElement).offsetWidth; // 强制回流以重启动画（连续点同一图也会闪）
+      img.classList.add("paper-image-jump-flash");
+      return true;
+    },
+    [recordJump],
+  );
 
   // 文内链接定位滚动（带漂移校正）：懒加载图片在平滑滚动途中/之后加载完成会引起布局位移、
   // 目标随之漂出视口（真实转换器产出实测远端链接首击偏差可达 ~1-3k px）。滚动后做三轮延迟复检，
@@ -1340,8 +1446,11 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       const container = contentRef.current;
       const root = scrollRef.current;
       if (!container || !root || !id) return false;
-      const el = document.getElementById(id);
+      // 多 tab 并存时同 id 锚点在其他 tab 的 DOM 里也存在（同库论文/同论文多 tab），
+      // getElementById 全局先中先取会串 tab——必须按本容器取（2026-08-20 实测串到隐藏 tab）
+      const el = container.querySelector(`[id="${CSS.escape(id)}"]`);
       if (el && container.contains(el)) {
+        recordJump();
         scrollToElWithCorrection(el, root.clientHeight / 4);
         // 闪烁目标：有文本的锚点闪自身；空锚点（<a id> 无文本）闪宿主块（参考文献条目/图注段）；
         // 宿主块也是空段（eq/sec 锚点独占一空 <p>）闪紧随的下一内容元素（公式块/标题；
@@ -1373,11 +1482,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       if (!range) return false;
       const top =
         range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3;
+      recordJump();
       root.scrollTo({ top, behavior: "smooth" });
       flashRanges([range]);
       return true;
     },
-    [flashRanges, scrollToElWithCorrection],
+    [flashRanges, scrollToElWithCorrection, recordJump],
   );
 
   const components = useMemo<Partial<Components>>(
@@ -1862,7 +1972,14 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     if (popupRef.current) setPopupState(null);
     if (hoverRangeRef.current) updateHoverRects();
     if (scrollRef.current) paperScrollMemory.set(paperDir, scrollRef.current.scrollTop);
-  }, [setPopupState, updateHoverRects, paperDir]);
+    // 转跳后驻留判定：用户手势滚动且偏离基线超阈值 → 清栈隐按钮（程序滚动不置位手势，天然排除）
+    if (showJumpBack && userGestureRef.current && baselineRef.current !== null && scrollRef.current) {
+      if (Math.abs(scrollRef.current.scrollTop - baselineRef.current) > DWELL_THRESHOLD) {
+        jumpStackRef.current = [];
+        setShowJumpBack(false);
+      }
+    }
+  }, [setPopupState, updateHoverRects, paperDir, showJumpBack]);
 
   const closePopup = useCallback(() => setPopupState(null), [setPopupState]);
 
@@ -1980,6 +2097,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         onContextMenu={handleContextMenu}
         onScroll={handleScroll}
         onClick={handleContentClick}
+        onWheel={markUserGesture}
+        onTouchStart={markUserGesture}
+        onPointerDown={handleScrollbarPointerDown}
       >
         <div
           ref={contentRef}
@@ -1998,6 +2118,19 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             {renderedBody}
           </ReactMarkdown>
         </div>
+        {/* 「返回上处」浮动按钮：sticky 钉在滚动视口右下角（h-0 占位不吃文档高度） */}
+        {showJumpBack && (
+          <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end pr-3">
+            <button
+              type="button"
+              onClick={handleJumpBack}
+              className="pointer-events-auto flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-neutral-600 text-xs shadow-lg transition-colors hover:bg-accent hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              <Undo2 className="size-3.5" />
+              返回上处
+            </button>
+          </div>
+        )}
         {hoverRects && (
           <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
             {hoverRects.map((rect) => (
