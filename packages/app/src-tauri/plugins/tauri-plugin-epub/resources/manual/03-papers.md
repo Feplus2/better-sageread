@@ -7,7 +7,7 @@
 - **本地 PDF**：文献库「导入」选择 PDF，后台逐篇解析（进度可见，可取消）。解析引擎在 设置 → PDF 转换 里选（需先在同一页面填好对应 Token）：
   - **MinerU VLM（推荐）**：公式、图注、大图完整性最好
   - **PaddleOCR**：速度更快；复杂公式场景以 MinerU VLM 为准
-- **Zotero 同步**：设置里配置 Zotero API Key 后，可扫描 Zotero 库按 collection 选论文批量导入；同一篇重复导入会自动跳过
+- **Zotero 同步**：无需 API Key——「从 Zotero 导入」面板里选择 Zotero 数据目录（默认自动定位 `~/Zotero`），即可扫描本地库按 collection 选论文批量导入；同一篇重复导入会自动跳过
 - 论文卡片右键：打开、向量化、翻译、重新解析、移动到文件夹、**打开文件夹**（paper.md、源 PDF、图片都在这里）、移到回收站
 
 ## 文件夹树

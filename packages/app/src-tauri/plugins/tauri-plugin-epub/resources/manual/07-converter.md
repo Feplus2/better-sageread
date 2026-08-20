@@ -21,10 +21,10 @@
 
 ## Zotero 同步
 
-- 在 Zotero 官网（zotero.org/settings/keys）创建 API Key（勾上读取权限；要让应用帮你建 collection 还需写权限）
-- 设置里填入 Key 与 UserID 后，文献库可扫描你的 Zotero 库，按 collection 勾选批量导入
+- 内置导入走的是**本地库**，不需要 API Key：「从 Zotero 导入」面板选择 Zotero 数据目录（默认自动定位 `~/Zotero`），即可扫描库按 collection 勾选批量导入
 - 导入是幂等的：同一篇重复导入自动跳过；本地删除（含回收站清空）后可重新导入
-- Zotero 侧的链接状态只存在本机，不随同步走——另一台设备上需重新配置 Zotero Key
+- Zotero 侧的链接状态只存在本机，不随同步走——另一台设备上重新选择数据目录即可
+- API Key 只有用 **Zotero Brain MCP** 时才涉及：配合 Zotero 桌面端（设置 → 高级 → 勾选「允许其他应用程序通过本地 API 通信」）可免 Key 只读；要让 Agent 帮你写入（如创建 collection），才需要在 Zotero 官网（zotero.org/settings/keys）创建带写权限的 Key，经 MCP 配置的 env 传入
 
 ## 网络下载（配合全局助手与外部 MCP）
 

@@ -10,7 +10,17 @@ import { useTagsOperations } from "@/pages/library/hooks/use-tags-operations";
 import { getTrashedBooks } from "@/services/book-service";
 import { useLibraryStore } from "@/store/library-store";
 import clsx from "clsx";
-import { BarChart3, Brain, ChevronDown, ChevronRight, CircleHelp, GraduationCap, Library, Lightbulb, Trash2 } from "lucide-react";
+import {
+  BarChart3,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  GraduationCap,
+  Library,
+  Lightbulb,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
@@ -133,11 +143,6 @@ export default function Sidebar() {
       label: "阅读统计",
       icon: BarChart3,
     },
-    {
-      path: "/manual",
-      label: "使用手册",
-      icon: CircleHelp,
-    },
   ];
 
   return (
@@ -230,6 +235,18 @@ export default function Sidebar() {
           })}
         </nav>
         <div className="space-y-1 px-2 py-3">
+          <Link
+            to="/manual"
+            className={clsx(
+              "flex w-full items-center gap-2 rounded-md p-1 py-1 text-left text-sm transition-colors hover:bg-muted",
+              location.pathname === "/manual"
+                ? "text-neutral-900 dark:text-neutral-100"
+                : "text-neutral-600 dark:text-neutral-300",
+            )}
+          >
+            <CircleHelp size={16} className="flex-shrink-0" />
+            <span className="text-sm">使用手册</span>
+          </Link>
           <Link
             to="/trash"
             className={clsx(

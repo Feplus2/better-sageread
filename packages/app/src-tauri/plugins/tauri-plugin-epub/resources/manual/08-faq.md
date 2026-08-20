@@ -9,7 +9,7 @@
 密钥全部保存在操作系统凭据管理器（Windows 凭据管理器，服务名 `com.bettersageread.app`），不写明文文件、不进备份包、不进对话上下文（模型只见 `{{secret:名称}}` 占位符）、不上云。
 
 **Q：换电脑怎么搬家？**
-A 机：设置 → 数据同步 → 立即备份。B 机：填同一个 WebDAV → 恢复最新备份 → 恢复后把 LLM Key、WebDAV 密码、Zotero Key 重新填一遍（密钥不上云是刻意的）即可完整使用。
+A 机：设置 → 数据同步 → 立即备份。B 机：填同一个 WebDAV → 恢复最新备份 → 恢复后把 LLM Key、WebDAV 密码、（如用 Zotero Brain MCP）Zotero Key 重新填一遍（密钥不上云是刻意的）即可完整使用。
 
 ## 功能使用
 

@@ -40,7 +40,7 @@ Better SageRead 把「读书」和「读论文」放进同一个书架：EPUB �
 - **论文**：PDF 经内置管线（MinerU VLM / PaddleOCR）解析为 Markdown——公式 KaTeX 渲染、大图光栅化重裁保持完整、图注/表注锚点速跳面板、整篇中译对照
 - **PDF 转 EPUB**：扫描版书籍一键转换入库
 - **标注与笔记**：划线高亮（多色/多笔触）、评论、长文 Markdown 笔记面板（AI 可直接帮你整理落笔），位置 tag 按章节归类
-- **Zotero**：配置 API Key 后扫描 Zotero 库，按 collection 一键批量导入
+- **Zotero**：直接扫描本地 Zotero 库（无需 API Key），按 collection 一键批量导入
 
 ### 🤖 AI 与 Agent
 
@@ -75,7 +75,7 @@ Better SageRead 把「读书」和「读论文」放进同一个书架：EPUB �
 1. **模型提供商**：填 LLM API Key（如 DeepSeek）
 2. **向量模型**：配置 embedding 服务——盘活书库的基石
 3. **PDF 转换**：填 MinerU Token（[mineru.net](https://mineru.net/apiManage/token) 免费申请；解析论文、PDF 转 EPUB 都靠它）
-4. **（可选）数据同步**：填 WebDAV 开备份；**（可选）Zotero**：填 API Key 开同步导入
+4. **（可选）数据同步**：填 WebDAV 开备份；**（可选）Zotero 导入**：无需 Key，在导入面板选择 Zotero 数据目录即可扫描本地库导入（API Key 仅 Zotero Brain MCP 写入时需要）
 
 详细说明见应用内「使用手册」（左侧导航栏）。
 
