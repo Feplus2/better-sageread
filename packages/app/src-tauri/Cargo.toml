@@ -65,6 +65,8 @@ windows-sys = { version = "0.59", features = [
 ] }
 # keyring 必须启用 Windows Credential Manager 后端，否则密钥不持久化
 keyring = { version = "3", features = ["windows-native"] }
+# follow-env 代理档的系统代理注册表回退（core/mcp proxy_spawn_env）
+winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

@@ -160,11 +160,140 @@ fn proxy_spawn_env(app: &AppHandle) -> Vec<(String, String)> {
             ]
         }
         // follow-env：子进程默认继承父 env 的 HTTP(S)_PROXY，只补 NO_PROXY 与 Node 开关
-        "follow-env" => vec![
-            ("NO_PROXY".into(), "localhost,127.0.0.1".into()),
-            ("NODE_USE_ENV_PROXY".into(), "1".into()),
-        ],
+        "follow-env" => {
+            let mut env = vec![
+                ("NO_PROXY".into(), "localhost,127.0.0.1".into()),
+                ("NODE_USE_ENV_PROXY".into(), "1".into()),
+            ];
+            // 父进程无代理 env（Windows GUI 进程常态：系统代理是注册表设置不是 env）时，
+            // 回退读 Windows 系统代理注入——否则 Python urllib 的 getproxies_environment()
+            // 会把任何 *_proxy 结尾的 env（含我们注入的 NO_PROXY/NODE_USE_ENV_PROXY）当作
+            // env 代理证据短路掉注册表回退，误判直连（2026-08-20 根因查明）。
+            if !has_env_proxy() {
+                if let Some(url) = system_proxy_url() {
+                    env.push(("HTTP_PROXY".into(), url.clone()));
+                    env.push(("HTTPS_PROXY".into(), url));
+                }
+            }
+            env
+        }
         _ => vec![],
+    }
+}
+
+/// 父进程 env 是否已带代理（键名大小写不敏感：Windows env 读取不区分大小写）
+fn has_env_proxy() -> bool {
+    std::env::vars_os().any(|(k, v)| {
+        !v.is_empty()
+            && matches!(
+                k.to_string_lossy().to_ascii_lowercase().as_str(),
+                "http_proxy" | "https_proxy" | "all_proxy"
+            )
+    })
+}
+
+/// 读取操作系统级系统代理，返回规范化的 http://host:port（未开启/无系统代理概念返回 None）。
+/// 仅 Windows 实现（读注册表）；macOS 系统代理需 SystemConfiguration/scutil，读取成本高，
+/// follow-env 在非 Windows 平台维持只继承 env，不做系统代理回退。
+#[cfg(windows)]
+fn system_proxy_url() -> Option<String> {
+    let settings = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        .ok()?;
+    let enable: u32 = settings.get_value("ProxyEnable").unwrap_or(0);
+    if enable != 1 {
+        return None;
+    }
+    let server: String = settings.get_value("ProxyServer").ok()?;
+    parse_proxy_server(&server)
+}
+
+#[cfg(not(windows))]
+fn system_proxy_url() -> Option<String> {
+    None
+}
+
+/// ProxyServer 字符串 → 规范化代理 URL（纯函数，便于单测）：
+/// - "host:port"（全协议共用形式）→ http://host:port；
+/// - "http=h1;https=h2;ftp=..."（分协议形式）→ 优先 https 项，退化 http 项；
+///   仅 socks 等其他协议 → None（不注入，避免把 socks 地址错标成 http 代理）；
+/// - 已带 scheme 的值原样保留；空串/无有效项 → None。
+fn parse_proxy_server(raw: &str) -> Option<String> {
+    fn with_scheme(value: &str) -> Option<String> {
+        let v = value.trim();
+        if v.is_empty() {
+            None
+        } else if v.contains("://") {
+            Some(v.to_string())
+        } else {
+            Some(format!("http://{v}"))
+        }
+    }
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if !raw.contains('=') {
+        return with_scheme(raw);
+    }
+    let mut http: Option<String> = None;
+    let mut https: Option<String> = None;
+    for part in raw.split(';') {
+        let Some((proto, value)) = part.split_once('=') else {
+            continue;
+        };
+        let Some(url) = with_scheme(value) else {
+            continue;
+        };
+        match proto.trim().to_ascii_lowercase().as_str() {
+            "https" => https = Some(url),
+            "http" => http = Some(url),
+            _ => {}
+        }
+    }
+    https.or(http)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_proxy_server;
+
+    #[test]
+    fn parses_plain_host_port() {
+        assert_eq!(parse_proxy_server("127.0.0.1:7890").as_deref(), Some("http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn keeps_existing_scheme() {
+        assert_eq!(parse_proxy_server("http://127.0.0.1:7897").as_deref(), Some("http://127.0.0.1:7897"));
+    }
+
+    #[test]
+    fn per_protocol_prefers_https() {
+        assert_eq!(
+            parse_proxy_server("http=127.0.0.1:7890;https=127.0.0.1:7897;ftp=127.0.0.1:7899").as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+    }
+
+    #[test]
+    fn per_protocol_falls_back_to_http() {
+        assert_eq!(
+            parse_proxy_server("ftp=127.0.0.1:7899;http=192.168.1.1:8080").as_deref(),
+            Some("http://192.168.1.1:8080")
+        );
+    }
+
+    #[test]
+    fn socks_only_returns_none() {
+        assert_eq!(parse_proxy_server("socks=127.0.0.1:1080"), None);
+    }
+
+    #[test]
+    fn empty_or_garbage_returns_none() {
+        assert_eq!(parse_proxy_server(""), None);
+        assert_eq!(parse_proxy_server("   "), None);
+        assert_eq!(parse_proxy_server("http=;https="), None);
     }
 }
 

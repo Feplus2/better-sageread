@@ -26,7 +26,7 @@ interface ProxyTestResult {
 const MODE_OPTIONS: Array<{ value: ProxyMode; label: string; desc: string }> = [
   { value: "off", label: "关闭", desc: "直连（遵循系统代理与环境变量）" },
   { value: "custom", label: "自定义", desc: "指定本机代理软件端口（推荐）" },
-  { value: "follow-env", label: "跟随环境变量", desc: "读取 HTTP_PROXY / HTTPS_PROXY" },
+  { value: "follow-env", label: "跟随环境变量", desc: "读取 HTTP_PROXY / HTTPS_PROXY，无环境变量时回退系统代理" },
 ];
 
 export default function ProxySettings() {
