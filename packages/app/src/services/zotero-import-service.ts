@@ -1,9 +1,4 @@
-import {
-  type PaperMetadata,
-  normalizeAuthors,
-  parseFrontmatter,
-  parsePaperMarkdown,
-} from "@/pages/paper-reader/paper-metadata";
+import { type PaperMetadata, parseFrontmatter, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
 import {
   type Folder,
   type PaperConvertProgress,
@@ -19,6 +14,7 @@ import {
   setPaperFolders,
   startPaperPdfImport,
 } from "@/services/paper-service";
+import { mergeZoteroMetadata } from "@/services/zotero-metadata-merge";
 import type { SimpleBook } from "@/types/simple-book";
 import { findDegenerateLoop } from "@/utils/degenerate";
 import { invoke } from "@tauri-apps/api/core";
@@ -618,19 +614,18 @@ async function importConvertedPaper(
   }
 
   const parsed: PaperMetadata = paper.frontmatter ? parseFrontmatter(paper.frontmatter) : {};
-  const metadata: PaperMetadata = { ...parsed, zotero_key: item.key };
-  if (!metadata.doi && item.doi) metadata.doi = item.doi;
+  // Zotero 优先合并（title/date/doi + 列表显示作者走 Zotero 值；完整作者列表仍保留提取值）
+  const { metadata, displayAuthor } = mergeZoteroMetadata(parsed, item);
+  metadata.zotero_key = item.key;
   if (item.pdfPath) metadata.zotero_pdf_path = item.pdfPath;
 
-  const authors = normalizeAuthors(metadata.author);
-  const author = authors.length > 1 ? `${authors[0]} et al.` : (authors[0] ?? "");
   try {
     await invoke<SimpleBook>("save_paper", {
       sourceDir: paper.dir,
       id: paper.id,
       metadata,
       title: metadata.title?.trim() || paper.title_fallback,
-      author,
+      author: displayAuthor,
       language: metadata.lang ?? "en",
       // Zotero 导入不拷 source.pdf：以 zotero_pdf_path 回链代替（用户偏好轻便）
       retainSourcePdf: false,
