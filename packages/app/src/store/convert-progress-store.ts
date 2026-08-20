@@ -316,7 +316,7 @@ function handleBookProgress(p: ConvertProgress) {
 /** 工作项：parse = 本地 PDF 解析入库；acquire = Zotero Brain 下载后解析入库（P2 参考文献卡片） */
 type PaperWorkItem =
   | { kind: "parse"; pdfPath: string; folderId?: string }
-  | { kind: "acquire"; doi?: string; title: string; url?: string };
+  | { kind: "acquire"; doi?: string; title: string; url?: string; arxivId?: string };
 
 let paperQueue: PaperWorkItem[] = [];
 let paperDraining = false;
@@ -387,7 +387,7 @@ export async function startPaperImportBatch(incomingPaths: string[], folderId?: 
 }
 
 /** P2 参考文献卡片「获取 PDF」入口：Zotero Brain 下载 → 解析 → 入库，随全局队列串行接续 */
-export function startPaperAcquireImport(input: { doi?: string; title: string; url?: string }): void {
+export function startPaperAcquireImport(input: { doi?: string; title: string; url?: string; arxivId?: string }): void {
   // 引擎 token 在下载前预检：解析段必用，缺失时早失败（不白烧一次下载）
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
@@ -401,7 +401,7 @@ export function startPaperAcquireImport(input: { doi?: string; title: string; ur
     return;
   }
   const wasDraining = paperDraining;
-  paperQueue.push({ kind: "acquire", doi: input.doi, title: input.title, url: input.url });
+  paperQueue.push({ kind: "acquire", doi: input.doi, title: input.title, url: input.url, arxivId: input.arxivId });
   setPaperImportState((prev) =>
     prev && prev.status === "running"
       ? { ...prev, total: prev.index + paperQueue.length, queuedCount: paperQueue.length }
@@ -567,6 +567,7 @@ async function downloadReferencePdf(item: {
   doi?: string;
   title: string;
   url?: string;
+  arxivId?: string;
 }): Promise<{ pdfPath?: string; message?: string; cancelled?: boolean }> {
   const server = findZoteroBrainServer();
   if (!server) return { message: "未配置 Zotero Brain MCP，请到 AI 中心 → MCP 配置后重试" };
@@ -577,7 +578,13 @@ async function downloadReferencePdf(item: {
       done = true;
       resolve({ cancelled: true });
     };
-    callMcpServerTool(server, "download_paper", { doi: item.doi, title: item.title, url: item.url }).then(
+    // arxiv_id 是 download_paper 的直取参数之一（references.json P2.1 起携带，有则透传提速）
+    callMcpServerTool(server, "download_paper", {
+      doi: item.doi,
+      title: item.title,
+      url: item.url,
+      arxiv_id: item.arxivId,
+    }).then(
       (raw) => {
         if (done) return;
         done = true;

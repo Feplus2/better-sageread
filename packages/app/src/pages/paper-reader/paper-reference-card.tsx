@@ -125,6 +125,7 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
       doi,
       title: title ?? reference.raw.slice(0, 80),
       url: landingUrl,
+      arxivId: reference.arxiv_id,
     });
     onOpenChange(false);
   };

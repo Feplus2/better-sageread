@@ -18,6 +18,8 @@ export interface PaperReference {
   year?: string;
   venue?: string;
   doi?: string;
+  /** arXiv 编号（如 2404.13213；Zotero Brain download_paper 的直取参数之一） */
+  arxiv_id?: string;
   /** P2.2 元数据补全缓存（阅读器写回；undefined = 尚未补全） */
   enrichment?: ReferenceEnrichment;
 }
@@ -253,11 +255,12 @@ export async function checkReferenceInLibrary(ref: {
   return null;
 }
 
-/** 访问页面 URL 优先级：解析 landing_page → doi.org → Scholar 标题搜索兜底（永远有值） */
+/** 访问页面 URL 优先级：解析 landing_page → doi.org → arXiv abs 页 → Scholar 标题搜索兜底（永远有值） */
 export function referenceLandingUrl(ref: PaperReference, enrichment?: ReferenceEnrichment | null): string {
   return (
     enrichment?.landingPage ??
     (ref.doi ? `https://doi.org/${ref.doi}` : undefined) ??
+    (ref.arxiv_id ? `https://arxiv.org/abs/${ref.arxiv_id}` : undefined) ??
     `https://scholar.google.com/scholar?q=${encodeURIComponent(ref.title || ref.raw.slice(0, 120))}`
   );
 }
