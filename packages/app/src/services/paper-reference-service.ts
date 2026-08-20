@@ -26,7 +26,7 @@ export interface PaperReference {
 
 /** 元数据补全结果（只缓存成功结果；失败不落盘，下次开卡重试） */
 export interface ReferenceEnrichment {
-  source: "crossref" | "openalex";
+  source: "crossref" | "openalex" | "semanticscholar";
   title?: string;
   authors?: string[];
   year?: string;
@@ -165,6 +165,30 @@ async function enrichFromCrossref(doi: string): Promise<ReferenceEnrichment | nu
   };
 }
 
+/** Semantic Scholar 按 arXiv 号直查（export.arxiv.org 无 CORS 头被 webview 拦，实测；S2 发 ACAO:*）。
+ *  arXiv id 本身是精确标识，无需标题相似度校验。 */
+async function enrichFromSemanticScholar(arxivId: string): Promise<ReferenceEnrichment | null> {
+  const res = await fetchWithTimeout(
+    `https://api.semanticscholar.org/graph/v1/paper/arXiv:${encodeURIComponent(arxivId)}?fields=title,authors,year,venue,abstract,externalIds`,
+    {},
+    12000,
+  );
+  if (!res.ok) return null;
+  const w = await res.json();
+  if (!w?.title) return null;
+  return {
+    source: "semanticscholar",
+    title: w.title,
+    authors: Array.isArray(w.authors) ? w.authors.map((a: any) => a?.name).filter(Boolean) : undefined,
+    year: w.year?.toString(),
+    venue: w.venue || undefined,
+    doi: w.externalIds?.DOI ?? undefined,
+    abstract: typeof w.abstract === "string" ? w.abstract : undefined,
+    landingPage: `https://arxiv.org/abs/${arxivId}`,
+    fetchedAt: Date.now(),
+  };
+}
+
 async function enrichFromOpenAlex(title: string): Promise<ReferenceEnrichment | null> {
   const res = await fetchWithTimeout(
     `https://api.openalex.org/works?search=${encodeURIComponent(title)}&per-page=3`,
@@ -179,10 +203,11 @@ async function enrichFromOpenAlex(title: string): Promise<ReferenceEnrichment | 
   return best ? openAlexToEnrichment(best) : null;
 }
 
-/** 懒补全：有 DOI 走 Crossref（摘要缺时补 OpenAlex），无 DOI 走 OpenAlex 标题搜索 */
+/** 懒补全：DOI 走 Crossref（摘要缺时补 OpenAlex）→ arXiv 号走 Semantic Scholar → 标题走 OpenAlex 搜索 */
 export async function enrichReference(ref: PaperReference): Promise<ReferenceEnrichment | null> {
   try {
     if (ref.doi) return await enrichFromCrossref(ref.doi);
+    if (ref.arxiv_id) return await enrichFromSemanticScholar(ref.arxiv_id);
     if (ref.title) return await enrichFromOpenAlex(ref.title);
     return null;
   } catch (error) {

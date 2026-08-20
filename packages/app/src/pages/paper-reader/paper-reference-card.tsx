@@ -120,10 +120,13 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
 
   const handleAcquirePdf = () => {
     // 全链路（Zotero Brain 下载 → 解析 → 入库）沉到全局转换进度层：
-    // 下载阶段也进右下角进度卡（阅读/聊天页豁免，与既有可见性规则一致），结果 toast 通知
+    // 下载阶段也进右下角进度卡（阅读/聊天页豁免，与既有可见性规则一致），结果 toast 通知。
+    // title 只传真标题（无标题条目如 APS 老版式传空）——raw 引文切片会被 slim 的标题校验
+    // 当作论文标题比对而误杀（"PDF 已下载但标题校验不符，丢弃"）；显示串另用 displayName 兜底
     void startPaperAcquireImport({
       doi,
-      title: title ?? reference.raw.slice(0, 80),
+      title,
+      displayName: title ?? reference.raw.slice(0, 80),
       url: landingUrl,
       arxivId: reference.arxiv_id,
     });

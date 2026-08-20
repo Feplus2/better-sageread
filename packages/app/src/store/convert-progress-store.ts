@@ -316,7 +316,16 @@ function handleBookProgress(p: ConvertProgress) {
 /** 工作项：parse = 本地 PDF 解析入库；acquire = Zotero Brain 下载后解析入库（P2 参考文献卡片） */
 type PaperWorkItem =
   | { kind: "parse"; pdfPath: string; folderId?: string }
-  | { kind: "acquire"; doi?: string; title: string; url?: string; arxivId?: string };
+  | {
+      kind: "acquire";
+      doi?: string;
+      /** 真标题（可空：APS 老版式条目无标题）——只用于 download_paper 的标题校验，空则不校验 */
+      title?: string;
+      /** 进度卡显示名（真标题缺位时由调用方用 raw 切片兜底——显示串不进检索参数） */
+      displayName?: string;
+      url?: string;
+      arxivId?: string;
+    };
 
 let paperQueue: PaperWorkItem[] = [];
 let paperDraining = false;
@@ -387,7 +396,13 @@ export async function startPaperImportBatch(incomingPaths: string[], folderId?: 
 }
 
 /** P2 参考文献卡片「获取 PDF」入口：Zotero Brain 下载 → 解析 → 入库，随全局队列串行接续 */
-export function startPaperAcquireImport(input: { doi?: string; title: string; url?: string; arxivId?: string }): void {
+export function startPaperAcquireImport(input: {
+  doi?: string;
+  title?: string;
+  displayName?: string;
+  url?: string;
+  arxivId?: string;
+}): void {
   // 引擎 token 在下载前预检：解析段必用，缺失时早失败（不白烧一次下载）
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
@@ -401,7 +416,14 @@ export function startPaperAcquireImport(input: { doi?: string; title: string; ur
     return;
   }
   const wasDraining = paperDraining;
-  paperQueue.push({ kind: "acquire", doi: input.doi, title: input.title, url: input.url, arxivId: input.arxivId });
+  paperQueue.push({
+    kind: "acquire",
+    doi: input.doi,
+    title: input.title,
+    displayName: input.displayName,
+    url: input.url,
+    arxivId: input.arxivId,
+  });
   setPaperImportState((prev) =>
     prev && prev.status === "running"
       ? { ...prev, total: prev.index + paperQueue.length, queuedCount: paperQueue.length }
@@ -435,7 +457,7 @@ async function drainPaperQueue() {
       const fileName =
         item.kind === "parse"
           ? (item.pdfPath.split(/[\\/]/).pop() ?? item.pdfPath)
-          : item.title || item.doi || "参考文献";
+          : item.title?.trim() || item.displayName || item.doi || item.arxivId || "参考文献";
       setPaperImportState(() => ({
         status: "running",
         fileName,
@@ -578,10 +600,10 @@ async function downloadReferencePdf(item: {
       done = true;
       resolve({ cancelled: true });
     };
-    // arxiv_id 是 download_paper 的直取参数之一（references.json P2.1 起携带，有则透传提速）
+    // title 只传真标题（空串——slim 端空标题跳过 PDF 标题校验，防 raw 引文切片被误当标题比对而拒收）
     callMcpServerTool(server, "download_paper", {
       doi: item.doi,
-      title: item.title,
+      title: item.title?.trim() || "",
       url: item.url,
       arxiv_id: item.arxivId,
     }).then(
