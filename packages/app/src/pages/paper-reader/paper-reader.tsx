@@ -2118,15 +2118,15 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             {renderedBody}
           </ReactMarkdown>
         </div>
-        {/* 「返回上处」浮动按钮：sticky 钉在滚动视口右下角（h-0 占位不吃文档高度） */}
+        {/* 「返回上处」浮动按钮：sticky 钉在滚动视口底部居中（h-0 占位不吃文档高度），视觉对齐聊天输入框 */}
         {showJumpBack && (
-          <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end pr-3">
+          <div className="pointer-events-none sticky bottom-4 z-20 flex h-0 justify-end pr-4">
             <button
               type="button"
               onClick={handleJumpBack}
-              className="pointer-events-auto flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-neutral-600 text-xs shadow-lg transition-colors hover:bg-accent hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+              className="pointer-events-auto flex -translate-y-full items-center gap-2 rounded-2xl border bg-background px-4 py-2 text-neutral-700 text-sm shadow-around transition-colors hover:bg-accent hover:text-neutral-900 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
             >
-              <Undo2 className="size-3.5" />
+              <Undo2 className="size-4" />
               返回上处
             </button>
           </div>
