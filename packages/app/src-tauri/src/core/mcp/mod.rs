@@ -96,6 +96,34 @@ async fn kill_tree(pid: u32) {
         .await;
 }
 
+/// 温柔关闭会话（2026-08-20）：先关 stdin（对端收到 EOF，给 server 自然退出/持久化收尾的机会），
+/// 短窗口轮询等待；仍存活才走 kill_tree/child.kill 兜底——close 语义仍是"确保进程死"。
+/// 直接 TerminateProcess 曾使子进程退出码恒 1（code=Some(1) 污染审计日志，且 server 无收尾机会）。
+async fn graceful_kill(session: &Arc<Mutex<McpSession>>, grace: Duration) {
+    let mut s = session.lock().await;
+    // 关闭 stdin = 对端 EOF（tokio ChildStdin 的 shutdown 关闭管道写端）
+    let _ = s.stdin.shutdown().await;
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        match s.child.try_wait() {
+            // 已自然退出：无需兜底
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            // 状态查询失败：直接走兜底
+            Err(_) => break,
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    #[cfg(windows)]
+    if s.pid > 0 {
+        kill_tree(s.pid).await;
+    }
+    let _ = s.child.kill().await;
+}
+
 // ---- 审计日志（A5：写盘前脱敏） ----
 
 fn audit_line(app: &AppHandle, server: &str, kind: &str, text: &str) {
@@ -470,21 +498,16 @@ pub async fn mcp_stdio_write(
     Ok(())
 }
 
-/// 关闭会话：杀进程树 + 回收（幂等，会话可能已被退出监视移除）
+/// 关闭会话：先 stdin EOF 让子进程自然退出，超时仍存活才杀进程树（幂等，会话可能已被退出监视移除）
 #[tauri::command]
 pub async fn mcp_stdio_close(state: State<'_, McpStdioState>, session_id: String) -> Result<(), String> {
     if let Some(session) = state.sessions.lock().await.remove(&session_id) {
-        let mut s = session.lock().await;
-        #[cfg(windows)]
-        if s.pid > 0 {
-            kill_tree(s.pid).await;
-        }
-        let _ = s.child.kill().await;
+        graceful_kill(&session, Duration::from_millis(500)).await;
     }
     Ok(())
 }
 
-/// app 退出清理（lib.rs CloseRequested 调用）：全部会话 kill + 回收
+/// app 退出清理（lib.rs CloseRequested 调用）：全部会话温柔关闭 + 回收
 pub async fn close_all_sessions(app: &AppHandle) {
     let Some(state) = app.try_state::<McpStdioState>() else {
         return;
@@ -492,13 +515,12 @@ pub async fn close_all_sessions(app: &AppHandle) {
     let ids: Vec<String> = state.sessions.lock().await.keys().cloned().collect();
     for id in ids {
         if let Some(session) = state.sessions.lock().await.remove(&id) {
-            let mut s = session.lock().await;
-            log::info!("[mcp-stdio] 退出清理：关闭会话 {}（pid={}）", s.label, s.pid);
-            #[cfg(windows)]
-            if s.pid > 0 {
-                kill_tree(s.pid).await;
-            }
-            let _ = s.child.kill().await;
+            let label = {
+                let s = session.lock().await;
+                format!("{}（pid={}）", s.label, s.pid)
+            };
+            log::info!("[mcp-stdio] 退出清理：关闭会话 {}", label);
+            graceful_kill(&session, Duration::from_millis(500)).await;
         }
     }
 }
