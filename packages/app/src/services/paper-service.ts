@@ -12,6 +12,8 @@ import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import { appDataDir, join } from "@tauri-apps/api/path";
+import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 
 /** Rust scan_papers_dir 返回的扫描结果（字段与 Rust 侧 snake_case 保持一致） */
 export interface ScannedPaper {
@@ -142,6 +144,17 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
         author,
         language: metadata.lang ?? "en",
       });
+      // P2.1 产物随入库：references.json（转换器产出过才有）拷进书目录，参考文献卡片依赖它；
+      // 拷贝失败仅告警不阻断入库（与 source.pdf 留存同语义）
+      try {
+        const refsSrc = await join(paper.dir, "references.json");
+        if (await exists(refsSrc)) {
+          const refsDst = await join(await appDataDir(), "books", paper.id, "references.json");
+          await writeFile(refsDst, await readFile(refsSrc));
+        }
+      } catch (error) {
+        console.warn(`拷贝 references.json 失败（不影响入库）: ${paper.dir}`, error);
+      }
       if (folderId) {
         try {
           await setPaperFolders(paper.id, [folderId]);

@@ -55,7 +55,13 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
     [anchorRect],
   );
 
-  // 开卡时：重置上一条状态；无缓存则懒补全（成功回传写缓存，失败降级 raw + Scholar 兜底）
+  // 元数据补全的重试触发器（退避耗尽/失败后可手动重试）
+  const [enrichRetryNonce, setEnrichRetryNonce] = useState(0);
+
+  // 开卡时：重置上一条状态；无缓存则懒补全（成功回传写缓存，失败降级 raw + Scholar 兜底）。
+  // 所有网络路径都有超时/退避上限，enrichReference 恒 settle——失败落 enrichFailed 终止态
+  // （静态文案 + 重试），不会无限转圈
+  // biome-ignore lint/correctness/useExhaustiveDependencies: enrichRetryNonce 是刻意的重试触发依赖
   useEffect(() => {
     if (!reference) return;
     setEnrichment(reference.enrichment ?? null);
@@ -79,7 +85,7 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
     return () => {
       cancelled = true;
     };
-  }, [reference, onEnriched]);
+  }, [reference, onEnriched, enrichRetryNonce]);
 
   // 在库检查：DOI（含补全出的 DOI）精确 → 标题归一化模糊；开卡即查，补全到达后用更全字段复查
   useEffect(() => {
@@ -177,11 +183,11 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
               </button>
             )}
 
-            {/* 摘要 / 解析状态 */}
+            {/* 摘要 / 解析状态（所有失败/超时路径都有终止态：退避耗尽后落静态文案 + 重试，不无限转圈） */}
             {enriching ? (
               <p className="flex items-center gap-1.5 text-neutral-500 text-xs dark:text-neutral-400">
                 <Loader className="size-3 animate-spin" />
-                正在解析元数据（Crossref / OpenAlex）…
+                正在补全元数据（限流时自动退避重试）…
               </p>
             ) : enrichment?.abstract ? (
               <p className="line-clamp-6 text-justify text-neutral-600 text-xs leading-relaxed dark:text-neutral-400">
@@ -189,7 +195,15 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
               </p>
             ) : enrichFailed ? (
               <p className="text-neutral-500 text-xs dark:text-neutral-400">
-                未能在线解析该条目，可试{" "}
+                未获取到元数据（可能网络限流），可稍后{" "}
+                <button
+                  type="button"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                  onClick={() => setEnrichRetryNonce((v) => v + 1)}
+                >
+                  重试
+                </button>{" "}
+                或经{" "}
                 <button
                   type="button"
                   className="text-blue-600 hover:underline dark:text-blue-400"
