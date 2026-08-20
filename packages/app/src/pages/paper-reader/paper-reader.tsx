@@ -429,6 +429,68 @@ function buildVirtualLiveSrc(sourceText: string): Element {
   return div;
 }
 
+/**
+ * 孤儿脚注定义兜底（转换器保守降级形态：只有 [^N]: 定义、正文无 [^N] 引用点）。
+ * GFM 脚注（micromark-extension-gfm-footnote）只渲染被引用的定义，未引用定义整段静默消失——
+ * 这里把孤儿定义抽出来转成「加粗 [^N] 标记 + 内容」的普通段落追加到文档末尾
+ * （紧随收拢的脚注区渲染；普通段落走完整 markdown 管线，链接/公式不受影响）。
+ * 被引用的定义完全不动（原位留给 GFM 收拢）。
+ */
+function hoistOrphanFootnoteDefs(body: string): string {
+  if (!body.includes("[^")) return body;
+  const lines = body.split("\n");
+  const defStartRe = /^\[\^([^\]\n]+)\]:[ \t]?(.*)$/;
+  // 第一遍：识别定义块（定义行 + 缩进续行），记录行号与内容
+  const defs: { id: string; text: string[] }[] = [];
+  const defLineIdx = new Set<number>();
+  let cur: { id: string; text: string[] } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(defStartRe);
+    if (m) {
+      cur = { id: m[1], text: [m[2]] };
+      defs.push(cur);
+      defLineIdx.add(i);
+      continue;
+    }
+    if (cur && /^[ \t]{2,}\S/.test(lines[i])) {
+      cur.text.push(lines[i].trim());
+      defLineIdx.add(i);
+      continue;
+    }
+    cur = null;
+  }
+  if (defs.length === 0) return body;
+  // 引用点集合：扫全部非定义行（定义行首的 [^N]: 不在其中，天然排除）
+  const rest = lines.filter((_, i) => !defLineIdx.has(i)).join("\n");
+  const refIds = new Set<string>();
+  for (const m of rest.matchAll(/\[\^([^\]\n]+)\](?!:)/g)) refIds.add(m[1]);
+  const orphanIds = new Set(defs.map((d) => d.id).filter((id) => !refIds.has(id)));
+  if (orphanIds.size === 0) return body;
+  // 第二遍：剔除孤儿定义块（被引用定义原位保留，交由 GFM 收拢）
+  const kept: string[] = [];
+  let skipping = false;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(defStartRe);
+    if (m) {
+      skipping = orphanIds.has(m[1]);
+      if (!skipping) kept.push(lines[i]);
+      continue;
+    }
+    if (defLineIdx.has(i)) {
+      // 缩进续行：跟随其定义块的去留
+      if (!skipping) kept.push(lines[i]);
+      continue;
+    }
+    skipping = false;
+    kept.push(lines[i]);
+  }
+  const orphanBlock = defs
+    .filter((d) => orphanIds.has(d.id))
+    .map((d) => `**[^${d.id}]** ${d.text.join(" ").trim()}`)
+    .join("\n\n");
+  return `${kept.join("\n").trimEnd()}\n\n${orphanBlock}\n`;
+}
+
 /** 自定义 a：http(s) 外链交给默认浏览器（Tauri opener）；页内 # 锚点交给 onNavigateFragment（id 定位 + quote 兜底，P1 链接重建） */
 function createPaperLinkComponent(onNavigateFragment: (id: string, linkText: string) => boolean): Components["a"] {
   return function PaperLink({ href, children, ...props }) {
@@ -830,7 +892,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
 ) {
   const { metadata, body } = useMemo(() => parsePaperMarkdown(markdown), [markdown]);
   // 原生 HTML 表格内的 $...$ 公式预烘焙为 KaTeX（rehype-katex 不扫 raw HTML 文本）
-  const renderedBody = useMemo(() => renderMathInRawTables(body), [body]);
+  // 原生 HTML 表格内的 $...$ 公式预烘焙为 KaTeX（rehype-katex 不扫 raw HTML 文本）；
+  // 先做孤儿脚注定义兜底（未被引用的 [^N]: 定义 GFM 会静默丢弃，抽成普通段落挪到文末）
+  const renderedBody = useMemo(() => renderMathInRawTables(hoistOrphanFootnoteDefs(body)), [body]);
   const hasMetadata = Object.keys(metadata).length > 0;
 
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -1118,7 +1182,10 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   useEffect(() => {
     const container = contentRef.current;
     if (!container) return;
-    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+    // 排除脚注区的隐藏 h2（GFM 脚注生成的 sr-only "Footnotes" 标签，不应进 TOC）
+    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
+      (el) => !el.closest("[data-footnotes]"),
+    );
     const items = headings.map((el) => ({
       id: el.id,
       text: el.textContent ?? "",
@@ -1134,7 +1201,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     const scrollRoot = scrollRef.current;
     if (!container || !scrollRoot || toc.length === 0) return;
 
-    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
+      (el) => !el.closest("[data-footnotes]"),
+    );
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {

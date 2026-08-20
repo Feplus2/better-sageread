@@ -846,3 +846,27 @@ foliate-view {
 .dark .paper-content li:has(a[id^="ref-"]):hover {
   background-color: oklch(0.24 0 0);
 }
+
+/* ---------- Pandoc/GFM 脚注区（[^N] 引用点 + [^N]: 定义，remark-gfm 产物） ----------
+ * 定义被 micromark 收拢到正文末尾的 <section data-footnotes>：收敛为分隔线 + 小号弱化文本；
+ * 引用点/回跳链接的点击与定位闪烁走 paper-reader.tsx 的 # 链接路径（P1 机制）。 */
+.paper-content section[data-footnotes] {
+  margin-top: 2.5rem;
+  border-top: 1px solid oklch(0.9 0 0);
+  padding-top: 0.75rem;
+  font-size: 0.85em;
+  color: oklch(0.45 0 0);
+}
+
+.dark .paper-content section[data-footnotes] {
+  border-top-color: oklch(0.35 0 0);
+  color: oklch(0.65 0 0);
+}
+
+.paper-content section[data-footnotes] li {
+  margin-top: 0.25rem;
+}
+
+.paper-content section[data-footnotes] li::marker {
+  font-size: 0.9em;
+}
