@@ -40,6 +40,7 @@ import {
   translatePaper,
 } from "@/services/paper-translation-service";
 import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-store";
+import { isPaperQueuedOrRunning, useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
@@ -286,6 +287,20 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     translateAbortRef.current?.abort();
   }, []);
 
+  // 打开时若该篇正在解析队列（含重解析）→ 提示当前为旧版本（每次打开至多提示一次）
+  useEffect(() => {
+    if (isPaperQueuedOrRunning(paperId)) {
+      toast.info("该论文正在重新解析，当前显示为旧版本");
+    }
+  }, [paperId]);
+
+  // 重载触发器（重解析完成横幅的「重新加载」）：nonce 变化重跑加载
+  const [reloadNonce, setReloadNonce] = useState(0);
+  // 重解析完成标记（仅当本 tab 开着时由队列写入）：出顶部横幅而非自动刷新（避免打断阅读位置）
+  const reparsedAt = useConvertProgressStore((s) => s.reparsedPapers[paperId] ?? null);
+  const ackPaperReparsed = useConvertProgressStore((s) => s.ackPaperReparsed);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadNonce 是刻意的重载触发依赖
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -322,7 +337,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     return () => {
       cancelled = true;
     };
-  }, [paperId]);
+  }, [paperId, reloadNonce]);
 
   // New 判定：打开即已阅——unread 首次打开时标记 reading（startedAt 只填一次；lastReadAt 每次刷新）
   useEffect(() => {
@@ -623,6 +638,23 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           onRebuildAlign={handleRebuildAlign}
           onOpenExport={() => setExportOpen(true)}
         />
+
+        {/* 重解析完成横幅（该篇标签页开着时队列写了完成标记）：不自动刷新，由用户点「重新加载」 */}
+        {reparsedAt !== null && (
+          <div className="flex items-center justify-between gap-3 border-amber-200 border-b bg-amber-50 px-4 py-1.5 text-amber-800 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            <span>本文已重新解析，当前显示为旧版本</span>
+            <button
+              type="button"
+              className="rounded-full border border-amber-300 px-2.5 py-0.5 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/50"
+              onClick={() => {
+                ackPaperReparsed(paperId);
+                setReloadNonce((v) => v + 1);
+              }}
+            >
+              重新加载
+            </button>
+          </div>
+        )}
 
         {loadError ? (
           <div className="flex flex-1 items-center justify-center">

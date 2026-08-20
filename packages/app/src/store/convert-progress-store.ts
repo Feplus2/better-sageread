@@ -29,6 +29,7 @@ import {
   startPaperPdfImport,
 } from "@/services/paper-service";
 import { useConverterStore } from "@/store/converter-store";
+import { useLayoutStore } from "@/store/layout-store";
 import { useLibraryStore } from "@/store/library-store";
 import { findDegenerateLoop } from "@/utils/degenerate";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -137,6 +138,11 @@ function buildBookStages(withTranslate: boolean, engine: "mineru" | "paddleocr")
 interface ConvertProgressState {
   paperImport: PaperImportState | null;
   bookConvert: BookConvertState;
+  /** 重解析完成标记（paperId → 完成时间戳）：仅当该篇有打开的标签页时写入；
+   *  阅读器据此刻意出「已重新解析」横幅（不自动刷新，避免打断阅读位置） */
+  reparsedPapers: Record<string, number>;
+  /** 阅读器「重新加载」后回执清除标记 */
+  ackPaperReparsed: (paperId: string) => void;
   /** 图书转换大窗口（图书馆页弹层）是否打开 */
   bookConvertDialogOpen: boolean;
   /** 图书转换是否最小化（右下角小卡呈现；点击小卡还原大窗口） */
@@ -157,6 +163,16 @@ interface ConvertProgressState {
 export const useConvertProgressStore = create<ConvertProgressState>()((set, get) => ({
   paperImport: null,
   bookConvert: BOOK_CONVERT_INITIAL,
+  reparsedPapers: {},
+
+  ackPaperReparsed: (paperId) => {
+    set((s) => {
+      if (!(paperId in s.reparsedPapers)) return s;
+      const next = { ...s.reparsedPapers };
+      delete next[paperId];
+      return { reparsedPapers: next };
+    });
+  },
   bookConvertDialogOpen: false,
   bookConvertMinimized: false,
 
@@ -449,8 +465,21 @@ export function isPaperQueuedOrRunning(paperId: string): boolean {
   return paperQueue.some((item) => item.kind === "reparse" && item.paperId === paperId);
 }
 
+// ---- 向量化 per-paper 跟踪（任务冲突模型：解析×向量化同篇互斥/同篇向量化幂等去重） ----
+// PapersPage 在向量化启动/结束时打点；startPaperReparse 据此拒入队
+const vectorizingPapers = new Set<string>();
+
+export function markPaperVectorizing(paperId: string, on: boolean): void {
+  if (on) vectorizingPapers.add(paperId);
+  else vectorizingPapers.delete(paperId);
+}
+
+export function isPaperVectorizing(paperId: string): boolean {
+  return vectorizingPapers.has(paperId);
+}
+
 /** 在库论文重解析入队（PapersPage「重新解析」统一入口）：保留 id/归属/对话/标注的产物整体替换。
- *  重复入队返回 false（调用方给"已在队列"提示）。 */
+ *  重复入队/正在向量化 → 拒入队并提示；标签页打开中 → 警告引导（不强制）。 */
 export function startPaperReparse(input: { id: string; title: string }): boolean {
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
@@ -461,6 +490,17 @@ export function startPaperReparse(input: { id: string; title: string }): boolean
   if (isPaperQueuedOrRunning(input.id)) {
     toast.info(`《${input.title}》已在解析队列中`);
     return false;
+  }
+  // 解析 × 向量化（同篇）互斥：向量化读的是旧产物，解析一替换就白算
+  if (isPaperVectorizing(input.id)) {
+    toast.info(`《${input.title}》正在向量化，完成后再重新解析`);
+    return false;
+  }
+  const tabOpen = useLayoutStore.getState().tabs.some((t) => t.id === `paper-${input.id}`);
+  if (tabOpen) {
+    toast.warning(`《${input.title}》标签页打开中：重新解析将替换产物，建议关闭标签页，完成后重新打开`, {
+      duration: 6000,
+    });
   }
   const wasDraining = paperDraining;
   paperQueue.push({ kind: "reparse", paperId: input.id, title: input.title });
@@ -554,6 +594,15 @@ async function drainPaperQueue() {
         imported += 1;
         // 新入库论文加入在库检查索引（引用卡片「打开」即时可见）
         if (item.kind === "acquire") invalidateLibraryPaperIndex();
+        // 重解析完成且该篇标签页开着 → 写标记（阅读器出「已重新解析」横幅，不自动刷新）
+        if (item.kind === "reparse") {
+          const tabOpen = useLayoutStore.getState().tabs.some((t) => t.id === `paper-${item.paperId}`);
+          if (tabOpen) {
+            useConvertProgressStore.setState((s) => ({
+              reparsedPapers: { ...s.reparsedPapers, [item.paperId]: Date.now() },
+            }));
+          }
+        }
       } else if (outcome === "skipped") skipped += 1;
       else if (outcome === "failed") {
         failed += 1;

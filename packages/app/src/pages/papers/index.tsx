@@ -52,6 +52,8 @@ import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import {
   isPaperQueuedOrRunning,
+  isPaperVectorizing,
+  markPaperVectorizing,
   setPaperImportRefresh,
   startPaperImportBatch,
   startPaperReparse,
@@ -977,7 +979,17 @@ export default function PapersPage() {
   };
 
   const handleVectorize = async (paper: BookWithStatus) => {
+    // 任务冲突模型：解析×向量化同篇互斥；同篇向量化幂等去重
+    if (isPaperQueuedOrRunning(paper.id)) {
+      toast.info(`《${paper.title}》正在解析队列中，完成后再向量化`);
+      return;
+    }
+    if (isPaperVectorizing(paper.id)) {
+      toast.info(`《${paper.title}》正在向量化中`);
+      return;
+    }
     setVectorizing((prev) => ({ ...prev, [paper.id]: 0 }));
+    markPaperVectorizing(paper.id, true);
     try {
       const res = await vectorizePaper({ id: paper.id, title: paper.title, author: paper.author });
       toast.success(`《${paper.title}》向量化完成，分块数：${res.report?.total_chunks ?? "未知"}`);
@@ -985,6 +997,7 @@ export default function PapersPage() {
       console.error("向量化论文失败:", error);
       toast.error(`向量化失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      markPaperVectorizing(paper.id, false);
       setVectorizing((prev) => {
         const next = { ...prev };
         delete next[paper.id];
@@ -1116,14 +1129,21 @@ export default function PapersPage() {
 
   /** 批量向量化：跳过已成功的，逐篇顺序执行；进度复用 vectorizing map（行内圆环同步展示） */
   const handleBatchVectorize = async () => {
-    if (batchLocked || selectedPapers.length === 0) return;
+    // 通道间默认互不阻塞：向量化不再因解析队列运行而禁用（batchLocked 收窄为批量任务自身互斥），
+    // 仅过滤撞车篇（该篇在解析队列中/正在向量化）
+    if (batchRunning != null || importing || zoteroRunning || selectedPapers.length === 0) return;
     const { useLlamaStore } = await import("@/store/llama-store");
     if (!useLlamaStore.getState().hasVectorCapability()) {
       toast.error("没有可用的嵌入模型，请先在设置中下载本地嵌入模型或配置外部嵌入服务");
       return;
     }
-    const queue = selectedPapers.filter((p) => p.status?.metadata?.vectorization?.status !== "success");
-    const skippedCount = selectedPapers.length - queue.length;
+    const runnable = selectedPapers.filter((p) => !isPaperQueuedOrRunning(p.id) && !isPaperVectorizing(p.id));
+    const collided = selectedPapers.length - runnable.length;
+    if (collided > 0) {
+      toast.info(`已跳过 ${collided} 篇解析中/向量化中的论文，完成后再处理`);
+    }
+    const queue = runnable.filter((p) => p.status?.metadata?.vectorization?.status !== "success");
+    const skippedCount = runnable.length - queue.length;
     if (queue.length === 0) {
       toast.info("所选论文均已完成向量化");
       return;
@@ -1157,6 +1177,7 @@ export default function PapersPage() {
             : prev,
         );
         setVectorizing((prev) => ({ ...prev, [paper.id]: 0 }));
+        markPaperVectorizing(paper.id, true);
         try {
           await vectorizePaper({ id: paper.id, title: paper.title, author: paper.author });
           done += 1;
@@ -1164,6 +1185,7 @@ export default function PapersPage() {
           failedNames.push(paper.title);
           console.error(`向量化论文失败: ${paper.id}`, error);
         } finally {
+          markPaperVectorizing(paper.id, false);
           setVectorizing((prev) => {
             const next = { ...prev };
             delete next[paper.id];
