@@ -32,6 +32,7 @@ import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useLibraryStore } from "@/store/library-store";
 import { findDegenerateLoop } from "@/utils/degenerate";
+import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
@@ -344,7 +345,13 @@ type PaperWorkItem =
       url?: string;
       arxivId?: string;
     }
-  | { kind: "reparse"; paperId: string; title: string };
+  | {
+      kind: "reparse";
+      paperId: string;
+      title: string;
+      /** AI 工具 filePath 参数显式指定的源 PDF（入队前已预检存在性，执行侧仍复核；缺省走 zotero 回链 → 书库 source.pdf） */
+      sourcePdfPath?: string;
+    };
 
 let paperQueue: PaperWorkItem[] = [];
 /** 正在执行的队列项（重复入队判定用；item 结算后清空） */
@@ -478,23 +485,32 @@ export function isPaperVectorizing(paperId: string): boolean {
   return vectorizingPapers.has(paperId);
 }
 
-/** 在库论文重解析入队（PapersPage「重新解析」统一入口）：保留 id/归属/对话/标注的产物整体替换。
- *  重复入队/正在向量化 → 拒入队并提示；标签页打开中 → 警告引导（不强制）。 */
-export function startPaperReparse(input: { id: string; title: string }): boolean {
+/** startPaperReparse 的入队结果：message 与 toast 同款文案（AI 工具原样透传为成功/失败消息） */
+export interface PaperReparseEnqueue {
+  ok: boolean;
+  message: string;
+}
+
+/** 在库论文重解析入队（PapersPage「重新解析」与 AI 工具 processPaper 的统一入口）：保留 id/归属/对话/标注的产物整体替换。
+ *  重复入队/正在向量化/引擎未就绪 → 拒入队并提示；标签页打开中 → 警告引导（不强制）。
+ *  filePath：AI 工具显式指定的源 PDF（工具侧已预检存在性）。 */
+export function startPaperReparse(input: { id: string; title: string; filePath?: string }): PaperReparseEnqueue {
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
   if (tokenError) {
     toast.error(tokenError);
-    return false;
+    return { ok: false, message: tokenError };
   }
   if (isPaperQueuedOrRunning(input.id)) {
-    toast.info(`《${input.title}》已在解析队列中`);
-    return false;
+    const message = `《${input.title}》已在解析队列中`;
+    toast.info(message);
+    return { ok: false, message };
   }
   // 解析 × 向量化（同篇）互斥：向量化读的是旧产物，解析一替换就白算
   if (isPaperVectorizing(input.id)) {
-    toast.info(`《${input.title}》正在向量化，完成后再重新解析`);
-    return false;
+    const message = `《${input.title}》正在向量化，完成后再重新解析`;
+    toast.info(message);
+    return { ok: false, message };
   }
   const tabOpen = useLayoutStore.getState().tabs.some((t) => t.id === `paper-${input.id}`);
   if (tabOpen) {
@@ -503,17 +519,20 @@ export function startPaperReparse(input: { id: string; title: string }): boolean
     });
   }
   const wasDraining = paperDraining;
-  paperQueue.push({ kind: "reparse", paperId: input.id, title: input.title });
+  paperQueue.push({ kind: "reparse", paperId: input.id, title: input.title, sourcePdfPath: input.filePath });
   setPaperImportState((prev) =>
     prev && prev.status === "running"
       ? { ...prev, total: prev.index + paperQueue.length, queuedCount: paperQueue.length }
       : prev,
   );
   if (wasDraining) {
-    toast.info(`已加入解析队列（待处理 ${paperQueue.length} 篇）`);
+    const message = `已加入解析队列（待处理 ${paperQueue.length} 篇）`;
+    toast.info(message);
+    void drainPaperQueue();
+    return { ok: true, message };
   }
   void drainPaperQueue();
-  return true;
+  return { ok: true, message: `《${input.title}》已开始重新解析` };
 }
 
 /** 队列泵：无泵在跑时启动一个，逐 item 串行结算；运行中新提交由循环自然拾取 */
@@ -676,9 +695,9 @@ async function drainPaperQueue() {
   }
 }
 
-/** reparse 项执行：解析源 PDF（zotero 回链 → 书库 source.pdf）→ runOnePdf → 产物整体替换（保留 id/归属/对话/标注） */
+/** reparse 项执行：解析源 PDF（显式 sourcePdfPath → zotero 回链 → 书库 source.pdf）→ runOnePdf → 产物整体替换（保留 id/归属/对话/标注） */
 async function runReparseItem(
-  item: { kind: "reparse"; paperId: string; title: string },
+  item: { kind: "reparse"; paperId: string; title: string; sourcePdfPath?: string },
   index: number,
   total: number,
 ): Promise<PdfOutcome> {
@@ -689,7 +708,12 @@ async function runReparseItem(
   } catch {
     // 无 metadata.json：走书库 source.pdf 兜底
   }
-  const pdfPath = await resolvePaperSourcePdf(item.paperId, meta);
+  // 显式路径优先（AI 工具 filePath；存在性复核用 Rust path_exists——plugin-fs 看不到库外路径）
+  const explicit = item.sourcePdfPath?.trim();
+  const pdfPath =
+    explicit && (await invoke<boolean>("path_exists", { path: explicit }).catch(() => false))
+      ? explicit
+      : await resolvePaperSourcePdf(item.paperId, meta);
   if (!pdfPath) {
     const message = `《${item.title}》找不到源 PDF，无法重新解析`;
     setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));

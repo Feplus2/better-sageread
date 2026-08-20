@@ -7,12 +7,18 @@ import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
  * - alignPaperTranslation（paper-alignment-service）：句级 + 词级对齐一条龙（需嵌入模型，
  *   无嵌入能力时跳过不抛错）；translate 动作完成后自动执行对齐（与 UI 行为一致）
  * - inspectPaperAlignment：对齐覆盖统计（status 动作用）
- * - reparsePapers（paper-reparse-service，I1）：源 PDF 重走解析器并整体替换产物，
- *   保留论文 id/文件夹归属/对话/标注（与文献库页批量重解析同款）
+ * - startPaperReparse（convert-progress-store，I1/冲突模型收尾）：重解析**入统一解析队列**
+ *   异步执行（入队即返），去重/向量化互斥/标签页提示与文献库页完全同口径；
+ *   产物整体替换，保留论文 id/文件夹归属/对话/标注
+ *
+ * 任务冲突模型（与 PapersPage 同口径）：translate/align 在该篇排队或解析中时拒绝执行
+ * （解析会整体替换产物，翻译/对齐基于旧产物即白算）。
  */
 import { alignPaperTranslation, inspectPaperAlignment } from "@/services/paper-alignment-service";
-import { reparsePapers } from "@/services/paper-reparse-service";
+import { resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import { loadPaperTranslation, translatePaper } from "@/services/paper-translation-service";
+import { isPaperQueuedOrRunning, startPaperReparse } from "@/store/convert-progress-store";
+import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
@@ -44,12 +50,14 @@ export const processPaperTool = tool({
   翻译完成后**自动顺带执行句级+词级对齐**（与阅读器界面行为一致）
 • action=align：仅执行/重建对齐（force=false 幂等补齐，force=true 全量重算）
 • action=reparse：用源 PDF 重新解析并替换正文（解析器升级/解析质量差时）；
+  **入统一解析队列异步执行，调用立即返回**（进度见应用右下角进度卡，完成后自动生成产物）；
   默认自动定位源 PDF，找不到时可用 filePath 显式指定
 
 ⚠️ **注意**：
-• 翻译耗时较长（取决于论文长度与辅助模型速度），工具会阻塞等待直到完成
+• 翻译耗时较长（取决于论文长度与辅助模型速度），translate/align 会阻塞等待直到完成；reparse 不入队阻塞、立即返回
 • 对齐需要已配置 Embedding 模型；未配置时对齐会跳过（翻译本体不受影响）
-• reparse 后：已有译文的块转陈旧（下次 translate 自动更新），句词对齐需重建（align force=true），文内高亮可能漂移
+• 同篇互斥：该论文正在解析队列中（排队或解析中）时，translate/align/reparse 会被拒绝并返回提示，需等解析完成后再试
+• reparse 完成后：已有译文的块转陈旧（下次 translate 自动更新），句词对齐需重建（align force=true），文内高亮可能漂移
 • 先用 getBooks(kind=paper) 确认目标论文的 ID
 
 📊 **返回内容**：
@@ -121,6 +129,17 @@ export const processPaperTool = tool({
       // ==================== 翻译（自动带对齐） ====================
       if (action === "translate") {
         const markdown = await readPaperMarkdown(paperId);
+        // 任务冲突模型：该篇排队/解析中时翻译读的是旧产物，解析一替换就白算——拒执行并引导
+        if (isPaperQueuedOrRunning(paperId)) {
+          const { metadata } = parsePaperMarkdown(markdown);
+          return {
+            results: {
+              success: false,
+              message: `《${metadata.title || paperId}》正在解析队列中，完成后再翻译`,
+            },
+            meta,
+          };
+        }
         const result = await translatePaper({
           paperId,
           markdown,
@@ -174,34 +193,43 @@ export const processPaperTool = tool({
         };
       }
 
-      // ==================== 重新解析（I1：复用文献库页同款 reparse 服务） ====================
+      // ==================== 重新解析（入统一解析队列，异步执行） ====================
       if (action === "reparse") {
         const markdown = await readPaperMarkdown(paperId);
         const { metadata } = parsePaperMarkdown(markdown);
         const title = metadata.title || paperId;
-        const report = await reparsePapers(
-          [{ id: paperId, title, sourcePdfPath: filePath }],
-          { [paperId]: metadata },
-          { isCancelled: () => options?.abortSignal?.aborted === true },
-        );
-        if (report.cancelled) {
-          return { results: { success: false, message: "重新解析被中止" }, meta };
+        // 源 PDF 预检（保持引导性：显式路径不存在 / 自动定位失败都在入队前早报错）；
+        // 存在性走 Rust path_exists——plugin-fs 的 exists 有作用域限制，看不到 Zotero storage 等库外路径
+        const explicit = filePath?.trim();
+        if (explicit && !(await invoke<boolean>("path_exists", { path: explicit }).catch(() => false))) {
+          return {
+            results: { success: false, message: `指定的源 PDF 不存在：${explicit}` },
+            meta,
+          };
         }
-        if (report.failed.length > 0) {
+        if (!explicit && !(await resolvePaperSourcePdf(paperId, metadata))) {
           return {
             results: {
               success: false,
-              message: `重新解析失败：${report.failed[0].error}${report.failed[0].error === "找不到源 PDF" ? "（可用 filePath 参数显式指定源 PDF 路径）" : ""}`,
+              message: "找不到源 PDF，无法重新解析（可用 filePath 参数显式指定源 PDF 路径）",
             },
             meta,
           };
         }
-        const suspectMsg =
-          report.suspect.length > 0 ? "（⚠️ 检测到疑似退化重复内容，建议在设置→PDF转换中更换解析引擎后重试）" : "";
+        // 入队即返：去重/向量化互斥/标签页警告与文献库页「重新解析」完全同口径；
+        // 拒入队时 message 为 startPaperReparse 的 toast 同款文案
+        const enq = startPaperReparse({ id: paperId, title, filePath: explicit || undefined });
+        if (!enq.ok) {
+          return {
+            results: { success: false, message: `${enq.message}（本次未入队，可在当前任务完成后再试）` },
+            meta,
+          };
+        }
         return {
           results: {
             success: true,
-            message: `重新解析完成${suspectMsg}。注意：正文已替换——已有译文的块转陈旧（下次 action=translate 会自动续翻更新），句词对齐需重建（action=align force=true），文内高亮可能漂移。`,
+            queued: true,
+            message: `${enq.message}——已入统一解析队列异步执行（进度见应用右下角进度卡）。完成后注意：已有译文的块转陈旧（下次 action=translate 自动续翻更新），句词对齐需重建（action=align force=true），文内高亮可能漂移；若该论文标签页开着，顶部会出现「重新加载」横幅`,
           },
           meta,
         };
@@ -209,6 +237,17 @@ export const processPaperTool = tool({
 
       // ==================== 仅对齐 ====================
       const markdown = await readPaperMarkdown(paperId);
+      // 任务冲突模型：同 translate——解析会整体替换产物，对齐基于旧产物即白算
+      if (isPaperQueuedOrRunning(paperId)) {
+        const { metadata } = parsePaperMarkdown(markdown);
+        return {
+          results: {
+            success: false,
+            message: `《${metadata.title || paperId}》正在解析队列中，完成后再对齐`,
+          },
+          meta,
+        };
+      }
       const align = await alignPaperTranslation({
         paperId,
         markdown,

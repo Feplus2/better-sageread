@@ -13,6 +13,7 @@ import {
   updateBookVectorizationMeta,
 } from "@/services/book-service";
 import { vectorizePaper } from "@/services/paper-service";
+import { isPaperQueuedOrRunning, isPaperVectorizing, markPaperVectorizing } from "@/store/convert-progress-store";
 import type { BookWithStatus } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { tool } from "ai";
@@ -77,12 +78,21 @@ async function vectorizeSingle(
   }
 }
 
-/** 对单篇论文执行向量化（vectorizePaper 内部已管理 meta 状态与失败回写） */
+/** 对单篇论文执行向量化（vectorizePaper 内部已管理 meta 状态与失败回写）。
+ *  任务冲突模型守卫与打点收在本函数——AI 工具与设置页「全量重新向量化」（vectorizeItem）共用此入口：
+ *  解析×向量化同篇互斥（向量化读旧产物，解析一替换就白算）；同篇向量化幂等去重。措辞与 PapersPage 同口径 */
 async function vectorizePaperSingle(
   paperId: string,
   paperTitle: string,
   paperAuthor: string,
 ): Promise<{ success: boolean; message: string; chunkCount?: number }> {
+  if (isPaperQueuedOrRunning(paperId)) {
+    return { success: false, message: `《${paperTitle}》正在解析队列中，完成后再向量化` };
+  }
+  if (isPaperVectorizing(paperId)) {
+    return { success: false, message: `《${paperTitle}》正在向量化中，无需重复发起` };
+  }
+  markPaperVectorizing(paperId, true);
   try {
     const res = await vectorizePaper({ id: paperId, title: paperTitle, author: paperAuthor });
     return {
@@ -95,6 +105,8 @@ async function vectorizePaperSingle(
       success: false,
       message: `《${paperTitle}》向量化失败：${error instanceof Error ? error.message : "未知错误"}`,
     };
+  } finally {
+    markPaperVectorizing(paperId, false);
   }
 }
 

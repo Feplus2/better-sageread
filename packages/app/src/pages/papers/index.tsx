@@ -1343,7 +1343,7 @@ export default function PapersPage() {
     if (!confirmed) return;
     let queued = 0;
     for (const paper of queue) {
-      if (startPaperReparse({ id: paper.id, title: paper.title })) queued += 1;
+      if (startPaperReparse({ id: paper.id, title: paper.title }).ok) queued += 1;
     }
     if (queued > 0) {
       toast.success(`已加入解析队列：${queued} 篇`);
