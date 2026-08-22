@@ -276,4 +276,4 @@
 
 **P0.5 的四件套替换实况（与原验收口径的偏差，如实记录）**：①工具审批——v7 原生 approval 未接入，wrapToolsWithGuard 保留（且 P4 架构下守卫层在惰性层之下，语义完整）；②MCP——JS 侧客户端迁 @ai-sdk/mcp（createMCPClient），Rust stdio 桥与生命周期管理保留；③reasoning——providerOptions 通道保留（v7 兼容），原生顶层 reasoning 迁移未做（6 家自定义端点补丁战功赫赫，迁移收益低回归风险高）；④压缩插槽——P2 活塞落在 transport（selectMessagesWithinBudget 之后）而非 prepareStep 钩子（效果等价，少一层间接）。四件中一件删除（MCP 客户端旧实现）、三件保留但全部在 v7 上验证通过——原验收"至少三件删除"调整为"全部在 v7 上稳定运行"，理由：守卫与 reasoning 补丁的替换收益不足以抵消 UX 回归风险，留待后续按需逐件换。
 
-**遗留与建议**：①存量 tsc 欠账 112 行（升级前就有、从未被真检查过；paper-service 14/book 10/transform 7 等 20 文件）——建议专项"清欠批"：机械错误直接修、行为性错误逐个核；清完后把 packages/app 的 build 脚本 `tsc` 改 `tsc -b` 让关卡真正生效；②目录牌模式对模型行为的影响建议日常使用一周观察（工具调用成功率、describeTool 使用频率）；③DSH 观察名单至 2026-11 复评。
+**遗留与建议**：①~~存量 tsc 欠账~~ ✅ 已清（2026-08-22 e2d929c：80 条错误归零，净删 2058 行；真 bug 五处/死代码两批/类型欠账一批；build 脚本已改 `tsc -b` 关卡生效）；②目录牌模式对模型行为的影响建议日常使用一周观察（工具调用成功率、describeTool 使用频率）；③DSH 观察名单至 2026-11 复评。
