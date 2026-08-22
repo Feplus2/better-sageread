@@ -31,6 +31,7 @@ import {
 } from "./utils";
 import { repairImageDataUrl, sniffImageMediaType } from "./utils/media-sniff";
 import { wrapToolsWithGuard } from "./utils/tool-guard";
+import { compactAgedRagResults } from "./utils/tool-result-slimming";
 
 /**
  * D3 动态状态段：每轮可能变化的位置信息（阅读章节/论文小节）统一放 system prompt 最尾部，
@@ -137,7 +138,10 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     const processedMessages = processQuoteMessages(await resolveImageAttachmentsForRequest(messagesForProcess));
     // token 双水位活塞：≤点火线(256k)零压缩；超过则泄压到 128k 以内，最近 10 条永不压缩
-    const { kept: selectedMessages, dropped } = selectMessagesWithinBudget(processedMessages);
+    const { kept: budgetedMessages, dropped } = selectMessagesWithinBudget(processedMessages);
+    // D5 L2 存根活塞：十进位轮次块批处理降级老轮次 RAG 结果（引用位冻结 + clear_at_least）；
+    // 置于水位活塞之后——已被泄压丢弃的消息无需再处理
+    const selectedMessages = compactAgedRagResults(budgetedMessages);
 
     // 超预算裁掉的旧消息：滚动压缩为摘要（按对话持久化到 thread.metadata），注入 system prompt
     let summaryText: string | null = null;

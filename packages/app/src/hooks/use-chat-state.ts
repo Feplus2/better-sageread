@@ -1,6 +1,7 @@
 import { useChat } from "@/ai/hooks/use-chat";
 import { modelSupportsVision } from "@/ai/providers/vision-map";
 import { repairImageDataUrl, sniffImageMediaType } from "@/ai/utils/media-sniff";
+import { truncateToolResultsForStorage } from "@/ai/utils/tool-result-slimming";
 import { useForceUpdate } from "@/hooks/use-force-update";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
@@ -152,7 +153,8 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       let current: { threadId: string; msgs: UIMessage[] } | null = { threadId, msgs };
       while (current) {
         try {
-          await editThread(current.threadId, { messages: current.msgs });
+          // D6 L1 出生截断：落库内容换预览（内存态保持全量供 UI/当轮使用；当轮在飞链不经过落库）
+          await editThread(current.threadId, { messages: truncateToolResultsForStorage(current.msgs) });
         } catch (error) {
           console.warn("对话增量落库失败:", error);
         }
