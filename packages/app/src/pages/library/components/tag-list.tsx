@@ -1,9 +1,4 @@
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
 import clsx from "clsx";
 import { Plus } from "lucide-react";

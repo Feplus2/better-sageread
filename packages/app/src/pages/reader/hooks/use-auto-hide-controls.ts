@@ -5,10 +5,7 @@ interface UseAutoHideControlsOptions {
   keepVisible?: boolean;
 }
 
-export const useAutoHideControls = ({
-  delay = 5000,
-  keepVisible = false,
-}: UseAutoHideControlsOptions = {}) => {
+export const useAutoHideControls = ({ delay = 5000, keepVisible = false }: UseAutoHideControlsOptions = {}) => {
   const [isVisible, setIsVisible] = useState(true);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHoveringRef = useRef(false);

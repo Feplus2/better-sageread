@@ -2,9 +2,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/compon
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
-import { SessionState } from "@/types/reading-session";
-import { Clock, TableOfContents } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { TableOfContents } from "lucide-react";
+import { useRef } from "react";
 import {
   TbLayoutSidebarLeftCollapse,
   TbLayoutSidebarLeftCollapseFilled,
@@ -19,13 +18,10 @@ import TOCView from "./toc-view";
 
 const HeaderBar = () => {
   const headerRef = useRef<HTMLDivElement>(null);
-  const [displayTime, setDisplayTime] = useState(0);
 
   const bookId = useReaderStore((state) => state.bookId);
   const bookDoc = useReaderStore((state) => state.bookData?.bookDoc);
   const progress = useReaderStore((state) => state.progress);
-  const sessionStats = useReaderStore((state) => state.sessionStats);
-  const isSessionInitialized = useReaderStore((state) => state.isSessionInitialized);
   const openDropdown = useReaderStore((state) => state.openDropdown);
   const setOpenDropdown = useReaderStore((state) => state.setOpenDropdown);
   const section = progress?.sectionLabel || "";
@@ -42,59 +38,6 @@ const HeaderBar = () => {
   } = useAutoHideControls({
     keepVisible: Boolean(openDropdown),
   });
-
-  useEffect(() => {
-    if (!sessionStats || !isSessionInitialized) {
-      setDisplayTime(0);
-      return;
-    }
-
-    const updateDisplayTime = () => {
-      const now = Date.now();
-      let totalActiveTimeMs = sessionStats.totalActiveTime;
-
-      if (sessionStats.currentState === SessionState.ACTIVE) {
-        const timeSinceLastUpdate = now - sessionStats.lastActivityTime;
-        totalActiveTimeMs += timeSinceLastUpdate;
-      }
-
-      const activeSeconds = Math.floor(totalActiveTimeMs / 1000);
-      setDisplayTime(activeSeconds);
-    };
-
-    updateDisplayTime();
-
-    const interval = setInterval(updateDisplayTime, 1000);
-
-    return () => clearInterval(interval);
-  }, [sessionStats, isSessionInitialized]);
-
-  const formatTime = (totalSeconds: number) => {
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-
-    if (minutes > 0) {
-      return `${minutes}分${seconds}秒`;
-    }
-    return `${seconds}秒`;
-  };
-
-  const getStatusDisplay = () => {
-    if (!isSessionInitialized || !sessionStats) {
-      return { text: "初始化", color: "text-neutral-400" };
-    }
-
-    switch (sessionStats.currentState) {
-      case SessionState.ACTIVE:
-        return { text: "阅读中", color: "text-green-500" };
-      case SessionState.PAUSED:
-        return { text: "已暂停", color: "text-neutral-400" };
-      case SessionState.STOPPED:
-        return { text: "已结束", color: "text-neutral-400" };
-      default:
-        return { text: "", color: "text-neutral-400" };
-    }
-  };
 
   const handleToggleTocDropdown = (isOpen: boolean) => {
     setOpenDropdown?.(isOpen ? "toc" : null);
@@ -180,18 +123,6 @@ const HeaderBar = () => {
             </TooltipTrigger>
             <TooltipContent side="bottom">{section}</TooltipContent>
           </Tooltip>
-
-          {/* {isSessionInitialized && (
-            <div
-              className={`flex items-center gap-x-2 text-xs transition-colors duration-300 ${
-                showControls ? "" : "opacity-70"
-              }`}
-            >
-              <Clock size={14} className="text-neutral-600 dark:text-neutral-400" />
-              <span className="font-mono text-neutral-700 dark:text-neutral-300">{formatTime(displayTime)}</span>
-              <span className={`text-sm ${getStatusDisplay().color} font-medium`}>{getStatusDisplay().text}</span>
-            </div>
-          )} */}
         </div>
 
         <div

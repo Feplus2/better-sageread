@@ -153,7 +153,9 @@ interface ConvertProgressState {
   openBookConvertDialog: () => void;
   /** 关闭图书转换大窗口：转换中/有结果 → 最小化为右下角小卡；空闲 → 彻底关闭 */
   closeBookConvertDialog: () => void;
-  setBookConvertConfig: (patch: Pick<BookConvertState, "ocr" | "translate"> | { pdfPath: string | null }) => void;
+  setBookConvertConfig: (
+    patch: Partial<Pick<BookConvertState, "ocr" | "translate"> | { pdfPath: string | null }>,
+  ) => void;
   startBookConvert: () => Promise<void>;
   cancelBookConvert: () => Promise<void>;
   importBookConvertResult: () => Promise<void>;
@@ -555,7 +557,9 @@ async function drainPaperQueue() {
       const fileName =
         item.kind === "parse"
           ? (item.pdfPath.split(/[\\/]/).pop() ?? item.pdfPath)
-          : item.title?.trim() || item.displayName || item.doi || item.arxivId || "参考文献";
+          : item.kind === "reparse"
+            ? item.title?.trim() || "重新解析"
+            : item.title?.trim() || item.displayName || item.doi || item.arxivId || "参考文献";
       setPaperImportState(() => ({
         status: "running",
         fileName,
@@ -752,7 +756,8 @@ async function runReparseItem(
 /** acquire 项的下载段：MCP 直调 Zotero Brain；取消在下载中即时结算（MCP 调用不可中止，晚到结果被丢弃） */
 async function downloadReferencePdf(item: {
   doi?: string;
-  title: string;
+  /** 可空（APS 老版式条目无标题）——空串跳过 PDF 标题校验（见下方调用处注释） */
+  title?: string;
   url?: string;
   arxivId?: string;
 }): Promise<{ pdfPath?: string; message?: string; cancelled?: boolean }> {

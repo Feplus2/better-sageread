@@ -111,7 +111,11 @@ function extractTerms(query: string): string[] {
 }
 
 /** 关键词降级检索：按 Markdown 标题切节，按词项命中计分，返回 top N 节 */
-export async function keywordSearchCorpus(prepareDir: () => Promise<string>, query: string, limit: number): Promise<ManualSearchItem[]> {
+export async function keywordSearchCorpus(
+  prepareDir: () => Promise<string>,
+  query: string,
+  limit: number,
+): Promise<ManualSearchItem[]> {
   const dir = await prepareDir();
   const entries = await readDir(dir);
   const terms = extractTerms(query);

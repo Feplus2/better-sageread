@@ -36,8 +36,7 @@ const solidPresetLabels: Record<string, string> = {
 
 const SettingsDropdown = () => {
   const store = useReaderStoreApi();
-  const { themeMode, themeColor, setThemeColor, themeCode, readerBackground, setReaderBackground, isDarkMode } =
-    useThemeStore();
+  const { themeColor, setThemeColor, themeCode, readerBackground, setReaderBackground, isDarkMode } = useThemeStore();
   const [customBackgrounds, setCustomBackgrounds] = useState<string[]>([]);
   const [customBackgroundUrls, setCustomBackgroundUrls] = useState<Record<string, string>>({});
 

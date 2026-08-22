@@ -1,9 +1,4 @@
-import {
-  createModelInstance,
-  createUtilityModelInstance,
-  getUtilityModel,
-  utilityTaskProviderOptions,
-} from "@/ai/providers/factory";
+import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
 import { type UIMessage, generateText } from "ai";
 
 // 防御性长度上限，prompt 中要求的是 10 字以内

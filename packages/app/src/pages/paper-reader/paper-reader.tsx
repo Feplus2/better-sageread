@@ -898,7 +898,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   const hasMetadata = Object.keys(metadata).length > 0;
 
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [activeHeadingId, setActiveHeadingId] = useState<string>("");
+  const [, setActiveHeadingId] = useState<string>("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -2124,7 +2124,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             <button
               type="button"
               onClick={handleJumpBack}
-              className="pointer-events-auto flex -translate-y-full items-center gap-2 rounded-2xl border bg-background px-4 py-2 text-neutral-700 text-sm shadow-around transition-colors hover:bg-accent hover:text-neutral-900 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
+              className="-translate-y-full pointer-events-auto flex items-center gap-2 rounded-2xl border bg-background px-4 py-2 text-neutral-700 text-sm shadow-around transition-colors hover:bg-accent hover:text-neutral-900 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
             >
               <Undo2 className="size-4" />
               返回上处

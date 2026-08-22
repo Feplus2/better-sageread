@@ -88,7 +88,7 @@ export default function BatchAITagDialog({ isOpen, onClose, results, onApply }: 
               <div className="mb-2 flex items-center justify-between">
                 <span className="font-medium text-sm">{r.book.title}</span>
                 {r.error ? (
-                  <Badge variant="secondary" className="text-xs text-red-500">
+                  <Badge variant="secondary" className="text-red-500 text-xs">
                     分类失败
                   </Badge>
                 ) : (

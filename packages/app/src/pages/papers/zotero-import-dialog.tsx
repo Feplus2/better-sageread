@@ -302,6 +302,7 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
           mergesApplied: 0,
           foldersCreated: [],
           foldersRenamed: [],
+          suspectQuality: [],
           cancelled: cancelRef.current,
         });
         setPhase("report");

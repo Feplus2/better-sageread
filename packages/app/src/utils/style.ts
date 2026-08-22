@@ -74,7 +74,11 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
   // 视频壁纸主题（怜烟）下纯色默认背景半透明化：文档背景改用调色板底色的透明版让动态壁纸隐约透出；
   // 元素级底色同场景背景一样透明化，避免半透明矩形层层叠加越来越实
   const translucentSolid = themeCode.videoWallpaper === true && !hasSceneBackground;
-  const solidBg = translucentSolid ? tinycolor(bg).setAlpha(themeCode.solidAlpha ?? 0.7).toRgbString() : bg;
+  const solidBg = translucentSolid
+    ? tinycolor(bg)
+        .setAlpha(themeCode.solidAlpha ?? 0.7)
+        .toRgbString()
+    : bg;
   const transparentElements = hasSceneBackground || translucentSolid;
 
   const colorStyles = `
@@ -452,8 +456,7 @@ export const getThemeCode = () => {
 
   // 全局主题为视频壁纸（怜烟，--bg-video 非空）时，阅读区纯色背景改走半透明（getColorStyles 处理）；
   // 透明度可由主题 css 的 --reader-solid-alpha 覆盖
-  const docRootStyles =
-    typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
+  const docRootStyles = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
   const videoWallpaper = docRootStyles?.getPropertyValue("--bg-video").includes("url(") ?? false;
   const solidAlphaVar = Number.parseFloat(docRootStyles?.getPropertyValue("--reader-solid-alpha") ?? "");
   const solidAlpha = Number.isFinite(solidAlphaVar) ? solidAlphaVar : isDarkMode ? 0.82 : 0.7;
@@ -639,7 +642,11 @@ export const applyFixedlayoutStyles = (document: Document, viewSettings: ViewSet
 
   // 视频壁纸主题（怜烟）下纯色背景半透明化（同 getColorStyles 的 translucentSolid）
   const translucentSolid = themeCode.videoWallpaper === true;
-  const solidBg = translucentSolid ? tinycolor(bg).setAlpha(themeCode.solidAlpha ?? 0.7).toRgbString() : bg;
+  const solidBg = translucentSolid
+    ? tinycolor(bg)
+        .setAlpha(themeCode.solidAlpha ?? 0.7)
+        .toRgbString()
+    : bg;
 
   const existingStyleId = "fixed-layout-styles";
   let style = document.getElementById(existingStyleId) as HTMLStyleElement;

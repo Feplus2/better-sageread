@@ -422,15 +422,17 @@ export async function importPaperPdf(
     unlisten?.();
   }
 
-  if (outcome.kind === "cancelled") {
+  // settle 在闭包内赋值，TS 的控制流收窄看不见——经显式类型的 const 别名恢复联合窄化
+  const result = outcome as PaperPdfImportResult;
+  if (result.kind === "cancelled") {
     return { success: false, message: "解析已取消（用户中止或超时）" };
   }
-  if (outcome.kind === "error") {
-    return { success: false, message: `论文解析失败：${outcome.message}` };
+  if (result.kind === "error") {
+    return { success: false, message: `论文解析失败：${result.message}` };
   }
 
   // 3. 入库
-  const { progress } = outcome;
+  const { progress } = result;
   try {
     const result = await importPapers(progress.paper_dir as string, folderId);
     if (result.failed.length > 0) {

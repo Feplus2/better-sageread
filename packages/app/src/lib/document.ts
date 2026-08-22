@@ -102,6 +102,7 @@ export const EXTS: Record<BookFormat, string> = {
   CBZ: "cbz",
   FB2: "fb2",
   FBZ: "fbz",
+  MARKDOWN: "md",
 };
 
 export class DocumentLoader {

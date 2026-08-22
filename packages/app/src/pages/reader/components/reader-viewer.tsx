@@ -52,7 +52,7 @@ const ReaderViewerContent: React.FC = () => {
     };
   }, [screenInsets, globalViewSettings, aspectRatio]);
 
-  if (!bookData?.bookDoc || !config || !contentInsets) {
+  if (!bookId || !bookData?.bookDoc || !config || !contentInsets) {
     return null;
   }
 
@@ -96,7 +96,8 @@ export default function ReaderViewer() {
   const tabId = `reader-${bookId}`;
   const isTabVisible = !isHomeActive && activeTabId === tabId;
 
-  const { sessionStats, isInitialized: isSessionInitialized } = useReadingSession(bookId, {
+  // bookId 可为 null（无书打开）——空串占位，钩子内部对空 id 自行短路
+  const { sessionStats, isInitialized: isSessionInitialized } = useReadingSession(bookId ?? "", {
     saveInterval: 5 * 1000,
     isVisible: isTabVisible,
   });
@@ -151,11 +152,7 @@ export default function ReaderViewer() {
             PDF 阅读模式：转换为 EPUB 可解锁 AI 问答、划线笔记、进度同步等完整体验（设置 → PDF 转换）
           </span>
         </div>
-        <iframe
-          src={bookData.nativeFileUrl}
-          className="flex-1 border-0"
-          title={`PDF: ${bookData.book?.title || ""}`}
-        />
+        <iframe src={bookData.nativeFileUrl} className="flex-1 border-0" title={`PDF: ${bookData.book?.title || ""}`} />
       </div>
     );
   }

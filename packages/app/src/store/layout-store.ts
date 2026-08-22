@@ -102,7 +102,7 @@ export const useLayoutStore = create<LayoutStore>()(
         };
 
         // 分组聚拢：书籍排在论文前，新书插到首个论文 tab 之前（无论文则追加到末尾）
-        const nextTabs = tabs.map((t) => ({ ...t, active: false }));
+        const nextTabs: Tab[] = tabs.map((t) => ({ ...t, active: false }));
         const firstPaperIndex = nextTabs.findIndex((t) => (t.type ?? "book") === "paper");
         if (firstPaperIndex === -1) {
           nextTabs.push(newTab);
@@ -208,7 +208,7 @@ export const useLayoutStore = create<LayoutStore>()(
         });
       },
 
-      reorderTab: (tabId: string, fromIndex: number, toIndex: number) => {
+      reorderTab: (_tabId: string, fromIndex: number, toIndex: number) => {
         const { tabs } = get();
         if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= tabs.length) return;
         const newTabs = [...tabs];

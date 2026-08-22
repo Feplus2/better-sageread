@@ -3,14 +3,13 @@
  * 仅供论文导出（HTML/PDF 打印页）使用，经动态 import 按需加载（字体 base64 约 400KB，不进主 chunk）。
  */
 
-import cssText from "katex/dist/katex.min.css?raw";
 import fontAms from "katex/dist/fonts/KaTeX_AMS-Regular.woff2?inline";
 import fontCaligraphicBold from "katex/dist/fonts/KaTeX_Caligraphic-Bold.woff2?inline";
 import fontCaligraphic from "katex/dist/fonts/KaTeX_Caligraphic-Regular.woff2?inline";
 import fontFrakturBold from "katex/dist/fonts/KaTeX_Fraktur-Bold.woff2?inline";
 import fontFraktur from "katex/dist/fonts/KaTeX_Fraktur-Regular.woff2?inline";
-import fontMainBoldItalic from "katex/dist/fonts/KaTeX_Main-BoldItalic.woff2?inline";
 import fontMainBold from "katex/dist/fonts/KaTeX_Main-Bold.woff2?inline";
+import fontMainBoldItalic from "katex/dist/fonts/KaTeX_Main-BoldItalic.woff2?inline";
 import fontMainItalic from "katex/dist/fonts/KaTeX_Main-Italic.woff2?inline";
 import fontMain from "katex/dist/fonts/KaTeX_Main-Regular.woff2?inline";
 import fontMathBoldItalic from "katex/dist/fonts/KaTeX_Math-BoldItalic.woff2?inline";
@@ -24,6 +23,7 @@ import fontSize2 from "katex/dist/fonts/KaTeX_Size2-Regular.woff2?inline";
 import fontSize3 from "katex/dist/fonts/KaTeX_Size3-Regular.woff2?inline";
 import fontSize4 from "katex/dist/fonts/KaTeX_Size4-Regular.woff2?inline";
 import fontTypewriter from "katex/dist/fonts/KaTeX_Typewriter-Regular.woff2?inline";
+import cssText from "katex/dist/katex.min.css?raw";
 
 const FONT_DATA_URIS: Record<string, string> = {
   "KaTeX_AMS-Regular.woff2": fontAms,

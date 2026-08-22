@@ -131,7 +131,7 @@ async function embedImagesAsDataUris(doc: string, paperId: string): Promise<stri
   return doc.replace(IMAGE_REF_RE, (token) => {
     const url = IMAGE_URL_RE.exec(token)?.[1];
     const dataUri = url ? dataUris.get(url) : undefined;
-    return dataUri ? token.replace(url, dataUri) : token;
+    return dataUri && url ? token.replace(url, dataUri) : token;
   });
 }
 

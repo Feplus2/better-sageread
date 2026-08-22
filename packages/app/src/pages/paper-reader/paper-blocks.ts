@@ -19,7 +19,7 @@ import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { MATH_SEGMENT_RE } from "./paper-cross-anchor";
-import { parsePaperMarkdown, splitPaperMarkdown } from "./paper-metadata";
+import { splitPaperMarkdown } from "./paper-metadata";
 
 export type PaperBlockKind =
   | "p"
@@ -212,7 +212,7 @@ export function extractPaperFigures(markdown: string): PaperFigureItem[] {
   const children = tree.children ?? [];
   const items: PaperFigureItem[] = [];
   let blockIndex = 0;
-  let pending: { images: string[]; blockIndex: number } | null = null;
+  let pending: { images: string[]; blockIndex: number; quote?: string } | null = null;
   let unnumbered = 0;
 
   const flushUnnumbered = () => {
@@ -281,7 +281,9 @@ export function extractPaperFigures(markdown: string): PaperFigureItem[] {
           break;
         }
         if (images.length > 0) {
-          pending = { images: [...(pending?.images ?? []), ...images], blockIndex: pending?.blockIndex ?? myIndex };
+          // flushUnnumbered（闭包）会写 pending，TS 控制流看不见——经显式类型局部变量重建
+          const prev = pending as { images: string[]; blockIndex: number; quote?: string } | null;
+          pending = { images: [...(prev?.images ?? []), ...images], blockIndex: prev?.blockIndex ?? myIndex };
         } else if (text) {
           flushUnnumbered(); // 普通文本段落截断图片组（产物中组图与图注恒相邻）
         }

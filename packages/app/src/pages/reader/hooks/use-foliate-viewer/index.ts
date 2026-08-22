@@ -92,7 +92,7 @@ export const useFoliateViewer = (bookId: string, bookDoc: BookDoc, config: BookC
         bookDoc,
         config,
         insets,
-        container: containerRef.current,
+        container: containerRef.current!,
         globalViewSettings: settings.globalViewSettings,
         onViewCreated: (view) => {
           store.getState().setView(view);

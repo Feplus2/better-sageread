@@ -1,5 +1,5 @@
 import type { ProgressHandler } from "@/utils/transfer";
-import type { Book, BookConfig, BookContent, ViewSettings } from "./book";
+import type { Book, BookConfig, ViewSettings } from "./book";
 import type { SystemSettings } from "./settings";
 
 export type AppPlatform = "web" | "tauri";

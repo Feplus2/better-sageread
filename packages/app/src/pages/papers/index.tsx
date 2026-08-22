@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
 import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
 import { updateBookStatus } from "@/services/book-service";
 import {
@@ -63,7 +63,6 @@ import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import type { PapersSortByType } from "@/types/settings";
 import type { BookWithStatus } from "@/types/simple-book";
-import { findDegenerateLoop } from "@/utils/degenerate";
 import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -1517,7 +1516,7 @@ export default function PapersPage() {
                     size="sm"
                     className="h-8 shrink-0"
                     disabled={selectedIds.size === 0}
-                    onClick={handleBatchTranslate}
+                    onClick={() => void handleBatchTranslate()}
                   >
                     <Languages className="size-4" />
                     翻译
@@ -1527,7 +1526,7 @@ export default function PapersPage() {
                     size="sm"
                     className="h-8 shrink-0"
                     disabled={selectedIds.size === 0}
-                    onClick={handleBatchReparse}
+                    onClick={() => void handleBatchReparse()}
                   >
                     <RefreshCw className="size-4" />
                     重新解析

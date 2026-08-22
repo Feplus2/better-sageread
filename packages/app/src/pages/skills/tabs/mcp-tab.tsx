@@ -262,9 +262,9 @@ export default function McpTab() {
     };
 
     if (editingServer) {
-      updateServer(editingServer.id, data);
+      updateServer(editingServer.id, data as Partial<Omit<McpServer, "id">>);
     } else {
-      addServer(data);
+      addServer(data as Omit<McpServer, "id">);
     }
     setIsDialogOpen(false);
   };

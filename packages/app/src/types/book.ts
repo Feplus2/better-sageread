@@ -7,6 +7,8 @@ export type BookNoteSource = "user" | "ai";
 
 export interface Book {
   id: string;
+  /** 上游旧模型的哈希主键；BookWithStatus 迁移路径下常映射 id（见 bookConvert.ts），新代码用 id */
+  hash?: string;
   filePath?: string;
   format: BookFormat;
   title: string;
@@ -24,6 +26,14 @@ export interface Book {
   primaryLanguage?: string;
 
   baseDir?: string;
+
+  // —— 上游数据模型遗留/迁移字段（活代码会赋值：bookConvert / 分组与去重链路）——
+  sourceTitle?: string;
+  groupId?: string | null;
+  groupName?: string;
+  tags?: string[] | null;
+  metadata?: unknown;
+  coverImageUrl?: string;
 }
 
 export interface BookGroupType {

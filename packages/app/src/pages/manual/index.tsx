@@ -36,7 +36,9 @@ export default function ManualPage() {
     (async () => {
       try {
         const dir = await prepareManualFiles();
-        const entries = (await readDir(dir)).filter((e) => e.isFile && e.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name));
+        const entries = (await readDir(dir))
+          .filter((e) => e.isFile && e.name.endsWith(".md"))
+          .sort((a, b) => a.name.localeCompare(b.name));
         const list: ManualChapter[] = [];
         for (const entry of entries) {
           list.push(parseChapter(entry.name, await readTextFile(`${dir}/${entry.name}`)));
@@ -111,7 +113,7 @@ export default function ManualPage() {
           </div>
         )}
         {chapter && (
-          <Markdown className="chat-md prose prose-headings:my-2 prose-p:my-1.5 prose-table:text-xs mx-auto max-w-3xl pb-10 text-foreground text-sm leading-relaxed">
+          <Markdown className="chat-md prose mx-auto prose-headings:my-2 prose-p:my-1.5 max-w-3xl pb-10 prose-table:text-xs text-foreground text-sm leading-relaxed">
             {chapter.content}
           </Markdown>
         )}

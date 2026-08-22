@@ -17,6 +17,8 @@ type ModelProvider = {
   name: string;
   active: boolean;
   provider: string;
+  /** 图标标识（lucide 名等，展示用；预置提供商配置） */
+  icon?: string;
   exploreModelsUrl?: string;
   apiKey?: string;
   apiKeyHelpUrl?: string;

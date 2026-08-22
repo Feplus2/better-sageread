@@ -93,7 +93,7 @@ export default function BookItem({
   }, []);
 
   // 右键菜单受控开关（MoreHorizontal 图标点击也可打开）
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [, setMenuOpen] = useState(false);
 
   /** 打开书籍数据目录（{appData}/books/{id}——转换产物 EPUB/paper.md/封面都在这里） */
   const handleOpenFolder = async () => {
@@ -522,7 +522,7 @@ export default function BookItem({
 
   return (
     <>
-      <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <ContextMenu onOpenChange={setMenuOpen}>
         <ContextMenuTrigger asChild>
           <div className="group cursor-pointer" onClick={handleClick}>
             <div

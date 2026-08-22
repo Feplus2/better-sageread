@@ -1,5 +1,5 @@
-import katex from "katex";
 import { MATH_SEGMENT_RE } from "@/pages/paper-reader/paper-cross-anchor";
+import katex from "katex";
 import { useMemo } from "react";
 
 /**

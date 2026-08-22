@@ -12,7 +12,7 @@ interface SearchResultItemProps {
 const SearchResultItem: React.FC<SearchResultItemProps> = ({ cfi, excerpt, onSelectResult }) => {
   const store = useReaderStoreApi();
   const progress = store.getState().progress;
-  const { viewRef } = useScrollToItem(cfi, progress);
+  const { viewRef } = useScrollToItem(cfi, progress ?? null);
 
   return (
     <li

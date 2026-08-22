@@ -6,6 +6,7 @@ import { getTrashedBooks, uploadBook } from "@/services/book-service";
 import { FILE_ACCEPT_FORMATS } from "@/services/constants";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useLibraryStore } from "@/store/library-store";
+import type { SimpleBook } from "@/types/simple-book";
 import { getFilename, listFormater } from "@/utils/book";
 import { readFile } from "@tauri-apps/plugin-fs";
 
@@ -51,8 +52,8 @@ export function useBookUpload() {
   const importBooks = useCallback(
     async (files: File[]) => {
       setIsUploading(true);
-      const failedFiles = [];
-      const successBooks = [];
+      const failedFiles: string[] = [];
+      const successBooks: SimpleBook[] = [];
 
       for (const file of files) {
         try {

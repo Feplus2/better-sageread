@@ -17,6 +17,7 @@ export async function convertBookWithStatusToBook(bookWithStatus: BookWithStatus
     : undefined;
 
   return {
+    id: bookWithStatus.id,
     hash: bookWithStatus.id,
     format: bookWithStatus.format,
     title: bookWithStatus.title,

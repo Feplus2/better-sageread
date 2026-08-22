@@ -16,9 +16,9 @@
  * 结果模块级缓存（source.pdf 入库后不再变化）。
  */
 
+import { listPapers } from "@/services/paper-service";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { listPapers } from "@/services/paper-service";
 
 export interface DuplicateVerdict {
   kind: "library" | "batch";

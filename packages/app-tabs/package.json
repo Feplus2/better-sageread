@@ -10,11 +10,10 @@
     ".": {
       "types": "./src/index.tsx",
       "import": "./src/index.tsx"
-    }
+    },
+    "./src/*": "./src/*"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

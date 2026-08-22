@@ -1,9 +1,4 @@
-import {
-  createModelInstance,
-  createUtilityModelInstance,
-  getUtilityModel,
-  utilityTaskProviderOptions,
-} from "@/ai/providers/factory";
+import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
 import type { SimpleBook } from "@/types/simple-book";
 import { generateText } from "ai";
 import type { Tag } from "./tag-service";

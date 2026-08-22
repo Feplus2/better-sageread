@@ -96,7 +96,7 @@ export const tauriStorage: StateStorage = {
     }
   },
 
-  removeItem: async (name: string): Promise<void> => {},
+  removeItem: async (): Promise<void> => {},
 };
 
 const ensureDirectory = async (dirPath: string) => {

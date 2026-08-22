@@ -23,7 +23,7 @@ import { partialMD5 } from "@/utils/md5";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, tempDir } from "@tauri-apps/api/path";
 import { join } from "@tauri-apps/api/path";
-import { writeFile, readFile } from "@tauri-apps/plugin-fs";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 
 export async function uploadBook(file: File): Promise<SimpleBook> {
   try {

@@ -57,9 +57,7 @@ export function MermaidPreview({ content }: MermaidPreviewProps) {
   }
 
   if (!svg) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground text-sm">渲染中...</div>
-    );
+    return <div className="flex h-full items-center justify-center text-muted-foreground text-sm">渲染中...</div>;
   }
 
   return (

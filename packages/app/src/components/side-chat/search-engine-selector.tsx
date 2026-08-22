@@ -6,7 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { type SearchEngine, type SearchProvider, useWebSearchStore } from "@/store/web-search-store";
+import { type SearchEngine, useWebSearchStore } from "@/store/web-search-store";
 import { Check, Globe } from "lucide-react";
 
 const PROVIDER_LABELS: Record<string, string> = {

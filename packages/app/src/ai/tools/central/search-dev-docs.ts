@@ -6,10 +6,10 @@
  */
 import {
   type ManualSearchItem,
+  WIKI_BOOK_ID,
   ensureWikiIndex,
   keywordSearchWiki,
   searchCorpus,
-  WIKI_BOOK_ID,
 } from "@/services/manual-service";
 import { useLlamaStore } from "@/store/llama-store";
 import { getCurrentVectorModelConfig } from "@/utils/model";

@@ -58,13 +58,13 @@ export class RemoteFile extends File implements ClosableFile {
   url: string;
   #name: string;
   #lastModified: number;
-  #size: number = -1;
-  #type: string = "";
+  #size = -1;
+  #type = "";
   #cache: Map<number, ArrayBuffer> = new Map(); // LRU cache
   #order: number[] = [];
 
   static MAX_CACHE_CHUNK_SIZE = 1024 * 128;
-  static MAX_CACHE_ITEMS_SIZE: number = 10;
+  static MAX_CACHE_ITEMS_SIZE = 10;
 
   constructor(url: string, name?: string, type = "", lastModified = Date.now()) {
     const basename = url.split("/").pop() || "remote-file";
