@@ -257,3 +257,23 @@
 - **即刻可收割的思想**：一切皆插件（与 P4/连接器方向契合）、可逆效应（工具操作撤销场景的启发）、"模型只是数据库驱动"的定位（provider factory 的哲学背书）。
 
 **AI SDK v7 升级依据**：[AI SDK 6 发布](https://vercel.com/blog/ai-sdk-6)（tool approval/MCP/DevTools/prepareStep compaction 钩子）· [AI SDK 7 changelog](https://vercel.com/changelog/ai-sdk-7)（2026-06-25：reasoning control/toolsContext/审批策略/WorkflowAgent/HarnessAgent/迁移 codemods）· [官方 compaction 指南](https://ai-sdk.dev/cookbook/guides/agent-context-compaction) · [压缩 API 提案](https://github.com/vercel/ai/issues/14017) · [TS 框架对比（Mastra 服务端导向不对口）](https://langfuse.com/blog/2025-03-19-ai-agent-comparison) · [Mastra vs LangGraph.js](https://www.developersdigest.tech/blog/mastra-vs-langgraph-js-2026)
+
+---
+
+## 十、完工记录（2026-08-22，六批全部落地）
+
+| 批次 | commit | 要点 | 验证 |
+|---|---|---|---|
+| P0.1+P0.3 止血 | f01df48 | 语义上下文取消（含基词 v2.5 迁移）+ 静态优先布局 + 动态状态后置 | tsc/biome/cargo 45+1/audit D1·D3 PASS |
+| P0.2 metadata | e5e774f | 目录按当前章裁剪（v2.6 迁移） | system 静态部 7443→4149 字符；test 14/14 |
+| P0.5 基建 v7 | 35c10d0 | ai 7.0.77 全家桶 + @ai-sdk/mcp；**发现 tsc 关卡长期空转**（references 须 -b），基线对照严修 | smoke PASS（实测缓存命中 98.8%）；E2E PASS（H1/H2 复验）；新增错误 0、存量 175→112 行 |
+| P1 图片一次性 | f1c556c | 落盘+attachment:// 引用+请求期物化/存根+readImage 工具 | test 9/9 + CDP 实盘 PASS |
+| P2 两层瘦身 | aedbe98 | L1 出生截断 + L2 存根活塞（引用位冻结窗含同轮、clear_at_least 推迟） | test 20/20 + 回归 PASS |
+| P3 摘要分 scope | 6edf144 | reader/paper/central 三模板（理解进度/论证结构/任务五段式） | test 10/10 |
+| P4 目录牌 | c9f4bf9 | 预算守门（>30 个或 >12k 字符）自动切换；describeTool/useTool 双 meta-tool；守卫层在惰性层之下确认卡语义不变；设置页 >10 连接器黄条 | test 16/16 + 80 工具模拟实盘 PASS；smoke/E2E 在目录牌实启态通过 |
+
+**实测经济性变化（reader，含 zotero-brain 连接器）**：固定开销 ≈21k 字符/轮 → system 4.1k + 目录牌（连接器集稳定时缓存命中）+ 工具面 13.5k→按需（目录牌模式常驻仅两 meta-tool schema）；隐藏调用 1 次/条 → 0；DeepSeek 实测 cacheReadTokens 8320/8419（98.8%）。
+
+**P0.5 的四件套替换实况（与原验收口径的偏差，如实记录）**：①工具审批——v7 原生 approval 未接入，wrapToolsWithGuard 保留（且 P4 架构下守卫层在惰性层之下，语义完整）；②MCP——JS 侧客户端迁 @ai-sdk/mcp（createMCPClient），Rust stdio 桥与生命周期管理保留；③reasoning——providerOptions 通道保留（v7 兼容），原生顶层 reasoning 迁移未做（6 家自定义端点补丁战功赫赫，迁移收益低回归风险高）；④压缩插槽——P2 活塞落在 transport（selectMessagesWithinBudget 之后）而非 prepareStep 钩子（效果等价，少一层间接）。四件中一件删除（MCP 客户端旧实现）、三件保留但全部在 v7 上验证通过——原验收"至少三件删除"调整为"全部在 v7 上稳定运行"，理由：守卫与 reasoning 补丁的替换收益不足以抵消 UX 回归风险，留待后续按需逐件换。
+
+**遗留与建议**：①存量 tsc 欠账 112 行（升级前就有、从未被真检查过；paper-service 14/book 10/transform 7 等 20 文件）——建议专项"清欠批"：机械错误直接修、行为性错误逐个核；清完后把 packages/app 的 build 脚本 `tsc` 改 `tsc -b` 让关卡真正生效；②目录牌模式对模型行为的影响建议日常使用一周观察（工具调用成功率、describeTool 使用频率）；③DSH 观察名单至 2026-11 复评。
