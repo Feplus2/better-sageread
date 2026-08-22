@@ -1,4 +1,5 @@
 import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
+import { type SummaryScope, buildScopedSummaryPrompt } from "@/ai/utils/summary-templates";
 import { editThread, getThreadById } from "@/services/thread-service";
 import type { Thread } from "@/types/thread";
 import { type UIMessage, generateText } from "ai";
@@ -94,22 +95,6 @@ function formatTranscript(messages: UIMessage[]): string {
   return [...head, `……（中间省略 ${omitted} 条）……`, ...tail].join("\n\n");
 }
 
-function buildSummaryPrompt(existingText: string | undefined, transcript: string): string {
-  return `你是对话压缩器。请把"既有摘要"与"新增对话片段"合并为一份更新后的滚动摘要。
-
-既有摘要：
-${existingText?.trim() || "（无）"}
-
-新增对话片段：
-${transcript}
-
-要求：
-1. 保留：话题脉络与当前焦点、已确认的结论与决定、未完成的待办、关键实体（书名/论文标题/文件路径/术语等）；既有摘要中已含的重要信息合并时也要格外注意保留，除非明确已被更新的内容取代（允许多轮压缩中逐渐淡化，但避免重要内容骤然丢失）
-2. 丢弃：寒暄客套、与主线无关的细节、已被后续结论取代的过时说法
-3. 自然语言表达，可分多段，总长不超过${SUMMARY_CHAR_LIMIT}字
-4. 直接输出摘要本身，不要任何解释或前缀`;
-}
-
 /**
  * 把本轮被预算裁掉的消息前缀增量滚入摘要，返回应注入的摘要文本。
  * 已覆盖无新增 → 返回既有摘要；压缩失败 → 返回既有摘要（或 null）；全程不阻断聊天。
@@ -117,8 +102,10 @@ ${transcript}
 export async function compressDroppedIntoSummary(params: {
   threadId: string;
   dropped: UIMessage[];
+  /** D7 分 scope 结构化：三助手各自的固定小节模板；缺省 reader */
+  agentScope?: SummaryScope;
 }): Promise<string | null> {
-  const { threadId, dropped } = params;
+  const { threadId, dropped, agentScope = "reader" } = params;
   if (dropped.length === 0) return null;
 
   try {
@@ -151,7 +138,12 @@ export async function compressDroppedIntoSummary(params: {
     try {
       const result = await generateText({
         model: modelInstance,
-        prompt: buildSummaryPrompt(existingText, formatTranscript(newlyDropped)),
+        prompt: buildScopedSummaryPrompt({
+          scope: agentScope,
+          existingText,
+          transcript: formatTranscript(newlyDropped),
+          charLimit: SUMMARY_CHAR_LIMIT,
+        }),
         maxOutputTokens: 4000,
         temperature: 0.3,
         providerOptions: utilityTaskProviderOptions(utilityModel.providerId, utilityModel.modelId),

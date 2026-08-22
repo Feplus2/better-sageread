@@ -147,7 +147,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     let summaryText: string | null = null;
     if (dropped.length > 0) {
       if (chatContext?.threadId) {
-        summaryText = await compressDroppedIntoSummary({ threadId: chatContext.threadId, dropped });
+        summaryText = await compressDroppedIntoSummary({ threadId: chatContext.threadId, dropped, agentScope });
       }
       console.log("🗜️ [上下文预算] 裁剪历史消息:", {
         droppedCount: dropped.length,
