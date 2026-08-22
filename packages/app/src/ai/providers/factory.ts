@@ -263,7 +263,7 @@ export function getUtilityModel(_task?: string): SelectedModel | null {
 export function utilityTaskProviderOptions(
   providerId: string,
   modelId: string,
-): Record<string, Record<string, unknown>> | undefined {
+): Record<string, Record<string, any>> | undefined {
   const id = modelId.toLowerCase();
   switch (providerId) {
     case "openai":

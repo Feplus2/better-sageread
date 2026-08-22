@@ -25,12 +25,14 @@ export const REASONING_LEVEL_LABELS: Record<ReasoningLevel, string> = {
   high: "高",
 };
 
-/** 通道 A：AI SDK 原生 providerOptions（streamText 直接可传） */
+/** 通道 A：AI SDK 原生 providerOptions（streamText 直接可传）。
+ * 返回值为 JSON 兼容字面量（string/number），v7 的 SharedV4ProviderOptions 要求 JSON 值域，
+ * 故标 any 而非 unknown（unknown 不可赋给 JSONValue）。 */
 export function chatReasoningProviderOptions(
   providerId: string,
   modelId: string,
   level: ReasoningLevel,
-): Record<string, Record<string, unknown>> | undefined {
+): Record<string, Record<string, any>> | undefined {
   const id = modelId.toLowerCase();
   switch (providerId) {
     case "openai":

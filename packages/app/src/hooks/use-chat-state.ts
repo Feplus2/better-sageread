@@ -209,7 +209,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           }
         } else if (message) {
           const reasoningTimes = reasoningTimesRef.current[message.id] || {};
-          const messageIndex = resolvedMessages.findIndex((item) => item.id === message.id);
+          const messageIndex = resolvedMessages.findIndex((item: any) => item.id === message.id);
 
           if (messageIndex !== -1) {
             const prevMeta = (message.metadata as MessageMetadata) || {};
@@ -753,10 +753,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     }
   }, [regenerate, sendMessage, status]);
 
-  const lastMessageObj = messages[messages.length - 1];
-  const lastInterrupted =
-    lastMessageObj?.role === "assistant" &&
-    !!((lastMessageObj.metadata as (MessageMetadata & { interrupted?: boolean }) | undefined)?.interrupted ?? false);
   // 「重新生成」为恒存在能力（用户 2026-08-08）：ready/error 均可重跑末条，不再依赖错误/中断条件
   const canRetry = status === "ready" || status === "error";
 

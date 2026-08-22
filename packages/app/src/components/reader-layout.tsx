@@ -97,7 +97,7 @@ export default function ReaderLayout() {
 
   // 激活即唤醒 + 刷新活跃时间；顺手清理已关闭 tab 的残留 id
   useEffect(() => {
-    lastActiveRef.current.set(activeTabId, Date.now());
+    if (activeTabId) lastActiveRef.current.set(activeTabId, Date.now());
     const { sleptTabIds: prev, setSleptTabIds } = useLayoutStore.getState();
     if (prev.length === 0) return;
     const tabIds = new Set(useLayoutStore.getState().tabs.map((t) => t.id));
@@ -126,7 +126,7 @@ export default function ReaderLayout() {
       } = useLayoutStore.getState();
       const now = Date.now();
       const next = new Set(prev);
-      next.delete(activeId);
+      if (activeId) next.delete(activeId);
       // PDF 标签页永不休眠：原生 iframe 渲染没有阅读位置恢复通道，休眠重挂载后用户会丢阅读位置
       const isPdfTab = (tabId: string) => getReaderStore(tabId)?.getState().bookData?.book?.format === "PDF";
       // LRU 硬上限：挂载数超限时从最久未活跃的开始休眠

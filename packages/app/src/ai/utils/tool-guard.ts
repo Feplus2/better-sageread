@@ -18,7 +18,7 @@
 import { useAgentConfirmStore } from "@/store/agent-confirm-store";
 import { resolveWorkspaceRootForScope, useAgentSettingsStore } from "@/store/agent-settings-store";
 import { invoke } from "@tauri-apps/api/core";
-import type { CoreTool } from "ai";
+import type { Tool } from "ai";
 import { parseMcpToolName } from "../mcp/mcp-manager";
 import type { AgentScope } from "../tools/registry";
 
@@ -101,12 +101,12 @@ function requestWithAbort(
   });
 }
 
-export function wrapToolsWithGuard(tools: Record<string, CoreTool>, agentScope: AgentScope): Record<string, CoreTool> {
+export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: AgentScope): Record<string, Tool> {
   const { safetyMode } = useAgentSettingsStore.getState();
   // 共享根 + 按助手覆盖（2026-08-05 拍板）：本 scope 生效根，判界与注入都用它
   const scopeRoot = resolveWorkspaceRootForScope(agentScope);
 
-  const wrapped: Record<string, CoreTool> = {};
+  const wrapped: Record<string, Tool> = {};
   for (const [name, baseTool] of Object.entries(tools)) {
     const spec = GUARDED_TOOLS[name];
     const originalExecute = baseTool.execute;

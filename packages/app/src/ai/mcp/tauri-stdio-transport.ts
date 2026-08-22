@@ -1,3 +1,4 @@
+import type { JSONRPCMessage, MCPTransport } from "@ai-sdk/mcp";
 /**
  * MCP stdio 传输（批次 D2）：本地 npm/uvx 类 MCP server 经 Rust 子进程桥通信。
  *
@@ -7,7 +8,14 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import { type JSONRPCMessage, MCPClientError, type MCPTransport } from "ai";
+
+/** v7 起 @ai-sdk/mcp 不再导出 MCPClientError；本地等价类（MCPTransport.onerror 契约只要求 Error） */
+class MCPClientError extends Error {
+  constructor(options: { message: string }) {
+    super(options.message);
+    this.name = "MCPClientError";
+  }
+}
 
 export interface TauriStdioTransportConfig {
   /** mcp-store 中的 server id（审计标识） */

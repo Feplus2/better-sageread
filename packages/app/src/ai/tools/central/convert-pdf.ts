@@ -63,10 +63,8 @@ export const convertPdfTool = tool({
       await startConvert(pdfPath, ocr, translate);
 
       // 设置进度监听，转换完成后自动入库
-      let epubPath: string | undefined;
       const unlisten = await listenConvertProgress((progress: ConvertProgress) => {
         if (progress.type === "done" && progress.epub_path) {
-          epubPath = progress.epub_path;
           // 自动导入
           importConvertedEpub(progress.epub_path)
             .then(() => {

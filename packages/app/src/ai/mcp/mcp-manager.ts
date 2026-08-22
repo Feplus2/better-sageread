@@ -3,7 +3,7 @@
  * 拉取工具集并以 `mcp_{serverKey}_{toolName}` 键合并进聊天工具集。
  *
  * B1 开工验证结论（ai@5.0.44）：
- * - `experimental_createMCPClient` / `MCPTransport` / `MCPClientError` / `JSONRPCMessage`
+ * - `createMCPClient` / `MCPTransport` / `MCPClientError` / `JSONRPCMessage`
  *   均直接从 `ai` 包导出，无需 `@ai-sdk/mcp`；
  * - 配置式 transport 仅支持 `{ type: 'sse' }`，Streamable HTTP 必须传自定义 MCPTransport
  *   对象（见 mcp-transport.ts）；
@@ -22,15 +22,16 @@ import { useAgentConfirmStore } from "@/store/agent-confirm-store";
 import { useAgentSettingsStore } from "@/store/agent-settings-store";
 import { type McpServer, useMcpStore } from "@/store/mcp-store";
 import type { AgentScope } from "@/store/quick-command-store";
-import { type CoreTool, experimental_createMCPClient } from "ai";
+import { createMCPClient } from "@ai-sdk/mcp";
+import type { Tool } from "ai";
 import { SseLegacyMcpTransport, StreamableHttpMcpTransport } from "./mcp-transport";
 import { TauriStdioMcpTransport } from "./tauri-stdio-transport";
 
-type McpClient = Awaited<ReturnType<typeof experimental_createMCPClient>>;
+type McpClient = Awaited<ReturnType<typeof createMCPClient>>;
 
 export interface McpScopeResult {
   /** 已合并的工具（键带 mcp_ 前缀，可直接并入 streamText tools） */
-  tools: Record<string, CoreTool>;
+  tools: Record<string, Tool>;
   /** 连接/拉取失败的 server（不阻塞其他 server，由调用方提示用户） */
   failures: Array<{ server: string; error: string }>;
   /** 关闭本次请求创建的全部客户端（streamText onFinish 调用） */
@@ -125,7 +126,7 @@ async function connectServer(server: McpServer): Promise<McpClient> {
       args: server.args ?? [],
       env: server.env ?? {},
     });
-    return experimental_createMCPClient({
+    return createMCPClient({
       transport,
       name: "sageread-mcp-client",
       onUncaughtError: () => {},
@@ -139,7 +140,7 @@ async function connectServer(server: McpServer): Promise<McpClient> {
     server.transport === "sse"
       ? new SseLegacyMcpTransport(server.url, headers)
       : new StreamableHttpMcpTransport(server.url, headers);
-  return experimental_createMCPClient({
+  return createMCPClient({
     transport,
     name: "sageread-mcp-client",
     // 吞掉未捕获错误（连接失败已在 failures 汇总，避免污染控制台）
@@ -152,7 +153,7 @@ async function connectServer(server: McpServer): Promise<McpClient> {
  * 单个 server 失败不阻塞其他 server（降级进 failures，由调用方提示）。
  */
 export async function getMcpToolsForScope(scope: AgentScope): Promise<McpScopeResult> {
-  const tools: Record<string, CoreTool> = {};
+  const tools: Record<string, Tool> = {};
   const failures: Array<{ server: string; error: string }> = [];
   const clients: McpClient[] = [];
 
@@ -185,7 +186,7 @@ export async function getMcpToolsForScope(scope: AgentScope): Promise<McpScopeRe
           tools[`${prefix}${toolName}`] = {
             ...tool,
             description: `[${server.name}] ${tool.description ?? ""}`,
-          } as CoreTool;
+          } as Tool;
         }
       } catch (error) {
         failures.push({
@@ -249,7 +250,7 @@ export async function callMcpServerTool(
   const client = await withTimeout(connectServer(server), CONNECT_TIMEOUT_MS, `连接「${server.name}」`);
   try {
     const toolSet = await withTimeout(client.tools(), CONNECT_TIMEOUT_MS, `拉取「${server.name}」工具列表`);
-    const tool = toolSet[toolName] as CoreTool | undefined;
+    const tool = toolSet[toolName] as Tool | undefined;
     if (!tool || typeof tool.execute !== "function") {
       throw new Error(`「${server.name}」未提供工具 ${toolName}`);
     }

@@ -1,3 +1,4 @@
+import type { JSONRPCMessage, MCPTransport } from "@ai-sdk/mcp";
 /**
  * MCP 远程传输（批次 B）：Streamable HTTP 与 SSE 两类远程 MCP server 的传输实现。
  *
@@ -7,7 +8,14 @@
  * 直接传给 experimental_createMCPClient 的 transport 参数。
  */
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { type JSONRPCMessage, MCPClientError, type MCPTransport } from "ai";
+
+/** v7 起 @ai-sdk/mcp 不再导出 MCPClientError；本地等价类（MCPTransport.onerror 契约只要求 Error） */
+class MCPClientError extends Error {
+  constructor(options: { message: string }) {
+    super(options.message);
+    this.name = "MCPClientError";
+  }
+}
 
 // ==================== SSE 流解析 ====================
 
@@ -282,18 +290,18 @@ export class SseLegacyMcpTransport implements MCPTransport {
         body: JSON.stringify(message),
         signal: this.abortController.signal,
       });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        fail(
+          new MCPClientError({
+            message: `MCP SSE Transport: POST 失败（HTTP ${response.status}）${text.slice(0, 200)}`,
+          }),
+        );
+      }
     } catch (error) {
       fail(
         new MCPClientError({
           message: `MCP SSE Transport: ${error instanceof Error ? error.message : String(error)}`,
-        }),
-      );
-    }
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      fail(
-        new MCPClientError({
-          message: `MCP SSE Transport: POST 失败（HTTP ${response.status}）${text.slice(0, 200)}`,
         }),
       );
     }

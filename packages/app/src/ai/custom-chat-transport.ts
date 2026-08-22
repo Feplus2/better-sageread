@@ -11,7 +11,7 @@ import {
   type PrepareSendMessagesRequest,
   type UIMessageChunk,
   convertToModelMessages,
-  stepCountIs,
+  isStepCount,
   streamText,
 } from "ai";
 import { toast } from "sonner";
@@ -175,7 +175,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });
 
     // sanitizeMessageParts：中断残留的 undefined text part 归一（否则 convert 后 zod 校验报 Invalid prompt）
-    const convertedMessages = convertToModelMessages(
+    // v6 起 convertToModelMessages 为异步（v3 规范），必须 await
+    const convertedMessages = await convertToModelMessages(
       stripUnknownToolParts(sanitizeMessageParts(selectedMessages), tools),
       {
         tools,
@@ -204,13 +205,15 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       messages: convertedMessages,
       abortSignal: options.abortSignal,
       toolChoice: "auto",
-      stopWhen: stepCountIs(20),
+      stopWhen: isStepCount(20),
       tools,
-      system: systemPrompt,
-      onFinish: () => {
+      // v7：system 更名 instructions（语义不变，逐字节兼容缓存）
+      instructions: systemPrompt,
+      onEnd: () => {
         void mcp.closeAll();
       },
-      ...(providerOptions ? { providerOptions } : {}),
+      // v7 providerOptions 要求 JSON 兼容值；档位映射产物即 JSON（string/number）
+      ...(providerOptions ? { providerOptions: providerOptions as Record<string, any> } : {}),
     });
 
     return result.toUIMessageStream({
@@ -229,6 +232,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
       messageMetadata: ({ part }) => {
         if (part.type === "finish") {
+          // UI 流 finish part 的字段仍为 totalUsage（v7 弃用的是 LanguageModelUsage 层的用法）
           return {
             totalUsage: part.totalUsage,
           };

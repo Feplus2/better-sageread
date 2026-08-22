@@ -79,7 +79,7 @@ const HomeLayout = () => {
       .onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === "enter" || payload.type === "over") {
-          if (payload.paths.some((p) => /\.(epub|pdf)$/i.test(p))) setDragOver(true);
+          if ("paths" in payload && payload.paths.some((p) => /\.(epub|pdf)$/i.test(p))) setDragOver(true);
         } else if (payload.type === "leave") {
           setDragOver(false);
         } else if (payload.type === "drop") {

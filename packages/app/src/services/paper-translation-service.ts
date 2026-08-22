@@ -176,7 +176,7 @@ async function extractGlossary(
   markdown: string,
   model: ReturnType<typeof createModelInstance>,
   signal?: AbortSignal,
-  providerOptions?: Record<string, Record<string, unknown>>,
+  providerOptions?: Record<string, Record<string, any>>,
 ): Promise<PaperGlossaryItem[] | null> {
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   const parts: string[] = [];
@@ -271,7 +271,7 @@ async function translateMetadata(
   force: boolean,
   signal?: AbortSignal,
   glossary?: PaperGlossaryItem[] | null,
-  providerOptions?: Record<string, Record<string, unknown>>,
+  providerOptions?: Record<string, Record<string, any>>,
 ): Promise<void> {
   const metaPath = await join(dir, "metadata.json");
   if (!(await exists(metaPath))) return;
