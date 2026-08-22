@@ -1113,10 +1113,13 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       const band = scrollRoot.clientHeight * 0.25;
       let active: Element | null = null;
       for (const el of headings) {
-        if (el.getBoundingClientRect().top - rootTop <= band) active = el;
-        else break;
+        if (el.getBoundingClientRect().top - rootTop <= band) {
+          // 只锚带 id 的标题：论文主标题常无 id（rehype-slug 只给编号小节生成），
+          // 锚无 id 标题会被 report 吞掉且无法与 TOC/跳转联动
+          if (el.id) active = el;
+        } else break;
       }
-      return active ?? headings[0];
+      return active ?? headings.find((h) => h.id) ?? headings[0];
     };
     const report = (el: Element) => {
       if (!el.id || el.id === activeHeadingIdRef.current) return;
@@ -1268,8 +1271,18 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 顶部 TOC 跳转也是转跳（同一滚动容器），纳入历史
   const scrollToHeading = useCallback(
     (id: string): boolean => {
-      activeHeadingIdRef.current = id;
-      setActiveHeadingId(id);
+      // H 修复（2026-08-23）：跳转目标直接上报父组件——若只预写去重 ref，
+      // 追踪器随后 compute 出同一目标时被去重吞掉（实测 TOC 跳转滚动成功但
+      // header/TOC 高亮/Agent 位置全部停在旧值）
+      const el0 = contentRef.current?.querySelector(`[id="${CSS.escape(id)}"]`);
+      if (el0) {
+        activeHeadingIdRef.current = id;
+        setActiveHeadingId(id);
+        onActiveHeadingChangeRef.current?.({ id, text: el0.textContent ?? "" });
+      } else {
+        activeHeadingIdRef.current = id;
+        setActiveHeadingId(id);
+      }
       const root = scrollRef.current;
       // 多 tab 并存时同 id 元素在其他 tab 的 DOM 里也存在，必须按本容器取（2026-08-20 实测串 tab）
       const el = contentRef.current?.querySelector(`[id="${CSS.escape(id)}"]`);
