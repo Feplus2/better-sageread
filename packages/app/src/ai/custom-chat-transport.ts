@@ -9,6 +9,7 @@ import {
   type ChatTransport,
   type LanguageModel,
   type PrepareSendMessagesRequest,
+  type Tool,
   type UIMessageChunk,
   convertToModelMessages,
   isStepCount,
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import { getMcpToolsForScope } from "./mcp/mcp-manager";
 import { chatReasoningProviderOptions } from "./providers/reasoning-map";
 import { modelSupportsVision } from "./providers/vision-map";
+import { buildLazyToolset, buildToolDirectoryBoard, shouldUseDirectoryMode } from "./tools/lazy-toolset";
 import { getToolsForScope } from "./tools/registry";
 import {
   loadMemorySection,
@@ -164,7 +166,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     }
 
     // P1：包装安全守卫——写/执行/外发类工具按安全模式弹确认卡（界外判定在 Rust 侧；mcp_ 前缀工具同样受门控）
-    const tools = wrapToolsWithGuard(
+    const guardedTools = wrapToolsWithGuard(
       {
         ...getToolsForScope(agentScope, {
           bookId: activeBookId,
@@ -175,6 +177,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
       agentScope,
     );
+
+    // D8 目录牌模式（预算守门：工具池 >30 个或 schema >12k 字符自动启用）：
+    // 请求工具面换 describeTool/useTool 惰性入口，真实工具（含守卫包装）经 useTool 转发执行；
+    // 目录牌文本进 system 静态区（随 scope/连接器集稳定，缓存友好）。
+    const directoryMode = shouldUseDirectoryMode(guardedTools);
+    const tools: Record<string, Tool> = directoryMode ? buildLazyToolset(guardedTools) : guardedTools;
 
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
     options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });
@@ -192,8 +200,10 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // D3 静态优先布局：buildPrompt（基词+静态段+技能+metadata，按书稳定）在前，
     // 工作区/记忆段（准静态）居中，每轮可能变化的动态状态殿后，最后是罕见的前情摘要。
     const dynamicSection = buildDynamicStateSection(chatContext);
+    const directoryBoard = directoryMode ? `\n\n${buildToolDirectoryBoard(guardedTools)}` : "";
     const systemPrompt =
       (await buildPrompt(chatContext)) +
+      directoryBoard +
       // 工作区根 + 文件即记忆（memory.md）：三 scope 统一在此注入，按 scope 解析生效根
       (await loadWorkspaceSection(agentScope)) +
       (await loadMemorySection(agentScope)) +

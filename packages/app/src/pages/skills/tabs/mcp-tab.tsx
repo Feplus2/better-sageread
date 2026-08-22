@@ -287,6 +287,15 @@ export default function McpTab() {
         </div>
       </div>
 
+      {/* D8 预算守门的事前提示：连接器过多会显著增加工具面，聊天请求会自动切换"目录牌模式"
+          （按需取说明书，不崩溃但首次调用多一步）；此处提示引导收敛生效范围 */}
+      {servers.length > 10 && (
+        <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-700 text-xs dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          已挂载 {servers.length} 个连接器——工具池较大时模型选工具的准确率会下降，聊天将自动启用「目录牌
+          按需加载」模式（调用前先查说明书）。建议在各项连接器里只勾选真正需要的助手生效范围。
+        </div>
+      )}
+
       {servers.length === 0 ? (
         <div className="flex h-40 flex-col items-center justify-center gap-3">
           <Server className="size-8 text-muted-foreground" />

@@ -22,6 +22,7 @@ export const TOOL_RESULT_PREVIEW_CHARS = 2000;
 
 /** L1 纳入截断的内容承载型工具（UI 消费输出的工具不纳入，如 mindmap） */
 const L1_CONTENT_TOOLS = new Set([
+  "describeTool",
   "ragSearch",
   "ragContext",
   "ragRange",
