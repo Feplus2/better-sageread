@@ -109,6 +109,42 @@ export const handleWheel = (bookId: string, event: WheelEvent) => {
   );
 };
 
+/** D3+T4：iframe 内图片交互转发（foliate 书籍内容在 iframe 里，DOM 事件不冒泡到宿主）
+ * 右键/点击命中 img 时 preventDefault 并 postMessage 给宿主层的主题菜单/大图预览 */
+export const handleImageContextMenu = (bookId: string, event: MouseEvent) => {
+  const img = (event.target as Element | null)?.closest?.("img");
+  if (!img) return;
+  event.preventDefault();
+  event.stopPropagation();
+  window.postMessage(
+    {
+      type: "iframe-image-menu",
+      bookId,
+      src: img.src,
+      alt: img.getAttribute("alt") ?? "",
+      clientX: event.clientX,
+      clientY: event.clientY,
+    },
+    "*",
+  );
+};
+
+export const handleImageClick = (bookId: string, event: MouseEvent) => {
+  const img = (event.target as Element | null)?.closest?.("img");
+  if (!img) return;
+  event.preventDefault();
+  event.stopPropagation();
+  window.postMessage(
+    {
+      type: "iframe-image-preview",
+      bookId,
+      src: img.src,
+      alt: img.getAttribute("alt") ?? "",
+    },
+    "*",
+  );
+};
+
 export const handleClick = (bookId: string, event: MouseEvent) => {
   const now = Date.now();
 

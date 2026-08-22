@@ -6,6 +6,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, chatReasoningBodyPatch } from "./reasoning-map";
+import { VISION_NAME_RE } from "./vision-map";
 
 export interface ProviderConfig {
   providerId: string;
@@ -144,6 +145,17 @@ export function createProviderInstance(config: ProviderConfig) {
 
   switch (providerId) {
     case "deepseek":
+      // D3 修复：视觉型号走 openai-compatible 通道——@ai-sdk/deepseek 为纯文本官方适配器
+      // （file part 被静默丢弃，模型只能看到文件名文本）；DeepSeek 视觉 API 本就是 OpenAI
+      // 兼容格式（image_url），openai-compatible 适配器可正确转换。命名判定与 vision-map 同源。
+      if (modelId && VISION_NAME_RE.test(modelId.toLowerCase())) {
+        return createOpenAICompatible({
+          name: "deepseek-vision",
+          baseURL: baseUrl || "https://api.deepseek.com",
+          apiKey: apiKey || "",
+          ...(wrappedDefault ? { fetch: wrappedDefault } : {}),
+        });
+      }
       return createDeepSeek({
         apiKey: apiKey || "",
         baseURL: baseUrl,

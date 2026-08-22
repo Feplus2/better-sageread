@@ -1,12 +1,12 @@
 import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { ImagePreviewOverlay } from "@/components/media/image-interactions";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { BookNote, HighlightColor, HighlightStyle } from "@/types/book";
-import { save } from "@tauri-apps/plugin-dialog";
-import { readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { readFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Quote, Undo2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ImageOff, Undo2 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -623,136 +623,8 @@ function createPaperImageComponent(
 }
 
 /** 图片大图预览（点开）：居中放大 + 复制 / 保存 / 引用 / 关闭；Esc 与点击背板关闭 */
-function PaperImagePreview({
-  image,
-  onClose,
-  onQuote,
-}: {
-  image: { src: string; alt: string };
-  onClose: () => void;
-  /** J2 补环：引用到 AI 输入区（转 dataUrl 后上抛，视觉闸在聊天侧判） */
-  onQuote?: (image: { dataUrl: string; mediaType: string; name: string }) => void;
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const handleCopy = async () => {
-    try {
-      const blob = await (await fetch(image.src)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
-      toast.success("图片已复制到剪贴板");
-    } catch (error) {
-      toast.error(`复制失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
-  const handleQuote = async () => {
-    try {
-      const blob = await (await fetch(image.src)).blob();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("读取图片失败"));
-        reader.readAsDataURL(blob);
-      });
-      onQuote?.({
-        dataUrl,
-        mediaType: blob.type || "image/png",
-        name: image.alt || "figure",
-      });
-      toast.success("已引用到对话输入区");
-      onClose();
-    } catch (error) {
-      toast.error(`引用失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      const base =
-        image.alt
-          .replace(/[\\/:*?"<>|]/g, "_")
-          .slice(0, 60)
-          .trim() || "figure";
-      const path = await save({
-        defaultPath: `${base}.png`,
-        filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
-      });
-      if (!path) return;
-      const bytes = new Uint8Array(await (await fetch(image.src)).arrayBuffer());
-      await writeFile(path, bytes);
-      toast.success(`已保存到 ${path}`);
-    } catch (error) {
-      toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
-  return (
-    // 背板点击关闭；内容区阻止冒泡
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div className="absolute top-4 right-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
-        >
-          <Copy className="size-4" />
-          复制
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
-        >
-          <Download className="size-4" />
-          保存
-        </button>
-        {onQuote && (
-          <button
-            type="button"
-            onClick={handleQuote}
-            className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
-          >
-            <Quote className="size-4" />
-            引用
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex items-center rounded-md bg-white/10 p-1.5 text-white hover:bg-white/20"
-          aria-label="关闭预览"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
-      <img
-        src={image.src}
-        alt={image.alt}
-        className="max-h-[86vh] max-w-[92vw] object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
-      {image.alt && (
-        <div className="-translate-x-1/2 absolute bottom-4 left-1/2 max-w-[80vw] truncate rounded-md bg-black/60 px-3 py-1.5 text-neutral-200 text-xs">
-          {image.alt}
-        </div>
-      )}
-    </div>
-  );
-}
-
 const AUTHOR_COLLAPSE_COUNT = 6;
 
-/** 正文顶部的元数据块（标题/作者/出处/DOI/摘要/关键词），无 frontmatter 时不渲染 */
 function MetadataBlock({
   metadata,
   viewMode = "original",
@@ -2203,7 +2075,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         />
       )}
       {imagePreview && (
-        <PaperImagePreview image={imagePreview} onClose={() => setImagePreview(null)} onQuote={onQuoteImageToChat} />
+        <ImagePreviewOverlay image={imagePreview} onClose={() => setImagePreview(null)} onQuote={onQuoteImageToChat} />
       )}
     </>
   );

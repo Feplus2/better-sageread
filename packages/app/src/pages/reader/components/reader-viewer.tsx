@@ -87,7 +87,8 @@ const ReaderViewerContent: React.FC = () => {
           : undefined
       }
     >
-      <ImageInteractions containerRef={foliateViewer.containerRef} enableClickPreview onQuote={handleQuoteImage} />
+      {/* 书籍内容在 foliate iframe 里：经 postMessage 通道接收图片事件（见 iframeEventHandlers） */}
+      <ImageInteractions viaPostMessage onQuote={handleQuoteImage} />
     </div>
   );
 };

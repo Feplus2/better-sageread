@@ -168,6 +168,23 @@ export function ImagePreviewOverlay({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // D4：滚轮缩放 + 拖拽平移 + 双击复位（100% 起步，0.5~8 倍）
+  const imgWrapRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    const el = imgWrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setZoom((z) => Math.min(8, Math.max(0.5, z * (e.deltaY < 0 ? 1.15 : 0.87))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
   const run = async (action: "copy" | "save" | "quote") => {
     try {
       if (action === "copy") {
@@ -214,8 +231,42 @@ export function ImagePreviewOverlay({
           <X className="size-4" />
         </Button>
       </div>
-      <div className="max-h-[88vh] max-w-[92vw]" onClick={(e) => e.stopPropagation()}>
-        <img src={image.src} alt={image.alt} className="max-h-[88vh] max-w-[92vw] object-contain" />
+      <div
+        ref={imgWrapRef}
+        className={cn(
+          "flex max-h-[88vh] max-w-[92vw] items-center justify-center overflow-visible",
+          dragRef.current === null ? "cursor-grab" : "cursor-grabbing",
+        )}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={() => {
+          setZoom(1);
+          setOffset({ x: 0, y: 0 });
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          dragRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = dragRef.current;
+          if (!d) return;
+          setOffset({ x: d.ox + (e.clientX - d.x), y: d.oy + (e.clientY - d.y) });
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+        }}
+      >
+        <img
+          src={image.src}
+          alt={image.alt}
+          draggable={false}
+          className="max-h-[88vh] max-w-[92vw] select-none object-contain transition-transform duration-75"
+          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
+        />
       </div>
     </div>
   );
@@ -230,17 +281,37 @@ export function ImageInteractions({
   enableClickPreview = false,
   onQuote,
   className,
+  viaPostMessage = false,
 }: {
-  containerRef: React.RefObject<HTMLElement | null>;
+  containerRef?: React.RefObject<HTMLElement | null>;
+  /** 宿主层容器监听（论文正文等普通 DOM 场景） */
   enableClickPreview?: boolean;
   onQuote?: (image: { dataUrl: string; mediaType: string; name: string }) => void;
   className?: string;
+  /** iframe 场景（foliate 书籍）：iframeEventHandlers 经 postMessage 转发图片事件，此处接收 */
+  viaPostMessage?: boolean;
 }) {
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; image: TargetImage } | null>(null);
   const [preview, setPreview] = useState<TargetImage | null>(null);
 
+  // iframe 通道：foliate 书籍内容在 iframe 里，事件经 iframeEventHandlers postMessage 转发到宿主
   useEffect(() => {
-    const container = containerRef.current;
+    if (!viaPostMessage) return;
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data;
+      if (!d || typeof d !== "object") return;
+      if (d.type === "iframe-image-menu" && typeof d.src === "string") {
+        setMenu({ pos: { x: d.clientX ?? 200, y: d.clientY ?? 200 }, image: { src: d.src, alt: String(d.alt ?? "") } });
+      } else if (d.type === "iframe-image-preview" && typeof d.src === "string") {
+        setPreview({ src: d.src, alt: String(d.alt ?? "") });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [viaPostMessage]);
+
+  useEffect(() => {
+    const container = containerRef?.current;
     if (!container) return;
 
     const imageFromEvent = (e: Event): TargetImage | null => {

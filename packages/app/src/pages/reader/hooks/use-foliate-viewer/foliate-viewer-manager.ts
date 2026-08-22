@@ -12,6 +12,8 @@ import { getDirFromUILanguage } from "@/utils/rtl";
 import { applyFixedlayoutStyles, applyImageStyle, applyTranslationStyle, transformStylesheet } from "@/utils/style";
 import {
   handleClick,
+  handleImageClick,
+  handleImageContextMenu,
   handleKeydown,
   handleMouseMove,
   handleMousedown,
@@ -206,12 +208,21 @@ export class FoliateViewerManager {
     if (!doc.isEventListenersAdded) {
       doc.isEventListenersAdded = true;
       const bookId = this.config.bookId;
-      doc.addEventListener("click", (event: MouseEvent) => handleClick(bookId, event));
+      doc.addEventListener("click", (event: MouseEvent) => {
+        const img = (event.target as Element | null)?.closest?.("img");
+        if (img) {
+          handleImageClick(bookId, event);
+          return;
+        }
+        handleClick(bookId, event);
+      });
       doc.addEventListener("mousedown", (event: MouseEvent) => handleMousedown(bookId, event));
       doc.addEventListener("mouseup", (event: MouseEvent) => handleMouseup(bookId, event));
       doc.addEventListener("mousemove", (event: MouseEvent) => handleMouseMove(bookId, event));
       doc.addEventListener("wheel", (event: WheelEvent) => handleWheel(bookId, event));
       doc.addEventListener("keydown", (event: KeyboardEvent) => handleKeydown(bookId, event));
+      // D3+T4：图片右键主题菜单 / 点击大图预览（宿主层经 postMessage 接收）
+      doc.addEventListener("contextmenu", (event: MouseEvent) => handleImageContextMenu(bookId, event));
     }
   }
 

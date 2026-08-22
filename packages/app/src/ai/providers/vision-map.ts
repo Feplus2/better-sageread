@@ -11,7 +11,7 @@
  * 各家新视觉模型命名高度规律，启发式可覆盖发布节奏领先于本表更新的型号
  * （实测踩坑：deepseek-v4-flash-vision-exp 被旧表误拦）。已知纯文本系列仍显式拦截。
  */
-const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
+export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
 
 export function modelSupportsVision(providerId: string | undefined, modelId: string | undefined): boolean {
   const pid = (providerId ?? "").toLowerCase();
