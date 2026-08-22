@@ -377,6 +377,23 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         }
     }
 
+    // 阅读助手系统提示词 v2.6（2026-08-21）：D2 metadata 保守档——目录按当前章裁剪后注入，
+    // 「完整信息」口径改为「裁剪概览 + 按需获取」。手术式替换，只在仍是官方文案时执行；幂等。
+    let result = sqlx::query(
+        "UPDATE skills SET content = REPLACE(content, '• 【当前阅读图书元信息与目录】包含当前正在阅读的书籍的完整信息', ?), updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%【当前阅读图书元信息与目录】包含当前正在阅读的书籍的完整信息%'",
+    )
+    .bind("• 【当前阅读图书元信息与目录】包含当前书的元信息与目录概览（已按当前章节裁剪，深层条目按需用 ragToc/readBookSection 获取）")
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.6 (metadata trimmed view).");
+        }
+    }
+
     // book_notes.category（C2 AI 重点标注的类别 id，如 goal/methods；NULL=人工标注）
     let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN category TEXT")
         .execute(pool)

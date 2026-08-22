@@ -28,7 +28,6 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   const activeBookId = chatContext?.activeBookId;
   let systemPromptBase = "";
   let activeSkillNames: string[] = [];
-
   try {
     const allSkills = await getSkills();
     const systemPromptSkill = allSkills.find((skill) => skill.isSystem && skill.isActive);
@@ -102,11 +101,86 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
 
   // 静态优先布局（D3）：稳定的元信息与目录段在 system prompt 内殿后；
   // 每轮可能变化的【当前阅读章节】由 transport 移到全部注入段的最尾部（缓存友好）。
+  // D2 保守档：目录按当前章裁剪（一级平铺 + 当前章子树），深层走 ragToc/readBookSection。
   if (metadataMd && metadataMd.trim().length > 0) {
-    prompt += `\n\n【当前阅读图书元信息与目录】\n${metadataMd}`;
+    const tocHint = hasVectorCapability
+      ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；完整目录用 ragToc 获取，readBookSection 支持标题模糊匹配）"
+      : "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；readBookSection 按标题模糊直读原文）";
+    const trimmed = trimMetadataForPrompt(metadataMd, chatContext?.activeSectionLabel, tocHint);
+    prompt += `\n\n【当前阅读图书元信息与目录】\n${trimmed}`;
   }
 
   return prompt;
+}
+
+/**
+ * D2 metadata 保守档（2026-08-21）：整份目录树不再常驻 system prompt——
+ * 注入视图 = 元信息 + 一级章节平铺 + 当前章子树（祖先链保留以维持层级可读），
+ * 深层目录由 ragToc/readBookSection 按需获取。生成侧（pipeline.rs 的完整 metadata.md）不动，
+ * 本函数只裁剪注入视图；无目录结构或解析失败时原样返回（安全回落）。
+ */
+function trimMetadataForPrompt(md: string, sectionLabel: string | undefined, hintLine: string): string {
+  const tocMark = "## 目录";
+  const tocIdx = md.indexOf(tocMark);
+  if (tocIdx === -1) return md;
+  const head = md.slice(0, tocIdx + tocMark.length);
+  const lines = md.slice(tocIdx + tocMark.length).split("\n");
+
+  interface TocEntry {
+    indent: number;
+    lineIdx: number;
+  }
+  const entries: TocEntry[] = [];
+  lines.forEach((line, i) => {
+    const m = line.match(/^(\s*)-\s+\S/);
+    if (!m) return;
+    entries.push({ indent: Math.floor(m[1].length / 2), lineIdx: i });
+  });
+  if (entries.length === 0) return md;
+
+  // 目录头部的说明行（首个条目前的非条目行）保留
+  const preamble = lines.slice(0, entries[0].lineIdx);
+
+  // 当前章匹配：双向包含，从最深条目向前找（同名时深层优先）；未命中则只有一级平铺
+  const label = sectionLabel?.trim();
+  let matchIdx = -1;
+  if (label) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const title = lines[entries[i].lineIdx].replace(/^(\s*)-\s+/, "").trim();
+      if (title && (label.includes(title) || title.includes(label))) {
+        matchIdx = i;
+        break;
+      }
+    }
+  }
+
+  const kept = new Set<number>();
+  for (const e of entries) {
+    if (e.indent === 0) kept.add(e.lineIdx);
+  }
+  if (matchIdx >= 0) {
+    const stack: TocEntry[] = [];
+    for (let i = 0; i <= matchIdx; i++) {
+      while (stack.length && stack[stack.length - 1].indent >= entries[i].indent) stack.pop();
+      stack.push(entries[i]);
+    }
+    for (const a of stack) kept.add(a.lineIdx);
+    const match = entries[matchIdx];
+    for (let i = matchIdx + 1; i < entries.length; i++) {
+      if (entries[i].indent <= match.indent) break;
+      kept.add(entries[i].lineIdx);
+    }
+  }
+
+  const body: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i < entries[0].lineIdx) continue; // preamble 另行拼接
+    if (!kept.has(i)) continue;
+    const line = lines[i];
+    if (line.trim() === "" && body[body.length - 1]?.trim() === "") continue;
+    body.push(line);
+  }
+  return `${head}\n${preamble.join("\n").trim()}\n${body.join("\n").trim()}\n${hintLine}`;
 }
 
 /** 把 metadata.json 格式化为提示词可用的元信息块（无目录部分，仅书名/作者/出版信息） */
