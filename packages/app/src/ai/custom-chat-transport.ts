@@ -42,17 +42,20 @@ import { compactAgedRagResults } from "./utils/tool-result-slimming";
  */
 function buildDynamicStateSection(chatContext: ChatContext | undefined): string {
   const agentScope = chatContext?.agentScope ?? "reader";
+  // 反复读：实测模型回答位置类问题时倾向引用自己历史里的旧答案而非本段注入
+  // （注入链已被注入段复述实验证明实时正确）——加显式压制指令
+  const antiEcho = "（位置以此处为准；对话历史中早前提到的小节/位置可能已过时，回答位置类问题时忽略历史，以本段为准）";
   if (agentScope === "paper") {
     const label = chatContext?.activeSectionLabel?.trim();
     const body = chatContext?.activeContext?.trim();
     const parts: string[] = [];
     if (label) parts.push(`【当前阅读小节】\n${label}`);
     if (body) parts.push(`【当前小节正文】\n${body}`);
-    return parts.join("\n\n");
+    return parts.length > 0 ? parts.join("\n\n") + antiEcho : "";
   }
   if (agentScope === "reader") {
     const label = chatContext?.activeSectionLabel?.trim();
-    if (label) return `【当前阅读章节】\n${label}`;
+    if (label) return `【当前阅读章节】\n${label}${antiEcho}`;
   }
   return "";
 }
@@ -65,11 +68,15 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     model: LanguageModel,
     options?: {
       prepareSendMessagesRequest?: PrepareSendMessagesRequest<UIMessage>;
+      /** 面板的 agent scope：body 未携带 chatContext 时按此从活注册表兜底（G 修复） */
+      scopeHint?: string;
     },
   ) {
     this.model = model;
     this.prepareSendMessagesRequest = options?.prepareSendMessagesRequest;
+    this.scopeHint = options?.scopeHint;
   }
+  private scopeHint?: string;
 
   updateModel(model: LanguageModel) {
     this.model = model;
@@ -103,7 +110,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       requestBody = prepared.body;
     }
 
-    const chatContext = (requestBody as any)?.chatContext as ChatContext | undefined;
+    let chatContext = (requestBody as any)?.chatContext as ChatContext | undefined;
+    if (!chatContext) {
+      // 活注册表兜底：body 未带（prepare 链任何一环断裂）时按 scopeHint 读最新快照
+      const { getLiveChatContext } = await import("./utils/live-chat-context");
+      chatContext = getLiveChatContext(this.scopeHint);
+    }
     const activeBookId = chatContext?.activeBookId;
     const agentScope = chatContext?.agentScope ?? "reader";
 
