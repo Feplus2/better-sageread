@@ -46,19 +46,14 @@ export interface TabInfo extends TabProperties {
 interface ReaderStore {
   activeBookId: string | null;
   activeBook: (SimpleBook & BookMetadata) | null;
-  activeContext: string | null;
   lastBookId: string | null;
-  lastSemanticContext: string | null;
   booksState: { [bookId: string]: BookState };
   tabs: TabInfo[];
   activeTabId: string | null;
   isHomeActive: boolean;
 
   setActiveBookId: (bookId: string | null) => void;
-  setActiveContext: (context: string | null) => void;
-  getActiveContext: () => string | null;
   setLastBookId: (bookId: string | null) => void;
-  setLastSemanticContext: (context: string | null) => void;
   addTab: (bookId: string, title?: string) => void;
   removeTab: (tabId: string) => void;
   activateTab: (tabId: string) => void;
@@ -94,9 +89,7 @@ async function loadBookMetadata(bookId: string): Promise<BookMetadata | null> {
 export const useReaderStore = create<ReaderStore>((set, get) => ({
   activeBookId: null,
   activeBook: null,
-  activeContext: null,
   lastBookId: null,
-  lastSemanticContext: null,
   booksState: {},
   tabs: [],
   activeTabId: null,
@@ -108,9 +101,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
 
     if (currentBookId && bookId && currentBookId !== bookId) {
       set({
-        activeContext: null,
         lastBookId: null,
-        lastSemanticContext: null,
       });
     }
 
@@ -132,20 +123,8 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     }
   },
 
-  setActiveContext: (context: string | null) => {
-    set({ activeContext: context });
-  },
-
-  getActiveContext: () => {
-    return get().activeContext;
-  },
-
   setLastBookId: (bookId: string | null) => {
     set({ lastBookId: bookId });
-  },
-
-  setLastSemanticContext: (context: string | null) => {
-    set({ lastSemanticContext: context });
   },
 
   addTab: (bookId: string, title?: string) => {

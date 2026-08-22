@@ -23,9 +23,7 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
       onProviderSelect?.(providerId);
       return;
     }
-    const updatedProviders = modelProviders.map((p) =>
-      p.provider === providerId ? { ...p, active: !p.active } : p,
-    );
+    const updatedProviders = modelProviders.map((p) => (p.provider === providerId ? { ...p, active: !p.active } : p));
     setModelProviders(updatedProviders);
   };
 
@@ -40,7 +38,7 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
         <h2 className="text mb-4 dark:text-neutral-200">辅助模型</h2>
         <div className="flex items-start justify-between gap-4">
           <p className="mt-1 text-neutral-600 text-xs dark:text-neutral-400">
-            用于生成对话标题、语义上下文、AI 标签、PDF 转换等轻量任务，推荐选择便宜快速的模型；留空则跟随当前聊天模型
+            用于生成对话标题、AI 标签、前情摘要压缩、PDF 转换等轻量任务，推荐选择便宜快速的模型；留空则跟随当前聊天模型
           </p>
           <div className="flex flex-shrink-0 items-center gap-2">
             <ModelSelector
@@ -96,7 +94,9 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
                     <div
                       onClick={() => {
                         if (!provider.active && !provider.apiKey?.trim()) {
-                          toast.info("请先填写 API Key", { description: `进入「${provider.name}」设置页配置 API Key 后再启用` });
+                          toast.info("请先填写 API Key", {
+                            description: `进入「${provider.name}」设置页配置 API Key 后再启用`,
+                          });
                           onProviderSelect?.(provider.provider);
                         }
                       }}

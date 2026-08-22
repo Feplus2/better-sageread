@@ -244,7 +244,7 @@ export function createUtilityModelInstance(providerId: string, modelId: string) 
 }
 
 /**
- * 获取用于轻量任务（生成对话标题、语义上下文、AI 标签等）的辅助模型
+ * 获取用于轻量任务（生成对话标题、AI 标签、前情摘要压缩等）的辅助模型
  * 未配置辅助模型时回落到当前聊天选中模型
  * _task 为将来按任务类型分配模型预留，当前忽略
  */

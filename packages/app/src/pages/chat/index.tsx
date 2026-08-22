@@ -169,8 +169,7 @@ function ChatPage() {
   const [toolDetail, setToolDetail] = useState<any>(null);
   const [showToolDetail, setShowToolDetail] = useState(false);
   const scrollContextRef = useRef<any>(null);
-  const { activeBookId, activeContext, setActiveBookId, setActiveContext, currentThread, setCurrentThread } =
-    useChatReaderStore();
+  const { activeBookId, setActiveBookId, currentThread, setCurrentThread } = useChatReaderStore();
 
   const {
     input,
@@ -203,11 +202,9 @@ function ChatPage() {
   } = useChatState({
     chatContext: {
       activeBookId,
-      activeContext,
       agentScope: "central",
     },
     setActiveBookId,
-    setActiveContext,
     currentThread: currentThread,
     setCurrentThread: setCurrentThread,
   });

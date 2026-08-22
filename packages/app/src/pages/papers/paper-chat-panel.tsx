@@ -194,8 +194,6 @@ export function PaperChatPanel({
       paperScopeIds,
     },
     setActiveBookId: () => {},
-    // 语义上下文由当前小节派生，不使用线程存储的语义上下文
-    setActiveContext: () => {},
     currentThread,
     setCurrentThread,
   });

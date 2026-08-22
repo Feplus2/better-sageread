@@ -360,6 +360,23 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
         }
     }
 
+    // 阅读助手系统提示词 v2.5（2026-08-21）：D1 取消语义上下文——每条消息一次的隐藏生成调用退役，
+    // 基词同步删除【语义上下文】行（系统注入段不再有该项）。手术式删除，只在仍是官方文案时执行；
+    // 已删自然幂等；用户自定义过的不动。
+    let result = sqlx::query(
+        "UPDATE skills SET content = REPLACE(content, '• 【语义上下文】记录对话主题和关注点的变化\n', ''), updated_at = ?
+         WHERE is_system = 1
+           AND content LIKE '%【语义上下文】记录对话主题和关注点的变化%'",
+    )
+    .bind(chrono::Utc::now().timestamp_millis())
+    .execute(pool)
+    .await;
+    if let Ok(done) = result {
+        if done.rows_affected() > 0 {
+            println!("Migration applied: reader system prompt upgraded to v2.5 (semantic context removed).");
+        }
+    }
+
     // book_notes.category（C2 AI 重点标注的类别 id，如 goal/methods；NULL=人工标注）
     let result = sqlx::query("ALTER TABLE book_notes ADD COLUMN category TEXT")
         .execute(pool)

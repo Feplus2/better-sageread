@@ -26,8 +26,6 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
 
 export async function buildReadingPrompt(chatContext: ChatContext | undefined): Promise<string> {
   const activeBookId = chatContext?.activeBookId;
-  const semanticContext = chatContext?.activeContext;
-  const sectionLabel = chatContext?.activeSectionLabel;
   let systemPromptBase = "";
   let activeSkillNames: string[] = [];
 
@@ -102,14 +100,8 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     prompt += activeSkillNames.map((name) => `• ${name}`).join("\n");
   }
 
-  if (semanticContext && semanticContext.trim().length > 0) {
-    prompt += `\n\n【语义上下文】\n${semanticContext}`;
-  }
-
-  if (sectionLabel && sectionLabel.trim().length > 0) {
-    prompt += `\n\n【当前阅读章节】\n${sectionLabel}`;
-  }
-
+  // 静态优先布局（D3）：稳定的元信息与目录段在 system prompt 内殿后；
+  // 每轮可能变化的【当前阅读章节】由 transport 移到全部注入段的最尾部（缓存友好）。
   if (metadataMd && metadataMd.trim().length > 0) {
     prompt += `\n\n【当前阅读图书元信息与目录】\n${metadataMd}`;
   }

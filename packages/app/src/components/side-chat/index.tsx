@@ -38,9 +38,7 @@ function ChatContent({ bookId }: ChatContentProps) {
   const [toolDetail, setToolDetail] = useState<any>(null);
   const [showMindmapDialog, setShowMindmapDialog] = useState(false);
 
-  const setActiveContext = useReaderStore((state) => state.setActiveContext)!;
   const progress = useReaderStore((state) => state.progress);
-  const activeContext = useReaderStore((state) => state.activeContext)!;
   const currentThread = useReaderStore((state) => state.currentThread);
   const setCurrentThread = useReaderStore((state) => state.setCurrentThread)!;
 
@@ -79,12 +77,10 @@ function ChatContent({ bookId }: ChatContentProps) {
   } = useChatState({
     chatContext: {
       activeBookId: bookId,
-      activeContext,
       activeSectionLabel: progress?.sectionLabel,
       agentScope: "reader",
     },
     setActiveBookId: () => {},
-    setActiveContext: setActiveContext,
     currentThread: currentThread,
     setCurrentThread: setCurrentThread,
   });

@@ -31,6 +31,28 @@ import {
 import { repairImageDataUrl, sniffImageMediaType } from "./utils/media-sniff";
 import { wrapToolsWithGuard } from "./utils/tool-guard";
 
+/**
+ * D3 动态状态段：每轮可能变化的位置信息（阅读章节/论文小节）统一放 system prompt 最尾部，
+ * 保证其前面的全部注入段（基词/工具/目录/工作区/记忆）前缀稳定，最大化提示缓存命中。
+ * 论文小节正文（chatContext.activeContext，页面按 heading 规则提取）属动态内容，同样后置。
+ */
+function buildDynamicStateSection(chatContext: ChatContext | undefined): string {
+  const agentScope = chatContext?.agentScope ?? "reader";
+  if (agentScope === "paper") {
+    const label = chatContext?.activeSectionLabel?.trim();
+    const body = chatContext?.activeContext?.trim();
+    const parts: string[] = [];
+    if (label) parts.push(`【当前阅读小节】\n${label}`);
+    if (body) parts.push(`【当前小节正文】\n${body}`);
+    return parts.join("\n\n");
+  }
+  if (agentScope === "reader") {
+    const label = chatContext?.activeSectionLabel?.trim();
+    if (label) return `【当前阅读章节】\n${label}`;
+  }
+  return "";
+}
+
 export class CustomChatTransport implements ChatTransport<UIMessage> {
   private model: LanguageModel;
   private prepareSendMessagesRequest?: PrepareSendMessagesRequest<UIMessage>;
@@ -161,11 +183,15 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
     );
 
+    // D3 静态优先布局：buildPrompt（基词+静态段+技能+metadata，按书稳定）在前，
+    // 工作区/记忆段（准静态）居中，每轮可能变化的动态状态殿后，最后是罕见的前情摘要。
+    const dynamicSection = buildDynamicStateSection(chatContext);
     const systemPrompt =
       (await buildPrompt(chatContext)) +
       // 工作区根 + 文件即记忆（memory.md）：三 scope 统一在此注入，按 scope 解析生效根
       (await loadWorkspaceSection(agentScope)) +
       (await loadMemorySection(agentScope)) +
+      (dynamicSection ? `\n\n${dynamicSection}` : "") +
       (summaryText ? `\n\n【前情摘要】\n${summaryText}\n（以上为早期对话的压缩摘要，非原始记录）` : "");
 
     // P3 思考强度档位：AI SDK 原生参数族（openai/google/openrouter/grok）在此下发；

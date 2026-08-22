@@ -19,27 +19,21 @@ export interface BookDataState {
 interface ChatReaderStore {
   activeBookId: string | undefined;
   bookData: BookDataState | null;
-  activeContext: string | undefined;
   lastBookId: string | undefined;
-  lastSemanticContext: string | undefined;
   config: BookConfig | undefined;
   isLoading: boolean;
   error: string | null;
   currentThread: Thread | null;
 
   setActiveBookId: (bookId: string | undefined) => void;
-  setActiveContext: (context: string | undefined) => void;
   setLastBookId: (bookId: string | undefined) => void;
-  setLastSemanticContext: (context: string | undefined) => void;
   setCurrentThread: (thread: Thread | null) => void;
 }
 
 export const useChatReaderStore = create<ChatReaderStore>((set, get) => ({
   activeBookId: undefined,
   bookData: null,
-  activeContext: undefined,
   lastBookId: undefined,
-  lastSemanticContext: undefined,
   config: undefined,
   isLoading: false,
   error: null,
@@ -50,9 +44,7 @@ export const useChatReaderStore = create<ChatReaderStore>((set, get) => ({
 
     if (currentBookId && bookId && currentBookId !== bookId) {
       set({
-        activeContext: undefined,
         lastBookId: undefined,
-        lastSemanticContext: undefined,
         config: undefined,
         bookData: null,
       });
@@ -124,16 +116,8 @@ export const useChatReaderStore = create<ChatReaderStore>((set, get) => ({
     }
   },
 
-  setActiveContext: (context: string | undefined) => {
-    set({ activeContext: context });
-  },
-
   setLastBookId: (bookId: string | undefined) => {
     set({ lastBookId: bookId });
-  },
-
-  setLastSemanticContext: (context: string | undefined) => {
-    set({ lastSemanticContext: context });
   },
 
   setCurrentThread: (thread: Thread | null) => {

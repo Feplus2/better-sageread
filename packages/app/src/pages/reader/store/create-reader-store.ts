@@ -34,13 +34,11 @@ export interface ReaderState {
   progress: BookProgress | undefined;
   sessionStats: SessionStats | null;
   isSessionInitialized: boolean;
-  activeContext: string | undefined;
   openDropdown: OpenDropdown;
   currentThread: Thread | null;
 
   initBook: () => Promise<void>;
   setConfig: (config: BookConfig) => void;
-  setActiveContext: (context: string | undefined) => void;
   saveConfig: (config: BookConfig) => Promise<void>;
   updateBooknotes: (booknotes: BookNote[]) => BookConfig | undefined;
   setView: (view: FoliateView) => void;
@@ -58,7 +56,6 @@ export const createReaderStore = (bookId: string) => {
   return createStore<ReaderState>((set, get) => ({
     bookId,
     config: null,
-    activeContext: undefined,
     bookData: null,
     view: null,
     location: null,
@@ -181,7 +178,6 @@ export const createReaderStore = (bookId: string) => {
     setSessionInitialized: (initialized) => set({ isSessionInitialized: initialized }),
     setLoading: (loading) => set({ isLoading: loading }),
     setError: (error) => set({ error }),
-    setActiveContext: (context) => set({ activeContext: context }),
     setOpenDropdown: (dropdown) => set({ openDropdown: dropdown }),
     setCurrentThread: (thread: Thread | null) => set({ currentThread: thread }),
   }));

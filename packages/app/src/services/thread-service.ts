@@ -67,46 +67,6 @@ export async function editThread(threadId: string, options: EditThreadOptions): 
   }
 }
 
-/**
- * 更新Thread的语义上下文
- */
-export async function updateThreadContext(threadId: string, context: string): Promise<Thread> {
-  try {
-    // 先获取当前thread以保留现有metadata
-    const currentThread = await getThreadById(threadId);
-
-    // 解析现有metadata
-    let metadata: ThreadMetadata = {};
-    try {
-      metadata = JSON.parse(currentThread.metadata);
-    } catch (error) {
-      console.warn("Failed to parse existing metadata, using empty object:", error);
-    }
-
-    // 更新语义上下文
-    metadata.semanticContext = context;
-
-    // 调用editThread更新
-    return await editThread(threadId, { metadata });
-  } catch (error) {
-    console.error("Error updating thread context:", error);
-    throw new Error("Failed to update thread context on the backend.");
-  }
-}
-
-/**
- * 获取Thread的语义上下文
- */
-export function getThreadContext(thread: Thread): string | undefined {
-  try {
-    const metadata: ThreadMetadata = JSON.parse(thread.metadata);
-    return metadata.semanticContext;
-  } catch (error) {
-    console.warn("Failed to parse thread metadata:", error);
-    return undefined;
-  }
-}
-
 export async function getLatestThreadBybookId(bookId: string | undefined, scope: ThreadScope): Promise<Thread | null> {
   try {
     const result: RawThread | null = await invoke("get_latest_thread_by_book_id", { bookId, scope });

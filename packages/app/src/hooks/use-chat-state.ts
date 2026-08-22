@@ -5,15 +5,7 @@ import { useForceUpdate } from "@/hooks/use-force-update";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
-import { generateContextWithAI } from "@/services/ai-context-service";
-import {
-  createThread,
-  editThread,
-  getLatestThreadBybookId,
-  getThreadById,
-  getThreadContext,
-  updateThreadContext,
-} from "@/services/thread-service";
+import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { useThreadStore } from "@/store/thread-store";
@@ -86,6 +78,7 @@ function normalizeChatError(error: unknown): Error {
 
 export interface ChatContext {
   activeBookId?: string;
+  /** paper 专用：当前阅读小节正文（页面按 heading 从 paper.md 规则提取）；reader/central 不使用 */
   activeContext?: string;
   activeSectionLabel?: string;
   agentScope?: "central" | "reader" | "paper";
@@ -98,13 +91,12 @@ export interface ChatContext {
 interface UseChatStateOptions {
   chatContext: ChatContext;
   setActiveBookId: (bookId: string) => void;
-  setActiveContext: (context: string | undefined) => void;
   currentThread?: Thread | null;
   setCurrentThread?: (thread: Thread | null) => void;
 }
 
 export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
-  const { chatContext, setActiveBookId, setActiveContext } = options;
+  const { chatContext, setActiveBookId } = options;
   const { activeBookId, agentScope } = chatContext;
   // 根据 Agent 角色确定线程 scope
   const threadScope = agentScope === "central" ? "global" : "book";
@@ -425,7 +417,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           if (latestThread) {
             setCurrentThread(latestThread);
             setMessages(latestThread.messages);
-            setActiveContext(getThreadContext(latestThread) || undefined);
           }
           isInit.current = true;
           forceUpdate();
@@ -622,50 +613,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     return parts;
   }, []);
 
-  /**
-   * 异步生成语义上下文
-   */
-  const generateSemanticContextAsync = useCallback(
-    async (userQuestion: string) => {
-      // 论文助手的语义上下文 = 当前阅读小节正文，由页面在提交前直接注入 chatContext，
-      // 不走辅助模型生成（书专用的上下文跟踪逻辑）
-      if (agentScope === "paper") {
-        return;
-      }
-      try {
-        const thread = currentThreadRef.current;
-        if (!thread) {
-          console.log("No current thread, skipping context generation");
-          return;
-        }
-        const previousContext = getThreadContext(thread);
-        const lastAssistantMessage = messagesRef.current
-          .slice()
-          .reverse()
-          .find((msg) => msg.role === "assistant");
-
-        const previousAnswer =
-          lastAssistantMessage?.parts
-            ?.filter((part: any) => part.type === "text")
-            ?.map((part: any) => part.text)
-            ?.join("") || undefined;
-
-        const contextResponse = await generateContextWithAI(
-          userQuestion,
-          previousContext,
-          previousAnswer,
-          selectedModel || undefined,
-        );
-
-        await updateThreadContext(thread.id, contextResponse.context);
-        setActiveContext(contextResponse.context);
-      } catch (error) {
-        console.error("Failed to generate semantic context:", error);
-      }
-    },
-    [selectedModel, setActiveContext, agentScope],
-  );
-
   const handleSubmit = useCallback(
     async (overrideInput?: string) => {
       if (status !== "ready") return;
@@ -700,7 +647,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       setImages([]);
 
       try {
-        generateSemanticContextAsync(trimmedInput);
         await sendMessage({ parts: messageParts });
         setMessages((prev) => {
           if (!Array.isArray(prev) || prev.length === 0) {
@@ -746,7 +692,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       sendMessage,
       setMessages,
       setCurrentThread,
-      generateSemanticContextAsync,
     ],
   );
 
@@ -776,15 +721,12 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         setMessages(fullThread.messages);
         setReferences([]);
         setShowThreads(false);
-        const threadContext = getThreadContext(fullThread);
-        setActiveContext(threadContext || undefined);
-
-        console.log("Selected thread:", fullThread.id, "context loaded:", !!threadContext);
+        console.log("Selected thread:", fullThread.id);
       } catch (error) {
         console.error("Failed to load thread:", error);
       }
     },
-    [setCurrentThread, setMessages, setActiveBookId, setActiveContext],
+    [setCurrentThread, setMessages, setActiveBookId],
   );
 
   const handleBackFromThreads = useCallback(() => {

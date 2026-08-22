@@ -56,13 +56,12 @@ const PAPER_AGENT_PROMPT_NO_VECTOR = `
 未配置嵌入模型，跨论文语义检索不可用。如用户需要跨论文检索，提示其在设置中配置嵌入模型并向量化论文。`;
 
 /**
- * 构建论文助手的完整系统提示词：角色与能力分层 + 论文元数据 + 当前阅读小节（标题与正文）。
- * 当前小节正文经 chatContext.activeContext 传入（阅读视图按当前 heading 从 paper.md 提取，已截断）。
+ * 构建论文助手的完整系统提示词：角色与能力分层 + 论文元数据（静态部分）。
+ * 每轮可能变化的当前小节（标题与正文）由 transport 的动态状态段统一注入到最尾部
+ * （D3 静态优先布局；正文经 chatContext.activeContext 传入，阅读视图按当前 heading 提取）。
  */
 export async function buildPaperPrompt(chatContext: ChatContext | undefined): Promise<string> {
   const paperId = chatContext?.activeBookId;
-  const sectionLabel = chatContext?.activeSectionLabel;
-  const sectionContext = chatContext?.activeContext;
 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
 
@@ -99,15 +98,7 @@ export async function buildPaperPrompt(chatContext: ChatContext | undefined): Pr
       }
     }
   } catch (error) {
-    console.warn("加载论文元数据失败：", error);
-  }
-
-  if (sectionLabel && sectionLabel.trim().length > 0) {
-    prompt += `\n\n【当前阅读小节】\n${sectionLabel}`;
-  }
-
-  if (sectionContext && sectionContext.trim().length > 0) {
-    prompt += `\n\n【当前小节正文】\n${sectionContext}`;
+    console.warn("加载论文元数据失败:", error);
   }
 
   return prompt;
