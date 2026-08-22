@@ -22,6 +22,7 @@ import dayjs from "dayjs";
 import {
   Brain,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Image as ImageIcon,
@@ -221,6 +222,72 @@ const MemoizedTool = memo(
     prev.onViewDetail === next.onViewDetail &&
     prev.isChatPage === next.isChatPage,
 );
+
+/**
+ * T6 工具调用折叠组（2026-08-22，业界惯例：Claude Code/Cursor 均把连续工具调用收拢为状态行）：
+ * 目录牌模式下工具调用翻倍（describeTool→useTool 两步），逐卡平铺视觉噪音大。
+ * 连续 ≥2 个工具 part 收拢为一条摘要行（工具名清单 + 进行中状态），点击展开原卡片区。
+ */
+const ToolCallGroup = memo(function ToolCallGroup({
+  parts,
+  onViewDetail,
+  isChatPage,
+}: {
+  parts: any[];
+  onViewDetail?: (toolPart: any) => void;
+  isChatPage: boolean;
+}) {
+  const running = parts.some((p) => p.state === "input-streaming" || p.state === "input-available");
+  const [open, setOpen] = useState(running);
+  const names = Array.from(
+    new Set(
+      parts.map((p) => TOOL_NAME_MAP[String(p.type).replace(/^tool-/, "")] ?? String(p.type).replace(/^tool-/, "")),
+    ),
+  );
+  // 摘要参数：首个工具的首个字符串入参截断（query/command/path 类）
+  const firstInput = parts[0]?.input;
+  const digestEntry = firstInput
+    ? (Object.values(firstInput).find((v) => typeof v === "string" && v.trim()) ?? "")
+    : "";
+  const digest = String(digestEntry).replace(/\s+/g, " ").slice(0, 40);
+
+  return (
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-1.5 text-left text-neutral-600 text-xs transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/40 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      >
+        {running ? (
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-neutral-400" />
+        ) : (
+          <Check className="size-3.5 shrink-0 text-neutral-400" />
+        )}
+        <span className="shrink-0">
+          {running ? `正在调用工具（${names.join("、")}…）` : `已调用 ${parts.length} 个工具（${names.join("、")}）`}
+        </span>
+        {digest && <span className="min-w-0 flex-1 truncate text-neutral-400">{digest}</span>}
+        <ChevronDown className={cn("size-3.5 shrink-0 text-neutral-400 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-1">
+          {parts.map((part, idx) => {
+            const toolType = String(part.type).replace(/^tool-/, "");
+            return (
+              <MemoizedTool
+                key={part.toolCallId ?? `tg-${idx}`}
+                part={part}
+                toolName={TOOL_NAME_MAP[toolType] || toolType}
+                onViewDetail={onViewDetail}
+                isChatPage={isChatPage}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function ChatMessages({
   messages,
@@ -546,17 +613,38 @@ export function ChatMessages({
 
       if (typeof type === "string" && type.startsWith("tool-")) {
         flushText();
-        const toolType = type.replace(/^tool-/, "");
-        const toolName = TOOL_NAME_MAP[toolType] || toolType;
-        elements.push(
-          <MemoizedTool
-            key={`tool-${i}`}
-            part={part}
-            toolName={toolName}
-            onViewDetail={onViewToolDetail}
-            isChatPage={isChatPage}
-          />,
-        );
+        // T6：向后收拢连续工具 part（≥2 个进折叠组，单个保持原卡）
+        const groupParts: any[] = [part];
+        let j = i + 1;
+        while (j < parts.length) {
+          const next = parts[j];
+          if (typeof next?.type !== "string" || !next.type.startsWith("tool-")) break;
+          groupParts.push(next);
+          j += 1;
+        }
+        if (groupParts.length >= 2) {
+          elements.push(
+            <ToolCallGroup
+              key={`toolgroup-${i}`}
+              parts={groupParts}
+              onViewDetail={onViewToolDetail}
+              isChatPage={isChatPage}
+            />,
+          );
+        } else {
+          const toolType = type.replace(/^tool-/, "");
+          const toolName = TOOL_NAME_MAP[toolType] || toolType;
+          elements.push(
+            <MemoizedTool
+              key={`tool-${i}`}
+              part={part}
+              toolName={toolName}
+              onViewDetail={onViewToolDetail}
+              isChatPage={isChatPage}
+            />,
+          );
+        }
+        i = j - 1;
         continue;
       }
 

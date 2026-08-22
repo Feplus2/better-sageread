@@ -280,6 +280,31 @@ const paperScrollMemory = new Map<string, number>();
 function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
   const top = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset;
   root.scrollTo({ top, behavior: "smooth" });
+  // 懒加载图片布局漂移校正（2026-08-22）：正文图片 loading=lazy，远距跳转时目标上方
+  // 图片未加载（高度为零），smooth 滚动途中图片陆续加载把内容下推，落点偏上（实测 TOC
+  // 跳转不精确的根因）。滚动后两阶段重算纠偏；用户一旦手动介入立即放弃，不与用户抢滚动条。
+  const recompute = () => el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset;
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+    root.removeEventListener("wheel", cancel);
+    root.removeEventListener("touchstart", cancel);
+  };
+  root.addEventListener("wheel", cancel, { passive: true });
+  root.addEventListener("touchstart", cancel, { passive: true });
+  const correct = (delay: number) => {
+    window.setTimeout(() => {
+      if (cancelled) return cancel();
+      const target = recompute();
+      if (Math.abs(root.scrollTop - target) > 8) {
+        root.scrollTo({ top: target });
+        correct(delay * 2);
+      } else {
+        cancel();
+      }
+    }, delay);
+  };
+  correct(450);
 }
 
 /**
@@ -899,6 +924,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
 
   const [toc, setToc] = useState<TocItem[]>([]);
   const [, setActiveHeadingId] = useState<string>("");
+  // 位置式标题追踪的去重镜像（compute/scrollToHeading 双写，避免重复上报）
+  const activeHeadingIdRef = useRef("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1195,33 +1222,48 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     onTocChangeRef.current?.(items);
   }, [body]);
 
-  // IntersectionObserver 高亮当前阅读位置对应的标题（并向父组件上报，供论文助手使用）
+  // 当前阅读位置标题追踪（位置式，2026-08-22 重写）：
+  // 旧 IntersectionObserver 方案只在标题"穿越"检测带时触发——TOC 跳转/大幅滚动落入
+  // 长小节中部时无标题穿越，论文助手的"当前小节"感知停摆（实测：书籍正常论文失效）。
+  // 改为滚动停顿 + 跳转后主动计算：取文档顺序上最后一个顶部进入视口上 25% 带的标题。
   useEffect(() => {
     const container = contentRef.current;
     const scrollRoot = scrollRef.current;
     if (!container || !scrollRoot || toc.length === 0) return;
 
-    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
-      (el) => !el.closest("[data-footnotes]"),
-    );
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveHeadingId(entry.target.id);
-            onActiveHeadingChangeRef.current?.({
-              id: entry.target.id,
-              text: entry.target.textContent ?? "",
-            });
-          }
-        }
-      },
-      { root: scrollRoot, rootMargin: "0px 0px -75% 0px", threshold: 0 },
-    );
-    for (const el of headings) {
-      observer.observe(el);
-    }
-    return () => observer.disconnect();
+    let rafId = 0;
+    const compute = () => {
+      rafId = 0;
+      const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
+        (el) => !el.closest("[data-footnotes]"),
+      );
+      if (headings.length === 0) return;
+      const rootTop = scrollRoot.getBoundingClientRect().top;
+      const band = scrollRoot.clientHeight * 0.25;
+      let active: Element | null = null;
+      for (const el of headings) {
+        if (el.getBoundingClientRect().top - rootTop <= band) active = el;
+        else break;
+      }
+      const finalActive = active ?? headings[0];
+      if (!finalActive.id || finalActive.id === activeHeadingIdRef.current) return;
+      activeHeadingIdRef.current = finalActive.id;
+      setActiveHeadingId(finalActive.id);
+      onActiveHeadingChangeRef.current?.({
+        id: finalActive.id,
+        text: finalActive.textContent ?? "",
+      });
+    };
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(compute);
+    };
+    scrollRoot.addEventListener("scroll", onScroll, { passive: true });
+    compute();
+    return () => {
+      scrollRoot.removeEventListener("scroll", onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, [toc]);
 
   // P2 标签页休眠还原：重挂载后首次 effect 即恢复记忆位置并清除（一次性消费，
@@ -1333,6 +1375,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   // 顶部 TOC 跳转也是转跳（同一滚动容器），纳入历史
   const scrollToHeading = useCallback(
     (id: string): boolean => {
+      activeHeadingIdRef.current = id;
       setActiveHeadingId(id);
       const root = scrollRef.current;
       // 多 tab 并存时同 id 元素在其他 tab 的 DOM 里也存在，必须按本容器取（2026-08-20 实测串 tab）

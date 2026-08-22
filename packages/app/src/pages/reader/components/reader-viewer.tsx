@@ -1,3 +1,4 @@
+import { ImageInteractions, quoteImageToChat } from "@/components/media/image-interactions";
 import { useReadingSession } from "@/hooks/use-reading-session";
 import { useSafeAreaInsets } from "@/hooks/use-safe-areaInsets";
 import { useAppSettingsStore } from "@/store/app-settings-store";
@@ -7,7 +8,7 @@ import { useThemeStore } from "@/store/theme-store";
 import { getInsetEdges } from "@/utils/grid";
 import { getViewInsets } from "@/utils/insets";
 import { getReaderBackgroundLayers } from "@/utils/style";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import useBookShortcuts from "../hooks/use-book-shortcuts";
 import { useFoliateViewer } from "../hooks/use-foliate-viewer";
 import Annotator from "./annotator";
@@ -58,6 +59,17 @@ const ReaderViewerContent: React.FC = () => {
 
   const foliateViewer = useFoliateViewer(bookId, bookData.bookDoc, config, contentInsets);
 
+  // T3+T4：书籍图片交互——点击大图预览 + 右键主题菜单（复制/另存为/引用）。
+  // 引用走 imageToChat 事件（reader 侧输入区接收，与划词引用同链路）；面板未展开先展开再派发
+  const { isChatVisible, toggleChatSidebar } = useLayoutStore();
+  const handleQuoteImage = useCallback(
+    (image: { dataUrl: string; mediaType: string; name: string }) => {
+      if (!isChatVisible) toggleChatSidebar();
+      window.setTimeout(() => quoteImageToChat(bookId)(image), 50);
+    },
+    [bookId, isChatVisible, toggleChatSidebar],
+  );
+
   return (
     <div
       ref={foliateViewer.containerRef}
@@ -74,7 +86,9 @@ const ReaderViewerContent: React.FC = () => {
             }
           : undefined
       }
-    />
+    >
+      <ImageInteractions containerRef={foliateViewer.containerRef} enableClickPreview onQuote={handleQuoteImage} />
+    </div>
   );
 };
 

@@ -1,3 +1,4 @@
+import { ImageInteractions } from "@/components/media/image-interactions";
 import { PreviewPanel } from "@/components/preview/preview-panel";
 import {
   type PaperFigureItem,
@@ -97,6 +98,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   const [referencesWrapper, setReferencesWrapper] = useState<Record<string, any> | null>(null);
   const [refCard, setRefCard] = useState<{ refId: string; rect: DOMRect } | null>(null);
   const paperReaderRef = useRef<PaperReaderHandle>(null);
+  // T4：图片右键菜单宿主（正文容器）
+  const paperContentHostRef = useRef<HTMLDivElement>(null);
   // 论文标注（book_notes 表复用）：CRUD 后 invalidate，下传给 PaperReader 与 PaperNotepadPanel
   const {
     annotations,
@@ -670,7 +673,9 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
             <div className="text-neutral-500 text-xs dark:text-neutral-500">视图已休眠，切回自动恢复</div>
           </div>
         ) : (
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1" ref={paperContentHostRef}>
+            {/* T4：正文图片右键主题菜单（点击预览由 per-img 自带，勿重复启用） */}
+            <ImageInteractions containerRef={paperContentHostRef} onQuote={(img) => handleQuoteImageToChat(img)} />
             <PaperReader
               ref={paperReaderRef}
               paperDir={paperDir}
