@@ -37,6 +37,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import { create } from "zustand";
+import { isPaperTaskActive } from "./paper-task-registry";
 
 // ----------------------------------------------------------------------
 // 论文 PDF 解析导入（状态类型自 PapersPage 迁入，字段不变）
@@ -496,22 +497,33 @@ export interface PaperReparseEnqueue {
 /** 在库论文重解析入队（PapersPage「重新解析」与 AI 工具 processPaper 的统一入口）：保留 id/归属/对话/标注的产物整体替换。
  *  重复入队/正在向量化/引擎未就绪 → 拒入队并提示；标签页打开中 → 警告引导（不强制）。
  *  filePath：AI 工具显式指定的源 PDF（工具侧已预检存在性）。 */
-export function startPaperReparse(input: { id: string; title: string; filePath?: string }): PaperReparseEnqueue {
+export function startPaperReparse(
+  input: { id: string; title: string; filePath?: string },
+  options?: { silent?: boolean },
+): PaperReparseEnqueue {
   const { paperEngine } = useConverterStore.getState();
   const tokenError = paperEngineTokenError(paperEngine);
   if (tokenError) {
     toast.error(tokenError);
     return { ok: false, message: tokenError };
   }
+  const silent = options?.silent ?? false;
   if (isPaperQueuedOrRunning(input.id)) {
     const message = `《${input.title}》已在解析队列中`;
-    toast.info(message);
+    if (!silent) toast.info(message);
     return { ok: false, message };
   }
   // 解析 × 向量化（同篇）互斥：向量化读的是旧产物，解析一替换就白算
   if (isPaperVectorizing(input.id)) {
     const message = `《${input.title}》正在向量化，完成后再重新解析`;
-    toast.info(message);
+    if (!silent) toast.info(message);
+    return { ok: false, message };
+  }
+  // 解析 × 翻译（同篇）互斥（2026-08-23 补）：译文按块索引对齐，重转替换正文会让
+  // 在跑的翻译白做（成品译给旧块）——翻译期间拒绝入队
+  if (isPaperTaskActive(input.id, "translate")) {
+    const message = `《${input.title}》正在翻译，完成后再重新解析（否则在翻的译文会作废）`;
+    if (!silent) toast.info(message);
     return { ok: false, message };
   }
   const tabOpen = useLayoutStore.getState().tabs.some((t) => t.id === `paper-${input.id}`);

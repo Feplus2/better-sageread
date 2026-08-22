@@ -43,8 +43,10 @@ import {
 import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-store";
 import { isPaperQueuedOrRunning, useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
+import { usePaperTaskRegistry } from "@/store/paper-task-registry";
 import { useThemeStore } from "@/store/theme-store";
 import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
+import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { Resizable } from "re-resizable";
@@ -243,6 +245,13 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   const handleTranslate = useCallback(
     async (force: boolean) => {
       if (!markdown || translateAbortRef.current) return;
+      // H 批量冲突模型：同篇解析/翻译中 → 拒绝；打点进注册表（批量按钮据此实时禁用）
+      const conflicts = paperConflicts(paperId, "translate");
+      if (conflicts.length > 0) {
+        toast.info(`该论文${conflictReasonText(conflicts)}，完成后再翻译`);
+        return;
+      }
+      usePaperTaskRegistry.getState().mark(paperId, "translate", true);
       const controller = new AbortController();
       translateAbortRef.current = controller;
       setTranslating({ done: 0, total: 0 });
@@ -280,6 +289,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
         }
       } finally {
         translateAbortRef.current = null;
+        usePaperTaskRegistry.getState().mark(paperId, "translate", false);
         setTranslating(null);
       }
     },

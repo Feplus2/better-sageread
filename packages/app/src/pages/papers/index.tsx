@@ -45,15 +45,10 @@ import {
   renameFolder,
   setPaperFolders,
   trashPaper,
-  vectorizePaper,
 } from "@/services/paper-service";
-import { translatePaper } from "@/services/paper-translation-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import {
-  isPaperQueuedOrRunning,
-  isPaperVectorizing,
-  markPaperVectorizing,
   setPaperImportRefresh,
   startPaperImportBatch,
   startPaperReparse,
@@ -61,8 +56,11 @@ import {
 } from "@/store/convert-progress-store";
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
+import { usePaperTaskRegistry } from "@/store/paper-task-registry";
+import { usePaperTaskStore } from "@/store/paper-task-store";
 import type { PapersSortByType } from "@/types/settings";
 import type { BookWithStatus } from "@/types/simple-book";
+import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
 import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -437,7 +435,8 @@ export default function PapersPage() {
   const sortAscending = settings.papersSortAscending ?? false;
   const metaLang = settings.papersMetaLang ?? "original";
   // 向量化进行中：paper_id -> 进度百分比（0-100）
-  const [vectorizing, setVectorizing] = useState<Record<string, number>>({});
+  // 向量化百分比圆环：改订阅任务队列 store（队列 drain 写入；原本地 state 在批量循环里，已随 H4 迁移）
+  const vectorizing = usePaperTaskStore((st) => st.vectorizePercent);
   // 文件夹侧栏状态
   const [selection, setSelection] = useState<Selection>({ kind: "all" });
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -461,11 +460,14 @@ export default function PapersPage() {
   const [manageMode, setManageMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchMoveOpen, setBatchMoveOpen] = useState(false);
-  const [batchRunning, setBatchRunning] = useState<BatchKind | null>(null);
-  const [batchProgress, setBatchProgress] = useState<BatchProgressState | null>(null);
+  // 进度卡数据源：任务 store 双通道（向量化/翻译），reparse 卡在全局解析浮层
+  const storeProgress = usePaperTaskStore((st) => st.progress);
+  const batchProgress: BatchProgressState | null = storeProgress.vectorize
+    ? { kind: "vectorize", ...storeProgress.vectorize }
+    : storeProgress.translate
+      ? { kind: "translate", ...storeProgress.translate }
+      : null;
   const [batchCancelling, setBatchCancelling] = useState(false);
-  const batchCancelRef = useRef(false);
-  const batchTranslateAbortRef = useRef<AbortController | null>(null);
   const { paperEngine } = useConverterStore();
   // 事件回调里读取最新 selection（拖放监听挂载一次，闭包不能捕获渲染期状态）
   const selectionRef = useRef(selection);
@@ -522,7 +524,10 @@ export default function PapersPage() {
   useEffect(() => {
     if (batchProgress?.status !== "success") return;
     if (batchProgress.failedCount > 0) return;
-    const timer = setTimeout(() => setBatchProgress(null), 6000);
+    const timer = setTimeout(() => {
+      if (batchProgress)
+        usePaperTaskStore.setState((prev) => ({ progress: { ...prev.progress, [batchProgress.kind]: undefined } }));
+    }, 6000);
     return () => clearTimeout(timer);
   }, [batchProgress?.status, batchProgress?.failedCount]);
 
@@ -534,9 +539,9 @@ export default function PapersPage() {
     const unlisten = listen<{ paper_id: string; percent: number }>("paper://index-progress", (e) => {
       const p = e.payload;
       if (!p) return;
-      setVectorizing((prev) =>
-        p.paper_id in prev ? { ...prev, [p.paper_id]: Math.max(0, Math.min(100, Math.round(p.percent))) } : prev,
-      );
+      usePaperTaskStore.setState((prev) => ({
+        vectorizePercent: { ...prev.vectorizePercent, [p.paper_id]: Math.max(0, Math.min(100, Math.round(p.percent))) },
+      }));
     });
     return () => {
       unlisten.then((off) => off());
@@ -919,11 +924,7 @@ export default function PapersPage() {
   };
 
   runPdfImportRef.current = (paths) => {
-    // 批量任务守卫（旧 runPdfImportBatch 行为）：重解析与解析共用 Rust 单子进程，并发互踩
-    if (batchRunning != null) {
-      toast.info("已有批量任务进行中");
-      return;
-    }
+    // 解析导入走全局队列（convert-progress-store 自身串行），与向量化/翻译通道并行不互斥
     // 全局队列（convert-progress-store）：进度卡跨页面呈现，folderId 在启动时定格
     void startPaperImportBatch(paths, selectionRef.current.kind === "folder" ? selectionRef.current.id : undefined);
   };
@@ -931,10 +932,6 @@ export default function PapersPage() {
   /** 开始解析：关闭选择弹窗，候选列表转入后台串行队列（全局右下角进度卡），完成时 toast 提醒 */
   const handleStartPdfImport = async () => {
     if (pdfCandidates.length === 0) return;
-    if (batchRunning != null) {
-      toast.info("已有批量任务进行中");
-      return;
-    }
     const paths = pdfCandidates;
     setPdfPickerOpen(false);
     setPdfCandidates([]);
@@ -978,33 +975,19 @@ export default function PapersPage() {
   };
 
   const handleVectorize = async (paper: BookWithStatus) => {
-    // 任务冲突模型：解析×向量化同篇互斥；同篇向量化幂等去重
-    if (isPaperQueuedOrRunning(paper.id)) {
-      toast.info(`《${paper.title}》正在解析队列中，完成后再向量化`);
+    const { useLlamaStore } = await import("@/store/llama-store");
+    if (!useLlamaStore.getState().hasVectorCapability()) {
+      toast.error("没有可用的嵌入模型，请先在设置中下载本地嵌入模型或配置外部嵌入服务");
       return;
     }
-    if (isPaperVectorizing(paper.id)) {
-      toast.info(`《${paper.title}》正在向量化中`);
+    const conflicts = paperConflicts(paper.id, "vectorize");
+    if (conflicts.length > 0) {
+      toast.info(`《${paper.title}》${conflictReasonText(conflicts)}，完成后再向量化`);
       return;
     }
-    setVectorizing((prev) => ({ ...prev, [paper.id]: 0 }));
-    markPaperVectorizing(paper.id, true);
-    try {
-      const res = await vectorizePaper({ id: paper.id, title: paper.title, author: paper.author });
-      toast.success(`《${paper.title}》向量化完成，分块数：${res.report?.total_chunks ?? "未知"}`);
-    } catch (error) {
-      console.error("向量化论文失败:", error);
-      toast.error(`向量化失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      markPaperVectorizing(paper.id, false);
-      setVectorizing((prev) => {
-        const next = { ...prev };
-        delete next[paper.id];
-        return next;
-      });
-      // 成功/失败都刷新列表，让向量化徽标落为最新状态
-      await loadAll();
-    }
+    usePaperTaskStore
+      .getState()
+      .enqueue("vectorize", [{ id: paper.id, title: paper.title, author: paper.author ?? "", solo: true }]);
   };
 
   /** 打开论文数据目录（{appData}/books/{id}——paper.md/源 PDF/图片都在这里），与图书卡片同款 */
@@ -1026,7 +1009,34 @@ export default function PapersPage() {
   /** 选中集合对应的论文（按列表顺序；过滤掉已不在库的幽灵 id） */
   const selectedPapers = useMemo(() => papers.filter((p) => selectedIds.has(p.id)), [papers, selectedIds]);
   /** 批量任务或导入进行中：占用转换/LLM 资源的批量操作（向量化/翻译/重新解析）禁用 */
-  const batchLocked = batchRunning != null || importing || paperImportRunning || zoteroRunning;
+  // 响应式订阅任务注册表：任一篇任务状态变化 → 按钮禁用态实时重算（冲突解除自动恢复可点）
+  const activeVectorizeMap = usePaperTaskRegistry((st) => st.activeVectorize);
+  const activeTranslateMap = usePaperTaskRegistry((st) => st.activeTranslate);
+  const vectorizeQueueList = usePaperTaskStore((st) => st.vectorizeQueue);
+  const translateQueueList = usePaperTaskStore((st) => st.translateQueue);
+  const busyVectorize = useMemo(
+    () => new Set([...Object.keys(activeVectorizeMap), ...vectorizeQueueList.map((t) => t.id)]),
+    [activeVectorizeMap, vectorizeQueueList],
+  );
+  const busyTranslate = useMemo(
+    () => new Set([...Object.keys(activeTranslateMap), ...translateQueueList.map((t) => t.id)]),
+    [activeTranslateMap, translateQueueList],
+  );
+  const taskVectorizeBlockers = selectedPapers.filter(
+    (p) => paperConflicts(p.id, "vectorize").length > 0 || busyVectorize.has(p.id),
+  );
+  const taskTranslateBlockers = selectedPapers.filter(
+    (p) => paperConflicts(p.id, "translate").length > 0 || busyTranslate.has(p.id),
+  );
+  const taskReparseBlockers = selectedPapers.filter((p) => paperConflicts(p.id, "parse").length > 0);
+  const blockerHint = (list: BookWithStatus[], verb: string) =>
+    list.length > 0
+      ? `${list.length} 篇无法${verb}：${list
+          .slice(0, 3)
+          .map((p) => `${p.title}`)
+          .join("、")}${list.length > 3 ? " 等" : ""}（任务进行中或已排队，取消勾选后可执行）`
+      : undefined;
+  const batchLocked = importing || paperImportRunning || zoteroRunning;
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -1081,7 +1091,15 @@ export default function PapersPage() {
   };
 
   const handleBatchDelete = async () => {
-    if (batchRunning || selectedPapers.length === 0) return;
+    const anyChannelBusy =
+      Object.keys(usePaperTaskStore.getState().vectorizePercent).length > 0 ||
+      usePaperTaskStore.getState().vectorizeDraining ||
+      usePaperTaskStore.getState().translateDraining;
+    if (anyChannelBusy) {
+      toast.info("向量化/翻译进行中，完成后删除（避免删到正在处理的论文）");
+      return;
+    }
+    if (selectedPapers.length === 0) return;
     try {
       const confirmed = await ask(
         `确定把选中的 ${selectedPapers.length} 篇论文移到回收站吗？\n\n回收站中的论文可以随时恢复。`,
@@ -1107,224 +1125,41 @@ export default function PapersPage() {
       toast.error(`批量删除失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
-
   /** 批量任务通用收尾：写收尾卡 + 清选择 + 刷新列表 */
-  const finishBatch = (summary: string, failedNames: string[], cancelled: boolean) => {
-    setBatchProgress((prev) =>
-      prev
-        ? {
-            ...prev,
-            status: cancelled || failedNames.length > 0 ? "error" : "success",
-            percent: 100,
-            summary,
-            failedNames,
-            failedCount: failedNames.length,
-          }
-        : prev,
-    );
-    setBatchCancelling(false);
-    setSelectedIds(new Set());
-  };
 
   /** 批量向量化：跳过已成功的，逐篇顺序执行；进度复用 vectorizing map（行内圆环同步展示） */
+  /** 批量向量化：入队（单篇=批量=入队；按钮禁用态实时推导冲突，此处仅竞态兜底） */
   const handleBatchVectorize = async () => {
-    // 通道间默认互不阻塞：向量化不再因解析队列运行而禁用（batchLocked 收窄为批量任务自身互斥），
-    // 仅过滤撞车篇（该篇在解析队列中/正在向量化）
-    if (batchRunning != null || importing || zoteroRunning || selectedPapers.length === 0) return;
+    if (selectedPapers.length === 0) return;
     const { useLlamaStore } = await import("@/store/llama-store");
     if (!useLlamaStore.getState().hasVectorCapability()) {
       toast.error("没有可用的嵌入模型，请先在设置中下载本地嵌入模型或配置外部嵌入服务");
       return;
     }
-    const runnable = selectedPapers.filter((p) => !isPaperQueuedOrRunning(p.id) && !isPaperVectorizing(p.id));
-    const collided = selectedPapers.length - runnable.length;
-    if (collided > 0) {
-      toast.info(`已跳过 ${collided} 篇解析中/向量化中的论文，完成后再处理`);
-    }
-    const queue = runnable.filter((p) => p.status?.metadata?.vectorization?.status !== "success");
-    const skippedCount = runnable.length - queue.length;
-    if (queue.length === 0) {
-      toast.info("所选论文均已完成向量化");
-      return;
-    }
-    batchCancelRef.current = false;
-    setBatchCancelling(false);
-    setBatchRunning("vectorize");
-    const total = queue.length;
-    let done = 0;
-    const failedNames: string[] = [];
-    setBatchProgress({
-      kind: "vectorize",
-      status: "running",
-      index: 0,
-      total,
-      title: "",
-      detail: "准备向量化…",
-      percent: 0,
-      doneCount: 0,
-      failedCount: 0,
-      skippedCount,
-      failedNames: [],
-    });
-    try {
-      for (let i = 0; i < total; i++) {
-        if (batchCancelRef.current) break;
-        const paper = queue[i];
-        setBatchProgress((prev) =>
-          prev
-            ? { ...prev, index: i, title: paper.title, detail: "向量化中…", percent: Math.round((i / total) * 100) }
-            : prev,
-        );
-        setVectorizing((prev) => ({ ...prev, [paper.id]: 0 }));
-        markPaperVectorizing(paper.id, true);
-        try {
-          await vectorizePaper({ id: paper.id, title: paper.title, author: paper.author });
-          done += 1;
-        } catch (error) {
-          failedNames.push(paper.title);
-          console.error(`向量化论文失败: ${paper.id}`, error);
-        } finally {
-          markPaperVectorizing(paper.id, false);
-          setVectorizing((prev) => {
-            const next = { ...prev };
-            delete next[paper.id];
-            return next;
-          });
-          setBatchProgress((prev) =>
-            prev ? { ...prev, doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] } : prev,
-          );
-        }
-      }
-    } finally {
-      setBatchRunning(null);
-    }
-    const cancelled = batchCancelRef.current;
-    const remaining = total - done - failedNames.length;
-    finishBatch(
-      cancelled
-        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理`
-        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}${skippedCount > 0 ? ` · 跳过已向量化 ${skippedCount}` : ""}`,
-      failedNames,
-      cancelled,
+    usePaperTaskStore.getState().enqueue(
+      "vectorize",
+      selectedPapers.map((p) => ({ id: p.id, title: p.title, author: p.author ?? "" })),
     );
-    await loadAll();
+    if (manageMode && selectedIds.size > 0) setManageMode(false);
   };
 
-  /** 批量翻译：复用单篇入口 translatePaper（幂等续翻），逐篇顺序执行，AbortController 可取消 */
-  const handleBatchTranslate = async (papers?: BookWithStatus[]) => {
-    const requested = papers ?? selectedPapers;
-    if (requested.length === 0) return;
-    // 翻译通道自身串行（既有行为）：批量管理任务（翻译/向量化/重解析占用 LLM 或转换资源）在跑则提示
-    if (batchRunning != null) {
-      toast.info("已有批量任务进行中");
-      return;
-    }
-    // 撞车过滤：目标论文正在解析队列中/正在解析（内容将被替换）时跳过并说明
-    const collided = requested.filter((p) => isPaperQueuedOrRunning(p.id));
-    const queue = requested.filter((p) => !isPaperQueuedOrRunning(p.id));
-    if (collided.length > 0) {
-      toast.info(
-        `已跳过 ${collided.length} 篇解析中的论文：${collided
-          .slice(0, 3)
-          .map((p) => `《${p.title}》`)
-          .join("")}${collided.length > 3 ? " 等" : ""}，完成后再翻译`,
-        { duration: 6000 },
-      );
-    }
-    if (queue.length === 0) return;
+  /** 批量翻译：入队（幂等续翻；队列与进度在 paper-task-store） */
+  const handleBatchTranslate = async () => {
+    if (selectedPapers.length === 0) return;
     if (!getUtilityModel()) {
       toast.error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
       return;
     }
-    batchCancelRef.current = false;
-    setBatchCancelling(false);
-    const controller = new AbortController();
-    batchTranslateAbortRef.current = controller;
-    setBatchRunning("translate");
-    const total = queue.length;
-    let done = 0;
-    const failedNames: string[] = [];
-    let cancelled = false;
-    const base = await appDataDir();
-    setBatchProgress({
-      kind: "translate",
-      status: "running",
-      index: 0,
-      total,
-      title: "",
-      detail: "准备翻译…",
-      percent: 0,
-      doneCount: 0,
-      failedCount: 0,
-      skippedCount: 0,
-      failedNames: [],
-    });
-    try {
-      for (let i = 0; i < total; i++) {
-        if (batchCancelRef.current) break;
-        const paper = queue[i];
-        setBatchProgress((prev) =>
-          prev
-            ? { ...prev, index: i, title: paper.title, detail: "读取正文…", percent: Math.round((i / total) * 100) }
-            : prev,
-        );
-        try {
-          const markdown = await readTextFile(await join(base, "books", paper.id, "paper.md"));
-          const result = await translatePaper({
-            paperId: paper.id,
-            markdown,
-            force: false,
-            signal: controller.signal,
-            onProgress: ({ done: d, total: t }) =>
-              setBatchProgress((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      detail: t > 0 ? `翻译块 ${d}/${t}` : prev.detail,
-                      percent: Math.round(((i + (t > 0 ? d / t : 0)) / total) * 100),
-                    }
-                  : prev,
-              ),
-          });
-          if (result.cancelled) {
-            cancelled = true;
-            break;
-          }
-          done += 1;
-          // 元数据译文（title_zh/abstract_zh）写入 metadata.json，清缓存让列表中文化立即生效
-          metaCacheRef.current.delete(paper.id);
-        } catch (error) {
-          if (controller.signal.aborted || batchCancelRef.current) {
-            cancelled = true;
-            break;
-          }
-          failedNames.push(paper.title);
-          console.error(`翻译论文失败: ${paper.id}`, error);
-        }
-        setBatchProgress((prev) =>
-          prev ? { ...prev, doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] } : prev,
-        );
-      }
-    } finally {
-      batchTranslateAbortRef.current = null;
-      setBatchRunning(null);
-    }
-    const remaining = total - done - failedNames.length;
-    finishBatch(
-      cancelled
-        ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理（已翻部分已落盘，可续翻）`
-        : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}`,
-      failedNames,
-      cancelled,
+    usePaperTaskStore.getState().enqueue(
+      "translate",
+      selectedPapers.map((p) => ({ id: p.id, title: p.title })),
     );
-    await loadAll();
+    if (manageMode && selectedIds.size > 0) setManageMode(false);
   };
 
-  /** 重新解析：确认后逐篇进 convert-progress-store 全局队列（与解析/获取 PDF 同列串行；
-   *  保留 id/归属/对话/标注的产物整体替换语义在队列的 reparse 项里）。运行中可加队 */
-  const handleBatchReparse = async (papers?: BookWithStatus[]) => {
-    const queue = papers ?? selectedPapers;
-    if (queue.length === 0) return;
+  /** 重新解析：确认后逐篇入全局解析队列（silent 聚合拒绝，单条 toast） */
+  const handleBatchReparse = async () => {
+    if (selectedPapers.length === 0) return;
     const tokenError = paperEngineTokenError(paperEngine);
     if (tokenError) {
       toast.error(tokenError);
@@ -1333,29 +1168,37 @@ export default function PapersPage() {
     let confirmed = false;
     try {
       confirmed = await ask(
-        `将用最新解析引擎重新解析选中的 ${queue.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
-        { title: queue.length > 1 ? `重新解析（${queue.length} 篇）` : "重新解析", kind: "warning" },
+        `将用最新解析引擎重新解析选中的 ${selectedPapers.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
+        { title: selectedPapers.length > 1 ? `重新解析（${selectedPapers.length} 篇）` : "重新解析", kind: "warning" },
       );
     } catch (error) {
       console.error("确认对话框失败:", error);
     }
     if (!confirmed) return;
     let queued = 0;
-    for (const paper of queue) {
-      if (startPaperReparse({ id: paper.id, title: paper.title }).ok) queued += 1;
+    const rejected: string[] = [];
+    for (const paper of selectedPapers) {
+      const res = startPaperReparse({ id: paper.id, title: paper.title }, { silent: true });
+      if (res.ok) queued += 1;
+      else rejected.push(res.message);
+    }
+    if (rejected.length > 0) {
+      toast.info(`跳过 ${rejected.length} 篇：${rejected.slice(0, 3).join("；")}${rejected.length > 3 ? " 等" : ""}`, {
+        duration: 6000,
+      });
     }
     if (queued > 0) {
       toast.success(`已加入解析队列：${queued} 篇`);
       if (manageMode && selectedIds.size > 0) setManageMode(false);
     }
   };
-
-  /** 批量任务取消：向量化当前篇跑完即停；翻译 abort；重新解析 kill 当前篇子进程（terminated 事件结算） */
+  /** 批量任务取消：向量化当前篇跑完即停；翻译 abort 当前篇+清队列 */
   const handleCancelBatch = () => {
-    batchCancelRef.current = true;
     setBatchCancelling(true);
-    setBatchProgress((prev) => (prev ? { ...prev, detail: "正在取消…" } : prev));
-    if (batchRunning === "translate") batchTranslateAbortRef.current?.abort();
+    const kind = batchProgress?.kind;
+    if (kind === "vectorize" || kind === "translate") {
+      usePaperTaskStore.getState().cancel(kind);
+    }
   };
 
   /** 关闭批量进度卡（running 时等同取消） */
@@ -1364,7 +1207,9 @@ export default function PapersPage() {
       handleCancelBatch();
       return;
     }
-    setBatchProgress(null);
+    if (batchProgress) {
+      usePaperTaskStore.setState((prev) => ({ progress: { ...prev.progress, [batchProgress.kind]: undefined } }));
+    }
   };
 
   // ---- 列表视图 ----
@@ -1377,14 +1222,14 @@ export default function PapersPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* 解析运行中不禁用：提交进全局队列排队（convert-progress-store 串行接续） */}
-          <Button onClick={handleImportPdf} disabled={importing || batchRunning != null}>
+          <Button onClick={handleImportPdf} disabled={importing}>
             <FileDown className="size-4" />
             导入 PDF
           </Button>
           <Button
             variant="outline"
             onClick={() => setZoteroOpen(true)}
-            disabled={importing || paperImportRunning || zoteroRunning || batchRunning != null}
+            disabled={importing || paperImportRunning || zoteroRunning}
           >
             {zoteroRunning ? <Loader2 className="size-4 animate-spin" /> : <Library className="size-4" />}
             Zotero 导入
@@ -1392,7 +1237,7 @@ export default function PapersPage() {
           {/* 高级导入：面向开发者/转换器用户——期望的是 Papers_Converter 产物目录（含 paper.md 与 images/） */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={importing || batchRunning != null}>
+              <Button variant="outline" disabled={importing}>
                 {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
                 高级
                 <ChevronDown className="size-3.5" />
@@ -1491,7 +1336,7 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={batchRunning != null || selectedIds.size === 0}
+                    disabled={selectedIds.size === 0}
                     onClick={() => {
                       // 批量移动初始为空：确认即整体替换所选论文的文件夹归属
                       setMoveChecked(new Set());
@@ -1505,7 +1350,8 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={batchLocked || selectedIds.size === 0}
+                    disabled={batchLocked || selectedIds.size === 0 || taskVectorizeBlockers.length > 0}
+                    title={blockerHint(taskVectorizeBlockers, "向量化") ?? ""}
                     onClick={handleBatchVectorize}
                   >
                     <Sparkles className="size-4" />
@@ -1515,7 +1361,8 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={selectedIds.size === 0}
+                    disabled={batchLocked || selectedIds.size === 0 || taskTranslateBlockers.length > 0}
+                    title={blockerHint(taskTranslateBlockers, "翻译") ?? ""}
                     onClick={() => void handleBatchTranslate()}
                   >
                     <Languages className="size-4" />
@@ -1525,7 +1372,8 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0"
-                    disabled={selectedIds.size === 0}
+                    disabled={batchLocked || selectedIds.size === 0 || taskReparseBlockers.length > 0}
+                    title={blockerHint(taskReparseBlockers, "重新解析") ?? ""}
                     onClick={() => void handleBatchReparse()}
                   >
                     <RefreshCw className="size-4" />
@@ -1535,7 +1383,7 @@ export default function PapersPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 shrink-0 text-red-500 hover:text-red-600 dark:hover:text-red-400"
-                    disabled={batchRunning != null || selectedIds.size === 0}
+                    disabled={selectedIds.size === 0}
                     onClick={handleBatchDelete}
                   >
                     <Trash2 className="size-4" />
@@ -1674,14 +1522,14 @@ export default function PapersPage() {
                   转换产物（含 paper.md 与 images/ 的目录）可走右上角「高级」导入。
                 </p>
               </div>
-              <Button onClick={handleImportPdf} disabled={importing || paperImportRunning || batchRunning != null}>
+              <Button onClick={handleImportPdf} disabled={importing || paperImportRunning}>
                 <FileDown className="size-4" />
                 导入 PDF
               </Button>
               <Button
                 variant="outline"
                 onClick={() => setZoteroOpen(true)}
-                disabled={importing || paperImportRunning || zoteroRunning || batchRunning != null}
+                disabled={importing || paperImportRunning || zoteroRunning}
               >
                 <Library className="size-4" />
                 Zotero 导入
@@ -1820,11 +1668,11 @@ export default function PapersPage() {
                           )}
                           {isVectorized ? "重新向量化" : "向量化"}
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => void handleBatchTranslate([paper])}>
+                        <ContextMenuItem onClick={() => void handleBatchTranslate()}>
                           <Languages className="mr-2 size-4" />
                           翻译
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => void handleBatchReparse([paper])}>
+                        <ContextMenuItem onClick={() => void handleBatchReparse()}>
                           <RefreshCw className="mr-2 size-4" />
                           重新解析
                         </ContextMenuItem>
