@@ -86,3 +86,58 @@ export function stripFileParts(messages: UIMessage[]): UIMessage[] {
     })
     .filter((message) => !Array.isArray(message.parts) || message.parts.length > 0);
 }
+
+/**
+ * D4 图片一次性（请求期，只改副本不动存量消息）：
+ * - 仅**最后一条 user 消息**的图片 part 真发（attachment:// 引用从盘物化为 dataUrl；存量 dataUrl 原样）；
+ * - 更早轮次的图片 part 降级为文字存根（attachment:// 与存量 dataUrl 同等处理）——
+ *   图片字节不再每轮重发重计费，模型需要重看时经 readImage 工具按引用取回。
+ */
+export async function resolveImageAttachmentsForRequest(messages: UIMessage[]): Promise<UIMessage[]> {
+  const lastUserIndex = messages.findLastIndex((msg) => msg.role === "user");
+  if (lastUserIndex === -1) return messages;
+
+  const out = messages.slice();
+  for (let i = 0; i < out.length; i++) {
+    const message = out[i];
+    if (message.role !== "user" || !Array.isArray(message.parts)) continue;
+    const parts = message.parts as any[];
+    if (!parts.some((part: any) => part.type === "file")) continue;
+
+    const isLastUser = i === lastUserIndex;
+    const nextParts: any[] = [];
+    for (const part of parts) {
+      if (part?.type !== "file") {
+        nextParts.push(part);
+        continue;
+      }
+      const name = typeof part.filename === "string" && part.filename ? part.filename : "图片";
+      const ref =
+        typeof part.url === "string" && part.url.startsWith("attachment://") ? part.url : (part as any).attachmentRef;
+      if (isLastUser) {
+        if (ref) {
+          try {
+            const { readImageAttachment } = await import("@/services/attachment-service");
+            const loaded = await readImageAttachment(ref);
+            if (loaded) {
+              nextParts.push({ ...part, url: loaded.dataUrl, mediaType: loaded.mediaType, attachmentRef: ref });
+              continue;
+            }
+            // 落盘文件缺失（被清理）：透传原 part（引用对多数提供商不可见图，但不炸请求）
+          } catch {
+            // 物化链路异常（fs/权限等）：透传原 part，不让请求因缺图失败
+          }
+        }
+        nextParts.push(part);
+      } else {
+        const refText = ref ?? "已失效";
+        nextParts.push({
+          type: "text",
+          text: `⟦图片（${name}）：已分析过，可用 readImage 工具以引用 ${refText} 重看⟧`,
+        });
+      }
+    }
+    out[i] = { ...message, parts: nextParts } as UIMessage;
+  }
+  return out;
+}

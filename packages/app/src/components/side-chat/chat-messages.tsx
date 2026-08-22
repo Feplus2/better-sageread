@@ -10,6 +10,7 @@ import { useTextSelection } from "@/hooks/use-text-selection";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessageToMarkdown } from "@/lib/export-thread-markdown";
 import { cn } from "@/lib/utils";
+import { attachmentToAssetUrl } from "@/services/attachment-service";
 import { createNote } from "@/services/note-service";
 import { audioPlayerManager, synthesizeSpeechChunked } from "@/services/tts-service";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
@@ -75,6 +76,34 @@ export const TOOL_NAME_MAP: Record<string, string> = {
  * 仅裁渲染层，messages 数据层全量保留（AI 上下文/导出不受影响） */
 const INITIAL_WINDOW = 6;
 const EXPAND_STEP = 6;
+
+/** D4 图片附件渲染：attachment:// 引用 → asset 协议 URL（文件在 {appData}/attachments，UI 不再吃 base64） */
+function AttachmentImg({ url, alt }: { url: string; alt: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void attachmentToAssetUrl(url).then((resolved) => {
+      if (alive) setSrc(resolved);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  if (!src) {
+    return (
+      <div className="max-h-72 max-w-full rounded-lg border border-neutral-200 p-4 text-neutral-400 text-xs dark:border-neutral-700 dark:text-neutral-500">
+        图片加载中…
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
+    />
+  );
+}
 
 /** 向上找最近的可滚动祖先（全局聊天与书籍侧栏各自有自己的滚动容器） */
 function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
@@ -464,19 +493,23 @@ export function ChatMessages({
         continue;
       }
 
-      // J2：图片附件（file part，base64 dataUrl 随消息落库；纯文本模型请求时已在 transport 剔除）
+      // J2 图片附件（D4：新消息存 attachment:// 引用按需解析；存量消息仍是 base64 dataUrl）
       if (type === "file") {
         flushText();
         const url = (part as any).url;
         const mediaType = (part as any).mediaType ?? "";
         if (typeof url === "string" && mediaType.startsWith("image/")) {
           elements.push(
-            <img
-              key={`file-${i}`}
-              src={url}
-              alt={(part as any).filename ?? "图片"}
-              className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
-            />,
+            url.startsWith("attachment://") ? (
+              <AttachmentImg key={`file-${i}`} url={url} alt={(part as any).filename ?? "图片"} />
+            ) : (
+              <img
+                key={`file-${i}`}
+                src={url}
+                alt={(part as any).filename ?? "图片"}
+                className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
+              />
+            ),
           );
         }
         continue;

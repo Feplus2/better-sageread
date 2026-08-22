@@ -9,6 +9,7 @@ export { getReadingStatsTool } from "./reading-stats";
 export { notesTool } from "./notes";
 export { mindmapTool } from "./mindmap";
 export { webSearchTool } from "./web-search";
+export { readImageTool } from "./read-image";
 export {
   createGetCitationsTool,
   createGetFiguresTool,

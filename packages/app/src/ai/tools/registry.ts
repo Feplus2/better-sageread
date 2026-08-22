@@ -58,6 +58,7 @@ import {
   getSkillsTool,
   mindmapTool,
   notesTool,
+  readImageTool,
   webSearchTool,
 } from "./index";
 import { createManageNotesTool } from "./manage-notes";
@@ -184,6 +185,12 @@ registerTools([
     scope: "shared",
     tool: askAppHelpTool as Tool,
     description: "Better SageRead 使用帮助问答（检索内置使用手册）",
+  },
+  {
+    name: "readImage",
+    scope: "shared",
+    tool: readImageTool as Tool,
+    description: "重看已分析过的图片附件（按 attachment:// 引用取回）",
   },
 ]);
 

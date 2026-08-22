@@ -23,6 +23,7 @@ import {
   loadMemorySection,
   loadWorkspaceSection,
   processQuoteMessages,
+  resolveImageAttachmentsForRequest,
   sanitizeMessageParts,
   selectMessagesWithinBudget,
   stripFileParts,
@@ -134,7 +135,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       });
     }
 
-    const processedMessages = processQuoteMessages(messagesForProcess);
+    const processedMessages = processQuoteMessages(await resolveImageAttachmentsForRequest(messagesForProcess));
     // token 双水位活塞：≤点火线(256k)零压缩；超过则泄压到 128k 以内，最近 10 条永不压缩
     const { kept: selectedMessages, dropped } = selectMessagesWithinBudget(processedMessages);
 

@@ -5,6 +5,7 @@ import { useForceUpdate } from "@/hooks/use-force-update";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
+import { saveImageAttachment } from "@/services/attachment-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
@@ -625,6 +626,17 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
 
       const referenceSnapshot = references.map((reference) => ({ ...reference }));
       const imageSnapshot = images.map((img) => ({ ...img }));
+      // D4 图片一次性：附件先落盘，消息里只存 attachment:// 引用（threads/L2/备份不再携带 base64；
+      // 首轮流内真图由 transport 按需物化，落盘失败回退 dataUrl 直存保可用）
+      await Promise.all(
+        imageSnapshot.map(async (img) => {
+          try {
+            img.dataUrl = await saveImageAttachment(img.id, img.dataUrl, img.mediaType);
+          } catch (e) {
+            console.warn("附件落盘失败，回退 dataUrl 直存:", e);
+          }
+        }),
+      );
       const messageParts = buildMessageParts(trimmedInput, referenceSnapshot, imageSnapshot);
       // 纯文本 + 无附件的提交不成立（只有标记占位也算空）
       if (messageParts.length === 0) return;

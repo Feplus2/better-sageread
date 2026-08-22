@@ -7,6 +7,12 @@ export {
   selectMessagesWithinBudget,
   selectValidMessages,
 } from "./message-selector";
-export { processQuoteMessages, sanitizeMessageParts, stripFileParts, stripUnknownToolParts } from "./message-processor";
+export {
+  processQuoteMessages,
+  resolveImageAttachmentsForRequest,
+  sanitizeMessageParts,
+  stripFileParts,
+  stripUnknownToolParts,
+} from "./message-processor";
 export { loadMemorySection, loadWorkspaceSection } from "./workspace-context";
 export { estimateMessageTokens, estimateMessagesTokens, estimateTokens } from "./token-estimator";
