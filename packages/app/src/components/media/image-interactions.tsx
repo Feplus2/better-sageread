@@ -117,36 +117,48 @@ function ContextPopupMenu({
   };
 
   return (
-    <div
-      ref={ref}
-      style={style}
-      className="fixed z-[110] min-w-44 overflow-hidden rounded-md border border-neutral-200 bg-background p-1 shadow-lg dark:border-neutral-700"
-      role="menu"
-    >
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-        onClick={() => void run("copy")}
+    <>
+      {/* 取消背板：全屏透明层接住任何左键/右键（含书籍 closed-shadow 内的点击）即关闭菜单 */}
+      <div
+        className="fixed inset-0 z-[105]"
+        onMouseDown={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+        role="presentation"
+      />
+      <div
+        ref={ref}
+        style={style}
+        className="fixed z-[110] min-w-44 overflow-hidden rounded-md border border-neutral-200 bg-background p-1 shadow-lg dark:border-neutral-700"
+        role="menu"
       >
-        <Copy className="size-4 text-neutral-500" /> 复制图片
-      </button>
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-        onClick={() => void run("save")}
-      >
-        <Download className="size-4 text-neutral-500" /> 图片另存为…
-      </button>
-      {onQuote && (
         <button
           type="button"
           className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          onClick={() => void run("quote")}
+          onClick={() => void run("copy")}
         >
-          <Quote className="size-4 text-neutral-500" /> 引用到对话
+          <Copy className="size-4 text-neutral-500" /> 复制图片
         </button>
-      )}
-    </div>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          onClick={() => void run("save")}
+        >
+          <Download className="size-4 text-neutral-500" /> 图片另存为…
+        </button>
+        {onQuote && (
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={() => void run("quote")}
+          >
+            <Quote className="size-4 text-neutral-500" /> 引用到对话
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 
