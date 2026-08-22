@@ -1094,22 +1094,21 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     onTocChangeRef.current?.(items);
   }, [body]);
 
-  // 当前阅读位置标题追踪（位置式，2026-08-22 重写）：
-  // 旧 IntersectionObserver 方案只在标题"穿越"检测带时触发——TOC 跳转/大幅滚动落入
-  // 长小节中部时无标题穿越，论文助手的"当前小节"感知停摆（实测：书籍正常论文失效）。
-  // 改为滚动停顿 + 跳转后主动计算：取文档顺序上最后一个顶部进入视口上 25% 带的标题。
+  // 当前阅读位置标题追踪（双保险，2026-08-23 二次加固）：
+  // 主通道＝位置式（滚动事件 → rAF 计算“视口上 25% 带内最后一个标题”），覆盖跳转落点；
+  // 辅通道＝IntersectionObserver（标题穿越检测带即触发），覆盖滚动事件丢失/监听失效的场景。
+  // 两路共用同一去重 ref，谁先算出新值谁上报。deps 含 viewMode/translationMap（正文重建后
+  // 内容 DOM 换新，必须重挂监听——仅依赖 toc 在视图切换但 body 未变时会漏）。
   useEffect(() => {
     const container = contentRef.current;
     const scrollRoot = scrollRef.current;
     if (!container || !scrollRoot || toc.length === 0) return;
 
-    let rafId = 0;
-    const compute = () => {
-      rafId = 0;
+    const computeFromPosition = () => {
       const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
         (el) => !el.closest("[data-footnotes]"),
       );
-      if (headings.length === 0) return;
+      if (headings.length === 0) return null;
       const rootTop = scrollRoot.getBoundingClientRect().top;
       const band = scrollRoot.clientHeight * 0.25;
       let active: Element | null = null;
@@ -1117,26 +1116,48 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
         if (el.getBoundingClientRect().top - rootTop <= band) active = el;
         else break;
       }
-      const finalActive = active ?? headings[0];
-      if (!finalActive.id || finalActive.id === activeHeadingIdRef.current) return;
-      activeHeadingIdRef.current = finalActive.id;
-      setActiveHeadingId(finalActive.id);
-      onActiveHeadingChangeRef.current?.({
-        id: finalActive.id,
-        text: finalActive.textContent ?? "",
-      });
+      return active ?? headings[0];
     };
+    const report = (el: Element) => {
+      if (!el.id || el.id === activeHeadingIdRef.current) return;
+      activeHeadingIdRef.current = el.id;
+      setActiveHeadingId(el.id);
+      onActiveHeadingChangeRef.current?.({ id: el.id, text: el.textContent ?? "" });
+    };
+
+    let rafId = 0;
     const onScroll = () => {
       if (rafId) return;
-      rafId = requestAnimationFrame(compute);
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const el = computeFromPosition();
+        if (el) report(el);
+      });
     };
     scrollRoot.addEventListener("scroll", onScroll, { passive: true });
-    compute();
+
+    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6")).filter(
+      (el) => !el.closest("[data-footnotes]"),
+    );
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) report(entry.target);
+        }
+      },
+      { root: scrollRoot, rootMargin: "0px 0px -75% 0px", threshold: 0 },
+    );
+    for (const el of headings) observer.observe(el);
+
+    const el = computeFromPosition();
+    if (el) report(el);
+
     return () => {
       scrollRoot.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
+      observer.disconnect();
     };
-  }, [toc]);
+  }, [toc, viewMode, translation]);
 
   // P2 标签页休眠还原：重挂载后首次 effect 即恢复记忆位置并清除（一次性消费，
   // 不影响后续 viewMode/译文切换；markdown 首帧与 effect 同周期提交，内容已就位）
