@@ -68,13 +68,19 @@ const waitResult = async (key, maxMs) => {
   return { timeout: true };
 };
 
-console.log("--- 探针1：forecast ref[3] 的垃圾 title（复现用户输入）---");
-await fire("__p1", { title: "[3] S. Sarangi and S. H. H. Tye, Phys. Lett. B 536, 185 (2002) [arXiv:" });
-console.log(JSON.stringify(await waitResult("__p1", 200000)));
-
-console.log("--- 探针2：干净 arXiv 输入（Attention Is All You Need）---");
-await fire("__p2", { title: "Attention Is All You Need", url: "https://arxiv.org/abs/1706.03762" });
-console.log(JSON.stringify(await waitResult("__p2", 200000)));
+const probes = process.argv[2]
+  ? JSON.parse(process.argv[2])
+  : [
+      ["探针1：forecast ref[3] 的垃圾 title（复现用户输入）", { title: "[3] S. Sarangi and S. H. H. Tye, Phys. Lett. B 536, 185 (2002) [arXiv:" }],
+      ["探针2：干净 arXiv 输入（Attention Is All You Need）", { title: "Attention Is All You Need", url: "https://arxiv.org/abs/1706.03762" }],
+    ];
+for (let i = 0; i < probes.length; i++) {
+  const [label, args] = probes[i];
+  console.log(`--- ${label} ---`);
+  const key = `__p${i}`;
+  await fire(key, args);
+  console.log(JSON.stringify(await waitResult(key, 200000)));
+}
 
 ws.close();
 console.log("done");
