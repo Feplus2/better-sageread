@@ -18,11 +18,10 @@ import {
   dismissPaperImport,
   useConvertProgressStore,
 } from "@/store/convert-progress-store";
-import { useLayoutStore } from "@/store/layout-store";
 import clsx from "clsx";
 import { BookText, Check, FileText, X } from "lucide-react";
 import { useEffect } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 /** 论文解析进度卡（markup 自 PapersPage 迁入；成功 6s 自动消失逻辑一并迁移） */
 function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
@@ -193,15 +192,11 @@ function BookConvertMiniCard({ bookConvert }: { bookConvert: BookConvertState })
 }
 
 export default function GlobalConvertProgress() {
-  const isHomeActive = useLayoutStore((s) => s.isHomeActive);
-  const location = useLocation();
   const paperImport = useConvertProgressStore((s) => s.paperImport);
   const bookConvert = useConvertProgressStore((s) => s.bookConvert);
   const bookConvertMinimized = useConvertProgressStore((s) => s.bookConvertMinimized);
 
-  // 豁免视图：阅读器 tab 激活（书籍/论文）或全局助手聊天页
-  const exempt = !isHomeActive || location.pathname === "/chat";
-  if (exempt) return null;
+  // 禁区由 BottomRightStackHost 统一管理（display:none），此处不再判豁免
   if (!paperImport && !bookConvertMinimized) return null;
 
   return (
