@@ -10,6 +10,8 @@ import { type PaperTaskKind, conflictKinds, registryActiveKinds } from "@/store/
 export function paperActiveKinds(paperId: string): PaperTaskKind[] {
   const active = registryActiveKinds(paperId);
   if (isPaperQueuedOrRunning(paperId)) active.push("parse");
+  // 刷新兜底：注册表内存态丢失时走 metadata（异步——首次调用可能缺，但批量按钮
+  // 灾难场景是刷新后立即操作，恢复 effect 已先跑过了）
   return active;
 }
 

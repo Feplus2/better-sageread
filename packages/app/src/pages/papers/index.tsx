@@ -591,6 +591,68 @@ export default function PapersPage() {
     loadAll();
   }, [loadAll]);
 
+  // 刷新恢复（2026-08-23）：向量化进行中刷新页面 → 内存队列丢失但 Rust 侧仍在跑。
+  // 扫描 metadata 中 status=processing 的论文回写注册表，防重复入队争抢；进度卡重建为简化态。
+  useEffect(() => {
+    void (async () => {
+      try {
+        const papers = await listPapers();
+        const processing = papers.filter((p) => p.status?.metadata?.vectorization?.status === "processing");
+        if (processing.length === 0) return;
+        const reg = await import("@/store/paper-task-registry");
+        const mark = reg.usePaperTaskRegistry.getState().mark;
+        for (const p of processing) mark(p.id, "vectorize", true);
+        // 进度卡恢复（简化：无法知道百分比，显示 N 篇进行中）
+        if (processing.length > 0) {
+          usePaperTaskStore.setState({
+            progress: {
+              vectorize: {
+                status: "running",
+                index: 0,
+                total: processing.length,
+                title: processing[0]?.title ?? "",
+                detail: "向量化进行中（页面刷新后恢复监控）…",
+                percent: 0,
+                doneCount: 0,
+                failedCount: 0,
+                skippedCount: 0,
+                failedNames: [],
+              },
+            },
+          });
+        }
+        // 监听完成事件：metadata 变为 success/failed 时解除注册表标记（loadAll 后自然刷新）
+        // 简化：30 秒轮询检查一次
+        const timer = setInterval(async () => {
+          try {
+            const recheck = await listPapers();
+            const stillProcessing = recheck.filter((p) => p.status?.metadata?.vectorization?.status === "processing");
+            const regS = reg.usePaperTaskRegistry.getState();
+            // 解除已完成的
+            for (const p of processing) {
+              if (!stillProcessing.find((sp) => sp.id === p.id)) {
+                regS.mark(p.id, "vectorize", false);
+              }
+            }
+            if (stillProcessing.length === 0) {
+              clearInterval(timer);
+              // 清恢复态进度卡
+              usePaperTaskStore.setState((prev) => ({
+                progress: prev.progress.vectorize?.detail?.includes("恢复监控")
+                  ? { ...prev.progress, vectorize: undefined }
+                  : prev.progress,
+              }));
+            }
+          } catch {
+            /* 轮询失败静默 */
+          }
+        }, 30000);
+      } catch {
+        /* 恢复失败不阻断 */
+      }
+    })();
+  }, []);
+
   // 批量解析结算后的列表刷新回调（注册给全局队列；本页不在场时跳过，重进自会加载）
   // loadAll 经 ref 间接引用：注册一次，刷新函数始终取最新
   const loadAllRef = useRef(loadAll);

@@ -1,18 +1,19 @@
-import { type ReactNode, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * 右下角进度卡共享栈（2026-08-23）：
- * 向量化/翻译/解析/Zotero 导入等多张进度卡原本各自 fixed right-4 bottom-4，
- * 同时出现时互相覆盖。本组件提供唯一容器，各卡 Portal 进入后自动纵向堆叠。
+ * 右下角进度卡共享栈（2026-08-23 v2 同步版）：
+ * 多张进度卡同时出现时纵向堆叠不覆盖。v1 的 useEffect+useState 有一帧延迟且在
+ * React 并发模式下可能不触发重渲染——改为模块级同步创建，Portal 立即生效。
  *
  * 用法：卡片外层包 <BottomRightPortal>…卡片…</BottomRightPortal>。
- * 容器 pointer-events-none，卡片自身需要 pointer-events-auto（现有卡已有交互）。
+ * 容器 pointer-events-none，卡片 wrapper pointer-events-auto。
  */
 
 const STACK_ID = "bottom-right-stack";
 
 function ensureStack(): HTMLElement {
+  if (typeof document === "undefined") return {} as HTMLElement;
   let el = document.getElementById(STACK_ID);
   if (!el) {
     el = document.createElement("div");
@@ -23,11 +24,9 @@ function ensureStack(): HTMLElement {
   return el;
 }
 
+// 模块级同步创建——import 时即挂载，无 useEffect 延迟
+const stackEl = ensureStack();
+
 export function BottomRightPortal({ children }: { children: ReactNode }) {
-  const [target, setTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    setTarget(ensureStack());
-  }, []);
-  if (!target) return null;
-  return createPortal(<div className="pointer-events-auto">{children}</div>, target);
+  return createPortal(<div className="pointer-events-auto">{children}</div>, stackEl);
 }
