@@ -10,6 +10,7 @@
  * 豁免只影响可见性：进度状态与事件接收在 store，退出豁免视图即恢复呈现。
  */
 
+import { BottomRightPortal } from "@/components/ui/bottom-right-stack";
 import { Progress } from "@/components/ui/progress";
 import {
   type BookConvertState,
@@ -204,9 +205,17 @@ export default function GlobalConvertProgress() {
   if (!paperImport && !bookConvertMinimized) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-40 flex flex-col items-end gap-2">
-      {paperImport && <PaperImportCard paperImport={paperImport} />}
-      {bookConvertMinimized && bookConvert.status !== "idle" && <BookConvertMiniCard bookConvert={bookConvert} />}
-    </div>
+    <>
+      {paperImport && (
+        <BottomRightPortal>
+          <PaperImportCard paperImport={paperImport} />
+        </BottomRightPortal>
+      )}
+      {bookConvertMinimized && bookConvert.status !== "idle" && (
+        <BottomRightPortal>
+          <BookConvertMiniCard bookConvert={bookConvert} />
+        </BottomRightPortal>
+      )}
+    </>
   );
 }

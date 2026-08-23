@@ -1,3 +1,4 @@
+import { BottomRightPortal } from "@/components/ui/bottom-right-stack";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -341,34 +342,36 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
   // 进行态：右下角后台进度卡（与单篇/多篇 PDF 导入同款），不渲染模态让出页面；取消等效原关闭行为
   if (phase === "running" && run) {
     return (
-      <div className="absolute right-4 bottom-4 z-40 w-80 rounded-xl border bg-background p-3.5 shadow-lg">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate font-medium text-sm">{run.title || "准备导入…"}</span>
-          <span className="shrink-0 text-muted-foreground text-xs">
-            {Math.min(run.index + 1, run.total)}/{run.total}
-          </span>
+      <BottomRightPortal>
+        <div className="w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate font-medium text-sm">{run.title || "准备导入…"}</span>
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {Math.min(run.index + 1, run.total)}/{run.total}
+            </span>
+          </div>
+          <Progress value={overallPercent} className="h-1.5" />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+              {run.stageName ? `${run.stageName} · ` : ""}
+              {run.detail ?? ""}
+            </span>
+            <span className="shrink-0 text-muted-foreground text-xs">{overallPercent}%</span>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            <span className="text-muted-foreground text-xs">Zotero 批量导入</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={handleCancel}
+              disabled={cancelling}
+            >
+              {cancelling ? "正在取消…" : "取消"}
+            </Button>
+          </div>
         </div>
-        <Progress value={overallPercent} className="h-1.5" />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-            {run.stageName ? `${run.stageName} · ` : ""}
-            {run.detail ?? ""}
-          </span>
-          <span className="shrink-0 text-muted-foreground text-xs">{overallPercent}%</span>
-        </div>
-        <div className="mt-2.5 flex items-center justify-between gap-2">
-          <span className="text-muted-foreground text-xs">Zotero 批量导入</span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={handleCancel}
-            disabled={cancelling}
-          >
-            {cancelling ? "正在取消…" : "取消"}
-          </Button>
-        </div>
-      </div>
+      </BottomRightPortal>
     );
   }
 

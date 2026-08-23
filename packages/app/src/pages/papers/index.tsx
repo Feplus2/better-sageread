@@ -1,5 +1,6 @@
 import { getUtilityModel } from "@/ai/providers/factory";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { BottomRightPortal } from "@/components/ui/bottom-right-stack";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1777,74 +1778,78 @@ export default function PapersPage() {
 
       {/* 后台解析进度卡已上移为全局浮层（components/global-convert-progress）——跨页面持续呈现 */}
 
-      {/* 批量任务进度卡（右下角浮层，样式对齐解析卡/Zotero 卡；running 时关闭即取消） */}
+      {/* 批量任务进度卡（共享右下角栈，与解析/Zotero 卡纵向堆叠不覆盖；running 时关闭即取消） */}
       {batchProgress && (
-        <div className="absolute right-4 bottom-4 z-40 w-80 rounded-xl border bg-background p-3.5 shadow-lg">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="min-w-0 flex-1 truncate font-medium text-sm">{BATCH_KIND_LABELS[batchProgress.kind]}</span>
-            <span className="shrink-0 text-muted-foreground text-xs">
-              {Math.min(batchProgress.index + 1, batchProgress.total)}/{batchProgress.total}
-            </span>
-            <button
-              type="button"
-              className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-              onClick={handleDismissBatchProgress}
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-
-          {batchProgress.status === "running" ? (
-            <>
-              <Progress value={batchProgress.percent} className="h-1.5" />
-              <div className="mt-2 flex items-center justify-between gap-2 text-muted-foreground text-xs">
-                <span className="min-w-0 flex-1 truncate">
-                  {batchProgress.title ? `《${batchProgress.title}》 ` : ""}
-                  {batchProgress.detail}
-                </span>
-                <span className="shrink-0">{batchProgress.percent}%</span>
-              </div>
-              <div className="mt-2.5 flex items-center justify-between gap-2">
-                <span className="text-muted-foreground text-xs">
-                  完成 {batchProgress.doneCount}
-                  {batchProgress.failedCount > 0 ? ` · 失败 ${batchProgress.failedCount}` : ""}
-                  {batchProgress.skippedCount > 0 ? ` · 跳过 ${batchProgress.skippedCount}` : ""}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2.5 text-xs"
-                  onClick={handleCancelBatch}
-                  disabled={batchCancelling}
-                >
-                  {batchCancelling ? "正在取消…" : "取消"}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p
-                className={clsx(
-                  "text-xs",
-                  batchProgress.status === "success"
-                    ? "text-green-600 dark:text-green-400"
-                    : "text-red-600 dark:text-red-400",
-                )}
+        <BottomRightPortal>
+          <div className="w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1 truncate font-medium text-sm">
+                {BATCH_KIND_LABELS[batchProgress.kind]}
+              </span>
+              <span className="shrink-0 text-muted-foreground text-xs">
+                {Math.min(batchProgress.index + 1, batchProgress.total)}/{batchProgress.total}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                onClick={handleDismissBatchProgress}
               >
-                {batchProgress.summary}
-              </p>
-              {batchProgress.failedNames.length > 0 && (
-                <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
-                  {batchProgress.failedNames.map((name) => (
-                    <li key={name} className="truncate" title={name}>
-                      {name}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
+                <X className="size-3.5" />
+              </button>
+            </div>
+
+            {batchProgress.status === "running" ? (
+              <>
+                <Progress value={batchProgress.percent} className="h-1.5" />
+                <div className="mt-2 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+                  <span className="min-w-0 flex-1 truncate">
+                    {batchProgress.title ? `《${batchProgress.title}》 ` : ""}
+                    {batchProgress.detail}
+                  </span>
+                  <span className="shrink-0">{batchProgress.percent}%</span>
+                </div>
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground text-xs">
+                    完成 {batchProgress.doneCount}
+                    {batchProgress.failedCount > 0 ? ` · 失败 ${batchProgress.failedCount}` : ""}
+                    {batchProgress.skippedCount > 0 ? ` · 跳过 ${batchProgress.skippedCount}` : ""}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={handleCancelBatch}
+                    disabled={batchCancelling}
+                  >
+                    {batchCancelling ? "正在取消…" : "取消"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p
+                  className={clsx(
+                    "text-xs",
+                    batchProgress.status === "success"
+                      ? "text-green-600 dark:text-green-400"
+                      : "text-red-600 dark:text-red-400",
+                  )}
+                >
+                  {batchProgress.summary}
+                </p>
+                {batchProgress.failedNames.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
+                    {batchProgress.failedNames.map((name) => (
+                      <li key={name} className="truncate" title={name}>
+                        {name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+        </BottomRightPortal>
       )}
 
       {/* 页面级拖入感应遮罩（拖 PDF 到文献库页任意位置直接解析） */}
