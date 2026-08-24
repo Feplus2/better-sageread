@@ -62,13 +62,13 @@ pub struct BackupManifest {
     pub assets: Vec<AssetRef>,
 }
 
-/// 大包资产包（manifest v3）：按捆上传——每本书一包、字体/背景/工作区各一捆、向量库单文件。
-/// 请求数从"文件数"压到"书数+4"（WebDAV 频率限流的治本）；内容清单哈希不变则永不重传。
+/// 大包资产包（manifest v3）：按捆上传——每本书一包、字体/背景/工作区/聊天附件各一捆、向量库单文件。
+/// 请求数从"文件数"压到"书数+5"（WebDAV 频率限流的治本）；内容清单哈希不变则永不重传。
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AssetRef {
-    /// 包类型：book / fonts / backgrounds / workspace / vectors
+    /// 包类型：book / fonts / backgrounds / workspace / vectors / attachments
     pub kind: String,
-    /// 包名：book id 或固定名（fonts/backgrounds/workspace/vectors）
+    /// 包名：book id 或固定名（fonts/backgrounds/workspace/vectors/attachments）
     pub name: String,
     /// 包内容清单哈希（目录内全部文件 path+sha256 的组合哈希；向量库为文件哈希）
     pub sha256: String,

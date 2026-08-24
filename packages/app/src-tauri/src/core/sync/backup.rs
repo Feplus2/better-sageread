@@ -18,7 +18,7 @@ const ASSET_CACHE_FILE: &str = "backup-assets-cache.json";
 /// 单文件 ≥4MB 用 Stored 直接打包（EPUB/PDF/woff2/sqlite 已压缩，Deflate 白烧 CPU）
 const STORED_THRESHOLD: u64 = 4 * 1024 * 1024;
 
-/// 云端资产捆目录（跟随备份 remote_dir；每捆一个 zip，请求数 = 书数+4）
+/// 云端资产捆目录（跟随备份 remote_dir；每捆一个 zip，请求数 = 书数+5）
 fn bundles_dir(config: &WebdavConfig) -> String {
     format!("{}/asset-bundles", config.remote_dir.trim_matches('/'))
 }
@@ -217,7 +217,7 @@ fn bundle_from_dir(
     }))
 }
 
-/// 扫描全部资产捆：books/{id} 每本一捆、向量库单文件、字体/背景/工作区各一捆
+/// 扫描全部资产捆：books/{id} 每本一捆、向量库单文件、字体/背景/工作区/聊天附件各一捆
 fn collect_bundles(app: &AppHandle, config_dir: &Path) -> Result<(Vec<Bundle>, AssetCache), String> {
     let mut cache = load_asset_cache(config_dir);
     let mut bundles: Vec<Bundle> = Vec::new();
@@ -277,6 +277,11 @@ fn collect_bundles(app: &AppHandle, config_dir: &Path) -> Result<(Vec<Bundle>, A
         if let Some(b) = bundle_from_dir(&mut cache, "workspace", "workspace".to_string(), app_data.join("agent-workspace"))? {
             bundles.push(b);
         }
+        // 聊天图片附件（D4 起消息只存 attachment:// 引用，字节在 {appData}/attachments；
+        // 不进备份则换机恢复后对话图片全丢——按需产物通常不大，全量带上）
+        if let Some(b) = bundle_from_dir(&mut cache, "attachments", "attachments".to_string(), app_data.join("attachments"))? {
+            bundles.push(b);
+        }
     }
     if let Ok(config_dir_path) = app.path().app_config_dir() {
         // 阅读背景图
@@ -315,6 +320,7 @@ pub(crate) fn bundle_target_dir(app: &AppHandle, kind: &str, name: &str) -> Opti
         "vectors" => Some(app.path().app_data_dir().ok()?.join("papers")),
         "fonts" => Some(app.path().app_data_dir().ok()?.join("fonts")),
         "workspace" => Some(app.path().app_data_dir().ok()?.join("agent-workspace")),
+        "attachments" => Some(app.path().app_data_dir().ok()?.join("attachments")),
         "backgrounds" => Some(app.path().app_config_dir().ok()?.join("reader-backgrounds")),
         _ => None,
     }
@@ -411,7 +417,7 @@ pub async fn run_backup(
         }
     }
 
-    // 3. 扫描资产捆（书按本、向量库/字体/背景/工作区各一捆；内容清单哈希）
+    // 3. 扫描资产捆（书按本、向量库/字体/背景/工作区/聊天附件各一捆；内容清单哈希）
     let _ = app.emit("sync-backup-progress", serde_json::json!({ "stage": "scan" }));
     let (bundles, asset_cache) = collect_bundles(app, &config_dir)?;
     let assets: Vec<AssetRef> = bundles
@@ -705,5 +711,49 @@ mod tests {
         assert_eq!(parsed.assets[0].bundle_remote_name(), format!("book-b1-{}.zip", "a".repeat(16)));
 
         let _ = fs::remove_dir_all(&staging);
+    }
+
+    /// 附件捆（S4）：{appData}/attachments 目录打捆 → 解包到另一个数据目录 →
+    /// 文件逐字节一致、内容清单哈希与备份侧相同（stage_restore 损包校验同口径）——
+    /// 换机恢复后 attachment:// 引用指向的图片文件必须可用
+    #[test]
+    fn test_attachments_bundle_roundtrip() {
+        let root = std::env::temp_dir().join(format!("sageread-attachments-test-{}", uuid::Uuid::new_v4()));
+        // 源机：对话图片落盘目录（attachment://img1.png 引用的实体）
+        let src = root.join("src-appdata").join("attachments");
+        fs::create_dir_all(&src).unwrap();
+        let png = b"\x89PNG\r\n\x1a\n-fake-png-bytes";
+        let jpg = b"\xff\xd8\xff\xe0-fake-jpg-bytes";
+        fs::write(src.join("img1.png"), png).unwrap();
+        fs::write(src.join("img2.jpg"), jpg).unwrap();
+
+        // 备份侧：组装捆（kind=attachments，与 collect_bundles 同参数）+ 打 zip
+        let mut cache = AssetCache::new();
+        let bundle = bundle_from_dir(&mut cache, "attachments", "attachments".to_string(), src.clone())
+            .unwrap()
+            .expect("attachments 目录应打成捆");
+        assert_eq!(bundle.kind, "attachments");
+        assert_eq!(bundle.files.len(), 2, "两个附件文件都应入捆");
+        let zip_bytes = build_bundle_zip(&bundle).unwrap();
+
+        // 恢复侧：解到另一台机器的数据目录（apply_staged_assets 的整目录时点替换语义）
+        let restored = root.join("dst-appdata").join("attachments");
+        fs::create_dir_all(&restored).unwrap();
+        zip::ZipArchive::new(Cursor::new(&zip_bytes))
+            .unwrap()
+            .extract(&restored)
+            .unwrap();
+
+        // 图片文件逐字节可见
+        assert_eq!(fs::read(restored.join("img1.png")).unwrap(), png);
+        assert_eq!(fs::read(restored.join("img2.jpg")).unwrap(), jpg);
+        // 损包校验口径：恢复目录的内容清单哈希 == 备份 manifest 里的 sha256
+        assert_eq!(
+            dir_content_hash(&restored).unwrap().as_deref(),
+            Some(bundle.content_hash.as_str()),
+            "恢复后目录内容哈希应与备份清单一致"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -526,7 +526,7 @@ export default function SyncSettings() {
             </Button>
           </div>
           <p className="text-neutral-600 text-xs dark:text-neutral-400">
-            配置仅保存在本机；坚果云请在账号设置里创建应用密码。备份为全量搬家（含书籍/论文文件、向量库、字体与背景等，大文件按内容哈希去重、只传一次）；API
+            配置仅保存在本机；坚果云请在账号设置里创建应用密码。备份为全量搬家（含书籍/论文文件、向量库、字体、背景与对话图片附件等，大文件按内容哈希去重、只传一次）；API
             密钥永不包含（仅存本机凭据管理器）。
           </p>
         </div>
