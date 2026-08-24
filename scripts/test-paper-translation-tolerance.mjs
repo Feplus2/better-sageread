@@ -49,6 +49,10 @@ globalThis.__mockGenerateText = async ({ prompt }) => {
   }
   const jsonText = prompt.slice(prompt.indexOf("待翻译内容：") + "待翻译内容：".length).trim();
   const batch = JSON.parse(jsonText);
+  // 脚注批次（fn 字符串键契约）与正文块批次（index 数字键）分流
+  if (batch.length > 0 && typeof batch[0].fn === "string") {
+    return { text: JSON.stringify(batch.map((b) => ({ fn: b.fn, text: `脚注译文${b.fn}` }))) };
+  }
   return { text: JSON.stringify(batch.map((b) => ({ index: b.index, text: `译文${b.index}` }))) };
 };
 
@@ -62,6 +66,9 @@ const STUBS = {
   `,
   ai: `
     export const generateText = (...args) => globalThis.__mockGenerateText(...args);
+  `,
+  "@tauri-apps/api/core": `
+    export const invoke = async () => undefined;
   `,
   "@tauri-apps/api/path": `
     export const appDataDir = async () => globalThis.__testDataDir;
@@ -244,6 +251,35 @@ await check("术语表抽取失败：不阻断翻译，批次 prompt 无术语�
   } finally {
     glossaryBehavior = "ok";
   }
+});
+
+// ─── 脚注翻译（fn:<id> 独立键） ───
+
+await check("脚注：fn:<id> 独立键入译本、总数含脚注、续翻幂等跳过", async () => {
+  mkdirSync(paperDir("p7"), { recursive: true });
+  // 13 个正文块 + 2 条脚注定义（[^1] 被引用、[^2] 孤儿——提取不问引用与否）
+  const mdWithFn = `${MD12}\n\nBody paragraph with a footnote ref[^1] inside.\n\n[^1]: Footnote one text.\n\n[^2]: Footnote two text.\n`;
+  calls.length = 0;
+  const result = await translatePaper({ paperId: "p7", markdown: mdWithFn });
+  assert(result.total === 15, `total 应为 15（13 块 + 2 脚注），got ${result.total}`);
+  assert(result.translated === 15, `应新翻 15 项，got ${result.translated}`);
+  const file = await loadPaperTranslation("p7");
+  const keys = Object.keys(file?.blocks ?? {});
+  assert(keys.length === 15, `落盘应为 15 键，got ${keys.length}`);
+  assert(file.blocks["fn:1"]?.text === "脚注译文1", `fn:1 落盘异常: ${file.blocks["fn:1"]?.text}`);
+  assert(file.blocks["fn:2"]?.text === "脚注译文2", "fn:2 落盘异常");
+  const fnCalls = calls.filter((p) => p.includes("脚注（页下注）"));
+  assert(fnCalls.length === 1, `脚注应独立成批调用 1 次，got ${fnCalls.length}`);
+  // 续翻：全部幂等跳过
+  const rerun = await translatePaper({ paperId: "p7", markdown: mdWithFn });
+  assert(rerun.translated === 0 && rerun.skipped === 15, `续翻应全跳过：${JSON.stringify(rerun)}`);
+  // 脚注内容变更 → 只补翻该脚注
+  const mdFnChanged = mdWithFn.replace("Footnote one text", "Footnote one revised text");
+  const rerun2 = await translatePaper({ paperId: "p7", markdown: mdFnChanged });
+  assert(rerun2.translated === 1 && rerun2.skipped === 14, `应只补翻 1 条脚注：${JSON.stringify(rerun2)}`);
+  const file2 = await loadPaperTranslation("p7");
+  assert(file2.blocks["fn:1"]?.text === "脚注译文1", "补翻后 fn:1 应更新");
+  assert(file2.blocks["fn:2"]?.text === "脚注译文2", "fn:2 不应动");
 });
 
 rmSync(outDir, { recursive: true, force: true });

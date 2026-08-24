@@ -49,6 +49,8 @@ export interface PaperExportParams {
   markdown: string;
   /** 译本块文本（mode != original 时必需；null 时按原文导出） */
   translationMap?: ReadonlyMap<number, string> | null;
+  /** 脚注译文（fn:<id> 键域拆出，id → 译文） */
+  footnoteMap?: ReadonlyMap<string, string> | null;
   /** 译本文件本体（含句/词对齐表；译文模式内联高亮跨语言映射、对照模式中文侧镜像用） */
   translationFile?: PaperTranslationFile | null;
   /** 元数据译文（文档头中文标题，译文/对照模式优先） */
@@ -152,14 +154,19 @@ function stripTranslationDivImageRefs(doc: string): string {
 
 /** 模式化正文：视图重建 → 去 frontmatter → 译文 div 图片引用清理 → 按 includeImages 剔除图片引用 */
 function buildPaperExportBody(params: PaperExportParams): string {
-  const { markdown, translationMap, mode } = params;
+  const { markdown, translationMap, footnoteMap, mode } = params;
   let viewMarkdown = markdown;
   if (mode !== "original" && translationMap) {
     // 对照模式分格式：markdown 导出走原生引用块（可编辑、公式保持 $...$），HTML 导出走译文 div（样式化）
     viewMarkdown =
       mode === "bilingual" && params.format === "markdown"
-        ? buildPaperBilingualExportMarkdown(markdown, translationMap)
-        : buildPaperViewMarkdown(markdown, translationMap, mode as Exclude<PaperViewMode, "original">);
+        ? buildPaperBilingualExportMarkdown(markdown, translationMap, footnoteMap ?? undefined)
+        : buildPaperViewMarkdown(
+            markdown,
+            translationMap,
+            mode as Exclude<PaperViewMode, "original">,
+            footnoteMap ?? undefined,
+          );
   }
   const { body } = parsePaperMarkdown(viewMarkdown.replace(/\r\n?/g, "\n"));
   let exportBody = stripTranslationDivImageRefs(body);

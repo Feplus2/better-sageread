@@ -2,8 +2,9 @@
  * 论文翻译服务（块级平行译本）。
  *
  * 产物：{appDataDir}/books/{paperId}/translation-zh.json
- *   {version:1, lang:"zh", updatedAt, blocks: {"<blockIndex>": {hash, text}}}
+ *   {version:1, lang:"zh", updatedAt, blocks: {"<blockIndex>": {hash, text}, "fn:<脚注id>": {hash, text}}}
  * hash = 块源文本 sha256 前 16 hex；翻译只增不改——hash 匹配的块跳过重翻（幂等/断点续翻）。
+ * 脚注定义（[^id]: …）不占块序号，以 fn:<id> 独立键入译本（同一幂等 hash 语义）。
  * 分批调用辅助模型（参照 ai-context-service.ts 的 utility model 调用），每批落盘一次，崩溃/取消可续。
  * 元数据（title/abstract）顺带翻译，读改写 metadata.json 的 title_zh/abstract_zh（不动其他字段）。
  */
@@ -14,9 +15,10 @@ import {
   getUtilityModel,
   utilityTaskProviderOptions,
 } from "@/ai/providers/factory";
-import { cutPaperBlocks } from "@/pages/paper-reader/paper-blocks";
+import { cutPaperBlocks, extractPaperFootnotes } from "@/pages/paper-reader/paper-blocks";
 import type { PaperAlignPair } from "@/pages/paper-reader/paper-cross-anchor";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { generateText } from "ai";
@@ -158,13 +160,55 @@ function buildBatchPrompt(
 
 要求：
 1. 学术术语、人名、化学式、符号在全篇保持一致译法；人名不译。
-2. $...$ 与 $$...$$ 包裹的数学公式、代码片段、URL、DOI、参考文献条目原样保留，不得翻译或改动。
+2. $...$ 与 $$...$$ 包裹的数学公式、代码片段、URL、DOI、参考文献条目、[^...] 脚注引用标记原样保留，不得翻译或改动。
 3. 保留原文的 Markdown 行内格式（**粗体**、*斜体*、\`代码\`、链接文字可译但保留 [文字](URL) 结构）。
 4. ![...](...) 图片引用必须原样保留（路径与定界符不得改动），不得翻译、删除或改写为普通文字。
 5. 输入是 JSON 数组 [{"index":N,"text":"..."}]，只输出 JSON 数组 [{"index":N,"text":"译文"}]：index 与输入一一对应、不得遗漏或新增，不要输出任何其他文字或解释。${glossaryNote}${strictNote}
 
 待翻译内容：
 ${JSON.stringify(batch)}`;
+}
+
+/** 脚注批次提示词：与正文批次同规则，键契约改为 fn 字符串（脚注定义不入块序号） */
+function buildFootnoteBatchPrompt(
+  batch: { fn: string; text: string }[],
+  strict = false,
+  glossary?: PaperGlossaryItem[] | null,
+): string {
+  const strictNote = strict
+    ? "\n\n注意：上一次输出的 JSON 无法解析。本次必须只输出一个严格合法的 JSON 数组（双引号、无尾随逗号、字符串内控制字符已转义），不要任何额外文字。"
+    : "";
+  const glossaryNote = glossary?.length
+    ? `\n\n术语表（以下术语必须严格采用给定译法，全篇保持一致）：\n${glossary.map((g) => `${g.src} → ${g.tgt}`).join("\n")}`
+    : "";
+  return `你是专业的学术论文翻译引擎。把给定论文的脚注（页下注）逐条翻译为简体中文。
+
+要求：
+1. 学术术语、人名、化学式、符号与正文保持一致译法；人名不译。
+2. $...$ 与 $$...$$ 包裹的数学公式、代码片段、URL、DOI 原样保留，不得翻译或改动。
+3. 保留原文的 Markdown 行内格式（**粗体**、*斜体*、\`代码\`、链接文字可译但保留 [文字](URL) 结构）。
+4. 输入是 JSON 数组 [{"fn":"脚注ID","text":"..."}]，只输出 JSON 数组 [{"fn":"脚注ID","text":"译文"}]：fn 与输入一一对应、不得遗漏或新增，不要输出任何其他文字或解释。${glossaryNote}${strictNote}
+
+待翻译内容：
+${JSON.stringify(batch)}`;
+}
+
+/** 脚注批次切分（与 makeBatches 同限额；fn 键契约） */
+function makeFootnoteBatches(pending: { fn: string; text: string }[]): { fn: string; text: string }[][] {
+  const batches: { fn: string; text: string }[][] = [];
+  let current: { fn: string; text: string }[] = [];
+  let chars = 0;
+  for (const item of pending) {
+    if (current.length > 0 && (current.length >= BATCH_MAX_BLOCKS || chars + item.text.length > BATCH_MAX_CHARS)) {
+      batches.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(item);
+    chars += item.text.length;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 /** 术语表抽取的源文本采样上限（标题+摘要+正文前若干块） */
@@ -228,8 +272,8 @@ ${parts.join("\n\n")}`;
   return items.length > 0 ? items : null;
 }
 
-/** 解析模型输出为 [{index, text}]，容忍 ```json 围栏与前后杂讯；结构非法抛错 */
-function parseBatchResponse(raw: string): { index: number; text: string }[] {
+/** 解析模型输出为 JSON 数组：容忍 ```json 围栏与前后杂讯；LaTeX 反斜杠保守修复；结构非法抛错 */
+function parseJsonArrayResponse(raw: string): unknown[] {
   const cleaned = raw
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -249,12 +293,28 @@ function parseBatchResponse(raw: string): { index: number; text: string }[] {
     parsed = JSON.parse(repaired); // 仍失败则抛给上层（严格措辞重试/跳过该批）
   }
   if (!Array.isArray(parsed)) throw new Error("模型响应不是 JSON 数组");
-  return parsed.map((item) => {
+  return parsed;
+}
+
+/** 正文块批次响应 → [{index, text}] */
+function parseBatchResponse(raw: string): { index: number; text: string }[] {
+  return parseJsonArrayResponse(raw).map((item) => {
     const record = item as { index?: unknown; text?: unknown };
     if (typeof record?.index !== "number" || typeof record?.text !== "string" || !record.text.trim()) {
       throw new Error("模型响应条目缺少 index/text");
     }
     return { index: record.index, text: record.text };
+  });
+}
+
+/** 脚注批次响应 → [{fn, text}]（fn 为字符串键，对应 fn:<id> 独立键） */
+function parseFootnoteBatchResponse(raw: string): { fn: string; text: string }[] {
+  return parseJsonArrayResponse(raw).map((item) => {
+    const record = item as { fn?: unknown; text?: unknown };
+    if (typeof record?.fn !== "string" || !record.fn || typeof record?.text !== "string" || !record.text.trim()) {
+      throw new Error("模型响应条目缺少 fn/text");
+    }
+    return { fn: record.fn, text: record.text };
   });
 }
 
@@ -276,9 +336,10 @@ function makeBatches(pending: { index: number; text: string }[]): { index: numbe
   return batches;
 }
 
-/** 元数据翻译：title/abstract 一次附加调用，读改写 metadata.json 的 title_zh/abstract_zh */
+/** 元数据翻译：title/abstract 一次附加调用，写 metadata.json 的 title_zh/abstract_zh
+ * （写入走 patch_paper_metadata_json 全局锁串行化，与向量锚/Zotero 回链并发互不覆盖） */
 async function translateMetadata(
-  dir: string,
+  paperId: string,
   source: { title?: string; abstract?: string },
   model: ReturnType<typeof createModelInstance>,
   force: boolean,
@@ -286,7 +347,7 @@ async function translateMetadata(
   glossary?: PaperGlossaryItem[] | null,
   providerOptions?: Record<string, Record<string, any>>,
 ): Promise<void> {
-  const metaPath = await join(dir, "metadata.json");
+  const metaPath = await join(await paperDirOf(paperId), "metadata.json");
   if (!(await exists(metaPath))) return;
   let metadata: Record<string, unknown>;
   try {
@@ -315,25 +376,25 @@ async function translateMetadata(
   const end = cleaned.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error("元数据翻译响应解析失败");
   const parsed = JSON.parse(cleaned.slice(start, end + 1)) as { title_zh?: unknown; abstract_zh?: unknown };
-  // 读改写：只动 title_zh/abstract_zh，其他字段原样保留
+  // 只落非空字段；写入走 Rust 侧全局锁（读改写串行化，其他字段不受并发写者覆盖）
+  const patch: Record<string, string> = {};
   if (needTitle && typeof parsed.title_zh === "string" && parsed.title_zh.trim()) {
-    metadata.title_zh = parsed.title_zh.trim();
+    patch.title_zh = parsed.title_zh.trim();
   }
   if (needAbstract && typeof parsed.abstract_zh === "string" && parsed.abstract_zh.trim()) {
-    metadata.abstract_zh = parsed.abstract_zh.trim();
+    patch.abstract_zh = parsed.abstract_zh.trim();
   }
-  await writeTextFile(metaPath, JSON.stringify(metadata, null, 2));
+  if (Object.keys(patch).length > 0) {
+    await invoke("patch_paper_metadata_json", { paperId, patch });
+  }
 }
 
-/** 翻译运行状态戳记：读改写 metadata.json 的 translationRunState（"complete"|"partial"），
+/** 翻译运行状态戳记：写 metadata.json 的 translationRunState（"complete"|"partial"），
  *  供列表徽标区分完整/不完整译本（中断、批次失败 → partial）。
  *  重解析换新 metadata.json 后戳记消失，但此时译本必然 stale——徽标走陈旧口径，不依赖戳记 */
-async function stampTranslationRunState(dir: string, state: "complete" | "partial"): Promise<void> {
+async function stampTranslationRunState(paperId: string, state: "complete" | "partial"): Promise<void> {
   try {
-    const metaPath = await join(dir, "metadata.json");
-    const metadata = JSON.parse(await readTextFile(metaPath)) as Record<string, unknown>;
-    metadata.translationRunState = state;
-    await writeTextFile(metaPath, JSON.stringify(metadata, null, 2));
+    await invoke("patch_paper_metadata_json", { paperId, patch: { translationRunState: state } });
   } catch (error) {
     console.warn("写入翻译状态戳记失败:", error);
   }
@@ -380,8 +441,18 @@ export async function translatePaper(options: {
     .filter((block) => working[String(block.index)]?.hash !== hashes.get(block.index))
     .map((block) => ({ index: block.index, text: block.sourceText }));
 
-  const total = translatable.length;
-  let done = total - pending.length;
+  // 脚注（[^id]: 定义）：不占块序号，以 fn:<id> 独立键入译本（与正文块同一幂等 hash 语义）
+  const footnotes = extractPaperFootnotes(markdown);
+  const fnHashes = new Map<string, string>();
+  for (const fn of footnotes) {
+    fnHashes.set(fn.id, await hashBlockText(fn.text));
+  }
+  const pendingFootnotes = footnotes
+    .filter((fn) => working[`fn:${fn.id}`]?.hash !== fnHashes.get(fn.id))
+    .map((fn) => ({ fn: fn.id, text: fn.text }));
+
+  const total = translatable.length + footnotes.length;
+  let done = total - pending.length - pendingFootnotes.length;
   const skipped = done;
   let failedBatches = 0;
   onProgress?.({ done, total });
@@ -473,7 +544,57 @@ export async function translatePaper(options: {
   await Promise.all(Array.from({ length: Math.min(TRANSLATE_CONCURRENCY, batches.length) }, () => runWorker()));
   if (signal?.aborted) {
     await save();
-    await stampTranslationRunState(dir, "partial");
+    await stampTranslationRunState(paperId, "partial");
+    return result(true);
+  }
+
+  // 脚注批次（fn 键独立契约；量少通常一批，串行即可，与正文同一取消/容错语义）
+  for (const batch of makeFootnoteBatches(pendingFootnotes)) {
+    if (signal?.aborted) break;
+    let translated: { fn: string; text: string }[] | null = null;
+    try {
+      const { text } = await generateText({
+        model,
+        prompt: buildFootnoteBatchPrompt(batch, false, glossary),
+        temperature: 0.2,
+        abortSignal: signal,
+        providerOptions: taskOptions,
+      });
+      translated = parseFootnoteBatchResponse(text);
+    } catch (error) {
+      if (signal?.aborted) throw error; // 取消优先
+      console.warn("论文脚注翻译批次失败，以严格 JSON 措辞重试一次:", error);
+      try {
+        const { text } = await generateText({
+          model,
+          prompt: buildFootnoteBatchPrompt(batch, true, glossary),
+          temperature: 0.2,
+          abortSignal: signal,
+          providerOptions: taskOptions,
+        });
+        translated = parseFootnoteBatchResponse(text);
+      } catch (retryError) {
+        if (signal?.aborted) throw retryError;
+        console.warn(`论文脚注翻译批次重试仍失败，跳过该批 ${batch.length} 条:`, retryError);
+        failedBatches += 1;
+      }
+    }
+    if (translated) {
+      const batchKeys = new Set(batch.map((item) => item.fn));
+      for (const item of translated) {
+        if (!batchKeys.has(item.fn)) continue; // 模型多给的条目直接丢弃
+        const hash = fnHashes.get(item.fn);
+        if (!hash) continue;
+        working[`fn:${item.fn}`] = { hash, text: item.text.trim() };
+        done += 1;
+      }
+      await save(); // 每批落盘一次，崩溃/取消可续
+      onProgress?.({ done, total });
+    }
+  }
+  if (signal?.aborted) {
+    await save();
+    await stampTranslationRunState(paperId, "partial");
     return result(true);
   }
 
@@ -481,7 +602,7 @@ export async function translatePaper(options: {
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   try {
     await translateMetadata(
-      dir,
+      paperId,
       { title: metadata.title, abstract: metadata.abstract },
       model,
       force,
@@ -491,12 +612,12 @@ export async function translatePaper(options: {
     );
   } catch (error) {
     if (signal?.aborted) {
-      await stampTranslationRunState(dir, "partial");
+      await stampTranslationRunState(paperId, "partial");
       return result(true);
     }
     console.warn("论文元数据翻译失败（正文译本不受影响）:", error);
   }
 
-  await stampTranslationRunState(dir, failedBatches > 0 ? "partial" : "complete");
+  await stampTranslationRunState(paperId, failedBatches > 0 ? "partial" : "complete");
   return result(false);
 }

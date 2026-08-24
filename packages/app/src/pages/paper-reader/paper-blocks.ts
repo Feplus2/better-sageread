@@ -9,8 +9,10 @@
  * sourceText 为 DOM textContent 等口径的纯文本（行内公式保留 $...$，图片/硬换行无文本贡献），
  * 与锚点偏移处于同一文本空间；一致性测试见 scripts/test-paper-blocks-consistency.mjs。
  *
- * 已知例外（fixture 与契约产物均不出现，出现时按不可翻译处理并可能破坏块对齐）：
- *   脚注（remark-gfm 会在文末生成 <section data-footnotes> 内的 li）、原始 HTML 块。
+ * 已知例外（fixture 与契约产物均不出现，出现时按不可翻译处理并可能破坏块对齐）：原始 HTML 块。
+ * 脚注定义（[^id]: …，P1 起契约产物可含）：mdast footnoteDefinition 不占块序号，
+ *   翻译经 fn:<id> 独立键（extractPaperFootnotes / paper-translation-service），
+ *   视图重建在 collectEdits 里按 identifier 查表，不挤占正文块序号。
  */
 
 import katex from "katex";
@@ -47,11 +49,13 @@ export interface PaperBlock {
 
 export type PaperViewMode = "original" | "translated" | "bilingual";
 
-/** 宽松的 mdast 节点（GFM 表格/数学节点不在标准联合类型内，统一按结构访问） */
+/** 宽松的 mdast 节点（GFM 表格/数学/脚注节点不在标准联合类型内，统一按结构访问） */
 interface MdNode {
   type: string;
   value?: string;
   depth?: number;
+  /** footnoteDefinition 的归一化标识符（GFM 脚注） */
+  identifier?: string;
   children?: MdNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
@@ -144,6 +148,33 @@ export function cutPaperBlocks(markdown: string): PaperBlock[] {
   const { body } = splitBody(markdown);
   const tree = parser.parse(body) as unknown as MdNode;
   return collectBlocks(tree.children ?? []);
+}
+
+// ─── 脚注提取（翻译管线用；脚注不占块序号，以 fn:<id> 独立键入译本） ───
+
+/** 脚注定义（[^id]: 内容） */
+export interface PaperFootnote {
+  /** GFM 归一化标识符（mdast footnoteDefinition.identifier） */
+  id: string;
+  /** 脚注源文本（多段以 \n 连接；行内公式保留 $...$，与块源文本同口径） */
+  text: string;
+}
+
+/** 提取正文中的脚注定义（含孤儿定义；文档顺序）。无脚注返回空数组 */
+export function extractPaperFootnotes(markdown: string): PaperFootnote[] {
+  if (!markdown.includes("[^")) return [];
+  const { body } = splitBody(markdown);
+  const tree = parser.parse(body) as unknown as MdNode;
+  const footnotes: PaperFootnote[] = [];
+  for (const node of tree.children ?? []) {
+    if (node.type !== "footnoteDefinition" || !node.identifier) continue;
+    const text = (node.children ?? [])
+      .map((child) => extractText(child))
+      .join("\n")
+      .trim();
+    if (text) footnotes.push({ id: node.identifier, text });
+  }
+  return footnotes;
 }
 
 // ─── 图表速跳提取（侧边栏「图表」tab 数据源，运行时解析，不入库） ───
@@ -440,12 +471,53 @@ export function restoreImageRefs(sourceMarkdown: string, translated: string): st
   return result;
 }
 
+/** 脚注引用标记（[^id]；(?!:) 排除定义行首的 [^id]:） */
+const FOOTNOTE_REF_RE = /\[\^([^\]\n]+)\](?!:)/g;
+
+/**
+ * 译文脚注引用补回（译文模式硬保证，与 restoreImageRefs 同思路）：
+ * 模型整块翻译可能丢 [^id] 引用标记；丢失则 GFM 不渲染对应脚注定义，译文脚注成死文本。
+ * 源块每个引用标记若译文缺失（按 token 逐字比对），按源内字符比例位置补回：
+ * 就近贴空白之后（±12 字符窗口），吸附不到（CJK 译文无词间空白）按原位直插——
+ * 上标引用位置略偏可接受，丢脚注区不可接受。
+ */
+export function restoreFootnoteRefs(sourceMarkdown: string, translated: string): string {
+  const missing: { token: string; start: number }[] = [];
+  for (const match of sourceMarkdown.matchAll(FOOTNOTE_REF_RE)) {
+    if (!translated.includes(match[0])) missing.push({ token: match[0], start: match.index });
+  }
+  if (missing.length === 0) return translated;
+  let result = translated;
+  for (const { token, start } of [...missing].sort((a, b) => b.start - a.start)) {
+    const at = Math.min(result.length, Math.round((start / Math.max(1, sourceMarkdown.length)) * translated.length));
+    let insertAt = -1;
+    for (let i = at; i < Math.min(result.length, at + 12); i++) {
+      if (/\s/.test(result[i])) {
+        insertAt = i + 1;
+        break;
+      }
+    }
+    if (insertAt === -1) {
+      for (let i = at - 1; i >= Math.max(0, at - 12); i--) {
+        if (/\s/.test(result[i])) {
+          insertAt = i + 1;
+          break;
+        }
+      }
+    }
+    if (insertAt === -1) insertAt = at;
+    result = result.slice(0, insertAt) + token + result.slice(insertAt);
+  }
+  return result;
+}
+
 /** 枚举正文顶层节点并对每个有译文的可翻译块生成编辑（与 collectBlocks 同一遍历顺序） */
 function collectEdits(
   body: string,
   children: MdNode[],
   translations: ReadonlyMap<number, string>,
   mode: Exclude<PaperViewMode, "original">,
+  footnotes?: ReadonlyMap<string, string>,
 ): Edit[] {
   const edits: Edit[] = [];
   let index = 0;
@@ -461,6 +533,8 @@ function collectEdits(
   // cutPaperBlocks，块索引自此整体错位（联动 hover/词对齐静默失效的根因）。div 尾部补 \n
   // 保证 </div> 后必为空行；后续块本就有空行时多一个换行对 markdown 无影响。
   const trailingDiv = (text: string) => `\n\n${translationDiv(text)}\n`;
+  /** 译文模式内联引用补回：图片（restoreImageRefs）+ 脚注引用标记（restoreFootnoteRefs） */
+  const restoreRefs = (source: string, text: string) => restoreFootnoteRefs(source, restoreImageRefs(source, text));
   for (const node of children) {
     const nodeStart = offsetOf(node.position?.start, node);
     const nodeEnd = offsetOf(node.position?.end, node);
@@ -472,7 +546,7 @@ function collectEdits(
         const span = contentSpan(node);
         if (!span) break;
         if (mode === "translated") {
-          edits.push({ ...span, text: oneLine(restoreImageRefs(body.slice(nodeStart, nodeEnd), text)) });
+          edits.push({ ...span, text: oneLine(restoreRefs(body.slice(nodeStart, nodeEnd), text)) });
         } else {
           edits.push({ start: nodeEnd, end: nodeEnd, text: trailingDiv(text) });
         }
@@ -487,7 +561,7 @@ function collectEdits(
           if (mode === "translated") {
             // 译文模式：保留原列表标记，整块压平为单行（嵌套列表文本已并入该块译文）
             const marker = body.slice(start, end).match(LIST_MARKER_RE)?.[0] ?? "- ";
-            edits.push({ start, end, text: `${marker}${oneLine(restoreImageRefs(body.slice(start, end), text))}` });
+            edits.push({ start, end, text: `${marker}${oneLine(restoreRefs(body.slice(start, end), text))}` });
           } else {
             // 对照模式：译文 div 追加在 li 末尾（li 内部，不占块序号；原文偏移不受影响）
             edits.push({ start: end, end, text: translationDiv(text) });
@@ -498,7 +572,7 @@ function collectEdits(
         const text = take();
         if (!text) break;
         if (mode === "translated") {
-          const quoted = restoreImageRefs(body.slice(nodeStart, nodeEnd), text)
+          const quoted = restoreRefs(body.slice(nodeStart, nodeEnd), text)
             .split("\n")
             .map((line) => `> ${line.trim()}`)
             .join("\n");
@@ -517,7 +591,7 @@ function collectEdits(
             if (!span) continue;
             if (mode === "translated") {
               // 单元格内换行与 | 会破坏表格行，压单行并转义管道符
-              const restored = restoreImageRefs(body.slice(span.start, span.end), text);
+              const restored = restoreRefs(body.slice(span.start, span.end), text);
               edits.push({ ...span, text: oneLine(restored).replace(/\|/g, "\\|") });
             } else {
               edits.push({ start: span.end, end: span.end, text: ` ${translationDiv(text)}` });
@@ -525,6 +599,24 @@ function collectEdits(
           }
         }
         break;
+      case "footnoteDefinition": {
+        // 脚注定义：不占块序号（不调 take()），译文按 fn:<id> 键查表
+        const text = node.identifier ? footnotes?.get(node.identifier) : undefined;
+        if (!text?.trim()) break;
+        if (mode === "translated") {
+          // 保留 [^id]: 标记，内容区整块换译文（单行化；公式 $...$ 随重建再渲染）
+          const span = contentSpan(node);
+          if (!span) break;
+          edits.push({ ...span, text: oneLine(text) });
+        } else {
+          // 对照模式：译文 div 内联进首段末尾（留在定义内部渲染进脚注区，不占块序号）
+          const first = (node.children ?? [])[0];
+          if (!first) break;
+          const end = offsetOf(first.position?.end, first);
+          edits.push({ start: end, end, text: ` ${translationDiv(text)}` });
+        }
+        break;
+      }
       default:
         break;
     }
@@ -539,7 +631,11 @@ function collectEdits(
  * 公式保持 $...$ 文本（不烘焙 KaTeX HTML），译文中的图片引用清除（原文块已带图）：
  * 导出文档要可编辑、由 md 阅读器原生渲染，对照 div（HTML）只服务阅读区与 HTML 导出。
  */
-export function buildPaperBilingualExportMarkdown(markdown: string, translations: ReadonlyMap<number, string>): string {
+export function buildPaperBilingualExportMarkdown(
+  markdown: string,
+  translations: ReadonlyMap<number, string>,
+  footnotes?: ReadonlyMap<string, string>,
+): string {
   const { head, body } = splitBody(markdown);
   const tree = parser.parse(body) as unknown as MdNode;
   const clean = (text: string) =>
@@ -594,6 +690,13 @@ export function buildPaperBilingualExportMarkdown(markdown: string, translations
           }
         }
         break;
+      case "footnoteDefinition": {
+        // 脚注定义（不占块序号，不调 take()）：译文以定义续块形式 indented 收进脚注区
+        const text = node.identifier ? footnotes?.get(node.identifier) : undefined;
+        if (!text?.trim()) break;
+        edits.push({ start: nodeEnd, end: nodeEnd, text: `\n\n    > ${text}` });
+        break;
+      }
       default:
         break;
     }
@@ -611,15 +714,17 @@ export function buildPaperBilingualExportMarkdown(markdown: string, translations
  * 见 restoreImageRefs），块数量与顺序不变；
  * 对照模式：可翻译块后插入 <div class="paper-translation" data-translation>（listBlocks 同级排除，
  * 块索引与原文枚举一致，标注/搜索/TOC 不错位）。
+ * 脚注定义（[^id]: …）不占块序号，译文经 footnotes（id → 译文）按 identifier 查表替换/追加。
  */
 export function buildPaperViewMarkdown(
   markdown: string,
   translations: ReadonlyMap<number, string>,
   mode: Exclude<PaperViewMode, "original">,
+  footnotes?: ReadonlyMap<string, string>,
 ): string {
   const { head, body } = splitBody(markdown);
   const tree = parser.parse(body) as unknown as MdNode;
-  const edits = collectEdits(body, tree.children ?? [], translations, mode);
+  const edits = collectEdits(body, tree.children ?? [], translations, mode, footnotes);
   let result = body;
   for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
     result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);

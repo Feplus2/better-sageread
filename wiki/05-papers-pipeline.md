@@ -68,6 +68,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 - **论文翻译（前端 service 实现，非 Rust）**：`services/paper-translation-service.ts`
   - 粒度：**块级平行译本**——切块器 `cutPaperBlocks` 与渲染器 DOM 块枚举严格一致（工程不变量），块索引即对齐键；批次 ≤12 块且 ≤6k 字符（:88-89,248）
   - 缓存/幂等：产物 `{appData}/books/{paperId}/translation-zh.json`，每块键 = 源文本 sha256 前 16 hex，hash 匹配跳过重翻（续翻/崩溃恢复），每批落盘一次；`force` 重翻才全量重算（:91-98,120-124）。**不产出翻译版 markdown**，原文是唯一事实源
+  - 脚注（2026-08-25 起）：`[^id]` 定义不占块序号，以 `fn:<id>` 独立键入同一译本（同一幂等 hash 语义）；视图重建译文模式整块替换、对照模式译文 div 内联进脚注区；`restoreFootnoteRefs` 保证译文模式 `[^id]` 引用标记不被模型弄丢（丢失则 GFM 不渲染脚注区）
   - 模型：复用辅助模型（压思考强度），首轮翻译前抽取 30~60 条动态术语表注入后续批次（:52,172-193）；公式/代码/图片引用/References 不翻（prompt 约束 :154-163）
   - 对齐（句级/词级）：`paper-alignment-service.ts`——译后自动批量 embed 两侧句子 → 余弦相似度矩阵 → 单调 DP；对齐表写回译本 `blocks[idx].align/alignW`，幂等键 = 源 hash + 译文 hash（:31-38）；词级中文分词走 Rust `tokenize_zh`（jieba）
   - 元数据：title/abstract 顺带翻译写入 `metadata.json` 的 `title_zh/abstract_zh`，frontmatter 不动（:266-303）

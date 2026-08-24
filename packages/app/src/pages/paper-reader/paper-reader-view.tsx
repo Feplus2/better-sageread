@@ -126,6 +126,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   // ─── 翻译：平行译本（translation-zh.json）+ 元数据译文 + 进度/取消 ───
   const [translationFile, setTranslationFile] = useState<PaperTranslationFile | null>(null);
   const [translationMap, setTranslationMap] = useState<ReadonlyMap<number, string> | null>(null);
+  /** 脚注译文（fn:<id> 独立键拆分出 id → 译文；不占块序号） */
+  const [footnoteTranslationMap, setFootnoteTranslationMap] = useState<ReadonlyMap<string, string> | null>(null);
   const [translatedMeta, setTranslatedMeta] = useState<PaperTranslatedMeta | null>(null);
   const [translating, setTranslating] = useState<TranslateProgress | null>(null);
   const translateAbortRef = useRef<AbortController | null>(null);
@@ -152,17 +154,27 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     }
     const effectiveFile = stale ? null : file;
     setTranslationFile(effectiveFile);
-    setTranslationMap(
-      effectiveFile
-        ? new Map(Object.entries(effectiveFile.blocks).map(([index, block]) => [Number(index), block.text]))
-        : null,
-    );
+    if (effectiveFile) {
+      // 键域拆分：数字键 = 正文块译文；fn:<id> 键 = 脚注译文（独立键域，不进块序号地图）
+      const blockMap = new Map<number, string>();
+      const fnMap = new Map<string, string>();
+      for (const [key, block] of Object.entries(effectiveFile.blocks)) {
+        if (key.startsWith("fn:")) fnMap.set(key.slice(3), block.text);
+        else if (/^\d+$/.test(key)) blockMap.set(Number(key), block.text);
+      }
+      setTranslationMap(blockMap);
+      setFootnoteTranslationMap(fnMap.size > 0 ? fnMap : null);
+    } else {
+      setTranslationMap(null);
+      setFootnoteTranslationMap(null);
+    }
     setTranslatedMeta(stale ? null : meta);
   }, [paperId]);
 
   useEffect(() => {
     setTranslationFile(null);
     setTranslationMap(null);
+    setFootnoteTranslationMap(null);
     setTranslatedMeta(null);
     reloadTranslation().catch((error) => console.warn("加载论文译本失败:", error));
     // 切换论文时取消进行中的翻译（译本是按 paperId 隔离的）
@@ -193,6 +205,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     const alignments = new Map<number, NonNullable<PaperTranslationFile["blocks"][string]["align"]>>();
     const wordAlignments = new Map<number, NonNullable<PaperTranslationFile["blocks"][string]["alignW"]>>();
     for (const [index, block] of Object.entries(translationFile.blocks)) {
+      if (index.startsWith("fn:")) continue; // 脚注译文走 footnoteTranslationMap，不进块序号对齐体系
       texts.set(Number(index), block.text);
       if (block.align && block.align.length > 0) alignments.set(Number(index), block.align);
       if (block.alignW && block.alignW.length > 0) wordAlignments.set(Number(index), block.alignW);
@@ -252,8 +265,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   // 视图 markdown：原文直传；译文/对照模式用译本重建（块数量顺序与原文一致，锚点天然安全）
   const displayMarkdown = useMemo(() => {
     if (!markdown || viewMode === "original" || !translationMap) return markdown;
-    return buildPaperViewMarkdown(markdown, translationMap, viewMode);
-  }, [markdown, viewMode, translationMap]);
+    return buildPaperViewMarkdown(markdown, translationMap, viewMode, footnoteTranslationMap ?? undefined);
+  }, [markdown, viewMode, translationMap, footnoteTranslationMap]);
 
   const handleViewModeChange = useCallback(
     (mode: PaperViewMode) => {
@@ -767,6 +780,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           title={title}
           markdown={markdown}
           translationMap={translationMap}
+          footnoteMap={footnoteTranslationMap}
           translationFile={translationFile}
           translatedMeta={translatedMeta}
           annotations={annotations}

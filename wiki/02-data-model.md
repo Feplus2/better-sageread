@@ -64,7 +64,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 | `mdbook/`、`chapters/`、`metadata.md` | EPUB 索引管线 | `pipeline.rs:110,561`、插件 `commands.rs:140` |
 | `vectors.sqlite` | 索引管线（每书一库） | `pipeline.rs:26` |
 | `view-settings.json` | 前端按书写的视图设置 | `src/lib/tauri-storage.ts:166-168` |
-| `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本） | `services/paper-translation-service.ts:24-25,123` |
+| `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本；`fn:<id>` 键 = 脚注译文，不占块序号） | `services/paper-translation-service.ts:24-25,123` |
 
 版本锚与状态戳记（2026-08-24，重解析/翻译/向量化的版本对齐基座）：
 

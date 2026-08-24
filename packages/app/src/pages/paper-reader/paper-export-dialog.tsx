@@ -43,6 +43,8 @@ interface PaperExportDialogProps {
   markdown: string;
   /** 译本块文本；null = 无译本（译文/对照选项禁用） */
   translationMap: ReadonlyMap<number, string> | null;
+  /** 脚注译文（fn:<id> 键域拆出，id → 译文）；null = 无脚注译文 */
+  footnoteMap?: ReadonlyMap<string, string> | null;
   /** 译本文件本体（含句/词对齐表；译文/对照模式标注内联的跨语言映射） */
   translationFile: PaperTranslationFile | null;
   translatedMeta: PaperTranslatedMeta | null;
@@ -135,6 +137,7 @@ export default function PaperExportDialog({
   title,
   markdown,
   translationMap,
+  footnoteMap,
   translationFile,
   translatedMeta,
   annotations,
@@ -166,6 +169,7 @@ export default function PaperExportDialog({
         title,
         markdown,
         translationMap,
+        footnoteMap,
         translationFile,
         translatedMeta,
         annotations,
