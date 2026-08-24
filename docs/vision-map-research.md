@@ -74,7 +74,7 @@ docs.x.ai 本环境不可直连，以下为 Oracle 官方合作页 + OpenRouter 
 
 | 型号族 | 判定 | 备注 |
 |---|---|---|
-| `^glm-5v-`（glm-5v-turbo，2026-04 上线） | ✅ 放行 | **现行启发式会误拦**（其正则只认 `4…v`） |
+| `^glm-5v-`（glm-5v-turbo，2026-04 上线） | ✅ 放行 | ~~现行启发式会误拦~~ 纠错（2026-08-25 落地实测）：旧 `VISION_NAME_RE` 的 `\.?\d+v` 已命中 "5v"，现状本就放行；新枚举表显式列出仅作自保 |
 | `^glm-4\.\d+v`（4.6v 全系、4.5v、4.1v-thinking 全系） | ✅ 放行 | 4.5v 疑似下架边缘（概览表已移除），保留放行无妨 |
 | `^glm-4v-`（glm-4v-flash） | ✅ 放行 | 免费图像理解 |
 | `^glm-ocr$`、`^autoglm-phone$` | ✅ 放行（可选） | 名字无 v 但吃图片；OCR 走专用 layout_parsing 接口，聊天链路用不上，可不加 |
@@ -90,7 +90,7 @@ docs.x.ai 本环境不可直连，以下为 Oracle 官方合作页 + OpenRouter 
 | `-vl-`（qwen-vl-*、qwen2.5-vl-*、qwen3-vl-*） | ✅ 放行 | 旧 VL 系仍在售但"不再首选推荐" |
 | `^qvq-`（qvq-max/plus） | ✅ 放行 | 视觉推理"仅思考"系，仅流式输出 |
 | `omni`（qwen3.5-omni-*、qwen3-omni-flash 等） | ✅ 放行 | 全模态；qwen-omni-turbo 已停止更新 |
-| `^qwen3\.[56]\.(plus|flash|\d+b)`、`^qwen3\.7-(plus|flash)`、`^qwen3\.8-(max|27b)` | ✅ 放行 | **原生视觉主线，现行启发式全部误拦** |
+| `^qwen3\.[56]-(plus|flash|\d+b)`、`^qwen3\.7-(plus|flash)`、`^qwen3\.8-(max|27b)` | ✅ 放行 | **原生视觉主线，现行启发式全部误拦**（本行 3.5/3.6 段原文误作 `.` 分隔，2026-08-25 落地时按用例实为连字符修正） |
 | `^qwen3\.7-max-2026-06-08` 及之后快照 | ✅ 放行 | max 线按快照逐步开视觉：该快照起带视觉 |
 | `-ocr`（qwen3.5-ocr、qwen-vl-ocr）、`^gui-` | ✅ 放行 | OCR / GUI 截图专用 |
 | `^qwen3-max`（含 -preview）、`-max-preview`、`^qwen3\.7-max(-2026-05-20)?$`、`^qwen3\.8-2\.4t-` | ❌ 拦截 | 官方文本生成页明确警示"仅支持文本接口，直接替换模型会导致报错" |

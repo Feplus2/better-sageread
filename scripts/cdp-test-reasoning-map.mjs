@@ -33,7 +33,7 @@ const expression = `
   const checks = [];
   const check = (name, pass, info) => checks.push({ name, pass: !!pass, info: info == null ? "" : String(info) });
   const origin = location.origin;
-  const m = await import(origin + "/src/ai/providers/reasoning-map.ts");
+  const m = await import(origin + "/src/ai/providers/reasoning-map.ts?t=" + Date.now());
   const po = m.chatReasoningProviderOptions;
   const bp = m.chatReasoningBodyPatch;
   const applyPatch = (p) => { const body = {}; if (p) p(body); return body; };
@@ -47,6 +47,10 @@ const expression = `
   check("gemini 2.5 high→budget -1（动态）", po("google", "gemini-2.5-pro", "high")?.google?.thinkingConfig?.thinkingBudget === -1, "");
   check("gemini 3.5 flash off→minimal", po("google", "gemini-3.5-flash", "off")?.google?.thinkingConfig?.thinkingLevel === "minimal", "");
   check("gemini 3.1 pro off→low（不认 minimal）", po("google", "gemini-3.1-pro", "off")?.google?.thinkingConfig?.thinkingLevel === "low", "");
+  check("gemini 3.7 flash off→low（不认 minimal）", po("google", "gemini-3.7-flash", "off")?.google?.thinkingConfig?.thinkingLevel === "low", "");
+  check("gemini 3.7 flash-lite off→minimal（无实证不动）", po("google", "gemini-3.7-flash-lite", "off")?.google?.thinkingConfig?.thinkingLevel === "minimal", "");
+  check("gemini 3-pro off→low（不可关）", po("google", "gemini-3-pro", "off")?.google?.thinkingConfig?.thinkingLevel === "low", "");
+  check("gemini 3-pro medium→high（仅 low/high 档）", po("google", "gemini-3-pro", "medium")?.google?.thinkingConfig?.thinkingLevel === "high", "");
   check("gemini 3.x high→high", po("google", "gemini-3.5-flash", "high")?.google?.thinkingConfig?.thinkingLevel === "high", "");
   check("openrouter medium→effort medium", po("openrouter", "any-model", "medium")?.openrouter?.reasoning?.effort === "medium", "");
   check("openrouter off→low", po("openrouter", "any-model", "off")?.openrouter?.reasoning?.effort === "low", "");
@@ -56,7 +60,7 @@ const expression = `
 
   // ---- 通道 B：请求体补丁 ----
   check("deepseek off→thinking.disabled", applyPatch(bp("deepseek", undefined, "deepseek-chat", "off")).thinking?.type === "disabled", "");
-  check("deepseek low→disabled（无 low 档）", applyPatch(bp("deepseek", undefined, "deepseek-chat", "low")).thinking?.type === "disabled", "");
+  check("deepseek low→reasoning_effort low（2026-08-13 起三档）", applyPatch(bp("deepseek", undefined, "deepseek-v4-flash", "low")).reasoning_effort === "low", "");
   check("deepseek medium→reasoning_effort high", applyPatch(bp("deepseek", undefined, "deepseek-chat", "medium")).reasoning_effort === "high", "");
   check("deepseek high→reasoning_effort max", applyPatch(bp("deepseek", undefined, "deepseek-chat", "high")).reasoning_effort === "max", "");
   check("GLM off→disabled", applyPatch(bp("custom", "https://open.bigmodel.cn/api", "glm-4.6", "off")).thinking?.type === "disabled", "");
@@ -67,6 +71,8 @@ const expression = `
   check("Kimi K3 off→low（无 off 档）", applyPatch(bp("custom", "https://api.moonshot.cn/v1", "kimi-k3", "off")).reasoning_effort === "low", "");
   check("Kimi K3 high→max", applyPatch(bp("custom", "https://api.moonshot.cn/v1", "kimi-k3", "high")).reasoning_effort === "max", "");
   check("Kimi 思考专用型号→不下发", bp("custom", "https://api.moonshot.cn/v1", "kimi-k2-thinking", "off") === null, "");
+  check("Kimi k2.7-code 思考常开→不下发（传 disabled 400）", bp("custom", "https://api.moonshot.cn/v1", "kimi-k2.7-code", "off") === null, "");
+  check("Kimi k2.7-code-highspeed→不下发", bp("custom", "https://api.kimi.com/v1", "kimi-k2.7-code-highspeed", "high") === null, "");
   check("Kimi K2.x off→disabled", applyPatch(bp("custom", "https://api.moonshot.cn/v1", "kimi-k2.5", "off")).thinking?.type === "disabled", "");
   check("不认识端点→null", bp("custom", "https://example.com", "x", "off") === null, "");
 
@@ -83,7 +89,7 @@ if (!Array.isArray(checks)) {
 
 let pass = 0;
 for (const c of checks) {
-  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? "  | " + c.info : ""}`);
+  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? `  | ${c.info}` : ""}`);
   if (c.pass) pass++;
 }
 console.log(`\n${pass}/${checks.length} PASS`);

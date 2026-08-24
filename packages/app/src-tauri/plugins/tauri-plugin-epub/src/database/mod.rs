@@ -35,6 +35,11 @@ impl VectorDatabase {
         Ok(Self { db })
     }
 
+    /// 检索路径维度自检：vec0 表维度与当前嵌入模型不一致（hybrid 检索应降级 BM25-only）
+    pub fn vector_dimension_mismatch(&self) -> bool {
+        self.db.vector_dimension_mismatch()
+    }
+
 
 
 

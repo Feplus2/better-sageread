@@ -245,6 +245,21 @@ impl DatabaseConnection {
 
 
 
+    /// 检索路径维度自检：vec0 表维度与当前嵌入模型维度不一致时返回 true。
+    /// 维度自愈只在写入路径（initialize_schema 重建向量表）生效；open_existing 不重建表，
+    /// 换维度模型后、首次重向量化前，hybrid 检索会拿新维度查询向量打旧维度表
+    /// （sqlite-vec 维度不匹配报错）——检索侧据此降级 BM25-only。
+    /// 无 vec0 表（fallback 路径余弦按长度不等计 0，不报错）或维度无法解析时返回 false（保持原样）。
+    pub fn vector_dimension_mismatch(&self) -> bool {
+        if !self.supports_vector_search() {
+            return false;
+        }
+        match self.existing_vector_dimension() {
+            Ok(Some(existing)) => existing != self.embedding_dimension,
+            _ => false,
+        }
+    }
+
     /// 读取现有 vec0 表的向量维度（vec0 不向 PRAGMA table_info 报列类型，
     /// 但 sqlite_master.sql 保留原始建表语句，形如 "embedding FLOAT[2048]"；解析失败返回 None）
     fn existing_vector_dimension(&self) -> Result<Option<usize>> {
@@ -464,6 +479,48 @@ mod tests {
         // 重建后可按新维度正常写入（自愈目标：不再因维度钉死而写不进）
         insert_one_chunk(&mut db, 8, "paper-b");
         assert_eq!(chunk_count(&db), 1);
+    }
+
+    #[test]
+    fn test_open_existing_dimension_mismatch_detected() {
+        let temp_file = NamedTempFile::new().unwrap();
+        {
+            let mut db = DatabaseConnection::new(temp_file.path(), 4).unwrap();
+            insert_one_chunk(&mut db, 4, "paper-a");
+        }
+        // 检索路径（open_existing）不自愈不重建：换维度模型打开时检出维度不一致，供检索降级 BM25
+        let db = DatabaseConnection::open_existing(temp_file.path(), 8).unwrap();
+        assert!(db.vector_dimension_mismatch());
+        // 同维度打开：不误报
+        let db = DatabaseConnection::open_existing(temp_file.path(), 4).unwrap();
+        assert!(!db.vector_dimension_mismatch());
+    }
+
+    #[test]
+    fn test_open_existing_mismatch_bm25_fallback_works() {
+        let temp_file = NamedTempFile::new().unwrap();
+        {
+            let mut db = DatabaseConnection::new(temp_file.path(), 4).unwrap();
+            insert_one_chunk(&mut db, 4, "paper-a");
+        }
+        // 维度不一致时 hybrid 查询会撞 sqlite-vec 维度错误；降级路径（无查询向量）走 BM25 不报错
+        let db = DatabaseConnection::open_existing(temp_file.path(), 8).unwrap();
+        assert!(db.vector_dimension_mismatch());
+        let vdb = crate::database::VectorDatabase::open_for_search(temp_file.path(), 8).unwrap();
+        let config = crate::models::HybridSearchConfig::default();
+        let results = vdb
+            .search_with_mode_filtered("chunk text", None, 5, &config, None, false)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].paper_id, "paper-a");
+        // 对照：维度一致时 hybrid 向量检索正常（不触发降级）
+        let vdb_ok = crate::database::VectorDatabase::open_for_search(temp_file.path(), 4).unwrap();
+        assert!(!vdb_ok.vector_dimension_mismatch());
+        let embedding = vec![0.1; 4];
+        let results = vdb_ok
+            .search_with_mode_filtered("chunk text", Some(&embedding), 5, &config, None, false)
+            .unwrap();
+        assert_eq!(results.len(), 1);
     }
 }
 

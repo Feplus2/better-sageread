@@ -859,6 +859,7 @@ where
 
 /// 全局论文库检索：hybrid（提供嵌入配置时）或 BM25 降级，两侧都支持 paper_id 集合过滤
 /// 库不存在或 paper_ids 为 Some(空集) 时返回空结果，不报错
+/// 维度降级：vec0 表维度与当前嵌入模型不一致时（换模型后未重向量化）降级 BM25-only，不报错
 /// include_references: 是否包含参考文献区段分片（false 时检索默认排除）
 pub async fn search_papers_global<P: AsRef<Path>>(
     db_path: P,
@@ -900,6 +901,14 @@ pub async fn search_papers_global<P: AsRef<Path>>(
 
             let db = VectorDatabase::open_for_search(db_path, actual_dimension)
                 .context("Open database failed")?;
+
+            // 维度自愈只覆盖写入路径（initialize_schema 重建向量表）；检索路径 open_existing 不重建。
+            // 换维度模型后、首次重向量化前，新维度查询向量打旧维度 vec0 表会撞 sqlite-vec 维度不匹配——
+            // 检出后优雅降级为 BM25-only（跳过查询向量化，省一次嵌入调用），重新向量化后自动恢复语义检索
+            if db.vector_dimension_mismatch() {
+                log::warn!("向量索引维度与当前嵌入模型不一致，已降级为关键词检索；重新向量化后恢复语义检索");
+                return db.search_with_mode_filtered(query, None, limit, &config, paper_ids.as_deref(), include_references);
+            }
 
             let embedding = v.vectorize_text(query).await?;
 
