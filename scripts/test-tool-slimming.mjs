@@ -34,6 +34,18 @@ await esbuild.build({
 const slim = await import(`file://${out.replaceAll("\\", "/")}`);
 const { truncateToolResultsForStorage, compactAgedRagResults, agedBoundary } = slim;
 
+// citation-source 引用了 react 的 createContext（模块顶层调用），打包时把 react 一并打进去
+const outCite = join(tmp, "citemap.mjs");
+await esbuild.build({
+  entryPoints: [
+    new URL("../packages/app/src/components/markdown/citation-source.ts", import.meta.url).pathname.replace(/^\//, ""),
+  ],
+  bundle: true,
+  format: "esm",
+  outfile: outCite,
+});
+const { buildCitationMap } = await import(`file://${outCite.replaceAll("\\", "/")}`);
+
 let pass = 0;
 let fail = 0;
 const ok = (v, msg) => {
@@ -61,6 +73,14 @@ const ragPart = (id, output) => ({
   toolCallId: id,
   state: "output-available",
   input: { query: "x" },
+  output,
+});
+// D8 目录牌模式：useTool 转发 part（type=tool-useTool，原始工具名在 input.tool，output 为原工具结果）
+const useToolPart = (id, tool, output) => ({
+  type: "tool-useTool",
+  toolCallId: id,
+  state: "output-available",
+  input: { tool, args: {} },
   output,
 });
 const textMsg = (id, role, text) => ({ id, role, parts: [{ type: "text", text }] });
@@ -166,6 +186,111 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   msgs.push(textMsg("a16", "assistant", "后来才提到[118]"));
   const r16 = compactAgedRagResults(msgs);
   ok(String(r16[1].parts[0].output) === stub15, "边界扩张后旧存根逐字节不变（前缀稳定）");
+}
+
+// ========== D8 目录牌模式：useTool 转发 ==========
+// L1：useTool→ragSearch 大结果截断（原名还原后命中内容型白名单），预览头部保留 chunk_id 坐标
+{
+  const msgs = [
+    { id: "d1", role: "assistant", parts: [useToolPart("u1", "ragSearch", big(1500))] },
+    { id: "d2", role: "assistant", parts: [useToolPart("u2", "mindmap", { map: "x".repeat(5000) })] },
+    { id: "d3", role: "assistant", parts: [{ type: "tool-useTool", toolCallId: "u3", state: "output-available", output: big(1500) }] }, // input 缺失 → 兜底截断
+    { id: "d4", role: "assistant", parts: [useToolPart("u4", "ragSearch", big(10))] }, // 小结果不动
+  ];
+  const r = truncateToolResultsForStorage(msgs);
+  const p1 = r[0].parts[0].output;
+  ok(p1.__slimPreview === true && p1.preview.length <= 2000, "useTool→ragSearch 大结果截为预览");
+  ok(String(p1.preview).includes("chunk_id"), "useTool 预览头部保留 chunk_id 坐标");
+  ok(r[1].parts[0].output.map.length === 5000, "useTool→mindmap（UI 消费型）不截");
+  ok(r[2].parts[0].output.__slimPreview === true, "useTool 原始名缺失 → 兜底截断");
+  ok(r[3].parts[0].output === msgs[3].parts[0].output, "useTool 小结果原样（零拷贝）");
+  ok(String(msgs[0].parts[0].output).length > 2000, "原数组未被改动");
+  const r2 = truncateToolResultsForStorage(r);
+  ok(r2[0].parts[0].output === p1, "useTool 二次截断幂等");
+}
+
+// L2：useTool 转发的 rag 结果按原名降级，存根用原名 ⟦ragSearch#N⟧，引用位/来源坐标同口径
+//（3×big(1400) ≈ 2.1k tokens 清除量，过 clear_at_least 门槛）
+{
+  const msgs = [];
+  for (let t = 1; t <= 15; t++) {
+    msgs.push(textMsg(`u${t}`, "user", `问题${t}`));
+    if (t === 1) {
+      msgs.push({
+        id: "d1x",
+        role: "assistant",
+        parts: [
+          useToolPart("u1", "ragSearch", big(1400)),
+          useToolPart("u2", "ragContext", big(1400)),
+          useToolPart("u3", "ragRange", big(1400)),
+          useToolPart("u4", "paperSearch", big(1400)), // 非 RAG 系不降级
+          useToolPart("u5", "webSearch", big(1400)), // 非 RAG 系不降级
+          { type: "text", text: "答案要点 A[118]" },
+        ],
+      });
+    } else {
+      msgs.push(textMsg(`a${t}`, "assistant", `回答${t}`));
+    }
+  }
+  const r = compactAgedRagResults(msgs);
+  const a1 = r[1].parts;
+  ok(a1[0].output !== msgs[1].parts[0].output, "useTool→ragSearch 结果被降级");
+  ok(typeof a1[0].output === "string" && a1[0].output.includes("⟦ragSearch#"), "useTool→ragSearch 存根用原名");
+  ok(typeof a1[1].output === "string" && a1[1].output.includes("⟦ragContext#"), "useTool→ragContext 存根用原名");
+  ok(typeof a1[2].output === "string" && a1[2].output.includes("⟦ragRange#"), "useTool→ragRange 存根用原名");
+  ok(a1[0].output.includes("已引 118"), "useTool 引用位：[118] 判为已引");
+  ok(a1[0].output.includes("来源：第三章·二节"), "useTool 存根保留来源坐标");
+  ok(a1[3].output === msgs[1].parts[3].output, "useTool→paperSearch 不属 L2 RAG 系，不降级");
+  ok(a1[4].output === msgs[1].parts[4].output, "useTool→webSearch 不属 L2 RAG 系，不降级");
+  ok(String(msgs[1].parts[0].output).length > 2000, "原数组未被改动");
+}
+
+// L2：useTool 原始名缺失 → 不降级（无法确认是 RAG 系，宁可留全量）；同批可识别的正常降级
+{
+  const msgs = [];
+  for (let t = 1; t <= 15; t++) {
+    msgs.push(textMsg(`u${t}`, "user", `q${t}`));
+    if (t === 1)
+      msgs.push({
+        id: "d1y",
+        role: "assistant",
+        parts: [
+          { type: "tool-useTool", toolCallId: "u9", state: "output-available", output: big(1400) },
+          useToolPart("uA", "ragSearch", big(1400)),
+          useToolPart("uB", "ragSearch", big(1400)),
+          useToolPart("uC", "ragSearch", big(1400)),
+          { type: "text", text: "ok" },
+        ],
+      });
+    else msgs.push(textMsg(`a${t}`, "assistant", `r${t}`));
+  }
+  const r = compactAgedRagResults(msgs);
+  ok(r[1].parts[0].output === msgs[1].parts[0].output, "useTool 原始名缺失 → L2 不降级");
+  ok(typeof r[1].parts[1].output === "string" && r[1].parts[1].output.includes("⟦ragSearch#"), "同批可识别的 useTool→ragSearch 正常降级");
+}
+
+// 引用标来源映射：tool-useTool（input.tool 还原原名）与直挂 part 同口径建图
+{
+  const ragOutput = {
+    meta: { book_id: "book-1" },
+    results: [
+      { position: { chunk_id: 118 }, related_chapter_titles: "第三章·二节" },
+      { position: { chunk_id: 119 }, related_chapter_titles: "第三章·三节" },
+    ],
+  };
+  const direct = buildCitationMap([ragPart("c1", ragOutput)]);
+  const forwarded = buildCitationMap([useToolPart("c2", "ragSearch", ragOutput)]);
+  eq(forwarded?.get(118)?.kind, "book", "useTool→ragSearch 建图 kind=book");
+  eq(forwarded?.get(118)?.bookId, "book-1", "useTool→ragSearch 建图 bookId");
+  eq(forwarded?.get(119)?.title, "第三章·三节", "useTool→ragSearch 建图章节标题");
+  eq(direct?.get(118)?.bookId, forwarded?.get(118)?.bookId, "转发与直挂建图结果一致");
+  // paperSearch 转发
+  const paperOutput = { results: [{ position: { chunk_id: 42 }, paper_id: "p1", paper_title: "论文A" }] };
+  const forwardedPaper = buildCitationMap([useToolPart("c3", "paperSearch", paperOutput)]);
+  eq(forwardedPaper?.get(42)?.paperId, "p1", "useTool→paperSearch 建图 paperId");
+  // 无 input.tool 的 useTool 不建图（原名不可知，结构不可信）
+  const bare = buildCitationMap([{ type: "tool-useTool", toolCallId: "c4", state: "output-available", output: ragOutput }]);
+  eq(bare, null, "useTool 原始名缺失 → 不建图（走兜底）");
 }
 
 console.log(`\n${pass} 过 / ${fail} 挂`);

@@ -14,15 +14,20 @@ import { estimateTokens } from "./token-estimator";
  * 的 [chunkId] 标注"冻结计算（固定统计窗，边界扩张不回写 → 纯函数、单调、前缀稳定）；
  * clear_at_least：本批可清除量不足下限则整批推迟（缓存重启要断够本）。
  *
+ * D8 目录牌模式兼容：useTool 转发的结果 part 名为 tool-useTool，原始工具名从 input.tool
+ * 还原后按同名规则走 L1/L2（不改 part 名——stripUnknownToolParts 的 v7 兼容语义依赖现名）。
+ *
  * 两层都只改副本/写盘内容，永不改动内存中的原消息（请求期副本语义）。
  */
 
 /** L1：预览正文上限（与展示层 4000 截断同哲学、更紧；坐标在头部天然保留） */
 export const TOOL_RESULT_PREVIEW_CHARS = 2000;
 
-/** L1 纳入截断的内容承载型工具（UI 消费输出的工具不纳入，如 mindmap） */
+/** L1 纳入截断的内容承载型工具（UI 消费输出的工具不纳入，如 mindmap）；
+ * useTool 是目录牌转发入口：按 input.tool 还原原始工具名再判定（见 truncateToolResultsForStorage） */
 const L1_CONTENT_TOOLS = new Set([
   "describeTool",
+  "useTool",
   "ragSearch",
   "ragContext",
   "ragRange",
@@ -66,6 +71,12 @@ function toolNameOf(part: ToolLikePart): string | null {
   return null;
 }
 
+/** D8 目录牌模式：useTool 转发 part 的原始工具名在 input.tool（{tool, args} 入参），还原后按原名归类 */
+function forwardedToolName(part: ToolLikePart): string | null {
+  const input = (part as any).input;
+  return typeof input?.tool === "string" && input.tool ? input.tool : null;
+}
+
 function stringifyOutput(output: unknown): string {
   if (typeof output === "string") return output;
   try {
@@ -93,6 +104,13 @@ export function truncateToolResultsForStorage(messages: UIMessage[]): UIMessage[
       }
       const name = toolNameOf(part);
       if (!name || !L1_CONTENT_TOOLS.has(name)) return part;
+      // useTool 转发：还原原始工具名再判定——转给 UI 消费型工具（如 mindmap）的结果不截；
+      // 原始名缺失的转发按内容型兜底截断（白名单收录 useTool 即为此）。output 即真实工具的原始
+      // 结果结构，头部截断天然保住 chunk_id/来源坐标（引用标转跳依赖，见 citation-source.ts）
+      if (name === "useTool") {
+        const forwarded = forwardedToolName(part);
+        if (forwarded && !L1_CONTENT_TOOLS.has(forwarded)) return part;
+      }
       if (part.state && part.state !== "output-available") return part;
       if (part.output == null) return part;
       if (part.output && typeof part.output === "object" && (part.output as any).__slimPreview) return part; // 幂等
@@ -206,7 +224,11 @@ export function compactAgedRagResults(messages: UIMessage[]): UIMessage[] {
     if (t === 0 || t > boundary) continue;
     m.parts.forEach((part: any, partIdx: number) => {
       const name = toolNameOf(part);
-      if (!name || !L2_RAG_TOOLS.has(name)) return;
+      if (!name) return;
+      // useTool 转发：从 input.tool 还原原始工具名（原名缺失的不降级——无法确认是 RAG 系）；
+      // 存根文案用原名 ⟦ragSearch#N⟧，模型侧语义与直挂模式一致
+      const effective = name === "useTool" ? forwardedToolName(part) : name;
+      if (!effective || !L2_RAG_TOOLS.has(effective)) return;
       if (part.state && part.state !== "output-available") return;
       if (part.output == null) return;
       const out = part.output as any;
@@ -219,7 +241,7 @@ export function compactAgedRagResults(messages: UIMessage[]): UIMessage[] {
       for (let w = t; w <= t + CITE_WINDOW && w <= turn; w++) {
         for (const id of extractCitedChunkIds(turnTexts.get(w) ?? "")) cited.add(id);
       }
-      const stub = stubText(name, stubSeq, resultText, cited);
+      const stub = stubText(effective, stubSeq, resultText, cited);
       candidates.push({
         msgIdx: i,
         partIdx,

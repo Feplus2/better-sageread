@@ -8,6 +8,8 @@ import { createContext } from "react";
  * - tool-paperSearch.output.results[]：paper_id + position.chunk_id（跨文献场景的来源论文身份）
  * - tool-paperContext.output.results[]：chunk_id + paper_title（无 paper_id，只补缺不覆盖）
  * - tool-ragSearch.output：meta.book_id + results[].position.chunk_id（书籍场景）
+ * - D8 目录牌模式：tool-useTool 为转发入口，真实工具名在 input.tool，output 即原工具结果结构，
+ *   还原原名后按上述同口径解析（part 名不改写——stripUnknownToolParts 的 v7 兼容语义依赖现名）
  */
 export type CitationSource =
   | { kind: "paper"; paperId?: string; title?: string }
@@ -32,14 +34,17 @@ export function buildCitationMap(parts: any[]): ReadonlyMap<number, CitationSour
     if (typeof type !== "string" || !type.startsWith("tool-")) continue;
     const output = part.output;
     if (!output || typeof output !== "object") continue;
-    if (type === "tool-paperSearch" && Array.isArray(output.results)) {
+    // D8 目录牌：useTool 转发 part 的原始工具名在 input.tool（output 即原工具的结果结构）
+    const rawName = type.slice("tool-".length);
+    const name = rawName === "useTool" && typeof part.input?.tool === "string" ? part.input.tool : rawName;
+    if (name === "paperSearch" && Array.isArray(output.results)) {
       for (const r of output.results) {
         const chunkId = Number(r?.position?.chunk_id);
         if (Number.isInteger(chunkId) && r?.paper_id) {
           ensure().set(chunkId, { kind: "paper", paperId: r.paper_id, title: r.paper_title });
         }
       }
-    } else if (type === "tool-paperContext" && Array.isArray(output.results)) {
+    } else if (name === "paperContext" && Array.isArray(output.results)) {
       for (const r of output.results) {
         const chunkId = Number(r?.chunk_id);
         // paperContext 结果无 paper_id：只补缺，不覆盖 paperSearch 已建的带 id 映射
@@ -47,7 +52,7 @@ export function buildCitationMap(parts: any[]): ReadonlyMap<number, CitationSour
           ensure().set(chunkId, { kind: "paper", title: r?.paper_title });
         }
       }
-    } else if (type === "tool-ragSearch" && Array.isArray(output.results)) {
+    } else if (name === "ragSearch" && Array.isArray(output.results)) {
       const bookId = output.meta?.book_id;
       for (const r of output.results) {
         const chunkId = Number(r?.position?.chunk_id);
