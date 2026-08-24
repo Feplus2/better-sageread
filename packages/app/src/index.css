@@ -46,6 +46,93 @@
   --shadow-lg: 0 1px 3px 0px oklch(0.0 0 0 / 0.1), 0 4px 6px -1px oklch(0.0 0 0 / 0.1);
   --shadow-xl: 0 1px 3px 0px oklch(0.0 0 0 / 0.1), 0 8px 10px -1px oklch(0.0 0 0 / 0.1);
   --shadow-2xl: 0 1px 3px 0px oklch(0.0 0 0 / 0.25);
+
+  /* ---------- 动效 token（docs/motion-system-plan.md §五） ----------
+   * 所有动效的时长/位移/缓动只准引用这组变量，禁止裸数值；
+   * data-motion 属性挂 documentElement（use-motion-mode.ts 驱动），一处切换全局生效。 */
+  --motion-dur-fast: 120ms; /* 微交互：复选框 pop 等 */
+  --motion-dur-base: 200ms; /* 面板开合、卡片出入场 */
+  --motion-dur-slow: 300ms; /* 页面/tab 转场 */
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-expo */
+  --motion-slide: 8px; /* 滑入位移量（fade-only/reduced 归零 → 退化为纯 fade） */
+  --motion-scale: 0.98; /* 卡片出入场缩放（fade-only/reduced 归 1） */
+  --motion-pop-scale: 0.6; /* 复选框 pop 起点缩放（fade-only/reduced 归 1） */
+}
+
+/* fade-only（性能模式）：时长压短 + 位移/缩放退化，对齐 iOS「减弱动态效果」口径 */
+[data-motion="fade-only"] {
+  --motion-dur-slow: 120ms;
+  --motion-dur-base: 80ms;
+  --motion-slide: 0px;
+  --motion-scale: 1;
+  --motion-pop-scale: 1;
+}
+
+/* reduced（system 档命中 prefers-reduced-motion 时）：一切动效瞬时完成，等同硬切（逃生舱） */
+[data-motion="reduced"] {
+  --motion-dur-fast: 0.01ms;
+  --motion-dur-base: 0.01ms;
+  --motion-dur-slow: 0.01ms;
+  --motion-slide: 0px;
+  --motion-scale: 1;
+  --motion-pop-scale: 1;
+}
+
+/* 动效工具类（批次 1：管理态 + 进度卡）。只碰 transform/opacity，第一宪法。 */
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes motion-slide-up-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-slide));
+  }
+}
+
+@keyframes motion-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--motion-pop-scale));
+  }
+}
+
+@keyframes motion-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-slide)) scale(var(--motion-scale));
+  }
+}
+
+@keyframes motion-card-out {
+  to {
+    opacity: 0;
+    transform: translateY(var(--motion-slide)) scale(var(--motion-scale));
+  }
+}
+
+.motion-enter-fade {
+  animation: motion-fade-in var(--motion-dur-base) var(--motion-ease) both;
+}
+
+.motion-enter-slide-up {
+  animation: motion-slide-up-in var(--motion-dur-base) var(--motion-ease) both;
+}
+
+.motion-enter-pop {
+  animation: motion-pop-in var(--motion-dur-fast) var(--motion-ease) both;
+}
+
+/* 右下角进度卡出入场：进 = card-in 关键帧；出 = closing 态换 card-out（MotionStackCard 延迟卸载编排）。
+ * 打断进场的离场会从 opacity 1 重新淡出（animation 切换重播），属可接受边缘。 */
+.motion-stack-item {
+  animation: motion-card-in var(--motion-dur-base) var(--motion-ease) both;
+}
+
+.motion-stack-item.motion-closing {
+  animation-name: motion-card-out;
 }
 
 @theme {

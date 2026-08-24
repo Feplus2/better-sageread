@@ -350,7 +350,7 @@ export default function NewLibraryPage() {
         )}
 
         {selectionMode && (
-          <div className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-2 dark:border-neutral-700">
+          <div className="motion-enter-slide-up flex shrink-0 items-center justify-between gap-2 border-t px-3 py-2 dark:border-neutral-700">
             <span className="text-neutral-600 text-sm dark:text-neutral-400">已选 {selectedBookIds.size} 本</span>
             <div className="flex items-center gap-2">
               <Button
