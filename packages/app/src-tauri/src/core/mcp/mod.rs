@@ -35,56 +35,10 @@ pub struct McpStdioState {
 }
 
 // ---- Windows：Job Object（孤儿进程防护） ----
+// 实现已收编至 crate::core::process_tree（converter sidecar 与 MCP stdio 共用同一全局 Job）。
 
 #[cfg(windows)]
-mod job {
-    use std::sync::OnceLock;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
-
-    // HANDLE 是裸指针（非 Send/Sync），以 usize 存 OnceLock
-    static JOB: OnceLock<usize> = OnceLock::new();
-
-    /// 全局 Job Object：最后一个句柄关闭（app 退出）时杀死全部挂靠进程
-    fn global_job() -> HANDLE {
-        let stored = *JOB.get_or_init(|| unsafe {
-            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if !job.is_null() {
-                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                SetInformationJobObject(
-                    job,
-                    JobObjectExtendedLimitInformation,
-                    &info as *const _ as *const std::ffi::c_void,
-                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                );
-            }
-            job as usize
-        });
-        stored as HANDLE
-    }
-
-    /// 按 pid 挂靠 Job（best-effort，失败仅意味着该进程失去孤儿防护）
-    pub fn assign_by_pid(pid: u32) {
-        unsafe {
-            let job = global_job();
-            if job.is_null() {
-                return;
-            }
-            let handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-            if handle.is_null() {
-                return;
-            }
-            AssignProcessToJobObject(job, handle);
-            CloseHandle(handle);
-        }
-    }
-}
+use crate::core::process_tree::assign_by_pid;
 
 /// 杀整棵进程树：Windows 经 cmd /C 包裹时，kill 直接子进程杀不掉 node/uvx 孙进程
 #[cfg(windows)]
@@ -392,7 +346,7 @@ pub async fn mcp_stdio_start(
     let pid = child.id().unwrap_or(0);
     #[cfg(windows)]
     if pid > 0 {
-        job::assign_by_pid(pid);
+        assign_by_pid(pid);
     }
 
     let stdin = child.stdin.take().ok_or("无法打开子进程 stdin")?;

@@ -93,6 +93,9 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
         .spawn()
         .map_err(|e| format!("启动转换进程失败: {}", e))?;
 
+    // 孤儿防护：挂进全局 Job Object（app 退出/崩溃时整树陪葬；PyInstaller 孙进程默认随父入 Job）
+    crate::core::process_tree::assign_by_pid(child.pid());
+
     // 保存子进程句柄以便取消
     {
         let state = app.state::<ConverterState>();

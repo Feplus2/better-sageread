@@ -96,6 +96,30 @@ fn app_version(app: &AppHandle) -> String {
 
 /* ---------------- 本地状态 ---------------- */
 
+/// L2 同步运行互斥守卫（P4）：占锁成功即持有，Drop 释放。
+/// run_sync / run_pull_only 共用（两者都读写 SyncState 与本地库，不可并发）。
+struct L2RunGuard(AppHandle);
+impl L2RunGuard {
+    fn try_acquire(app: &AppHandle) -> Result<Self, String> {
+        let state = app.state::<crate::core::state::AppState>();
+        if state
+            .l2_running
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err("L2 同步已在进行中，本轮跳过".to_string());
+        }
+        Ok(Self(app.clone()))
+    }
+}
+impl Drop for L2RunGuard {
+    fn drop(&mut self) {
+        self.0
+            .state::<crate::core::state::AppState>()
+            .l2_running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 fn ensure_device_id(config_dir: &Path, state: &mut SyncState) -> Result<String, String> {
     if let Some(device_id) = &state.device_id {
         return Ok(device_id.clone());
@@ -910,12 +934,21 @@ pub fn min_pulled_for(device_id: &str, pointers: &[DevicePointer]) -> i64 {
 /// 任何一步失败只记 warn，不影响同步主流程。
 async fn prune_remote_changesets(config: &WebdavConfig, device_id: &str) {
     let result: Result<(), String> = async {
-        // 设备集合来自 devices.json 索引；逐一读指针拿各自 pulled 水位
+        // 设备集合来自 devices.json 索引；逐一读指针拿各自 pulled 水位。
+        // P0 修复（502 窗口实测可触发）：任一设备指针读失败 → 本轮放弃修剪
+        // （fail-closed）——否则 min_pulled 虚高会删掉该设备尚未消费的 changesets，
+        // 对端恢复后 404 跳水位，数据永久丢失
         let index = read_devices_index(config).await?;
         let mut pointers = Vec::new();
         for remote_id in index.keys() {
-            if let Ok(pointer) = read_pointer(config, remote_id).await {
-                pointers.push(pointer);
+            match read_pointer(config, remote_id).await {
+                Ok(pointer) => pointers.push(pointer),
+                Err(e) => {
+                    return Err(format!(
+                        "设备 {} 指针读取失败，本轮放弃修剪（防误删未消费包）: {}",
+                        remote_id, e
+                    ));
+                }
             }
         }
         let min_pulled = min_pulled_for(device_id, &pointers);
@@ -1101,6 +1134,7 @@ async fn pull_from_devices(
 }
 
 pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig) -> Result<SyncRunResult, String> {
+    let _l2_guard = L2RunGuard::try_acquire(app)?;
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let mut state = super::backup::read_sync_state(&config_dir);
     let device_id = ensure_device_id(&config_dir, &mut state)?;
@@ -1261,6 +1295,7 @@ pub async fn run_sync(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig)
 
 /// 只拉不推：打开书时的单点快拉（前端带超时调用，超时/失败静默放行本地）
 pub async fn run_pull_only(app: &AppHandle, pool: &SqlitePool, config: &WebdavConfig) -> Result<SyncRunResult, String> {
+    let _l2_guard = L2RunGuard::try_acquire(app)?;
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let mut state = super::backup::read_sync_state(&config_dir);
     let device_id = ensure_device_id(&config_dir, &mut state)?;

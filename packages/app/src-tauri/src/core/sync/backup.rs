@@ -60,9 +60,41 @@ pub fn read_sync_state(config_dir: &Path) -> SyncState {
         .unwrap_or_default()
 }
 
+/// sync-state.json 写入全局锁（P1：引擎三个写点 / record_l2_failure 读改写 /
+/// 布局迁移等多写方并发交错会写坏 JSON——损坏即 device_id 重建 + 水位清零，
+/// 全量重拉且已删除行复活）。所有写方走同一把锁互斥。
+static SYNC_STATE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 原子写 sync-state.json（tmp + rename；写半截/崩溃不留截断文件）。
+/// 全程持全局写锁（多写方互斥）。
 pub fn write_sync_state(config_dir: &Path, state: &SyncState) -> Result<(), String> {
+    let _guard = SYNC_STATE_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let content = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    fs::write(config_dir.join("sync-state.json"), content).map_err(|e| e.to_string())
+    let path = config_dir.join("sync-state.json");
+    let tmp = config_dir.join("sync-state.json.tmp");
+    fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    // Windows 下 rename 覆盖已存在目标由 std 保证（MoveFileEx MOVEFILE_REPLACE_EXISTING）
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// 读-改-写 sync-state.json（全程持锁，防并发写者互覆字段）。
+/// 供 record_l2_failure 这类"只改一两个字段"的写方使用——避免拿陈旧快照整写回。
+pub fn update_sync_state(
+    config_dir: &Path,
+    f: impl FnOnce(&mut SyncState),
+) -> Result<(), String> {
+    let _guard = SYNC_STATE_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut state = read_sync_state(config_dir);
+    f(&mut state);
+    let content = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    let path = config_dir.join("sync-state.json");
+    let tmp = config_dir.join("sync-state.json.tmp");
+    fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
 /// 打包备份 zip：条目 + manifest.json（抽出以便测试）

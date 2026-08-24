@@ -24,6 +24,8 @@ mod pipeline;
 mod manual;
 mod wiki;
 
+pub mod metadata_json;
+
 pub use state::EpubState;
 
 /// Initializes the EPUB plugin.

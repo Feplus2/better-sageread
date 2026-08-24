@@ -333,10 +333,11 @@ pub async fn sync_get_l2_status(app: AppHandle) -> Result<L2Status, String> {
 /// 记录 L2 失败原因到 sync-state（设置页"最近一次"展示）
 fn record_l2_failure(app: &AppHandle, error: &str) {
     if let Ok(config_dir) = app.path().app_config_dir().map_err(|e| e.to_string()) {
-        let mut state = backup::read_sync_state(&config_dir);
-        state.last_l2_sync_at = Some(chrono::Utc::now().timestamp_millis());
-        state.last_l2_result = Some(format!("失败: {error}"));
-        let _ = backup::write_sync_state(&config_dir, &state);
+        // 读-改-写走全局锁（P1：与引擎写点并发交错会互覆字段/写坏 JSON）
+        let _ = backup::update_sync_state(&config_dir, |state| {
+            state.last_l2_sync_at = Some(chrono::Utc::now().timestamp_millis());
+            state.last_l2_result = Some(format!("失败: {error}"));
+        });
     }
 }
 

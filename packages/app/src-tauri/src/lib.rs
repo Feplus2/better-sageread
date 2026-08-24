@@ -28,6 +28,7 @@ use crate::core::{
         get_reading_session,
         get_reading_sessions_by_book,
         get_trashed_books,
+        patch_paper_metadata_json,
         path_exists,
         purge_book,
         replace_paper_content,
@@ -190,6 +191,7 @@ pub fn run() {
             save_paper,
             replace_paper_content,
             get_paper_source_status,
+            patch_paper_metadata_json,
             path_exists,
             // papers (文献库文件夹)
             list_folders,

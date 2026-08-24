@@ -1693,6 +1693,28 @@ pub async fn get_paper_source_status(
     })
 }
 
+/// 论文 metadata.json 字段合并写入（TS 侧翻译服务的 title_zh/abstract_zh 与 translationRunState
+/// 戳记入口）。读改写经插件侧全局锁串行化——与向量化版本锚/Zotero 回链并发互不覆盖。
+#[tauri::command]
+pub async fn patch_paper_metadata_json(
+    app_handle: AppHandle,
+    paper_id: String,
+    patch: serde_json::Value,
+) -> Result<(), String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用目录失败: {}", e))?;
+    let meta_path = app_data_dir
+        .join("books")
+        .join(&paper_id)
+        .join("metadata.json");
+    let obj = patch
+        .as_object()
+        .ok_or_else(|| "patch 必须是 JSON 对象".to_string())?;
+    tauri_plugin_epub::metadata_json::patch_metadata_json(&meta_path, obj).map_err(|e| e.to_string())
+}
+
 // ==================== Note 相关命令（笔记面板，2026-08 重建） ====================
 
 #[tauri::command]

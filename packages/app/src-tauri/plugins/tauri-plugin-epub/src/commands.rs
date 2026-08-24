@@ -597,24 +597,19 @@ pub async fn index_paper<R: Runtime>(
 }
 
 /// 向量化完成后把版本锚写进 {app_data}/books/{paper_id}/metadata.json
-/// （读改写，不动其他字段；sourceHash = paper.md 内容 sha256 截 16 hex）
+/// （读改写走全局锁串行化——与翻译戳记/Zotero 回链并发互不覆盖；sourceHash = paper.md 内容 sha256 截 16 hex）
 fn record_vectorized_source_hash(app_data_dir: &std::path::Path, paper_id: &str) -> anyhow::Result<()> {
     use sha2::Digest;
     let book_dir = app_data_dir.join("books").join(paper_id);
     let content = std::fs::read(book_dir.join("paper.md"))?;
     let source_hash = format!("{:x}", sha2::Sha256::digest(&content))[..16].to_string();
 
-    let meta_path = book_dir.join("metadata.json");
-    let raw = std::fs::read_to_string(&meta_path)?;
-    let mut metadata: serde_json::Value = serde_json::from_str(&raw)?;
-    if let Some(obj) = metadata.as_object_mut() {
-        obj.insert(
-            "vectorizedSourceHash".to_string(),
-            serde_json::Value::String(source_hash),
-        );
-    }
-    std::fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
-    Ok(())
+    let mut patch = serde_json::Map::new();
+    patch.insert(
+        "vectorizedSourceHash".to_string(),
+        serde_json::Value::String(source_hash),
+    );
+    crate::metadata_json::patch_metadata_json(&book_dir.join("metadata.json"), &patch)
 }
 
 #[derive(Serialize)]

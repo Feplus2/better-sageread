@@ -16,7 +16,8 @@ use crate::core::process_tree::kill_tree;
 /// 已完成的解析产物快照（done 行落槽）：页面刷新窗口内 done 事件无人接收时，
 /// 前端重启后经查 `paper_convert_status` 取回补做落库；消费成功后经
 /// `clear_paper_convert_pending_done` 确认清除。
-#[derive(Debug, Clone, Serialize)]
+/// 同写 `{appData}/papers-converter/pending-done.json`——app 整体重启（内存槽丢失）也能恢复。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaperConvertDone {
     pub pdf_path: String,
@@ -42,6 +43,46 @@ impl Default for PaperConverterState {
             child: tokio::sync::Mutex::new(None),
             current_pdf: tokio::sync::Mutex::new(None),
             pending_done: tokio::sync::Mutex::new(None),
+        }
+    }
+}
+
+// ---- pending_done 持久化（app 重启级恢复：内存槽随进程消失，落盘文件兜底） ----
+
+fn pending_done_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("papers-converter").join("pending-done.json"))
+}
+
+fn persist_pending_done(app: &AppHandle, done: &PaperConvertDone) {
+    let Some(path) = pending_done_path(app) else { return };
+    match serde_json::to_string(done) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::warn!("[PaperConverter] pending_done 落盘失败: {}", e);
+            }
+        }
+        Err(e) => log::warn!("[PaperConverter] pending_done 序列化失败: {}", e),
+    }
+}
+
+fn remove_pending_done_file(app: &AppHandle) {
+    if let Some(path) = pending_done_path(app) {
+        let _ = std::fs::remove_file(path); // 不存在则报错，吞掉（幂等）
+    }
+}
+
+/// 磁盘兜底读 pending_done：产物目录仍在才认为可恢复；文件损坏/目录已删则顺手清理
+fn load_pending_done_from_disk(app: &AppHandle) -> Option<PaperConvertDone> {
+    let path = pending_done_path(app)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<PaperConvertDone>(&raw) {
+        Ok(done) if std::path::Path::new(&done.paper_dir).exists() => Some(done),
+        _ => {
+            let _ = std::fs::remove_file(&path);
+            None
         }
     }
 }
@@ -114,12 +155,16 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
 
     let (mut rx, child) = command.spawn().map_err(|e| format!("启动论文解析进程失败: {}", e))?;
 
+    // 孤儿防护：挂进全局 Job Object（app 退出/崩溃时整树陪葬；PyInstaller 孙进程默认随父入 Job）
+    crate::core::process_tree::assign_by_pid(child.pid());
+
     // 保存子进程句柄以便取消；登记在跑任务标识（前端刷新恢复查询），并清掉上轮未消费的 done 槽
     {
         let state = app.state::<PaperConverterState>();
         *state.child.lock().await = Some(child);
         *state.current_pdf.lock().await = Some(params.pdf_path.clone());
         *state.pending_done.lock().await = None;
+        remove_pending_done_file(&app);
     }
 
     let app_handle = app.clone();
@@ -166,7 +211,8 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
                                                 .unwrap_or(false),
                                         };
                                         let state = app_handle.state::<PaperConverterState>();
-                                        *state.pending_done.lock().await = Some(done);
+                                        *state.pending_done.lock().await = Some(done.clone());
+                                        persist_pending_done(&app_handle, &done);
                                     }
                                 }
                                 v.to_string()
@@ -243,17 +289,22 @@ pub struct PaperConvertStatus {
 pub async fn paper_convert_status(app: AppHandle) -> Result<PaperConvertStatus, String> {
     let state = app.state::<PaperConverterState>();
     let running_pdf_path = state.current_pdf.lock().await.clone();
-    let pending_done = state.pending_done.lock().await.clone();
+    // 内存槽优先；空则读磁盘兜底（app 整体重启后恢复场景）
+    let pending_done = match state.pending_done.lock().await.clone() {
+        Some(done) => Some(done),
+        None => load_pending_done_from_disk(&app),
+    };
     Ok(PaperConvertStatus {
         running_pdf_path,
         pending_done,
     })
 }
 
-/// 前端消费（import/replace）成功后确认清除 pending_done 槽（幂等）
+/// 前端消费（import/replace）成功后确认清除 pending_done 槽（幂等；内存+磁盘双清）
 #[tauri::command]
 pub async fn clear_paper_convert_pending_done(app: AppHandle) -> Result<(), String> {
     let state = app.state::<PaperConverterState>();
     *state.pending_done.lock().await = None;
+    remove_pending_done_file(&app);
     Ok(())
 }

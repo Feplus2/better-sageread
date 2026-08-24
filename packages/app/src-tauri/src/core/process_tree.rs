@@ -21,6 +21,70 @@ pub async fn kill_tree(pid: u32) {
 #[cfg(not(windows))]
 pub async fn kill_tree(_pid: u32) {}
 
+// ---- Windows：Job Object（孤儿进程防护，app 退出/崩溃时整树陪葬） ----
+// 全局共享一个 Job Object（KILL_ON_JOB_CLOSE）：converter / paper_converter sidecar 与
+// MCP stdio server 统一挂靠。Job 成员的子进程默认自动入 Job，PyInstaller 孙进程同样陪葬。
+
+#[cfg(windows)]
+mod job {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+
+    // HANDLE 是裸指针（非 Send/Sync），以 usize 存 OnceLock
+    static JOB: OnceLock<usize> = OnceLock::new();
+
+    /// 全局 Job Object：最后一个句柄关闭（app 退出）时杀死全部挂靠进程
+    fn global_job() -> HANDLE {
+        let stored = *JOB.get_or_init(|| unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if !job.is_null() {
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const std::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+            }
+            job as usize
+        });
+        stored as HANDLE
+    }
+
+    /// 按 pid 挂靠 Job（best-effort，失败仅意味着该进程失去孤儿防护）
+    pub fn assign_by_pid(pid: u32) {
+        unsafe {
+            let job = global_job();
+            if job.is_null() {
+                return;
+            }
+            let handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+            if handle.is_null() {
+                return;
+            }
+            AssignProcessToJobObject(job, handle);
+            CloseHandle(handle);
+        }
+    }
+}
+
+/// 把进程挂靠进全局 Job Object（app 退出时陪葬）。非 Windows 无需（无 PyInstaller 双进程结构）。
+#[cfg(windows)]
+pub fn assign_by_pid(pid: u32) {
+    job::assign_by_pid(pid);
+}
+
+/// 非 Windows 平台无 Job Object 机制，空实现。
+#[cfg(not(windows))]
+pub fn assign_by_pid(_pid: u32) {}
+
 #[cfg(all(test, windows))]
 mod tests {
     use windows_sys::Win32::Foundation::CloseHandle;

@@ -574,33 +574,19 @@ pub async fn inject_zotero_key(
 
     let metadata_path = dir.join("metadata.json");
     if metadata_path.is_file() {
-        let parsed = fs::read_to_string(&metadata_path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-            .and_then(|v| v.as_object().cloned());
-        match parsed {
-            Some(mut obj) => {
-                for (k, v) in &entries {
-                    obj.insert(k.to_string(), serde_json::Value::String(v.clone()));
-                }
-                match serde_json::to_string_pretty(&obj) {
-                    Ok(json) => {
-                        if let Err(e) = fs::write(&metadata_path, json) {
-                            log::warn!(
-                                "写入 metadata.json 失败（{}）: {}",
-                                metadata_path.display(),
-                                e
-                            );
-                        }
-                    }
-                    Err(e) => log::warn!(
-                        "序列化 metadata.json 失败（{}）: {}",
-                        metadata_path.display(),
-                        e
-                    ),
-                }
-            }
-            None => log::warn!("解析 metadata.json 失败（{}）", metadata_path.display()),
+        // 读改写走全局锁串行化（与翻译戳记/向量锚互不覆盖）
+        let mut patch = serde_json::Map::new();
+        for (k, v) in &entries {
+            patch.insert(k.to_string(), serde_json::Value::String(v.clone()));
+        }
+        if let Err(e) =
+            tauri_plugin_epub::metadata_json::patch_metadata_json(&metadata_path, &patch)
+        {
+            log::warn!(
+                "写入 metadata.json 失败（{}）: {}",
+                metadata_path.display(),
+                e
+            );
         }
     }
 
