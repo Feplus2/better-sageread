@@ -217,3 +217,35 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
   设置入口与侧栏显示小红点/「有新版本」标记，点进去手动触发确认框。
   实现要点：update-store 加一个 `availableUpdate` 只读标志位 + 静默 check 路径
   （silent 选项当时为启动自动弹框所设、纯手动化时删了，做这个时加回来但只喂标志位）。
+
+### 已清挂账小项（2026-08-25，v0.3.0 线）- ✅ **脚注翻译**：`fn:<id>` 独立键入译本（不占块序号，同一幂等 hash 语义）；
+  视图重建译文模式整块替换/对照模式译文 div 内联进脚注区；导出对照收 indented 引用续块；
+  `restoreFootnoteRefs` 硬保证译文模式 `[^id]` 引用标记不丢（丢失则 GFM 不渲染脚注区，
+  译文脚注成死文本——测试钉死）；翻译提示词 rule 2 补脚注引用标记保留。
+- ✅ **app 重启级恢复**：`pending_done` 落盘 `{appData}/papers-converter/pending-done.json`
+  （done 落槽即写、消费清除即删、状态查询磁盘兜底——产物目录缺失/文件损坏静默清理），
+  CDP 实盘 PASS（`scripts/cdp-verify-pending-done-persist.mjs`）。
+- ✅ **converter sidecar Job Object 防孤儿**：MCP 的 Job 实现收编至 `core/process_tree.rs`
+  （全局共享 KILL_ON_JOB_CLOSE Job），books_converter/papers_converter 两个 sidecar spawn 即挂靠
+  （PyInstaller 孙进程默认随父入 Job，app 崩溃整树陪葬）。
+- ✅ **metadata.json 读改写并发窗口（原挂账项 6）**：翻译（title_zh/abstract_zh、
+  translationRunState）× 向量化版本锚 × Zotero 回链三类写者的「读-改-写」整文件互覆窗口
+  收编为一把全局锁——插件新增 `metadata_json.rs` 的 `patch_metadata_json`（锁内读改写合并），
+  插件向量锚、app 侧 `inject_zotero_key`、新命令 `patch_paper_metadata_json`（TS 翻译服务
+  两处写者经 invoke 走它）全部走同一路径。cargo 52+25 绿、翻译容错单测 8/8 绿。
+- ✅ **同步方向复核（原挂账项 7）**：审计完成，结论见 `docs/sync-direction-audit.md`——
+  单次 502 全链路 fail-closed（无根因）；钓出 6 个真实风险点（P0 修剪误删未消费包、
+  P1 sync-state 非原子写致水位清零+删除复活、P2 拉取尾部水位跳跃、P3 暂时坏包 3 次永弃、
+  P4 无 L2 互斥、P5 进度回落键被顶翻）。**修法已列，动 sync 临界区前需用户拍板范围。**
+
+### v0.3.0 主线：P2 统一任务队列 + P3 有界并发 + P4 AI 体验
+
+**施工规格已全部落定（2026-08-25）**：
+- `docs/task-queue-p2-plan.md`——五通道统一模型 + 六直跑入口收敛入队 + 图书两通道队列化 +
+  卡片点开子任务面板，分 P2-0~P2-5 六阶段，每阶段附不动清单与验证矩阵。
+- `docs/task-concurrency-p3-plan.md`——解析有界并发 2（多句柄化 + staging 撞车待核点）、
+  向量化单篇内并行 embed + busy_timeout、翻译维持 3 路；依赖 P2 完成。
+- `docs/ai-experience-p4-plan.md`——工具描述跳板（文案级先行）→ getBooks/status 发现增强 →
+  central 语义检索（选型待定）→ 目录牌观测审计；不依赖 P2/P3 可提前搭车。
+
+前置调研见 `docs/task-system-survey.md`。
