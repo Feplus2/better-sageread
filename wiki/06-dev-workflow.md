@@ -143,8 +143,9 @@ cd packages/app/src-tauri && cargo test
 
 **发布 Checklist**（细则 `docs/release-workflow.md`，密钥名等以 `release.yml` 为准）：
 
-1. 改 `packages/app/src-tauri/tauri.conf.json` 的 version（CI 也会用 tag 名覆盖）
-2. 打 `v*` tag 并推送（或在 Actions 手动 workflow_dispatch）
-3. 等三平台矩阵构建出**草稿** Release
-4. 人工编辑 Release Notes 后 Publish
-5. 验证：`latest.json` 已生成，旧版本应用内自动更新能拉到（updater 签名为 secrets `TAURI_SIGNING_PRIVATE_KEY`）
+1. **巡检同步 wiki / 提示词（`src/constants/*-prompt.ts` 与 AI 工具描述）/ 用户手册（`plugins/tauri-plugin-epub/resources/manual/`）——发版前必备动作：行为有变就必须更新**
+2. 改仓库根 `RELEASE_NOTES.md`（面向用户口径；CI 同时用作 Release 正文与 `latest.json` 的 notes）并提交
+3. 打 `v*` tag 并推送（版本号/identifier 由 CI 从 tag 同步；tauri.conf.json 的 version 只是开发占位）
+4. 等三平台矩阵构建出**草稿** Release
+5. 核对草稿内容与资产后 Publish；发布后 `cos-sync.yml` 自动把安装包同步到 COS 桶（国内加速下载）
+6. 验证：`latest.json` 已生成，旧版本应用内自动更新能拉到（updater 签名为 secrets `TAURI_SIGNING_PRIVATE_KEY`）
