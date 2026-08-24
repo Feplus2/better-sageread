@@ -2,6 +2,7 @@ import { vectorizePaper } from "@/services/paper-service";
 import { translatePaper } from "@/services/paper-translation-service";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
 import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
+import { listen } from "@tauri-apps/api/event";
 import { appDataDir } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
@@ -316,4 +317,83 @@ async function drainTranslate() {
 export function queuedIdsOf(kind: TaskKind): Set<string> {
   const s = usePaperTaskStore.getState();
   return new Set((kind === "vectorize" ? s.vectorizeQueue : s.translateQueue).map((t) => t.id));
+}
+
+/**
+ * 队列外单篇向量化（AI 工具 vectorizePaperSingle / 设置页全量向量化）的进度卡跟踪：
+ * 建运行卡 → 订阅 paper://index-progress 实时喂 percent（兼喂 vectorizePercent 圆环，
+ * 页面不在场也照喂——store 模块级与视图无关）→ 成败收尾卡（成功卡由页面 6s 自动消失）。
+ * 通道队列在跑时不建卡（队列卡已覆盖通道，避免双写打架；圆环照常喂）。
+ * 修复前实证（2026-08-24）：AI 路径无卡片喂养，用户只能看到恢复卡的恒 0%。
+ */
+export async function trackSoloVectorize<T>(paper: { id: string; title: string }, run: () => Promise<T>): Promise<T> {
+  const st = usePaperTaskStore.getState();
+  // 通道队列在跑或已有 running 卡（另一篇 solo 在跑）时不建卡（圆环照喂）；
+  // success/error 收尾遗留卡不挡新卡（直接覆盖）
+  const cardActive =
+    !st.vectorizeDraining && st.vectorizeQueue.length === 0 && st.progress.vectorize?.status !== "running";
+  // 卡片所有权守卫：run 期间若通道队列开跑接管了卡片，本 solo 的进度/收尾一律不写
+  // （title+total=1 双重比对；队列卡的 total 由队列长度决定、title 逐篇轮换）
+  const ownsCard = () => {
+    const v = usePaperTaskStore.getState().progress.vectorize;
+    return v?.status === "running" && v.total === 1 && v.title === paper.title;
+  };
+  const patchSoloCard = (patch: Partial<ChannelProgress>) => {
+    if (!cardActive || !ownsCard()) return;
+    patchProgress("vectorize", patch);
+  };
+  if (cardActive) {
+    usePaperTaskStore.setState({
+      progress: {
+        ...st.progress,
+        vectorize: {
+          status: "running",
+          index: 0,
+          total: 1,
+          title: paper.title,
+          detail: "向量化中…",
+          percent: 0,
+          doneCount: 0,
+          failedCount: 0,
+          skippedCount: 0,
+          failedNames: [],
+        },
+      },
+    });
+  }
+  const unlisten = await listen<{ paper_id: string; percent: number }>("paper://index-progress", (e) => {
+    const p = e.payload;
+    if (p.paper_id !== paper.id) return;
+    const pct = Math.max(0, Math.min(100, Math.round(p.percent)));
+    usePaperTaskStore.setState((s) => ({
+      vectorizePercent: { ...s.vectorizePercent, [paper.id]: pct },
+    }));
+    patchSoloCard({ percent: pct });
+  });
+  try {
+    const res = await run();
+    patchSoloCard({
+      status: "success",
+      percent: 100,
+      doneCount: 1,
+      summary: `《${paper.title}》向量化完成`,
+    });
+    return res;
+  } catch (error) {
+    patchSoloCard({
+      status: "error",
+      percent: 100,
+      failedCount: 1,
+      failedNames: [paper.title],
+      summary: `《${paper.title}》向量化失败`,
+    });
+    throw error;
+  } finally {
+    unlisten();
+    usePaperTaskStore.setState((s) => {
+      const next = { ...s.vectorizePercent };
+      delete next[paper.id];
+      return { vectorizePercent: next };
+    });
+  }
 }

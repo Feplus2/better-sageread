@@ -6,6 +6,7 @@ import {
   updateBookVectorizationMeta,
 } from "@/services/book-service";
 import { resolveLlmParams } from "@/services/converter-service";
+import { notifyPaperListChanged, notifyPaperStatusChanged } from "@/services/paper-events";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useConverterStore } from "@/store/converter-store";
 import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
@@ -187,6 +188,10 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
     console.warn("读取同步配置失败（跳过论文自动上传）:", error);
   }
 
+  // 新条目入库 → 通知列表响应式重载（覆盖队列/AI 工具 importPaper 全部入口；
+  // 页面不在场时通知落空，重进时 loadAll 兜底）
+  if (result.imported > 0) notifyPaperListChanged();
+
   return result;
 }
 
@@ -300,6 +305,7 @@ export async function vectorizePaper(paper: { id: string; title: string; author:
     version: 1,
     startedAt: Date.now(),
   });
+  notifyPaperStatusChanged(paper.id);
 
   let res: EpubIndexResult;
   try {
@@ -314,6 +320,7 @@ export async function vectorizePaper(paper: { id: string; title: string; author:
     });
   } catch (error) {
     await updateBookVectorizationMeta(paper.id, { status: "failed", finishedAt: Date.now() });
+    notifyPaperStatusChanged(paper.id);
     throw error;
   }
 
@@ -324,10 +331,13 @@ export async function vectorizePaper(paper: { id: string; title: string; author:
       dimension: res.report.vector_dimension,
       finishedAt: Date.now(),
     });
+    // 响应式通知：列表圆环完成即转绿，不靠重挂载/手动刷新
+    notifyPaperStatusChanged(paper.id);
     return res;
   }
 
   await updateBookVectorizationMeta(paper.id, { status: "failed", finishedAt: Date.now() });
+  notifyPaperStatusChanged(paper.id);
   throw new Error(res?.message || "向量化失败");
 }
 

@@ -14,6 +14,7 @@ import {
 } from "@/services/book-service";
 import { vectorizePaper } from "@/services/paper-service";
 import { isPaperQueuedOrRunning, isPaperVectorizing, markPaperVectorizing } from "@/store/convert-progress-store";
+import { trackSoloVectorize } from "@/store/paper-task-store";
 import type { BookWithStatus } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { tool } from "ai";
@@ -94,7 +95,10 @@ async function vectorizePaperSingle(
   }
   markPaperVectorizing(paperId, true);
   try {
-    const res = await vectorizePaper({ id: paperId, title: paperTitle, author: paperAuthor });
+    // trackSoloVectorize：右下角进度卡 + 圆环事件喂养（修复前 AI 路径卡片恒 0% 跳完成）
+    const res = await trackSoloVectorize({ id: paperId, title: paperTitle }, () =>
+      vectorizePaper({ id: paperId, title: paperTitle, author: paperAuthor }),
+    );
     return {
       success: true,
       message: `《${paperTitle}》向量化完成，分块数：${res.report?.total_chunks ?? 0}`,

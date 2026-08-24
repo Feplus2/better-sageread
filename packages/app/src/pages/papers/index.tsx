@@ -30,7 +30,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
 import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
-import { updateBookStatus, updateBookVectorizationMeta } from "@/services/book-service";
+import { getBookStatus, updateBookStatus, updateBookVectorizationMeta } from "@/services/book-service";
+import { onPaperListChanged, onPaperStatusChanged } from "@/services/paper-events";
 import {
   type Folder,
   type FolderTreeNode,
@@ -603,13 +604,16 @@ export default function PapersPage() {
 
   // 刷新恢复（2026-08-23）：向量化进行中刷新页面 → 内存队列丢失但 Rust 侧仍在跑。
   // 扫描 metadata 中 status=processing 的论文回写注册表，防重复入队争抢；进度卡重建为简化态。
-  // 2026-08-24 三修：①轮询定时器随卸载清理（原来每次挂载泄漏一个 30s interval）；
+  // 2026-08-24 加固：①轮询定时器/进度监听随卸载清理（原每次挂载泄漏一个 30s interval）；
   // ②死标兜底——processing 标超过 2 小时未更新视为崩溃残留，不注册且回写 failed 解锁该篇；
-  // ③本通道有实时任务在跑（drain/队列/进度卡任一存在）时不恢复，避免覆盖实时进度卡。
+  // ③本通道有实时任务在跑（drain/队列/进度卡任一存在）时不恢复，避免覆盖实时进度卡；
+  // ④注册表对账——已标记但 metadata 不再是 processing 的（离场期间完成）即时解除；
+  // ⑤恢复卡订阅 paper://index-progress 实时喂 percent（圆环同喂），不再恒 0%。
   useEffect(() => {
     /** processing 标超过此时长未更新视为死标（单篇向量化正常为分钟级） */
     const STALE_PROCESSING_MS = 2 * 60 * 60 * 1000;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let unlistenProgress: (() => void) | undefined;
     let disposed = false;
     void (async () => {
       try {
@@ -627,15 +631,22 @@ export default function PapersPage() {
         for (const p of stale) {
           updateBookVectorizationMeta(p.id, { status: "failed", finishedAt: now }).catch(() => {});
         }
-        if (disposed || fresh.length === 0) return;
-        // 实时通道在跑：注册表已被 drain 打点、进度卡是实时的，恢复逻辑整体跳过
+        // 实时通道在跑：注册表已被 drain/solo 打点、进度卡是实时的，恢复逻辑整体跳过
         const ch = usePaperTaskStore.getState();
         if (ch.vectorizeDraining || ch.vectorizeQueue.length > 0 || ch.progress.vectorize) return;
         const reg = await import("@/store/paper-task-registry");
         if (disposed) return;
-        const mark = reg.usePaperTaskRegistry.getState().mark;
+        const regState = reg.usePaperTaskRegistry.getState();
+        // 对账：注册表里有标记但 metadata 已不是 processing 的（页面离场期间完成/失败、
+        // 上轮轮询随卸载被清理没来得及解除）→ 解除，防永久残留误挡该篇的向量化/重解析
+        for (const id of Object.keys(regState.activeVectorize)) {
+          const still = papers.find((p) => p.id === id)?.status?.metadata?.vectorization?.status === "processing";
+          if (!still) regState.mark(id, "vectorize", false);
+        }
+        if (fresh.length === 0) return;
+        const mark = regState.mark;
         for (const p of fresh) mark(p.id, "vectorize", true);
-        // 进度卡恢复（简化：无法知道百分比，显示 N 篇进行中）
+        // 进度卡恢复（简化：无法知道百分比初值，显示 N 篇进行中）
         usePaperTaskStore.setState({
           progress: {
             vectorize: {
@@ -652,6 +663,27 @@ export default function PapersPage() {
             },
           },
         });
+        // 恢复卡也吃真实进度事件（Rust 侧 index_paper 仍在跑仍会发）：圆环 + 卡片 percent 不再恒 0
+        const freshIds = new Set(fresh.map((p) => p.id));
+        const pctById = new Map<string, number>();
+        unlistenProgress = await listen<{ paper_id: string; percent: number }>("paper://index-progress", (e) => {
+          const p = e.payload;
+          if (!freshIds.has(p.paper_id)) return;
+          const pct = Math.max(0, Math.min(100, Math.round(p.percent)));
+          pctById.set(p.paper_id, pct);
+          const avg = Math.round([...pctById.values()].reduce((a, b) => a + b, 0) / Math.max(1, pctById.size));
+          usePaperTaskStore.setState((s) => ({
+            vectorizePercent: { ...s.vectorizePercent, [p.paper_id]: pct },
+            progress: s.progress.vectorize?.detail?.includes("恢复监控")
+              ? { ...s.progress, vectorize: { ...s.progress.vectorize, percent: avg } }
+              : s.progress,
+          }));
+        });
+        if (disposed) {
+          unlistenProgress();
+          unlistenProgress = undefined;
+          return;
+        }
         // 监听完成事件：metadata 变为 success/failed 时解除注册表标记（loadAll 后自然刷新）
         // 简化：30 秒轮询检查一次
         timer = setInterval(async () => {
@@ -668,6 +700,8 @@ export default function PapersPage() {
             if (stillProcessing.length === 0) {
               clearInterval(timer);
               timer = undefined;
+              unlistenProgress?.();
+              unlistenProgress = undefined;
               // 清恢复态进度卡（实时卡由 drain 自己收尾，不动）
               usePaperTaskStore.setState((prev) => ({
                 progress: prev.progress.vectorize?.detail?.includes("恢复监控")
@@ -684,8 +718,11 @@ export default function PapersPage() {
       }
     })();
     return () => {
+      // 卸载清理定时器与事件监听（堵漏）；注册表标记有意保留——任务真在跑，标记是真相；
+      // 若任务在页面离场期间完成，标记由下次挂载的恢复扫描（processing 已消失则不回写）自然解除
       disposed = true;
       if (timer !== undefined) clearInterval(timer);
+      unlistenProgress?.();
     };
   }, []);
 
@@ -698,6 +735,33 @@ export default function PapersPage() {
       void loadAllRef.current();
     });
     return () => setPaperImportRefresh(null);
+  }, []);
+
+  // 论文变更总线（2026-08-24）：状态变化按 id 局部刷新该篇（向量化完成圆环即转绿，不靠重挂载）；
+  // 列表变化（新条目入库）去抖 400ms 增量重载——AI 工具 importPaper 等不过队列收尾的入口也覆盖。
+  // 全程响应式局部更新，不做整页刷新（阅读视图不受影响：本页未挂载时通知落空，重进 loadAll 兜底）。
+  useEffect(() => {
+    let listTimer: ReturnType<typeof setTimeout> | null = null;
+    const offStatus = onPaperStatusChanged((paperId) => {
+      void (async () => {
+        try {
+          const st = await getBookStatus(paperId);
+          if (!st) return;
+          setPapers((prev) => prev.map((p) => (p.id === paperId ? { ...p, status: st } : p)));
+        } catch {
+          /* 单篇状态刷新失败不阻断 */
+        }
+      })();
+    });
+    const offList = onPaperListChanged(() => {
+      if (listTimer) clearTimeout(listTimer);
+      listTimer = setTimeout(() => void loadAllRef.current(), 400);
+    });
+    return () => {
+      offStatus();
+      offList();
+      if (listTimer) clearTimeout(listTimer);
+    };
   }, []);
 
   // ---- 文件夹派生数据 ----
