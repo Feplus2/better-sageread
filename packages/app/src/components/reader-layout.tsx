@@ -1,4 +1,3 @@
-import { BottomRightStackHost } from "@/components/ui/bottom-right-stack";
 import GlobalConvertProgress from "@/components/global-convert-progress";
 import HomeLayout from "@/components/home-layout";
 import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
@@ -8,7 +7,9 @@ import { PreviewPanel } from "@/components/preview/preview-panel";
 import SettingsDialog from "@/components/settings/settings-dialog";
 import SideChat from "@/components/side-chat";
 import SyncRefreshButton from "@/components/sync-refresh-button";
+import { BottomRightStackHost } from "@/components/ui/bottom-right-stack";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { UpdateConfirmDialog } from "@/components/update-confirm-dialog";
 import VerticalTabBar from "@/components/vertical-tab-bar";
 import WindowControls from "@/components/window-controls";
 import { useFontEvents } from "@/hooks/use-font-events";
@@ -29,6 +30,7 @@ import { syncUiConfigNow } from "@/services/ui-config-sync";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { markTabWoken, useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
+import { useUpdateStore } from "@/store/update-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
@@ -114,6 +116,15 @@ export default function ReaderLayout() {
       if (!lastActiveRef.current.has(t.id)) lastActiveRef.current.set(t.id, now);
     }
   }, [tabs]);
+
+  // 启动自动检查更新（延迟 5s 让首屏先稳住）：发现新版本只弹确认框（版本号+更新说明），
+  // 用户确认才下载——永不静默安装（v0.2.1 的 Rust 侧启动强更已拆除，事故教训 2026-08-24）
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void useUpdateStore.getState().checkForUpdates({ silentIfLatest: true, silentOnError: true });
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // 定时巡检：宽限期到期或 LRU 超限则休眠
   useEffect(() => {
@@ -623,6 +634,8 @@ export default function ReaderLayout() {
       {/* 全局转换进度层（论文解析卡 + 图书转换小卡；阅读器/聊天页豁免，见组件注释） */}
       <GlobalConvertProgress />
       <BottomRightStackHost />
+      {/* 更新确认框全局挂载：设置页手动检查与启动自动检查共用（update-store） */}
+      <UpdateConfirmDialog />
 
       <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
     </div>

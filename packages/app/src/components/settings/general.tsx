@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,12 +9,12 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getUserThemesDir } from "@/services/global-theme-service";
 import { useThemeStore } from "@/store/theme-store";
+import { useUpdateStore } from "@/store/update-store";
 import type { ThemeMode } from "@/styles/themes";
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, mkdir } from "@tauri-apps/plugin-fs";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { type Update, check } from "@tauri-apps/plugin-updater";
 import clsx from "clsx";
 import { Check, ChevronDownIcon, Copy, FolderOpen, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -24,11 +23,10 @@ import { toast } from "sonner";
 export default function GeneralSettings() {
   const [dataPath, setDataPath] = useState("");
   const [isCopied, setIsCopied] = useState(false);
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [appVersion, setAppVersion] = useState("0.1.0");
-  // 待确认的更新对象：非 null 时弹出确认框，用户点头才下载安装
-  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
-  const [isUpdating, setIsUpdating] = useState(false);
+  // 更新检查/确认框状态收编 update-store（与启动自动检查共用；确认框全局挂载于 ReaderLayout）
+  const isCheckingUpdate = useUpdateStore((s) => s.isChecking);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
 
   const { themeMode, autoScroll, swapSidebars, setThemeMode, setAutoScroll, setSwapSidebars } = useThemeStore();
   const { globalTheme, availableGlobalThemes, setGlobalTheme, refreshGlobalThemes, reloadGlobalThemes } =
@@ -111,47 +109,10 @@ export default function GeneralSettings() {
     }
   };
 
+  // 手动检查更新（设置页按钮）：走 update-store 与启动自动检查同一条路径——
+  // 确认框全局挂载；已最新/失败在此口径如实 toast
   const handleCheckForUpdates = async () => {
-    setIsCheckingUpdate(true);
-    try {
-      const update = await check();
-      if (update) {
-        // 发现新版本先弹确认框（版本号 + 更新内容），用户确认后才下载安装
-        setPendingUpdate(update);
-      } else {
-        toast.info("当前已是最新版本");
-      }
-    } catch (error) {
-      console.error("Check for updates failed:", error);
-      // Tauri 插件错误多为纯字符串（非 Error 实例），直接 String 兜底展示真实原因
-      const detail = error instanceof Error ? error.message : String(error ?? "");
-      toast.error("检查更新失败", {
-        description: detail && detail !== "undefined" ? detail : "未知错误",
-      });
-    } finally {
-      setIsCheckingUpdate(false);
-    }
-  };
-
-  const handleConfirmUpdate = async () => {
-    if (!pendingUpdate) return;
-    setIsUpdating(true);
-    try {
-      await pendingUpdate.downloadAndInstall();
-      setPendingUpdate(null);
-      toast.success("更新已下载", {
-        description: "请重启应用以完成更新",
-        duration: 10000,
-      });
-    } catch (error) {
-      console.error("Update failed:", error);
-      const detail = error instanceof Error ? error.message : String(error ?? "");
-      toast.error("更新失败", {
-        description: detail && detail !== "undefined" ? detail : "未知错误",
-      });
-    } finally {
-      setIsUpdating(false);
-    }
+    await checkForUpdates();
   };
 
   const handleThemeModeChange = (mode: ThemeMode) => {
@@ -343,40 +304,7 @@ export default function GeneralSettings() {
           </div>
         </div>
       </section>
-
-      {/* 更新确认框：检查到新版本后先展示版本号与更新内容，用户确认才下载 */}
-      <Dialog
-        open={!!pendingUpdate}
-        onOpenChange={(open) => {
-          if (!open && !isUpdating) setPendingUpdate(null);
-        }}
-      >
-        <DialogContent className="flex max-h-[80vh] max-w-lg flex-col">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>发现新版本 v{pendingUpdate?.version}</DialogTitle>
-          </DialogHeader>
-          {pendingUpdate?.body && (
-            <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-3 text-neutral-600 text-sm dark:text-neutral-400">
-              {pendingUpdate.body}
-            </div>
-          )}
-          <div className="flex flex-shrink-0 justify-end gap-3">
-            <Button variant="outline" onClick={() => setPendingUpdate(null)} disabled={isUpdating}>
-              以后再说
-            </Button>
-            <Button onClick={handleConfirmUpdate} disabled={isUpdating} className="min-w-24">
-              {isUpdating ? (
-                <div className="flex items-center gap-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border border-white/30 border-t-white" />
-                  下载中...
-                </div>
-              ) : (
-                "立即更新"
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* 更新确认框全局挂载于 ReaderLayout（update-confirm-dialog.tsx），设置页不重复挂 */}
     </div>
   );
 }

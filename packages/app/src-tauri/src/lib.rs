@@ -129,33 +129,11 @@ pub fn run() {
                 }
             }
             
-            // Check for updates on startup
-            #[cfg(not(debug_assertions))]
-            {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    use tauri_plugin_updater::UpdaterExt;
-                    match handle.updater() {
-                        Ok(updater) => match updater.check().await {
-                            Ok(Some(update)) => {
-                                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-                                    log::error!("Failed to install update: {}", e);
-                                }
-                            }
-                            Ok(None) => {
-                                log::info!("No update available");
-                            }
-                            Err(e) => {
-                                log::error!("Failed to check for updates: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            log::error!("Failed to get updater: {}", e);
-                        }
-                    }
-                });
-            }
-            
+            // 启动自动检查更新已迁移到前端（reader-layout 挂载后延迟检查）：
+            // 发现新版本只弹确认框（版本号+更新说明），用户确认才下载——
+            // 此处绝不再静默 download_and_install（强制更新事故 2026-08-24：v0.2.1 此段
+            // 启动即下载安装，用户无拒绝机会）
+
             tauri::async_runtime::spawn(async move {
                 // 启动时先应用待恢复数据（在数据库初始化之前）
                 if let Err(e) = core::sync::restore::apply_pending_restore(&app_handle) {
