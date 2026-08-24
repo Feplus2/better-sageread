@@ -172,6 +172,17 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     currentThreadRef.current = currentThread;
   }, [currentThread]);
 
+  // 卸载标记（2026-08-24 消息丢失根修）：在飞流的 onFinish 在组件卸载后仍会触发——
+  // 落库必须照常（保住响应），但共享 store 回写必须停，否则重挂载时 initializeThread
+  // 见到非空 currentThread 会跳过 DB 续接、新 Chat 实例 messages 恒为 [] → 用户看到"新开对话"页
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleReasoningTimesUpdate = (messageId: string, reasoningTimes: ReasoningTimes) => {
     reasoningTimesRef.current[messageId] = reasoningTimes;
   };
@@ -270,7 +281,8 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             .then(async (title) => {
               if (!title) return;
               const renamedThread = await editThread(thread.id, { title });
-              setCurrentThread(renamedThread);
+              // 卸载后不回写共享 store（理由见 mountedRef）；改名落库与缓存刷新照常
+              if (mountedRef.current) setCurrentThread(renamedThread);
               queryClient.invalidateQueries({ queryKey: ["threads"] });
             })
             .catch((error) => {
@@ -283,7 +295,8 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         // 不再另起 editThread 直写通道（旧版双通道并发，旧快照可能覆盖新快照）
         const persistMessages = (thread: Thread) => {
           void persistMessagesNow(thread.id, normalizedMessages);
-          setCurrentThread({ ...thread, messages: normalizedMessages });
+          // 卸载（切页/关 tab）后不回写共享 store——落库照常，UI 侧状态随组件消亡（理由见 mountedRef）
+          if (mountedRef.current) setCurrentThread({ ...thread, messages: normalizedMessages });
           autoNameFirstRound(thread);
         };
 
@@ -410,38 +423,44 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
   useEffect(() => {
     const initializeThread = async () => {
-      // H2 切页续接：重挂载时续接最近一次对话（书籍按 bookId+scope='book'，全局助手按 scope='global'）；
-      // 仅「新对话」按钮（handleNewThread）才显式新开——handleNewThread 后 isInit 已为 true，不会回读
-      if (!currentThread && !isInit.current) {
-        // central scope 不按 bookId 查（activeBookId 可能被钉书污染），由后端按 scope='global' 续接
-        const lookupBookId = agentScope === "central" ? undefined : activeBookId;
-        try {
-          const latestThread = await getLatestThreadBybookId(lookupBookId, threadScope);
-          if (latestThread) {
-            setCurrentThread(latestThread);
-            setMessages(latestThread.messages);
-          }
-          isInit.current = true;
-          forceUpdate();
-        } catch (error) {
-          console.error("Failed to load existing thread:", error);
-        }
-      } else {
+      if (isInit.current) return;
+      // 重挂载时 store 已有线程（HMR、卸载期在飞流 finish 回写等竞态）：把其消息水合进新 Chat 实例——
+      // 新实例 messages 恒为 []，不水合会落到"新开对话"页（2026-08-24 消息丢失根修配套）。
+      // 仅此首启分支做水合：之后 currentThread 变化（发消息/改名/选线程）走正常事件流，绝不回读覆盖在飞内容
+      if (currentThread) {
+        setMessages(currentThread.messages ?? []);
         isInit.current = true;
         forceUpdate();
+        return;
+      }
+      // H2 切页续接：重挂载时续接最近一次对话（书籍按 bookId+scope='book'，全局助手按 scope='global'）；
+      // 仅「新对话」按钮（handleNewThread）才显式新开——handleNewThread 后 isInit 已为 true，不会回读。
+      // central scope 不按 bookId 查（activeBookId 可能被钉书污染），由后端按 scope='global' 续接
+      const lookupBookId = agentScope === "central" ? undefined : activeBookId;
+      try {
+        const latestThread = await getLatestThreadBybookId(lookupBookId, threadScope);
+        if (latestThread) {
+          setCurrentThread(latestThread);
+          setMessages(latestThread.messages);
+        }
+        isInit.current = true;
+        forceUpdate();
+      } catch (error) {
+        console.error("Failed to load existing thread:", error);
       }
     };
 
     initializeThread();
   }, [activeBookId, currentThread, setCurrentThread, setMessages]);
 
+  // 卸载红线（2026-08-24 消息丢失根修）：绝不能 setMessages([])——本 hook 的 Chat 实例在组件
+  // 卸载后仍随在飞流式任务继续跑（流由 transport/孤儿实例持有），清空消息表会让孤儿流 finish 时
+  // 以残缺的 [assistant] 全量覆盖落库，user 消息与历史全没（实测产出孤 assistant 线程）。
+  // 卸载只需松开 store 指针（重挂载走 initializeThread 续接）；局部 state 随组件消亡，无需清。
   // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
   useEffect(() => {
     return () => {
       setCurrentThread(null);
-      setMessages([]);
-      setReferences([]);
-      setImages([]);
     };
   }, []);
 

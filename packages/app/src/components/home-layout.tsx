@@ -156,6 +156,15 @@ const HomeLayout = () => {
         <Sidebar />
 
         <div data-region="app-main" className="h-full flex-1 overflow-hidden p-1">
+          {/* 全局助手常驻挂载（仅 display 切换），与阅读 tab"侧栏与聊天保活（护流式任务）"同哲学：
+              此前 /chat 随 Routes 卸载——卸载清理清空仍在流式的 Chat 实例消息表，孤儿流 finish 以
+              残缺 [assistant] 覆盖落库（2026-08-24 消息丢失根修）。常驻后切页不断流、回页即续接 */}
+          <div
+            className="flex h-full flex-1 flex-col overflow-hidden rounded-xl shadow-around"
+            style={{ display: location.pathname === "/chat" ? "flex" : "none" }}
+          >
+            <ChatPage />
+          </div>
           <Routes>
             <Route
               path="/"
@@ -170,14 +179,6 @@ const HomeLayout = () => {
               element={
                 <div className="flex h-full flex-1 flex-col rounded-xl border bg-background shadow-around">
                   <StatisticsPage />
-                </div>
-              }
-            />
-            <Route
-              path="/chat"
-              element={
-                <div className="flex h-full flex-1 flex-col overflow-hidden rounded-xl shadow-around">
-                  <ChatPage />
                 </div>
               }
             />
