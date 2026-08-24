@@ -291,15 +291,25 @@ function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
  * 陆续加载把内容下推，落点偏上。滚动后两阶段重算纠偏；用户一旦手动介入立即放弃，
  * 不与用户抢滚动条；目标脱离 DOM（视图切换重建正文）也放弃。
  * measure 基于实时几何（元素/Range 均可），滚动目标每次重算而非定格初值。
+ * 互斥（2026-08-24）：同一滚动容器上后一次跳转取消前一次未完成的校正循环——
+ * 快速连跳（TOC 1→5→3）时两个校正循环各自量各自目标会来回乒乓。
  */
+
+/** 每个滚动容器至多一个在飞校正循环（WeakMap 随容器回收自动清理） */
+const activeDriftCorrections = new WeakMap<HTMLElement, () => void>();
+
 function scrollWithDriftCorrection(root: HTMLElement, measure: () => number, connected: () => boolean) {
+  activeDriftCorrections.get(root)?.();
   root.scrollTo({ top: measure(), behavior: "smooth" });
   let cancelled = false;
   const cancel = () => {
+    if (cancelled) return;
     cancelled = true;
+    if (activeDriftCorrections.get(root) === cancel) activeDriftCorrections.delete(root);
     root.removeEventListener("wheel", cancel);
     root.removeEventListener("touchstart", cancel);
   };
+  activeDriftCorrections.set(root, cancel);
   root.addEventListener("wheel", cancel, { passive: true });
   root.addEventListener("touchstart", cancel, { passive: true });
   const correct = (delay: number) => {
@@ -1345,7 +1355,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       // Table 2 远距跳转需 3 次的根因即此路径裸滚无校正）；Range 几何随布局实时重算
       scrollWithDriftCorrection(
         root,
-        () => range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3,
+        () =>
+          range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3,
         () => range.startContainer.isConnected,
       );
       flashRanges([range]);

@@ -12,12 +12,14 @@ import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
  *   产物整体替换，保留论文 id/文件夹归属/对话/标注
  *
  * 任务冲突模型（与 PapersPage 同口径）：translate/align 在该篇排队或解析中时拒绝执行
- * （解析会整体替换产物，翻译/对齐基于旧产物即白算）。
+ * （解析会整体替换产物，翻译/对齐基于旧产物即白算）；执行期间打点 paper-task-registry
+ * 的 translate 槽（开始/结束），使「解析×翻译」互斥在 AI 工具路径同样成立。
  */
 import { alignPaperTranslation, inspectPaperAlignment } from "@/services/paper-alignment-service";
 import { resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import { loadPaperTranslation, translatePaper } from "@/services/paper-translation-service";
 import { isPaperQueuedOrRunning, startPaperReparse } from "@/store/convert-progress-store";
+import { usePaperTaskRegistry } from "@/store/paper-task-registry";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
@@ -140,57 +142,64 @@ export const processPaperTool = tool({
             meta,
           };
         }
-        const result = await translatePaper({
-          paperId,
-          markdown,
-          force: force ?? false,
-          signal: options?.abortSignal,
-        });
-        if (result.cancelled) {
+        // 打点注册表 translate 槽（覆盖 translate+align 全程）：期间重解析该篇会被拒（白翻防护）
+        const taskMark = usePaperTaskRegistry.getState().mark;
+        taskMark(paperId, "translate", true);
+        try {
+          const result = await translatePaper({
+            paperId,
+            markdown,
+            force: force ?? false,
+            signal: options?.abortSignal,
+          });
+          if (result.cancelled) {
+            return {
+              results: {
+                success: false,
+                message: `翻译被中止，已翻译 ${result.translated} 块已保存，可用 action=translate 续翻`,
+                translation: result,
+              },
+              meta,
+            };
+          }
+
+          // 翻译完成后自动对齐（与 UI 行为一致；无嵌入能力时内部跳过并给 reason，不抛错）
+          const align = await alignPaperTranslation({
+            paperId,
+            markdown,
+            force: false,
+            signal: options?.abortSignal,
+          });
+
+          const translateMsg =
+            result.failedBatches > 0
+              ? `新翻 ${result.translated} 块，${result.failedBatches} 个批次失败已跳过（可再次 translate 补齐）`
+              : result.translated > 0
+                ? `新翻 ${result.translated} 块，跳过已翻 ${result.skipped} 块`
+                : "所有块均已有译文";
+          const alignMsg =
+            align.status === "done"
+              ? `句对齐 ${align.computed + align.reused}/${align.total}，词对齐 ${align.words.computed + align.words.reused}/${align.words.total}`
+              : align.status === "skipped"
+                ? `对齐已跳过（${align.reason === "no-vector-capability" ? "未配置嵌入模型" : align.reason}）`
+                : `对齐部分完成（句级失败 ${align.failed} 块，词级失败 ${align.words.failed} 块，可 action=align 补齐）`;
+
           return {
             results: {
-              success: false,
-              message: `翻译被中止，已翻译 ${result.translated} 块已保存，可用 action=translate 续翻`,
+              success: true,
+              message: `翻译完成：${translateMsg}；${alignMsg}`,
               translation: result,
+              alignment: {
+                status: align.status,
+                sentences: { total: align.total, computed: align.computed, reused: align.reused, failed: align.failed },
+                words: align.words,
+              },
             },
             meta,
           };
+        } finally {
+          taskMark(paperId, "translate", false);
         }
-
-        // 翻译完成后自动对齐（与 UI 行为一致；无嵌入能力时内部跳过并给 reason，不抛错）
-        const align = await alignPaperTranslation({
-          paperId,
-          markdown,
-          force: false,
-          signal: options?.abortSignal,
-        });
-
-        const translateMsg =
-          result.failedBatches > 0
-            ? `新翻 ${result.translated} 块，${result.failedBatches} 个批次失败已跳过（可再次 translate 补齐）`
-            : result.translated > 0
-              ? `新翻 ${result.translated} 块，跳过已翻 ${result.skipped} 块`
-              : "所有块均已有译文";
-        const alignMsg =
-          align.status === "done"
-            ? `句对齐 ${align.computed + align.reused}/${align.total}，词对齐 ${align.words.computed + align.words.reused}/${align.words.total}`
-            : align.status === "skipped"
-              ? `对齐已跳过（${align.reason === "no-vector-capability" ? "未配置嵌入模型" : align.reason}）`
-              : `对齐部分完成（句级失败 ${align.failed} 块，词级失败 ${align.words.failed} 块，可 action=align 补齐）`;
-
-        return {
-          results: {
-            success: true,
-            message: `翻译完成：${translateMsg}；${alignMsg}`,
-            translation: result,
-            alignment: {
-              status: align.status,
-              sentences: { total: align.total, computed: align.computed, reused: align.reused, failed: align.failed },
-              words: align.words,
-            },
-          },
-          meta,
-        };
       }
 
       // ==================== 重新解析（入统一解析队列，异步执行） ====================
@@ -248,12 +257,20 @@ export const processPaperTool = tool({
           meta,
         };
       }
-      const align = await alignPaperTranslation({
-        paperId,
-        markdown,
-        force: force ?? false,
-        signal: options?.abortSignal,
-      });
+      // 打点注册表 translate 槽：对齐基于译文，期间重解析同样会使其白算
+      const taskMark = usePaperTaskRegistry.getState().mark;
+      taskMark(paperId, "translate", true);
+      let align: Awaited<ReturnType<typeof alignPaperTranslation>>;
+      try {
+        align = await alignPaperTranslation({
+          paperId,
+          markdown,
+          force: force ?? false,
+          signal: options?.abortSignal,
+        });
+      } finally {
+        taskMark(paperId, "translate", false);
+      }
 
       if (align.status === "skipped") {
         const reasonMsg =

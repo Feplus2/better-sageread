@@ -165,10 +165,9 @@ async function drainVectorize() {
   while (true) {
     const item = usePaperTaskStore.getState().vectorizeQueue[0];
     if (!item) break;
-    if (cancelVectorize.current) {
-      usePaperTaskStore.setState({ vectorizeQueue: [] });
-      break;
-    }
+    // 取消语义对齐解析通道：cancel() 已就地清队，此后入队的项是新意图——
+    // 本泵遇到取消标即收尾（不二次清队），收尾后由结尾段重泵续跑新意图
+    if (cancelVectorize.current) break;
     const index = done + failedNames.length;
     patchProgress("vectorize", {
       index,
@@ -192,17 +191,18 @@ async function drainVectorize() {
       }
     } finally {
       mark(item.id, "vectorize", false);
+      // 按 id 摘除当前篇（不能 slice(1)：取消窗口内新入队的项占据了队首会被误吞）
       usePaperTaskStore.setState((s) => {
         const next = { ...s.vectorizePercent };
         delete next[item.id];
-        return { vectorizePercent: next, vectorizeQueue: s.vectorizeQueue.slice(1) };
+        return { vectorizePercent: next, vectorizeQueue: s.vectorizeQueue.filter((t) => t.id !== item.id) };
       });
       patchProgress("vectorize", { doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] });
     }
   }
 
   const cancelled = cancelVectorize.current;
-  const remaining = total - done - failedNames.length;
+  const remaining = Math.max(0, total - done - failedNames.length);
   patchProgress("vectorize", {
     status: failedNames.length > 0 ? "error" : "success",
     percent: 100,
@@ -215,6 +215,8 @@ async function drainVectorize() {
   }
   usePaperTaskStore.setState({ vectorizeDraining: false });
   usePaperTaskStore.getState().onSettled?.();
+  // 取消后又有新提交（新意图）：重新起泵接续（对齐解析通道 drainPaperQueue 收尾段语义）
+  if (cancelled && usePaperTaskStore.getState().vectorizeQueue.length > 0) void drainVectorize();
 }
 
 async function drainTranslate() {
@@ -288,13 +290,14 @@ async function drainTranslate() {
       }
     } finally {
       mark(item.id, "translate", false);
-      usePaperTaskStore.setState((s) => ({ translateQueue: s.translateQueue.slice(1) }));
+      // 按 id 摘除当前篇（不能 slice(1)：取消窗口内新入队的项占据了队首会被误吞）
+      usePaperTaskStore.setState((s) => ({ translateQueue: s.translateQueue.filter((t) => t.id !== item.id) }));
       patchProgress("translate", { doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] });
     }
   }
 
   const cancelled = translateAbort?.signal.aborted ?? false;
-  const remaining = total - done - failedNames.length;
+  const remaining = Math.max(0, total - done - failedNames.length);
   patchProgress("translate", {
     status: failedNames.length > 0 ? "error" : "success",
     percent: 100,
@@ -305,6 +308,8 @@ async function drainTranslate() {
   translateAbort = null;
   usePaperTaskStore.setState({ translateDraining: false });
   usePaperTaskStore.getState().onSettled?.();
+  // 取消后又有新提交（新意图）：重新起泵接续（对齐解析通道 drainPaperQueue 收尾段语义）
+  if (cancelled && usePaperTaskStore.getState().translateQueue.length > 0) void drainTranslate();
 }
 
 /** 队列容量探测（按钮禁用态的"排队中也算冲突"要与入队口径一致，供 paper-conflict 侧页面拼装） */

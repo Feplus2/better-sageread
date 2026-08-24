@@ -30,7 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
 import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
-import { updateBookStatus } from "@/services/book-service";
+import { updateBookStatus, updateBookVectorizationMeta } from "@/services/book-service";
 import {
   type Folder,
   type FolderTreeNode,
@@ -418,6 +418,8 @@ interface BatchProgressState {
   failedNames: string[];
   /** 收尾汇总（status 非 running 时展示） */
   summary?: string;
+  /** 取消中（cancel 已触发、当前篇收尾中）——取消按钮置灰文案用 */
+  cancelling?: boolean;
 }
 
 /** 文献库：MARKDOWN 论文的管理页（列表 + 文件夹侧栏，§3.2 文件夹模型）；点击论文行打开阅读标签页 */
@@ -463,12 +465,10 @@ export default function PapersPage() {
   const [batchMoveOpen, setBatchMoveOpen] = useState(false);
   // 进度卡数据源：任务 store 双通道（向量化/翻译），reparse 卡在全局解析浮层
   const storeProgress = usePaperTaskStore((st) => st.progress);
-  const batchProgress: BatchProgressState | null = storeProgress.vectorize
-    ? { kind: "vectorize", ...storeProgress.vectorize }
-    : storeProgress.translate
-      ? { kind: "translate", ...storeProgress.translate }
-      : null;
-  const [batchCancelling, setBatchCancelling] = useState(false);
+  // 双通道可并行（向量化×翻译读写不相干）：各出一张卡，经 BottomRightStack 纵向堆叠
+  const batchCards: (BatchProgressState & { kind: "vectorize" | "translate" })[] = (
+    ["vectorize", "translate"] as const
+  ).flatMap((kind) => (storeProgress[kind] ? [{ kind, ...storeProgress[kind]! }] : []));
   const { paperEngine } = useConverterStore();
   // 事件回调里读取最新 selection（拖放监听挂载一次，闭包不能捕获渲染期状态）
   const selectionRef = useRef(selection);
@@ -521,16 +521,26 @@ export default function PapersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 监听只挂一次，状态经 ref 读取
   }, []);
 
-  // 批量任务卡同款收尾：干净成功 6 秒自动消失，有失败/取消保留待手动关闭
+  // 批量任务卡同款收尾：干净成功 6 秒自动消失，有失败/取消保留待手动关闭（双通道各自适用）
+  const cleanSuccessKinds = batchCards
+    .filter((c) => c.status === "success" && c.failedCount === 0)
+    .map((c) => c.kind)
+    .join(",");
   useEffect(() => {
-    if (batchProgress?.status !== "success") return;
-    if (batchProgress.failedCount > 0) return;
+    if (!cleanSuccessKinds) return;
+    const kinds = cleanSuccessKinds.split(",") as ("vectorize" | "translate")[];
     const timer = setTimeout(() => {
-      if (batchProgress)
-        usePaperTaskStore.setState((prev) => ({ progress: { ...prev.progress, [batchProgress.kind]: undefined } }));
+      usePaperTaskStore.setState((prev) => {
+        const next = { ...prev.progress };
+        for (const k of kinds) {
+          // 6 秒内该通道状态又变了（重新开跑/出现失败）则不自动消失
+          if (next[k]?.status === "success" && next[k]?.failedCount === 0) next[k] = undefined;
+        }
+        return { progress: next };
+      });
     }, 6000);
     return () => clearTimeout(timer);
-  }, [batchProgress?.status, batchProgress?.failedCount]);
+  }, [cleanSuccessKinds]);
 
   // metadata.json 缓存：入库后内容不可变，避免每次刷新列表都重读磁盘
   const metaCacheRef = useRef<Map<string, PaperMetadata>>(new Map());
@@ -593,50 +603,72 @@ export default function PapersPage() {
 
   // 刷新恢复（2026-08-23）：向量化进行中刷新页面 → 内存队列丢失但 Rust 侧仍在跑。
   // 扫描 metadata 中 status=processing 的论文回写注册表，防重复入队争抢；进度卡重建为简化态。
+  // 2026-08-24 三修：①轮询定时器随卸载清理（原来每次挂载泄漏一个 30s interval）；
+  // ②死标兜底——processing 标超过 2 小时未更新视为崩溃残留，不注册且回写 failed 解锁该篇；
+  // ③本通道有实时任务在跑（drain/队列/进度卡任一存在）时不恢复，避免覆盖实时进度卡。
   useEffect(() => {
+    /** processing 标超过此时长未更新视为死标（单篇向量化正常为分钟级） */
+    const STALE_PROCESSING_MS = 2 * 60 * 60 * 1000;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let disposed = false;
     void (async () => {
       try {
         const papers = await listPapers();
-        const processing = papers.filter((p) => p.status?.metadata?.vectorization?.status === "processing");
-        if (processing.length === 0) return;
-        const reg = await import("@/store/paper-task-registry");
-        const mark = reg.usePaperTaskRegistry.getState().mark;
-        for (const p of processing) mark(p.id, "vectorize", true);
-        // 进度卡恢复（简化：无法知道百分比，显示 N 篇进行中）
-        if (processing.length > 0) {
-          usePaperTaskStore.setState({
-            progress: {
-              vectorize: {
-                status: "running",
-                index: 0,
-                total: processing.length,
-                title: processing[0]?.title ?? "",
-                detail: "向量化进行中（页面刷新后恢复监控）…",
-                percent: 0,
-                doneCount: 0,
-                failedCount: 0,
-                skippedCount: 0,
-                failedNames: [],
-              },
-            },
-          });
+        const now = Date.now();
+        const fresh: BookWithStatus[] = [];
+        const stale: BookWithStatus[] = [];
+        for (const p of papers) {
+          const vec = p.status?.metadata?.vectorization;
+          if (vec?.status !== "processing") continue;
+          const ts = vec.updatedAt ?? vec.startedAt ?? 0;
+          (now - ts > STALE_PROCESSING_MS ? stale : fresh).push(p);
         }
+        // 死标清理解锁（不注册、不出恢复卡；回写 failed 供用户重试）
+        for (const p of stale) {
+          updateBookVectorizationMeta(p.id, { status: "failed", finishedAt: now }).catch(() => {});
+        }
+        if (disposed || fresh.length === 0) return;
+        // 实时通道在跑：注册表已被 drain 打点、进度卡是实时的，恢复逻辑整体跳过
+        const ch = usePaperTaskStore.getState();
+        if (ch.vectorizeDraining || ch.vectorizeQueue.length > 0 || ch.progress.vectorize) return;
+        const reg = await import("@/store/paper-task-registry");
+        if (disposed) return;
+        const mark = reg.usePaperTaskRegistry.getState().mark;
+        for (const p of fresh) mark(p.id, "vectorize", true);
+        // 进度卡恢复（简化：无法知道百分比，显示 N 篇进行中）
+        usePaperTaskStore.setState({
+          progress: {
+            vectorize: {
+              status: "running",
+              index: 0,
+              total: fresh.length,
+              title: fresh[0]?.title ?? "",
+              detail: "向量化进行中（页面刷新后恢复监控）…",
+              percent: 0,
+              doneCount: 0,
+              failedCount: 0,
+              skippedCount: 0,
+              failedNames: [],
+            },
+          },
+        });
         // 监听完成事件：metadata 变为 success/failed 时解除注册表标记（loadAll 后自然刷新）
         // 简化：30 秒轮询检查一次
-        const timer = setInterval(async () => {
+        timer = setInterval(async () => {
           try {
             const recheck = await listPapers();
             const stillProcessing = recheck.filter((p) => p.status?.metadata?.vectorization?.status === "processing");
             const regS = reg.usePaperTaskRegistry.getState();
             // 解除已完成的
-            for (const p of processing) {
+            for (const p of fresh) {
               if (!stillProcessing.find((sp) => sp.id === p.id)) {
                 regS.mark(p.id, "vectorize", false);
               }
             }
             if (stillProcessing.length === 0) {
               clearInterval(timer);
-              // 清恢复态进度卡
+              timer = undefined;
+              // 清恢复态进度卡（实时卡由 drain 自己收尾，不动）
               usePaperTaskStore.setState((prev) => ({
                 progress: prev.progress.vectorize?.detail?.includes("恢复监控")
                   ? { ...prev.progress, vectorize: undefined }
@@ -651,6 +683,10 @@ export default function PapersPage() {
         /* 恢复失败不阻断 */
       }
     })();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) clearInterval(timer);
+    };
   }, []);
 
   // 批量解析结算后的列表刷新回调（注册给全局队列；本页不在场时跳过，重进自会加载）
@@ -1255,24 +1291,19 @@ export default function PapersPage() {
       if (manageMode && selectedIds.size > 0) setManageMode(false);
     }
   };
-  /** 批量任务取消：向量化当前篇跑完即停；翻译 abort 当前篇+清队列 */
-  const handleCancelBatch = () => {
-    setBatchCancelling(true);
-    const kind = batchProgress?.kind;
-    if (kind === "vectorize" || kind === "translate") {
-      usePaperTaskStore.getState().cancel(kind);
-    }
+  /** 批量任务取消（按通道）：向量化当前篇跑完即停；翻译 abort 当前篇+清队列。
+   *  取消中态由 store 进度卡的 cancelling 字段承载（cancel 时置位），无需本地状态 */
+  const handleCancelBatch = (kind: "vectorize" | "translate") => {
+    usePaperTaskStore.getState().cancel(kind);
   };
 
   /** 关闭批量进度卡（running 时等同取消） */
-  const handleDismissBatchProgress = () => {
-    if (batchProgress?.status === "running") {
-      handleCancelBatch();
+  const handleDismissBatchProgress = (card: (typeof batchCards)[number]) => {
+    if (card.status === "running") {
+      handleCancelBatch(card.kind);
       return;
     }
-    if (batchProgress) {
-      usePaperTaskStore.setState((prev) => ({ progress: { ...prev.progress, [batchProgress.kind]: undefined } }));
-    }
+    usePaperTaskStore.setState((prev) => ({ progress: { ...prev.progress, [card.kind]: undefined } }));
   };
 
   // ---- 列表视图 ----
@@ -1735,7 +1766,11 @@ export default function PapersPage() {
                           <Languages className="mr-2 size-4" />
                           翻译
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => void handleBatchReparse()}>
+                        <ContextMenuItem
+                          disabled={batchLocked || selectedIds.size === 0 || taskReparseBlockers.length > 0}
+                          title={blockerHint(taskReparseBlockers, "重新解析") ?? ""}
+                          onClick={() => void handleBatchReparse()}
+                        >
                           <RefreshCw className="mr-2 size-4" />
                           重新解析
                         </ContextMenuItem>
@@ -1840,50 +1875,48 @@ export default function PapersPage() {
 
       {/* 后台解析进度卡已上移为全局浮层（components/global-convert-progress）——跨页面持续呈现 */}
 
-      {/* 批量任务进度卡（共享右下角栈，与解析/Zotero 卡纵向堆叠不覆盖；running 时关闭即取消） */}
-      {batchProgress && (
-        <BottomRightPortal>
+      {/* 批量任务进度卡（共享右下角栈，与解析/Zotero 卡纵向堆叠不覆盖；向量化/翻译双通道可并行各出一张；running 时关闭即取消） */}
+      {batchCards.map((card) => (
+        <BottomRightPortal key={card.kind}>
           <div className="w-80 rounded-xl border bg-background p-3.5 shadow-lg">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="min-w-0 flex-1 truncate font-medium text-sm">
-                {BATCH_KIND_LABELS[batchProgress.kind]}
-              </span>
+              <span className="min-w-0 flex-1 truncate font-medium text-sm">{BATCH_KIND_LABELS[card.kind]}</span>
               <span className="shrink-0 text-muted-foreground text-xs">
-                {Math.min(batchProgress.index + 1, batchProgress.total)}/{batchProgress.total}
+                {Math.min(card.index + 1, card.total)}/{card.total}
               </span>
               <button
                 type="button"
                 className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                onClick={handleDismissBatchProgress}
+                onClick={() => handleDismissBatchProgress(card)}
               >
                 <X className="size-3.5" />
               </button>
             </div>
 
-            {batchProgress.status === "running" ? (
+            {card.status === "running" ? (
               <>
-                <Progress value={batchProgress.percent} className="h-1.5" />
+                <Progress value={card.percent} className="h-1.5" />
                 <div className="mt-2 flex items-center justify-between gap-2 text-muted-foreground text-xs">
                   <span className="min-w-0 flex-1 truncate">
-                    {batchProgress.title ? `《${batchProgress.title}》 ` : ""}
-                    {batchProgress.detail}
+                    {card.title ? `《${card.title}》 ` : ""}
+                    {card.detail}
                   </span>
-                  <span className="shrink-0">{batchProgress.percent}%</span>
+                  <span className="shrink-0">{card.percent}%</span>
                 </div>
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <span className="text-muted-foreground text-xs">
-                    完成 {batchProgress.doneCount}
-                    {batchProgress.failedCount > 0 ? ` · 失败 ${batchProgress.failedCount}` : ""}
-                    {batchProgress.skippedCount > 0 ? ` · 跳过 ${batchProgress.skippedCount}` : ""}
+                    完成 {card.doneCount}
+                    {card.failedCount > 0 ? ` · 失败 ${card.failedCount}` : ""}
+                    {card.skippedCount > 0 ? ` · 跳过 ${card.skippedCount}` : ""}
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
                     className="h-7 px-2.5 text-xs"
-                    onClick={handleCancelBatch}
-                    disabled={batchCancelling}
+                    onClick={() => handleCancelBatch(card.kind)}
+                    disabled={card.cancelling === true}
                   >
-                    {batchCancelling ? "正在取消…" : "取消"}
+                    {card.cancelling ? "正在取消…" : "取消"}
                   </Button>
                 </div>
               </>
@@ -1892,16 +1925,14 @@ export default function PapersPage() {
                 <p
                   className={clsx(
                     "text-xs",
-                    batchProgress.status === "success"
-                      ? "text-green-600 dark:text-green-400"
-                      : "text-red-600 dark:text-red-400",
+                    card.status === "success" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
                   )}
                 >
-                  {batchProgress.summary}
+                  {card.summary}
                 </p>
-                {batchProgress.failedNames.length > 0 && (
+                {card.failedNames.length > 0 && (
                   <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
-                    {batchProgress.failedNames.map((name) => (
+                    {card.failedNames.map((name) => (
                       <li key={name} className="truncate" title={name}>
                         {name}
                       </li>
@@ -1912,7 +1943,7 @@ export default function PapersPage() {
             )}
           </div>
         </BottomRightPortal>
-      )}
+      ))}
 
       {/* 页面级拖入感应遮罩（拖 PDF 到文献库页任意位置直接解析） */}
       {pdfDragOver && !pdfPickerOpen && (

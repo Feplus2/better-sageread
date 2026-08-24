@@ -37,7 +37,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import { create } from "zustand";
-import { isPaperTaskActive } from "./paper-task-registry";
+import { isPaperTaskActive, usePaperTaskRegistry } from "./paper-task-registry";
 
 // ----------------------------------------------------------------------
 // 论文 PDF 解析导入（状态类型自 PapersPage 迁入，字段不变）
@@ -476,16 +476,15 @@ export function isPaperQueuedOrRunning(paperId: string): boolean {
 }
 
 // ---- 向量化 per-paper 跟踪（任务冲突模型：解析×向量化同篇互斥/同篇向量化幂等去重） ----
-// PapersPage 在向量化启动/结束时打点；startPaperReparse 据此拒入队
-const vectorizingPapers = new Set<string>();
-
+// 2026-08-24 双轨合一：activeVectorize 唯一事实源收进 paper-task-registry（UI 队列/AI 工具/
+// 设置页全量向量化共用）。下面两个函数保持既有导出签名，内部改读/写新注册表——
+// startPaperReparse 的互斥判定与 UI 入口的 paperConflicts 由此看到同一个源。
 export function markPaperVectorizing(paperId: string, on: boolean): void {
-  if (on) vectorizingPapers.add(paperId);
-  else vectorizingPapers.delete(paperId);
+  usePaperTaskRegistry.getState().mark(paperId, "vectorize", on);
 }
 
 export function isPaperVectorizing(paperId: string): boolean {
-  return vectorizingPapers.has(paperId);
+  return isPaperTaskActive(paperId, "vectorize");
 }
 
 /** startPaperReparse 的入队结果：message 与 toast 同款文案（AI 工具原样透传为成功/失败消息） */
