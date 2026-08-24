@@ -278,12 +278,22 @@ const paperScrollMemory = new Map<string, number>();
 
 /** 只在内部滚动容器内滚动（scrollIntoView 会连累所有祖先滚动容器，导致整个版面上移） */
 function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
-  const top = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset;
-  root.scrollTo({ top, behavior: "smooth" });
-  // 懒加载图片布局漂移校正（2026-08-22）：正文图片 loading=lazy，远距跳转时目标上方
-  // 图片未加载（高度为零），smooth 滚动途中图片陆续加载把内容下推，落点偏上（实测 TOC
-  // 跳转不精确的根因）。滚动后两阶段重算纠偏；用户一旦手动介入立即放弃，不与用户抢滚动条。
-  const recompute = () => el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset;
+  scrollWithDriftCorrection(
+    root,
+    () => el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset,
+    () => el.isConnected,
+  );
+}
+
+/**
+ * 滚动 + 懒加载图片布局漂移校正（2026-08-22 初版；2026-08-24 泛化）：
+ * 正文图片 loading=lazy，远距跳转时目标上方图片未加载（高度为零），smooth 滚动途中图片
+ * 陆续加载把内容下推，落点偏上。滚动后两阶段重算纠偏；用户一旦手动介入立即放弃，
+ * 不与用户抢滚动条；目标脱离 DOM（视图切换重建正文）也放弃。
+ * measure 基于实时几何（元素/Range 均可），滚动目标每次重算而非定格初值。
+ */
+function scrollWithDriftCorrection(root: HTMLElement, measure: () => number, connected: () => boolean) {
+  root.scrollTo({ top: measure(), behavior: "smooth" });
   let cancelled = false;
   const cancel = () => {
     cancelled = true;
@@ -294,8 +304,8 @@ function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
   root.addEventListener("touchstart", cancel, { passive: true });
   const correct = (delay: number) => {
     window.setTimeout(() => {
-      if (cancelled) return cancel();
-      const target = recompute();
+      if (cancelled || !connected()) return cancel();
+      const target = measure();
       if (Math.abs(root.scrollTop - target) > 8) {
         root.scrollTo({ top: target });
         correct(delay * 2);
@@ -1330,10 +1340,14 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       if (!container || !root || !quote.trim()) return false;
       const range = findQuoteRange(container, quote);
       if (!range) return false;
-      const top =
-        range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3;
       recordJump();
-      root.scrollTo({ top, behavior: "smooth" });
+      // 漂移校正与 scrollElementInContainer 同款（图表速跳/引用定位经此——2026-08-24 实测
+      // Table 2 远距跳转需 3 次的根因即此路径裸滚无校正）；Range 几何随布局实时重算
+      scrollWithDriftCorrection(
+        root,
+        () => range.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - root.clientHeight / 3,
+        () => range.startContainer.isConnected,
+      );
       flashRanges([range]);
       return true;
     },
