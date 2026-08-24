@@ -21,8 +21,11 @@ import {
 import { invalidateLibraryPaperIndex } from "@/services/paper-reference-service";
 import { replacePaperWithConverted, resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import {
+  type PaperConvertPendingDone,
   type PaperConvertProgress,
   cancelPaperPdfImport,
+  clearPaperConvertPendingDone,
+  getPaperConvertStatus,
   importPapers,
   listenPaperConvertProgress,
   paperEngineTokenError,
@@ -282,12 +285,14 @@ export const useConvertProgressStore = create<ConvertProgressState>()((set, get)
   },
 
   cancelBookConvert: async () => {
+    // 先落 idle 再杀进程：树杀（taskkill /T /F）期间 terminated 事件到达时，
+    // handleBookProgress 见状态非 converting 不再误报「意外退出」
+    set((s) => ({ bookConvert: { ...s.bookConvert, status: "idle" } }));
     try {
       await cancelConvert();
     } catch (e) {
       console.warn("取消转换失败:", e);
     }
-    set((s) => ({ bookConvert: { ...s.bookConvert, status: "idle" } }));
     toast.info("已取消转换");
   },
 
@@ -806,33 +811,41 @@ async function runReparseItem(
     toast.error(message);
     return "failed";
   }
-  return runOnePdf(pdfPath, index, total, undefined, 0, async (progress) => {
-    const suspect = await replacePaperWithConverted(
-      { id: item.paperId, title: item.title },
-      progress.paper_dir as string,
-      meta ?? undefined,
-    );
-    setPaperImportState((prev) =>
-      prev
-        ? {
-            ...prev,
-            status: "success",
-            percent: 100,
-            title: item.title,
-            detail: `已更新《${item.title}》`,
-            stages: prev.stages.map((s) => ({ ...s, status: "done" as PdfStageStatus })),
-          }
-        : prev,
-    );
-    toast.success(`重新解析完成：《${item.title}》`);
-    // 完整性/退化警告与原批量路径同口径（converter 守卫 + 本地检测双通道）
-    if (suspect || progress.degenerate === true || progress.incomplete === true) {
-      toast.warning(`《${item.title}》重解析后检测到内容异常（退化循环或内容缺失），建议换引擎重试`, {
-        duration: 8000,
-      });
-    }
-    return "imported";
-  });
+  return runOnePdf(
+    pdfPath,
+    index,
+    total,
+    undefined,
+    0,
+    async (progress) => {
+      const suspect = await replacePaperWithConverted(
+        { id: item.paperId, title: item.title },
+        progress.paper_dir as string,
+        meta ?? undefined,
+      );
+      setPaperImportState((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "success",
+              percent: 100,
+              title: item.title,
+              detail: `已更新《${item.title}》`,
+              stages: prev.stages.map((s) => ({ ...s, status: "done" as PdfStageStatus })),
+            }
+          : prev,
+      );
+      toast.success(`重新解析完成：《${item.title}》`);
+      // 完整性/退化警告与原批量路径同口径（converter 守卫 + 本地检测双通道）
+      if (suspect || progress.degenerate === true || progress.incomplete === true) {
+        toast.warning(`《${item.title}》重解析后检测到内容异常（退化循环或内容缺失），建议换引擎重试`, {
+          duration: 8000,
+        });
+      }
+      return "imported";
+    },
+    { paperId: item.paperId, title: item.title },
+  );
 }
 
 /** acquire 项的下载段：MCP 直调 Zotero Brain；取消在下载中即时结算（MCP 调用不可中止，晚到结果被丢弃） */
@@ -884,7 +897,8 @@ async function downloadReferencePdf(item: {
 
 /** 解析单篇并等待结算：注册进度监听 → 启动转换 → done 后入库；失败/取消也正常结算（队列据此推进）。
  * stageOffset：调用方在解析阶段前插了前置段（如获取 PDF 的下载段）时，进度事件的阶段号按偏移对齐。
- * onParsed：自定义 done 落库逻辑（reparse 的产物整体替换）；缺省走 importPapers 新建条目 */
+ * onParsed：自定义 done 落库逻辑（reparse 的产物整体替换）；缺省走 importPapers 新建条目。
+ * reparseCtx：reparse 项的恢复上下文（写入 localStorage 记录，刷新后恢复落库链路用） */
 async function runOnePdf(
   pdfPath: string,
   index: number,
@@ -892,6 +906,7 @@ async function runOnePdf(
   folderId?: string,
   stageOffset = 0,
   onParsed?: (progress: PaperConvertProgress) => Promise<PdfOutcome>,
+  reparseCtx?: { paperId: string; title: string },
 ): Promise<PdfOutcome> {
   const fileName = pdfPath.split(/[\\/]/).pop() ?? pdfPath;
   let filePercent = 0;
@@ -909,9 +924,23 @@ async function runOnePdf(
     settled = true;
     unlisten?.();
     paperCurrentSettle = null;
+    clearPaperTaskRecord();
+    // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽）；失败则保留，下次启动恢复重试
+    if (outcome === "imported" || outcome === "skipped") {
+      void clearPaperConvertPendingDone().catch(() => {});
+    }
     resolveOutcome(outcome);
   };
   paperCurrentSettle = () => settle("cancelled");
+  // 刷新恢复锚点：任务上下文落 localStorage（刷新不丢；settle 即清除）
+  writePaperTaskRecord({
+    pdfPath,
+    kind: reparseCtx ? "reparse" : "parse",
+    folderId,
+    paperId: reparseCtx?.paperId,
+    title: reparseCtx?.title,
+    startedAt: Date.now(),
+  });
 
   try {
     unlisten = await listenPaperConvertProgress(async (progress: PaperConvertProgress) => {
@@ -1030,15 +1059,13 @@ async function runOnePdf(
 }
 
 /** 取消解析：kill 当前篇子进程并立即结算当前篇 + 清空队列（卡片显示部分结果；幂等）。
- *  取消后才提交的新任务视为新意图，不清（由 drain 收尾段重新起泵接续）。 */
+ *  取消后才提交的新任务视为新意图，不清（由 drain 收尾段重新起泵接续）。
+ *  顺序注意：先结算再杀进程——树杀（taskkill /T /F）把取消等待拉长到百毫秒级，
+ *  terminated 事件可能先于 invoke 返回到达；settled 闸 + 卡片状态守卫挡住它，
+ *  保证取消语义落在「已取消」而非「异常退出」。 */
 export async function cancelPaperImport() {
   paperCancelRequested = true;
   paperQueue = [];
-  try {
-    await cancelPaperPdfImport();
-  } catch (error) {
-    console.warn("取消论文解析失败:", error);
-  }
   paperCurrentSettle?.();
   useConvertProgressStore.setState((s) => ({
     paperImport:
@@ -1046,6 +1073,11 @@ export async function cancelPaperImport() {
         ? { ...s.paperImport, status: "error", error: "已取消解析" }
         : s.paperImport,
   }));
+  try {
+    await cancelPaperPdfImport();
+  } catch (error) {
+    console.warn("取消论文解析失败:", error);
+  }
 }
 
 /** 关闭论文进度卡（running 时等同取消） */
@@ -1056,4 +1088,326 @@ export function dismissPaperImport() {
     return;
   }
   useConvertProgressStore.setState({ paperImport: null });
+}
+
+// ----------------------------------------------------------------------
+// 刷新恢复（2026-08-24）：解析队列是纯内存态——页面刷新后 Rust 侧 sidecar 仍在跑、
+// paper-convert://progress 事件仍在发，但前端队列/监听全丢：进度卡消失，且 done 的
+// 落库收尾（importPapers / replace_paper_content）脱钩，产物滞留 papers-converter 目录。
+// 参照向量化通道的「刷新恢复」模式（papers/index.tsx 挂载扫描）：当前任务上下文落
+// localStorage（刷新不丢），挂载时经 paper_convert_status 探测 Rust 侧在跑任务与
+// 未消费 done 产物（pending_done 槽），恢复进度卡与完成监听，把落库链路接回去。
+// ----------------------------------------------------------------------
+const PAPER_TASK_RECORD_KEY = "paperImportCurrentTask";
+
+/** 当前解析任务的持久化记录（刷新后恢复落库链路用；正常 settle 即清除） */
+interface PaperTaskRecord {
+  pdfPath: string;
+  kind: "parse" | "reparse";
+  folderId?: string;
+  paperId?: string;
+  title?: string;
+  startedAt: number;
+}
+
+function writePaperTaskRecord(record: PaperTaskRecord): void {
+  try {
+    localStorage.setItem(PAPER_TASK_RECORD_KEY, JSON.stringify(record));
+  } catch {
+    // 持久化失败不阻断解析
+  }
+}
+
+function readPaperTaskRecord(): PaperTaskRecord | null {
+  try {
+    const raw = localStorage.getItem(PAPER_TASK_RECORD_KEY);
+    if (!raw) return null;
+    const r = JSON.parse(raw) as PaperTaskRecord;
+    return typeof r.pdfPath === "string" && r.pdfPath ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPaperTaskRecord(): void {
+  try {
+    localStorage.removeItem(PAPER_TASK_RECORD_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** 恢复态卡片的初始 State（进度由后续事件喂；情形 B 直接 percent=100） */
+function recoveredCard(fileName: string, detail: string, percent = 0): PaperImportState {
+  return {
+    status: "running",
+    fileName,
+    percent,
+    detail,
+    stages: buildPdfStages(),
+    index: 1,
+    total: 1,
+    queuedCount: 0,
+    importedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    failedNames: [],
+  };
+}
+
+/** 恢复路径的 done 落库：record 指认 reparse → 产物整体替换（保留 id/归属/对话/标注）；
+ *  否则按纯 parse 走 importPapers 新建入库（无记录时也保证产物落库）。
+ *  落库成功才清 Rust pending_done 槽；失败保留供下次启动重试（产物不落库是更严重事故）。 */
+async function settleRecoveredDone(done: PaperConvertPendingDone, record: PaperTaskRecord | null): Promise<PdfOutcome> {
+  let outcome: PdfOutcome;
+  if (record?.kind === "reparse" && record.paperId) {
+    const paperId = record.paperId;
+    const title = record.title ?? done.title ?? "";
+    // 旧元数据（zotero 回链字段替换产物时要保留）——从磁盘重读（对齐 runReparseItem）
+    let meta: PaperMetadata | null = null;
+    try {
+      meta = JSON.parse(await readTextFile(await join(await appDataDir(), "books", paperId, "metadata.json")));
+    } catch {
+      // 无 metadata.json：照样替换
+    }
+    try {
+      const suspect = await replacePaperWithConverted({ id: paperId, title }, done.paperDir, meta ?? undefined);
+      setPaperImportState((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "success",
+              percent: 100,
+              title,
+              detail: `已更新《${title}》`,
+              stages: prev.stages.map((s) => ({ ...s, status: "done" as PdfStageStatus })),
+            }
+          : prev,
+      );
+      toast.success(`重新解析完成：《${title}》`);
+      if (suspect || done.degenerate === true || done.incomplete === true) {
+        toast.warning(`《${title}》重解析后检测到内容异常（退化循环或内容缺失），建议换引擎重试`, {
+          duration: 8000,
+        });
+      }
+      // 标签页开着 → 写「已重新解析」横幅标记（对齐 drain 行为）
+      const tabOpen = useLayoutStore.getState().tabs.some((t) => t.id === `paper-${paperId}`);
+      if (tabOpen) {
+        useConvertProgressStore.setState((s) => ({
+          reparsedPapers: { ...s.reparsedPapers, [paperId]: Date.now() },
+        }));
+      }
+      outcome = "imported";
+    } catch (error) {
+      const message = `解析成功但落库失败：${error instanceof Error ? error.message : String(error)}`;
+      setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+      toast.error(`《${title}》${message}`);
+      outcome = "failed";
+    }
+  } else {
+    try {
+      const result = await importPapers(done.paperDir, record?.folderId);
+      // 静默失败闸（对齐 runOnePdf：importPapers 把单篇失败收进 result.failed 不抛）
+      if (result.failed.length > 0 && result.imported === 0 && result.skipped === 0) {
+        const message = `解析成功但入库失败：${result.failed[0].error}`;
+        setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+        toast.error(message);
+        outcome = "failed";
+      } else {
+        const label = done.title ?? done.slug ?? done.paperDir;
+        setPaperImportState((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "success",
+                percent: 100,
+                title: done.title,
+                detail: `已入库《${label}》`,
+                stages: prev.stages.map((s) => ({ ...s, status: "done" as PdfStageStatus })),
+              }
+            : prev,
+        );
+        if (result.skipped > 0 && result.imported === 0) {
+          toast.info("该论文已入库过（内容未变化）");
+          outcome = "skipped";
+        } else {
+          toast.success(`论文解析入库完成：${label}`);
+          if (done.incomplete === true) {
+            toast.warning(`《${label}》检测到内容缺失（图/表或整页未解析出）`, {
+              description: "建议在 设置 → PDF 转换 中更换解析引擎后重新解析",
+              duration: 10000,
+            });
+          }
+          // 退化循环检测（converter 守卫 + 本地检测双通道，对齐 runOnePdf）
+          try {
+            const raw = await readTextFile(await join(done.paperDir, "paper.md"));
+            if (done.degenerate === true || findDegenerateLoop(parsePaperMarkdown(raw).body)) {
+              toast.warning(`《${label}》检测到异常重复内容（解析引擎失控）`, {
+                description: "建议在 设置 → PDF 转换 中更换解析引擎后重新解析",
+                duration: 8000,
+              });
+            }
+          } catch {
+            // 检测失败不影响入库
+          }
+          // acquire 来源的恢复也走这里：入库后失效在库检查索引（引用卡片「打开」即时可见）
+          invalidateLibraryPaperIndex();
+          outcome = "imported";
+        }
+      }
+    } catch (error) {
+      const message = `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}`;
+      setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+      toast.error(message);
+      outcome = "failed";
+    }
+  }
+  if (outcome === "imported" || outcome === "skipped") {
+    void clearPaperConvertPendingDone().catch(() => {});
+  }
+  return outcome;
+}
+
+let paperRecoveryAttempted = false;
+
+/** 页面刷新后的解析通道恢复（GlobalConvertProgress 挂载时调用一次；幂等）。
+ *  情形 A：解析仍在跑 → 占住队列泵位 + 恢复进度卡 + 完成监听（结算后接续新提交）；
+ *  情形 B：done 在刷新窗口丢失（进程已退场、产物未消费）→ 直接补落库；
+ *  情形 C：进程与产物都没了但有残留记录 → 解析中断在刷新窗口，出错误卡引导重发。 */
+export async function recoverPaperImportAfterReload(): Promise<void> {
+  if (paperRecoveryAttempted) return;
+  paperRecoveryAttempted = true;
+  // 实时通道健在（未刷新/已起泵/运行中卡片在）→ 不恢复（对齐向量化恢复③防覆盖实时卡）
+  if (paperDraining) return;
+  if (useConvertProgressStore.getState().paperImport?.status === "running") return;
+
+  const status = await getPaperConvertStatus().catch(() => null);
+  if (!status) return;
+  const record = readPaperTaskRecord();
+
+  // 情形 B：done 产物滞留（含「done 已发但进程未退」的刷新瞬间——产物已可消费，不必再等进程）
+  if (status.pendingDone) {
+    const pending = status.pendingDone;
+    const rec = record?.pdfPath === pending.pdfPath ? record : null;
+    const fileName = rec?.title || pending.title || pending.pdfPath.split(/[\\/]/).pop() || pending.pdfPath;
+    setPaperImportState(() => recoveredCard(fileName, "恢复解析产物入库（页面刷新前已完成解析）…", 100));
+    await settleRecoveredDone(pending, rec);
+    clearPaperTaskRecord();
+    paperRefresh?.();
+    if (!status.runningPdfPath || status.runningPdfPath === pending.pdfPath) return;
+    // 防御：pending 与在跑任务不同源（正常不会发生——新任务启动即清 pending），继续走情形 A
+  }
+
+  const runningPdf = status.runningPdfPath;
+  if (!runningPdf) {
+    // 情形 C：有残留记录但进程/产物都没了 = error/terminated 丢失在刷新窗口
+    if (record) {
+      clearPaperTaskRecord();
+      const fileName = record.title || record.pdfPath.split(/[\\/]/).pop() || record.pdfPath;
+      setPaperImportState(() => ({
+        ...recoveredCard(fileName, ""),
+        status: "error",
+        error: "解析在页面刷新期间中断，请重新发起",
+      }));
+    }
+    return;
+  }
+
+  // 情形 A：解析仍在跑——占住泵位（新提交排队，结算后自动接续），恢复进度卡与完成监听
+  const rec = record?.pdfPath === runningPdf ? record : null;
+  paperDraining = true;
+  paperCancelRequested = false;
+  paperCurrentItem =
+    rec?.kind === "reparse" && rec.paperId
+      ? { kind: "reparse", paperId: rec.paperId, title: rec.title ?? "" }
+      : { kind: "parse", pdfPath: runningPdf, folderId: rec?.folderId };
+  const fileName = rec?.title || runningPdf.split(/[\\/]/).pop() || runningPdf;
+  setPaperImportState(() => recoveredCard(fileName, "解析进行中（页面刷新后恢复监控）…"));
+
+  let settled = false;
+  let unlisten: (() => void) | null = null;
+  const settleRecovered = () => {
+    if (settled) return;
+    settled = true;
+    unlisten?.();
+    paperCurrentSettle = null;
+    paperCurrentItem = null;
+    paperDraining = false;
+    clearPaperTaskRecord();
+    paperRefresh?.();
+    // 恢复期间新提交的排队任务接续（对齐 drain 收尾语义）
+    if (paperQueue.length > 0) void drainPaperQueue();
+  };
+  // 取消按钮（cancelPaperImport → paperCurrentSettle）驱动恢复任务即时结算
+  paperCurrentSettle = () => settleRecovered();
+
+  try {
+    unlisten = await listenPaperConvertProgress(async (progress) => {
+      // 任务归属过滤（对齐 runOnePdf：不归本任务的事件一律忽略）
+      if (progress.pdf_path && progress.pdf_path !== runningPdf) return;
+      if (progress.type === "progress" || progress.type === "stage_done") {
+        setPaperImportState((prev) =>
+          prev && prev.status === "running"
+            ? {
+                ...prev,
+                percent: progress.percent ?? prev.percent,
+                detail: progress.detail ?? prev.detail,
+                stages: markStages(prev.stages, progress.stage, progress.type === "stage_done" ? "done" : "active"),
+              }
+            : prev,
+        );
+        return;
+      }
+      if (progress.type === "done" && progress.paper_dir) {
+        await settleRecoveredDone(
+          {
+            pdfPath: progress.pdf_path ?? runningPdf,
+            paperDir: progress.paper_dir,
+            title: progress.title,
+            slug: progress.slug,
+            degenerate: progress.degenerate,
+            incomplete: progress.incomplete,
+          },
+          rec,
+        );
+        settleRecovered();
+        return;
+      }
+      if (progress.type === "error") {
+        const message = progress.message ?? "解析失败";
+        setPaperImportState((prev) => (prev ? { ...prev, status: "error", error: message } : prev));
+        settleRecovered();
+        return;
+      }
+      if (progress.type === "terminated") {
+        setPaperImportState((prev) =>
+          prev && prev.status === "running"
+            ? { ...prev, status: "error", error: progress.success === false ? "解析进程异常退出" : "解析已取消" }
+            : prev,
+        );
+        settleRecovered();
+      }
+    });
+  } catch {
+    // 监听注册失败：进程还在跑但接不上事件——按中断处理并释放泵位
+    setPaperImportState((prev) =>
+      prev ? { ...prev, status: "error", error: "恢复解析监控失败，请查看日志后重新发起" } : prev,
+    );
+    settleRecovered();
+    return;
+  }
+
+  // 竞态收口：监听挂好的空窗内进程可能已退场（done/error 无人接收）→ 复查状态直结
+  const recheck = await getPaperConvertStatus().catch(() => null);
+  if (!settled && recheck && recheck.runningPdfPath !== runningPdf) {
+    if (recheck.pendingDone && recheck.pendingDone.pdfPath === runningPdf) {
+      await settleRecoveredDone(recheck.pendingDone, rec);
+      settleRecovered();
+    } else if (!recheck.pendingDone) {
+      setPaperImportState((prev) =>
+        prev && prev.status === "running" ? { ...prev, status: "error", error: "解析在恢复监控前已中断" } : prev,
+      );
+      settleRecovered();
+    }
+  }
 }

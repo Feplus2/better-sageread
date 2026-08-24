@@ -8,6 +8,7 @@ pub mod local_api;
 pub mod mcp;
 pub mod paper_converter;
 pub mod papers;
+pub mod process_tree;
 pub mod prompts;
 pub mod proxy;
 pub mod secrets;

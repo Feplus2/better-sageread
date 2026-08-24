@@ -9,6 +9,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
+use crate::core::process_tree::kill_tree;
+
 /// 保存当前正在运行的转换子进程，供取消使用
 pub struct ConverterState {
     pub child: tokio::sync::Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
@@ -155,7 +157,14 @@ pub async fn cancel_convert(app: AppHandle) -> Result<(), String> {
     let state = app.state::<ConverterState>();
     let mut guard = state.child.lock().await;
     if let Some(child) = guard.take() {
-        child.kill().map_err(|e| format!("终止转换失败: {}", e))?;
+        // books_converter.exe 同为 PyInstaller 单文件包（bootloader 父 + 实际转换子进程）：
+        // 只 kill 直接子进程杀不掉孙进程。先 taskkill /T /F 杀整棵树，再 child.kill()
+        // 兜底收句柄；进程已退出的报错吞掉（幂等——已退出不算错）。
+        let pid = child.pid();
+        kill_tree(pid).await;
+        if let Err(e) = child.kill() {
+            log::info!("[Converter] kill 直接子进程返回（进程或已退出）: {}", e);
+        }
         log::info!("[Converter] 已取消转换");
     }
     Ok(())

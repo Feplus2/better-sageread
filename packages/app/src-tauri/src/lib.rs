@@ -43,7 +43,10 @@ use crate::core::{
     },
     database,
     converter::{cancel_convert, convert_pdf_to_epub, ConverterState},
-    paper_converter::{cancel_paper_convert, convert_paper_pdf, PaperConverterState},
+    paper_converter::{
+        cancel_paper_convert, clear_paper_convert_pending_done, convert_paper_pdf,
+        paper_convert_status, PaperConverterState,
+    },
     fonts::commands::{upload_and_convert_font, upload_font_data},
     llama::commands::{
         delete_local_model, download_llama_server, download_model_file,
@@ -297,6 +300,8 @@ pub fn run() {
             // paper converter (单篇 PDF → paper.md)
             convert_paper_pdf,
             cancel_paper_convert,
+            paper_convert_status,
+            clear_paper_convert_pending_done,
             // agent workspace (P1：写工具/执行命令，路径守卫 + 审计)
             agent_resolve_path,
             agent_read_file,

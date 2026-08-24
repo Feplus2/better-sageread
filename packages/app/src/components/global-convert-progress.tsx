@@ -18,6 +18,7 @@ import {
   type BookConvertState,
   type PaperImportState,
   dismissPaperImport,
+  recoverPaperImportAfterReload,
   useConvertProgressStore,
 } from "@/store/convert-progress-store";
 import { usePaperTaskStore } from "@/store/paper-task-store";
@@ -228,6 +229,11 @@ export default function GlobalConvertProgress() {
   const paperImport = useConvertProgressStore((s) => s.paperImport);
   const bookConvert = useConvertProgressStore((s) => s.bookConvert);
   const bookConvertMinimized = useConvertProgressStore((s) => s.bookConvertMinimized);
+
+  // 刷新恢复（挂载即探测）：Rust 侧解析进程/未消费产物跨刷新存活，恢复进度卡与落库监听
+  useEffect(() => {
+    void recoverPaperImportAfterReload();
+  }, []);
 
   // 禁区由 BottomRightStackHost 统一管理（display:none），此处不再判豁免
   return (

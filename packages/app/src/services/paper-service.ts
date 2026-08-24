@@ -268,6 +268,32 @@ export async function cancelPaperPdfImport(): Promise<void> {
   await invoke("cancel_paper_convert");
 }
 
+/** 解析产物 done 快照（Rust pending_done 槽；camelCase 对齐 serde rename_all） */
+export interface PaperConvertPendingDone {
+  pdfPath: string;
+  paperDir: string;
+  title?: string;
+  slug?: string;
+  degenerate?: boolean;
+  incomplete?: boolean;
+}
+
+/** 解析通道状态（页面刷新后的恢复探测）：在跑任务 + 可能未被消费的 done 产物 */
+export interface PaperConvertStatus {
+  runningPdfPath: string | null;
+  pendingDone: PaperConvertPendingDone | null;
+}
+
+/** 查询解析通道状态：页面刷新后 Rust 侧进程/产物仍在，前端据此恢复进度卡与落库链路 */
+export async function getPaperConvertStatus(): Promise<PaperConvertStatus> {
+  return invoke<PaperConvertStatus>("paper_convert_status");
+}
+
+/** 落库（import/replace）成功后确认清除 Rust 侧 pending_done 槽（幂等，fire-and-forget 用） */
+export async function clearPaperConvertPendingDone(): Promise<void> {
+  await invoke("clear_paper_convert_pending_done");
+}
+
 export async function listenPaperConvertProgress(
   callback: (progress: PaperConvertProgress) => void,
 ): Promise<UnlistenFn> {
@@ -467,6 +493,8 @@ export async function importPaperPdf(
     if (result.failed.length > 0) {
       return { success: false, message: `解析成功但入库失败：${result.failed[0].error}` };
     }
+    // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
+    void clearPaperConvertPendingDone().catch(() => {});
     // 定位入库后的 paper（标题匹配，退化用 slug）
     const papers = await listPapers();
     const imported =

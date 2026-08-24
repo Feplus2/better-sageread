@@ -14,6 +14,7 @@ import {
   type PaperConvertProgress,
   type ScannedPaper,
   cancelPaperPdfImport,
+  clearPaperConvertPendingDone,
   listenPaperConvertProgress,
   startPaperPdfImport,
 } from "@/services/paper-service";
@@ -149,6 +150,8 @@ export async function reparsePapers(
       // 3. 替换产物（zotero 字段保留：先注入新目录 frontmatter，再在合并 metadata 时兜底）
       try {
         const suspect = await replaceWithConverted(item, outcome.paperDir, metaById[item.id]);
+        // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
+        void clearPaperConvertPendingDone().catch(() => {});
         report.done.push(item);
         // 本地检测 + converter 质量守卫（done.degenerate）+ 完整性闸（done.incomplete）三通道
         if (suspect || outcome.degenerate || outcome.incomplete) report.suspect.push(item);

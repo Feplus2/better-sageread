@@ -5,6 +5,7 @@ import {
   type PaperFolderEntry,
   type ScannedPaper,
   cancelPaperPdfImport,
+  clearPaperConvertPendingDone,
   createFolder,
   getPaperFolderMap,
   listFolders,
@@ -565,6 +566,8 @@ export async function executeZoteroImport(
           knownKeys,
           ctx.trashedFolderIds,
         );
+        // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
+        void clearPaperConvertPendingDone().catch(() => {});
         if (paperId.duplicate) {
           // 哈希兜底：save_paper 判"已存在"→ 按收养处理
           report.skippedDup.push({ key: item.key, title: item.title, via: "hash" });
