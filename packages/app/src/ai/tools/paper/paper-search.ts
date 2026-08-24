@@ -21,12 +21,13 @@ interface PaperSearchItem {
 /**
  * 文献库语义检索（增强层工具，仅在有向量能力时注册）。
  * paperIds 为检索范围闭包：null = 全部文献；数组 = 限定论文集合（用户在面板中选择的作用域）。
+ * origin="central"（全局助手）：无面板作用域，恒为全部文献（P4-3 下放）。
  */
-export const createPaperSearchTool = (paperIds: string[] | null | undefined) =>
+export const createPaperSearchTool = (paperIds: string[] | null | undefined, origin: "paper" | "central" = "paper") =>
   tool({
     description: `在文献库向量库中执行语义+关键词混合检索，返回最相关的论文片段（可跨论文）。
 
-🔍 **检索范围**：由用户在面板中选择（本篇论文/所在文件夹/全部文献/自定义文件夹），工具自动生效，无需传参。
+🔍 **检索范围**：${origin === "central" ? "恒为全部文献（全局助手无面板作用域）；结果自带论文标题，引用须注明出自哪篇" : "由用户在面板中选择（本篇论文/所在文件夹/全部文献/自定义文件夹），工具自动生效，无需传参。"}
 
 💡 **使用场景**：
 • 跨论文的主题对比、文献调研类问题（"这些论文里谁用了 XX 方法"）

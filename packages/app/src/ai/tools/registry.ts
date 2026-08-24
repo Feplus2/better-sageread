@@ -386,7 +386,14 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     }
   }
 
-  // 5. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求
+  // 5. 全局助手：文献库语义检索下放 central（P4-3；向量能力门控，全库范围——
+  // central 无「当前论文」上下文，paperIds 恒 null，返回自带篇目标题供引用标注）
+  if (agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
+    tools.paperSearch = createPaperSearchTool(null, "central") as Tool;
+    tools.paperContext = createPaperContextTool() as Tool;
+  }
+
+  // 6. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求
   // （流结束要 closeAll），故不在此同步函数合并，而在 custom-chat-transport.ts 里
   // 调 getMcpToolsForScope() 后与本函数返回值合并，见 src/ai/mcp/mcp-manager.ts。
 
@@ -420,6 +427,12 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
       descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");
       descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
     }
+  }
+
+  // 全局助手的语义检索同为工厂创建（P4-3），描述手动同步
+  if (agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
+    descriptions.push("- paperSearch: 文献库语义检索（全库范围，跨论文主题检索/按主题找论文）");
+    descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
   }
 
   return descriptions;

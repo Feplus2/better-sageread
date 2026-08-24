@@ -120,7 +120,7 @@
 
 **单条消息的工具往返上限**：`stopWhen: stepCountIs(20)`（`custom-chat-transport.ts:176-188`）——一次发送最多 20 步 ReAct 循环；`reconnectToStream` 恒 null（:214-220），刷新页面后流式即终止、不支持断流重连。
 
-**审计日志**：`{appData}/agent-audit/*.jsonl`（如 `mcp-stdio.jsonl`、`local-api.jsonl`）。所有写盘日志先过 `redact_secrets` 脱敏（`core/secrets/mod.rs:244-279`），脱敏模式清单与前端 `ai/utils/secret-patterns.ts` 保持一致。`full` 档静默放行写操作时也照写审计。
+**审计日志**：`{appData}/agent-audit/*.jsonl`（如 `mcp-stdio.jsonl`、`local-api.jsonl`、`tool-catalog.jsonl`）。所有写盘日志先过 `redact_secrets` 脱敏（`core/secrets/mod.rs:244-279`），脱敏模式清单与前端 `ai/utils/secret-patterns.ts` 保持一致。`full` 档静默放行写操作时也照写审计。`tool-catalog.jsonl` 是目录牌模式观测（P4-4）：describeTool/useTool 调用序列（时间戳+进程内单调 seq+工具名+参数键名，参数值绝不进日志），供复盘「查牌→执行」链路。
 
 **联网搜索**：`core/web_search.rs` 双通道——内置 HTML 爬取（Bing/百度/DuckDuckGo）+ API provider（Tavily/Serper/SearXNG），key 从 keyring 取；前端工具为 shared 的 `webSearch`。
 
