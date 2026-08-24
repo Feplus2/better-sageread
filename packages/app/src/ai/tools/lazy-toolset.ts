@@ -1,3 +1,4 @@
+import { auditToolCatalogCall } from "@/ai/utils/tool-catalog-audit";
 import { type Tool, asSchema, tool as defineTool } from "ai";
 import { z } from "zod";
 
@@ -92,6 +93,7 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
       tool: z.string().min(1).describe("工具名，如 ragSearch / getBooks / mcp_xxx_yyy"),
     }),
     execute: async ({ tool: name }: { tool: string }) => {
+      auditToolCatalogCall({ kind: "describeTool", tool: name, argKeys: ["tool"] });
       const real = tools[name];
       if (!real) {
         return {
@@ -119,6 +121,7 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
       args: z.record(z.string(), z.any()).describe("该工具的参数对象（结构以 describeTool 返回的 schema 为准）"),
     }),
     execute: async ({ tool: name, args }: { tool: string; args: Record<string, unknown> }, options: any) => {
+      auditToolCatalogCall({ kind: "useTool", tool: name, argKeys: Object.keys(args ?? {}) });
       const real = tools[name];
       if (!real) {
         return {

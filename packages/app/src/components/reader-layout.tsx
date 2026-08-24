@@ -13,6 +13,7 @@ import { UpdateConfirmDialog } from "@/components/update-confirm-dialog";
 import VerticalTabBar from "@/components/vertical-tab-bar";
 import WindowControls from "@/components/window-controls";
 import { useFontEvents } from "@/hooks/use-font-events";
+import { useMotionMode } from "@/hooks/use-motion-mode";
 import { useSyncEvents } from "@/hooks/use-sync-events";
 import PaperReaderView from "@/pages/paper-reader/paper-reader-view";
 import ReaderViewer from "@/pages/reader";
@@ -30,6 +31,7 @@ import { syncUiConfigNow } from "@/services/ui-config-sync";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { markTabWoken, useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
+import { useUpdateStore } from "@/store/update-store";
 import { getOSPlatform } from "@/utils/misc";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
@@ -41,17 +43,22 @@ import appIconUrl from "../../src-tauri/icons/32x32.png";
 /** 全局设置入口（窗口顶栏右侧，横向/纵向两种顶栏模式共用，全页面可点） */
 function TopbarSettingsButton() {
   const { toggleSettingsDialog } = useAppSettingsStore();
+  // 「有新版本」小红点（启动静默检查只置标志位，绝不弹框/下载——用户拍板的不打扰口径）
+  const availableUpdate = useUpdateStore((s) => s.availableUpdate);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           onClick={toggleSettingsDialog}
-          className="flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 dark:hover:bg-accent"
+          className="relative flex h-6 w-6 items-center justify-center rounded-full outline-none hover:bg-accent focus:outline-none focus-visible:ring-0 dark:hover:bg-accent"
         >
           <Settings size={18} />
+          {availableUpdate && <span className="-top-0.5 -right-0.5 absolute h-2 w-2 rounded-full bg-red-500" />}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="bottom">设置</TooltipContent>
+      <TooltipContent side="bottom">
+        {availableUpdate ? `设置（有新版本 v${availableUpdate.version}）` : "设置"}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -59,6 +66,7 @@ function TopbarSettingsButton() {
 export default function ReaderLayout() {
   useFontEvents();
   useSyncEvents();
+  useMotionMode();
   const {
     tabs,
     activeTabId,
@@ -107,6 +115,12 @@ export default function ReaderLayout() {
     if (activeTabId && prev.includes(activeTabId)) markTabWoken(activeTabId);
     setSleptTabIds(prev.filter((id) => id !== activeTabId && tabIds.has(id)));
   }, [activeTabId]);
+
+  // 启动静默检查更新（每启动一次）：只置 availableUpdate 标志位喂小红点，
+  // 绝不弹框/下载（不打扰口径，2026-08-25 用户拍板）
+  useEffect(() => {
+    void useUpdateStore.getState().silentCheck();
+  }, []);
 
   // 新增 tab 时写入基准时间：避免"开新 tab 放置超宽限期→下个巡检立即休眠"的突然行为
   useEffect(() => {

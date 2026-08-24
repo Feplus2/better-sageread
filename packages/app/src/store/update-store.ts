@@ -9,10 +9,19 @@ import { create } from "zustand";
  * 用户拍板（2026-08-25）：启动不做自动检查，仅手动触发——不打扰优先。
  */
 
+interface AvailableUpdateInfo {
+  version: string;
+  date?: string;
+}
+
 interface UpdateState {
   pendingUpdate: Update | null;
+  /** 「有新版本」只读标志位（小红点数据源）：启动静默检查只置此位，绝不弹框/下载 */
+  availableUpdate: AvailableUpdateInfo | null;
   isChecking: boolean;
   isUpdating: boolean;
+  /** 启动静默检查（每启动一次）：只喂 availableUpdate 标志位；失败/无新版均静默 */
+  silentCheck: () => Promise<void>;
   /** 检查更新（仅设置页手动触发）：发现新版本挂 pendingUpdate 弹确认框；已最新/失败如实 toast */
   checkForUpdates: () => Promise<void>;
   /** 确认更新：下载安装（完成后提示重启） */
@@ -23,8 +32,20 @@ interface UpdateState {
 
 export const useUpdateStore = create<UpdateState>((set, get) => ({
   pendingUpdate: null,
+  availableUpdate: null,
   isChecking: false,
   isUpdating: false,
+
+  silentCheck: async () => {
+    if (get().isChecking || get().isUpdating) return;
+    try {
+      const update = await check();
+      // 只置标志位（版本号+日期），不挂 Update 对象不弹框——用户点「检查更新」时重新实时查
+      set({ availableUpdate: update ? { version: update.version, date: update.date } : null });
+    } catch {
+      // 静默：网络失败不打搅，也不清掉既有提醒（旧标志位继续留）
+    }
+  },
 
   checkForUpdates: async () => {
     if (get().isChecking || get().isUpdating || get().pendingUpdate) return;
@@ -32,8 +53,9 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     try {
       const update = await check();
       if (update) {
-        set({ pendingUpdate: update });
+        set({ pendingUpdate: update, availableUpdate: null });
       } else {
+        set({ availableUpdate: null });
         toast.info("当前已是最新版本");
       }
     } catch (error) {
@@ -54,7 +76,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     set({ isUpdating: true });
     try {
       await pendingUpdate.downloadAndInstall();
-      set({ pendingUpdate: null });
+      set({ pendingUpdate: null, availableUpdate: null });
       toast.success("更新已下载", {
         description: "请重启应用以完成更新",
         duration: 10000,

@@ -8,9 +8,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getUserThemesDir } from "@/services/global-theme-service";
+import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useThemeStore } from "@/store/theme-store";
 import { useUpdateStore } from "@/store/update-store";
 import type { ThemeMode } from "@/styles/themes";
+import type { MotionModeType } from "@/types/settings";
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, mkdir } from "@tauri-apps/plugin-fs";
@@ -27,10 +29,19 @@ export default function GeneralSettings() {
   // 更新检查/确认框状态收编 update-store（确认框全局挂载于 ReaderLayout；仅手动触发，启动不自动检查）
   const isCheckingUpdate = useUpdateStore((s) => s.isChecking);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
+  const availableUpdate = useUpdateStore((s) => s.availableUpdate);
 
   const { themeMode, autoScroll, swapSidebars, setThemeMode, setAutoScroll, setSwapSidebars } = useThemeStore();
   const { globalTheme, availableGlobalThemes, setGlobalTheme, refreshGlobalThemes, reloadGlobalThemes } =
     useThemeStore();
+  // 动效模式三档（motion token 体系，use-motion-mode 驱动 <html data-motion> 即时生效）
+  const { settings, setSettings } = useAppSettingsStore();
+  const motionMode: MotionModeType = settings.motionMode ?? "full";
+  const motionModeOptions = [
+    { value: "full" as MotionModeType, label: "完整动效" },
+    { value: "fade-only" as MotionModeType, label: "仅淡入淡出" },
+    { value: "system" as MotionModeType, label: "遵循系统" },
+  ];
 
   // 进入设置页时扫描一次主题列表（内置 + 用户主题文件夹；仅扫描不重注入，避免全局重渲染）
   useEffect(() => {
@@ -136,17 +147,22 @@ export default function GeneralSettings() {
           <div className="flex items-center justify-between">
             <div>
               <span className="text dark:text-neutral-200">检查更新</span>
-              <p className="mt-2 text-neutral-600 text-xs dark:text-neutral-400">检查是否有新版本可用</p>
+              <p className="mt-2 text-neutral-600 text-xs dark:text-neutral-400">
+                {availableUpdate ? `有新版本可用：v${availableUpdate.version}` : "检查是否有新版本可用"}
+              </p>
             </div>
             <Button
               size="sm"
               variant="outline"
               onClick={handleCheckForUpdates}
               disabled={isCheckingUpdate}
-              className="gap-2"
+              className="relative gap-2"
             >
               <RefreshCw className={clsx("size-4", isCheckingUpdate && "animate-spin")} />
               {isCheckingUpdate ? "检查中..." : "检查更新"}
+              {availableUpdate && !isCheckingUpdate && (
+                <span className="-top-1 -right-1 absolute h-2.5 w-2.5 rounded-full bg-red-500" />
+              )}
             </Button>
           </div>
 
@@ -243,6 +259,34 @@ export default function GeneralSettings() {
                 <TooltipContent side="bottom">刷新主题列表</TooltipContent>
               </Tooltip>
             </div>
+          </div>
+
+          <div className="flex items-start justify-between">
+            <div>
+              <span className="text dark:text-neutral-200">动效模式</span>
+              <p className="mt-2 text-neutral-600 text-xs dark:text-neutral-400">
+                低配设备可选「仅淡入淡出」，位移/缩放动效退化为淡入淡出
+              </p>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="w-32 justify-between">
+                  {motionModeOptions.find((option) => option.value === motionMode)?.label ?? "完整动效"}
+                  <ChevronDownIcon className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-32">
+                {motionModeOptions.map((option) => (
+                  <DropdownMenuItem
+                    key={option.value}
+                    onClick={() => setSettings({ ...settings, motionMode: option.value })}
+                    className={clsx("my-0.5", motionMode === option.value ? "bg-accent" : "")}
+                  >
+                    {option.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <div className="flex items-center justify-between">
