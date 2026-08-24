@@ -2,8 +2,8 @@
  * 全局助手工具（批次 F4）：解析单篇 PDF 论文并导入 SageRead 文献库。
  *
  * 链路本体已收进 paper-service 的 importPaperPdf（P2 参考文献卡片「获取 PDF」同款链路）：
- * startPaperPdfImport（Papers_Converter sidecar 解析）→ 等 done/error/terminated
- * 进度事件 → importPapers(paper_dir) 落库 → 返回 paper id/title。
+ * 经 task-center 的 paper-parse 通道入队（startPaperPdfImport 薄壳）→ waitTask 阻塞等结算
+ * → importPapers(paper_dir) 落库 → 返回 paper id/title。
  * 注意与 importBook（进书库）是两条链路：本工具产物是 paper.md，进「文献库」。
  */
 import { createFolder, importPaperPdf, listFolders } from "@/services/paper-service";

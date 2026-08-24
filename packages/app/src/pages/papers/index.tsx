@@ -52,12 +52,7 @@ import {
 import { PAPER_TRANSLATION_LANG } from "@/services/paper-translation-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
-import {
-  setPaperImportRefresh,
-  startPaperImportBatch,
-  startPaperReparse,
-  useConvertProgressStore,
-} from "@/store/convert-progress-store";
+import { setPaperImportRefresh, startPaperImportBatch, startPaperReparse } from "@/store/convert-progress-store";
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
@@ -607,11 +602,10 @@ export default function PapersPage() {
   const [moveChecked, setMoveChecked] = useState<Set<string>>(new Set());
   const [moveSubmitting, setMoveSubmitting] = useState(false);
   // PDF 解析导入：选择弹窗（点选/拖拽，可多选累加候选）+ 后台串行队列
-  // 队列与进度卡状态在 convert-progress-store（全局右下角卡，跨页面持续呈现）
+  // 队列在 task-center 的 paper-parse 通道（P2-4；全局右下角卡，跨页面持续呈现）
   const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
   const [pdfCandidates, setPdfCandidates] = useState<string[]>([]);
   const [pdfDragOver, setPdfDragOver] = useState(false);
-  const paperImportRunning = useConvertProgressStore((s) => s.paperImport?.status === "running");
   // Zotero 批量导入对话框（批量运行中禁用其他导入入口）
   const [zoteroOpen, setZoteroOpen] = useState(false);
   const [zoteroRunning, setZoteroRunning] = useState(false);
@@ -635,6 +629,12 @@ export default function PapersPage() {
     () => selectChannelAggregate({ tasks: taskCenterTasks, order: taskCenterOrder }, "paper-translate"),
     [taskCenterTasks, taskCenterOrder],
   );
+  // 解析通道在跑/有排队（P2-4 起读 task-center 聚合；含刷新恢复占用任务，Zotero 镜像任务不计）
+  const paperParseAgg = useMemo(
+    () => selectChannelAggregate({ tasks: taskCenterTasks, order: taskCenterOrder }, "paper-parse"),
+    [taskCenterTasks, taskCenterOrder],
+  );
+  const paperImportRunning = paperParseAgg.current !== null || paperParseAgg.queuedCount > 0;
   // 双通道可并行（向量化×翻译读写不相干）：各出一张卡，经 BottomRightStack 纵向堆叠
   const batchCards: (BatchProgressState & { kind: "vectorize" | "translate" })[] = (
     ["vectorize", "translate"] as const

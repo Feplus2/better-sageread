@@ -8,6 +8,7 @@ import {
 import { resolveLlmParams } from "@/services/converter-service";
 import { notifyPaperListChanged, notifyPaperStatusChanged } from "@/services/paper-events";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
+import type { PaperParseResult } from "@/services/task-executors/paper-parse";
 import { useConverterStore } from "@/store/converter-store";
 import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
@@ -386,7 +387,7 @@ export async function vectorizePaper(paper: { id: string; title: string; author:
   throw new Error(res?.message || "向量化失败");
 }
 
-/** 单篇 PDF 解析入库的结算结果（importPaperPdf 返回；AI 工具与参考文献卡片两条链路共用） */
+/** 单篇 PDF 解析入库的结算结果（importPaperPdf 返回；AI 工具 importPaper 链路用） */
 export interface PaperPdfImportOutcome {
   success: boolean;
   message: string;
@@ -398,22 +399,19 @@ export interface PaperPdfImportOutcome {
 /** 解析超时上限：论文解析（OCR/VLM）耗时可达十分钟级 */
 const PAPER_PARSE_TIMEOUT_MS = 15 * 60 * 1000;
 
-type PaperPdfImportResult =
-  | { kind: "done"; progress: PaperConvertProgress }
-  | { kind: "error"; message: string }
-  | { kind: "cancelled" };
-
 /**
- * 解析单篇 PDF 论文并导入文献库（共享链路：AI 工具 importPaper 与 P2 参考文献卡片「获取 PDF」）。
- * 链路：基本校验 → listenPaperConvertProgress → startPaperPdfImport → 等 done/error/terminated
- * → importPapers 落库 → 按标题/slug 反查入库 paper。
+ * 解析单篇 PDF 论文并导入文献库（AI 工具 importPaper 的链路）。
+ * P2-4 起改走统一队列：入队 task-center 的 paper-parse 通道并阻塞等结算（返回语义保持）——
+ * 拿到队列可见性/冲突检查，不改变 AI 的回答节奏。payload.silent 抑制执行器 toast
+ * （旧自持监听链路全程静默，只回消息）。中止/超时经 cancelTask 落到任务取消
+ * （执行器侧先结算再杀进程树）。执行/落库本体在执行器内，此处只做校验、等待与结果分类。
  */
 export async function importPaperPdf(
   filePath: string,
   folderId?: string,
   abortSignal?: AbortSignal,
 ): Promise<PaperPdfImportOutcome> {
-  // 1. 基本校验
+  // 1. 基本校验（同旧链路）
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   if (ext !== "pdf") {
     return { success: false, message: `仅支持 PDF 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。` };
@@ -428,92 +426,68 @@ export async function importPaperPdf(
     return { success: false, message: tokenError };
   }
 
-  // 2. 监听进度 → 启动解析 → 等结算（中止信号联动 cancel）
-  // 先注册监听再启动解析：避免 listen 就绪前后端发出的事件丢失；
-  // 按 pdf_path 过滤事件归属：并发/连续导入时只结算本任务的 done/error/terminated
-  let outcome: PaperPdfImportResult = { kind: "error", message: "解析超时" };
-  let unlisten: (() => void) | null = null;
-  let settled = false;
-  let resolveDone: () => void = () => {};
-  const donePromise = new Promise<void>((resolve) => {
-    resolveDone = resolve;
+  // 2. 入队 paper-parse 通道 + 等结算（先 enqueue 拿 taskId 再 waitTask：超时/中止要能定点取消本任务，
+  // 不能 cancelChannel 误伤前排的其它任务）。动态导入执行器模块：加载即自注册通道（无环约束，
+  // 执行器静态依赖本模块的服务函数）。
+  const { useTaskCenterStore } = await import("@/store/task-center-store");
+  const { dismissPaperParseIfIdle } = await import("@/services/task-executors/paper-parse");
+  dismissPaperParseIfIdle();
+  const enq = useTaskCenterStore.getState().enqueue({
+    channel: "paper-parse",
+    targetId: filePath,
+    title: filePath.split(/[\\/]/).pop() ?? filePath,
+    payload: { kind: "parse", pdfPath: filePath, folderId, silent: true },
   });
-  const settle = (o: PaperPdfImportResult) => {
-    if (settled) return;
-    settled = true;
-    outcome = o;
-    resolveDone();
-  };
-  try {
-    unlisten = await listenPaperConvertProgress((progress) => {
-      if (progress.pdf_path !== filePath) return;
-      if (progress.type === "done" && progress.paper_dir) {
-        settle({ kind: "done", progress });
-      } else if (progress.type === "error") {
-        settle({ kind: "error", message: progress.message ?? "解析失败" });
-      } else if (progress.type === "terminated") {
-        settle(progress.success === false ? { kind: "error", message: "解析进程异常退出" } : { kind: "cancelled" });
-      }
-    });
-  } catch {
-    settle({ kind: "error", message: "进度监听注册失败" });
+  if (!enq.ok) {
+    return { success: false, message: enq.detail ?? "解析任务入队失败" };
   }
-  if (!settled) {
-    void startPaperPdfImport(filePath).catch((error) =>
-      settle({ kind: "error", message: error instanceof Error ? error.message : String(error) }),
-    );
-  }
-
-  const onAbort = () => {
-    void cancelPaperPdfImport().catch(() => {});
-  };
+  const taskId = enq.taskId;
+  const onAbort = () => useTaskCenterStore.getState().cancelTask(taskId);
   abortSignal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(onAbort, PAPER_PARSE_TIMEOUT_MS);
   try {
-    await donePromise;
+    await useTaskCenterStore.getState().waitTask(taskId);
+  } catch {
+    // 失败/取消：从任务本体取分类信息（result 由执行器在抛错前写入；取消无 result）
   } finally {
     clearTimeout(timer);
     abortSignal?.removeEventListener("abort", onAbort);
-    unlisten?.();
   }
 
-  // settle 在闭包内赋值，TS 的控制流收窄看不见——经显式类型的 const 别名恢复联合窄化
-  const result = outcome as PaperPdfImportResult;
-  if (result.kind === "cancelled") {
+  const task = useTaskCenterStore.getState().tasks[taskId];
+  if (!task || task.status === "cancelled") {
     return { success: false, message: "解析已取消（用户中止或超时）" };
   }
-  if (result.kind === "error") {
-    return { success: false, message: `论文解析失败：${result.message}` };
+  const result = task.result as PaperParseResult | undefined;
+  if (task.status === "error") {
+    if (result?.outcome === "failed") {
+      // 入库段失败的 error 已是「解析成功但入库失败：…」成品文案（执行器与卡片共用）；解析段是原始文案
+      return { success: false, message: result.stage === "import" ? result.error : `论文解析失败：${result.error}` };
+    }
+    return { success: false, message: `论文解析失败：${task.error ?? "未知错误"}` };
   }
 
-  // 3. 入库
-  const { progress } = result;
-  try {
-    const result = await importPapers(progress.paper_dir as string, folderId);
-    if (result.failed.length > 0) {
-      return { success: false, message: `解析成功但入库失败：${result.failed[0].error}` };
-    }
-    // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
-    void clearPaperConvertPendingDone().catch(() => {});
-    // 定位入库后的 paper（标题匹配，退化用 slug）
-    const papers = await listPapers();
-    const imported =
-      papers.find((p) => progress.title && p.title === progress.title) ??
-      papers.find((p) => progress.slug && p.title.includes(progress.slug)) ??
-      null;
-    return {
-      success: true,
-      message:
-        result.imported > 0
-          ? `论文《${progress.title ?? progress.slug}》已解析并导入文献库`
-          : `论文《${progress.title ?? progress.slug}》已入库过（内容未变化）`,
-      paper: imported
-        ? { id: imported.id, title: imported.title, author: imported.author }
-        : { title: progress.title ?? (progress.slug as string) },
-      degenerate: progress.degenerate === true,
-      incomplete: progress.incomplete === true,
-    };
-  } catch (error) {
-    return { success: false, message: `解析成功但入库失败：${error instanceof Error ? error.message : String(error)}` };
+  // 3. 定位入库后的 paper（标题匹配，退化用 slug）——同旧链路
+  if (!result || result.outcome === "failed") {
+    return { success: false, message: "论文解析失败：结算产物缺失" };
   }
+  const label = result.title ?? result.slug ?? "";
+  let imported: BookWithStatus | null = null;
+  try {
+    const papers = await listPapers();
+    imported =
+      papers.find((p) => result.title && p.title === result.title) ??
+      papers.find((p) => result.slug && p.title.includes(result.slug)) ??
+      null;
+  } catch {
+    // 列表反查失败不影响成功语义（入库已完成），退化为仅标题回执
+  }
+  return {
+    success: true,
+    message:
+      result.outcome === "imported" ? `论文《${label}》已解析并导入文献库` : `论文《${label}》已入库过（内容未变化）`,
+    paper: imported ? { id: imported.id, title: imported.title, author: imported.author } : { title: label },
+    degenerate: result.degenerate === true,
+    incomplete: result.incomplete === true,
+  };
 }

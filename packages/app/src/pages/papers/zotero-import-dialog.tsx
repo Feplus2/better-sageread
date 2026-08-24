@@ -27,6 +27,7 @@ import {
   summarizeCandidates,
 } from "@/services/zotero-import-service";
 import { useConverterStore } from "@/store/converter-store";
+import { useTaskCenterStore } from "@/store/task-center-store";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { open as openPathDialog } from "@tauri-apps/plugin-dialog";
@@ -127,6 +128,11 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
   const [run, setRun] = useState<RunProgress | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [report, setReport] = useState<ZoteroImportReport | null>(null);
+  // 解析段进度镜像（P2-4）：每篇的解析进度投进 task-center 的 paper-parse 镜像任务，
+  // 卡片解析段改读统一 store（镜像任务不进队列/聚合卡，执行与取消仍由 zotero-import-service 自持）
+  const [mirrorTaskId, setMirrorTaskId] = useState<string | null>(null);
+  const mirrorTaskIdRef = useRef<string | null>(null);
+  const mirrorTask = useTaskCenterStore((s) => (mirrorTaskId ? s.tasks[mirrorTaskId] : undefined));
 
   const paperEngine = useConverterStore((state) => state.paperEngine);
   const setZoteroDataDir = useConverterStore((state) => state.setZoteroDataDir);
@@ -154,6 +160,8 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
     setRun(null);
     setCancelling(false);
     setReport(null);
+    mirrorTaskIdRef.current = null;
+    setMirrorTaskId(null);
     const stored = useConverterStore.getState().zoteroDataDir;
     setDirInput(stored);
     if (!stored) {
@@ -267,18 +275,31 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
       const result = await executeZoteroImport(scan, items, selectedKeys, {
         onItemStart: (index, total, item) => {
           setRun({ index, total, title: item.title, detail: "等待解析…", percent: 0 });
+          // 解析段进度镜像进统一 store（卡片数据源）；执行/取消仍由 service 自持
+          const mirrorId = useTaskCenterStore
+            .getState()
+            .beginMirrorTask({ channel: "paper-parse", targetId: item.pdfPath ?? item.key, title: item.title });
+          useTaskCenterStore.getState().updateMirrorTask(mirrorId, { detail: "等待解析…" });
+          mirrorTaskIdRef.current = mirrorId;
+          setMirrorTaskId(mirrorId);
         },
         onItemProgress: (p) => {
-          setRun((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  stageName: p.stage_name ?? prev.stageName,
-                  detail: p.detail ?? p.stage_name ?? prev.detail,
-                  percent: p.percent ?? prev.percent,
-                }
-              : prev,
-          );
+          const mirrorId = mirrorTaskIdRef.current;
+          if (mirrorId) {
+            useTaskCenterStore.getState().updateMirrorTask(mirrorId, {
+              percent: p.percent,
+              detail: p.detail ?? p.stage_name,
+              extra: p.stage_name !== undefined ? { stageName: p.stage_name } : undefined,
+            });
+          }
+        },
+        onItemSettled: () => {
+          const mirrorId = mirrorTaskIdRef.current;
+          if (mirrorId) {
+            useTaskCenterStore.getState().endMirrorTask(mirrorId);
+            mirrorTaskIdRef.current = null;
+            setMirrorTaskId(null);
+          }
         },
         isCancelled: () => cancelRef.current,
       });
@@ -318,6 +339,8 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
     cancelRef.current = true;
     setCancelling(true);
     setRun((prev) => (prev ? { ...prev, detail: "正在取消…" } : prev));
+    const mirrorId = mirrorTaskIdRef.current;
+    if (mirrorId) useTaskCenterStore.getState().updateMirrorTask(mirrorId, { detail: "正在取消…" });
     cancelPaperPdfImport().catch(() => {});
   };
 
@@ -336,8 +359,13 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
   };
 
   // ---- 渲染 ----
+  // 解析段字段（阶段名/细节/篇内百分比）读统一 store 的镜像任务；镜像缺位窗口
+  // （首篇启动前/篇间空隙）回落 run 的本地兜底值
+  const stageName = (mirrorTask?.extra?.stageName as string | undefined) ?? run?.stageName;
+  const runDetail = mirrorTask?.detail ?? run?.detail;
+  const runPercent = mirrorTask?.percent ?? run?.percent;
   const overallPercent =
-    run && run.total > 0 ? Math.min(100, Math.round(((run.index + (run.percent ?? 0) / 100) / run.total) * 100)) : 0;
+    run && run.total > 0 ? Math.min(100, Math.round(((run.index + (runPercent ?? 0) / 100) / run.total) * 100)) : 0;
 
   // 进行态：右下角后台进度卡（与单篇/多篇 PDF 导入同款），不渲染模态让出页面；取消等效原关闭行为
   if (phase === "running" && run) {
@@ -353,8 +381,8 @@ export function ZoteroImportDialog({ open, onOpenChange, onCompleted, onRunningC
           <Progress value={overallPercent} className="h-1.5" />
           <div className="mt-2 flex items-center justify-between gap-2">
             <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-              {run.stageName ? `${run.stageName} · ` : ""}
-              {run.detail ?? ""}
+              {stageName ? `${stageName} · ` : ""}
+              {runDetail ?? ""}
             </span>
             <span className="shrink-0 text-muted-foreground text-xs">{overallPercent}%</span>
           </div>

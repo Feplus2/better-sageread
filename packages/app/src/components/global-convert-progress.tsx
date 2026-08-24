@@ -2,7 +2,7 @@
  * 全局转换进度层（右下角浮层，挂在 ReaderLayout——独立于任何路由页面）。
  *
  * 三类卡纵向堆叠（互不重叠）：
- * - 论文 PDF 解析进度卡：状态在 convert-progress-store，跨页面持续呈现；
+ * - 论文 PDF 解析进度卡：P2-4 起数据源是 task-center 的 paper-parse 通道聚合（跨页面持续呈现）；
  * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现，点击还原大窗口；
  * - 阅读页单篇翻译小卡：状态在 paper-task-store（readerTranslate），阅读器内发起的翻译
  *   在主页/文献库可见；阅读器页内由栈禁区隐藏（页内自有进度 UI）。
@@ -14,6 +14,7 @@
 
 import { MotionStackCard } from "@/components/ui/bottom-right-stack";
 import { Progress } from "@/components/ui/progress";
+import { paperParseCardOf } from "@/services/task-executors/paper-parse";
 import {
   type BookConvertState,
   type PaperImportState,
@@ -28,16 +29,17 @@ import { BookText, Check, FileText, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 
-/** 论文解析进度卡（markup 自 PapersPage 迁入；成功 6s 自动消失逻辑一并迁移） */
+/** 论文解析进度卡（markup 自 PapersPage 迁入；成功 6s 自动消失逻辑一并迁移）。
+ *  P2-4 起数据源为 task-center 的 paper-parse 通道聚合（paperParseCardOf 折算），markup 不动。 */
 function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
   // 成功态 6 秒后自动消失（批量有失败、失败/取消态保留待手动关闭）
   useEffect(() => {
     if (paperImport.status !== "success") return;
     if (paperImport.failedCount > 0) return;
     const timer = setTimeout(() => {
-      // 定时器到期时状态可能已被接续的下一篇换成 running——dismiss 对 running 等于取消，
+      // 定时器到期时通道可能已被接续的下一篇换成 running——dismiss 对 running 等于取消，
       // 必须只在仍是 success 时执行（队列化后接续间隔可能超过 6s，2026-08-20 实测误杀下一篇）
-      const current = useConvertProgressStore.getState().paperImport;
+      const current = paperParseCardOf(selectChannelAggregate(useTaskCenterStore.getState(), "paper-parse"));
       if (current?.status === "success") dismissPaperImport();
     }, 6000);
     return () => clearTimeout(timer);
@@ -249,15 +251,20 @@ function ReaderTranslateCardBody({ rt }: { rt: ReaderTranslateState }) {
 }
 
 export default function GlobalConvertProgress() {
-  const paperImport = useConvertProgressStore((s) => s.paperImport);
   const bookConvert = useConvertProgressStore((s) => s.bookConvert);
   const bookConvertMinimized = useConvertProgressStore((s) => s.bookConvertMinimized);
-  // 小卡可见性改读 task-center 通道聚合：有在跑/排队/未清除的已结算任务即呈现；
+  // 解析卡/小卡可见性与进度读 task-center 通道聚合：有在跑/排队/未清除的已结算任务即呈现；
   // cancelled 结算不驱动显示（对齐旧口径：取消即回 idle 无卡）。
   // 注意：selectChannelAggregate 每次返回新对象，不能直接作 zustand 选择器（getSnapshot 须缓存，
   // 否则无限重渲染）——此处订阅稳定的 tasks/order 引用再 useMemo 聚合。
   const taskCenterTasks = useTaskCenterStore((s) => s.tasks);
   const taskCenterOrder = useTaskCenterStore((s) => s.order);
+  const paperParseAgg = useMemo(
+    () => selectChannelAggregate({ tasks: taskCenterTasks, order: taskCenterOrder }, "paper-parse"),
+    [taskCenterTasks, taskCenterOrder],
+  );
+  // 解析卡视图模型：通道聚合折算回 PaperImportState 形状（paper-parse.ts；卡片 markup 不动）
+  const paperImport = useMemo(() => paperParseCardOf(paperParseAgg), [paperParseAgg]);
   const bookConvertAgg = useMemo(
     () =>
       selectChannelAggregate(

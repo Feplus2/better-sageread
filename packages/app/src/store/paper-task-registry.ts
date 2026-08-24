@@ -3,11 +3,11 @@ import { create } from "zustand";
 /**
  * 论文任务注册表（2026-08-23 批量任务冲突模型统一）：
  * 同篇任务互斥的单一事实源（向量化/翻译两个通道的"运行中"状态）。
- * 解析通道的排队/运行状态仍在 convert-progress-store 的解析队列里（单一事实源不重复），
+ * 解析通道的排队/运行状态在 task-center 的 paper-parse 通道（P2-4 起；原 convert-progress-store），
  * 组合判定（解析×其它）见 utils/paper-conflict.ts。
  *
- * 本模块为叶子（不 import 任何其它 store/service），convert-progress-store 的
- * startPaperReparse 依赖此处的翻译状态做互斥——保持无环。
+ * 本模块为叶子（不 import 任何其它 store/service），解析通道与翻译互斥的入队判定
+ * 经 paper-conflict 适配层注入 task-center——保持无环。
  */
 
 export type PaperTaskKind = "parse" | "vectorize" | "translate";
