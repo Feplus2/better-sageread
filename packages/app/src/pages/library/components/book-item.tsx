@@ -24,15 +24,12 @@ import { useDownloadImage } from "@/hooks/use-download-image";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { BookTag } from "@/pages/library/hooks/use-tags-management";
 import { type AITagSuggestion, generateTagsWithAI } from "@/services/ai-tag-service";
-import { updateBookVectorizationMeta } from "@/services/book-service";
-import { type EpubIndexResult, indexEpub, rebuildCoverAfterDownload } from "@/services/book-service";
+import { rebuildCoverAfterDownload } from "@/services/book-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { type Tag, createTag, getTags } from "@/services/tag-service";
 import { useLayoutStore } from "@/store/layout-store";
-import { useNotificationStore } from "@/store/notification-store";
+import { useTaskCenterStore } from "@/store/task-center-store";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
-import { getCurrentVectorModelConfig } from "@/utils/model";
-import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { exists } from "@tauri-apps/plugin-fs";
@@ -82,7 +79,23 @@ export default function BookItem({
   const [isAITagLoading, setIsAITagLoading] = useState(false);
   const { selectedModel } = useModelSelector();
   const [showEmbeddingDialog, setShowEmbeddingDialog] = useState(false);
-  const [vectorizeProgress, setVectorizeProgress] = useState<number | null>(null);
+  // 向量化排队/运行态读 task-center 的 book-vectorize 通道（P2-2 统一入队；
+  // 进度 percent 由通道执行器从 epub://index-progress 事件回写任务上）
+  const vectorizeTask = useTaskCenterStore((s) => {
+    for (const id of s.order) {
+      const t = s.tasks[id];
+      if (
+        t &&
+        t.channel === "book-vectorize" &&
+        t.targetId === book.id &&
+        (t.status === "queued" || t.status === "running")
+      ) {
+        return t;
+      }
+    }
+    return null;
+  });
+  const vectorizeProgress: number | null = vectorizeTask ? vectorizeTask.percent : null;
 
   // 数据库标签（供右键菜单“管理标签”子菜单映射真实标签 ID）
   const [databaseTags, setDatabaseTags] = useState<Tag[]>([]);
@@ -109,29 +122,6 @@ export default function BookItem({
       toast.error("打开文件夹失败");
     }
   };
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const off = await listen<{
-        book_id: string;
-        current: number;
-        total: number;
-        percent: number;
-        chapter_title: string;
-        chunk_index: number;
-      }>("epub://index-progress", (e) => {
-        const p = e.payload;
-        if (p && p.book_id === book.id) {
-          setVectorizeProgress(Math.max(0, Math.min(100, Math.round(p.percent))));
-        }
-      });
-      unlisten = off;
-    })();
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [book.id]);
 
   const { openBook } = useLayoutStore();
   const [isCloudOnly, setIsCloudOnly] = useState(false);
@@ -297,63 +287,14 @@ export default function BookItem({
     });
   }, [book.coverUrl, book.title, downloadImage]);
 
-  // Extracted vectorization action
+  // 向量化（P2-2 统一入队）：进 task-center 的 book-vectorize 通道；同书在队/在跑由队列幂等拒入。
+  // 执行/进度/metadata 回写/toast/通知/列表刷新全在执行器（services/task-executors/book-vectorize.ts）。
   const handleVectorizeBook = useCallback(async () => {
-    const { addNotification } = useNotificationStore.getState();
-
-    const vectorConfig = await getCurrentVectorModelConfig();
-    const version = 1;
-
-    try {
-      toast.info("开始向量化...");
-      setVectorizeProgress(0);
-      await updateBookVectorizationMeta(book.id, {
-        status: "processing",
-        model: vectorConfig.model,
-        dimension: vectorConfig.dimension,
-        version,
-        startedAt: Date.now(),
-      });
-
-      const res: EpubIndexResult = await indexEpub(book.id, {
-        dimension: vectorConfig.dimension,
-        embeddingsUrl: vectorConfig.embeddingsUrl,
-        model: vectorConfig.model,
-        apiKey: vectorConfig.apiKey,
-      });
-
-      if (res?.success && res.report) {
-        await updateBookVectorizationMeta(book.id, {
-          status: "success",
-          chunkCount: res.report.total_chunks,
-          dimension: res.report.vector_dimension,
-          finishedAt: Date.now(),
-        });
-      } else {
-        await updateBookVectorizationMeta(book.id, {
-          status: "failed",
-          finishedAt: Date.now(),
-        });
-        throw new Error(res?.message || "向量化失败");
-      }
-      const message = `《${book.title}》向量化完成，分块数：${res.report?.total_chunks ?? "未知"}`;
-      toast.success(message);
-      addNotification(message);
-      setVectorizeProgress(null);
-      if (onRefresh) await onRefresh();
-    } catch (err) {
-      console.error("向量化失败", err);
-      await updateBookVectorizationMeta(book.id, {
-        status: "failed",
-        finishedAt: Date.now(),
-      });
-      setVectorizeProgress(null);
-      const errorMessage = `《${book.title}》向量化失败`;
-      toast.error("向量化失败，请检查嵌入服务是否可用");
-      addNotification(errorMessage);
-      if (onRefresh) await onRefresh();
-    }
-  }, [book.id, book.title, onRefresh]);
+    const { enqueueBookVectorize } = await import("@/services/task-executors/book-vectorize");
+    const res = enqueueBookVectorize({ id: book.id, title: book.title, solo: true });
+    if (res.ok) toast.info("开始向量化...");
+    else toast.info(res.detail ?? "该书已在向量化队列中");
+  }, [book.id, book.title]);
 
   const handleTagToggle = useCallback(
     async (tagId: string) => {
@@ -569,7 +510,7 @@ export default function BookItem({
                   )}
                   {selectionMode && (
                     <div
-                      className={`absolute top-1 left-1 flex size-5 items-center justify-center rounded border transition-colors ${
+                      className={`motion-enter-pop absolute top-1 left-1 flex size-5 items-center justify-center rounded border transition-colors ${
                         isSelected
                           ? "border-primary bg-primary text-primary-foreground"
                           : "border-neutral-300 bg-white/80 dark:border-neutral-500 dark:bg-neutral-800/80"

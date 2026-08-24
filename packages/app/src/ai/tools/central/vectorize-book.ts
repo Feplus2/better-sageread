@@ -4,19 +4,17 @@
  * 为书籍/论文构建语义向量索引，使助手能通过 RAG 检索内容回答问题。
  * EPUB 书籍走 indexEpub；MARKDOWN 论文走 vectorizePaper（index_paper，论文专用分块）。
  * 支持单本模式和批量模式（自动检测所有未向量化的条目）。
+ *
+ * P2-2/P2-3：执行统一入 task-center 通道（图书 book-vectorize / 论文 paper-vectorize，
+ * enqueueAndWait 阻塞等结算，保持"全部完成后汇总返回"语义）——与 book-item 按钮、
+ * 设置页全量重建、文献库批量条同一队列，同条目在队/在跑由队列幂等拒入，不再多入口打架。
  */
 import { type LibraryKind, filterByKind } from "@/ai/tools/book";
-import {
-  type EpubIndexResult,
-  getBooksWithStatus,
-  indexEpub,
-  updateBookVectorizationMeta,
-} from "@/services/book-service";
-import { vectorizePaper } from "@/services/paper-service";
-import { isPaperQueuedOrRunning, isPaperVectorizing, markPaperVectorizing } from "@/store/convert-progress-store";
-import { trackSoloVectorize } from "@/store/paper-task-store";
+import { getBooksWithStatus } from "@/services/book-service";
+import { enqueueBookVectorizeAndWait } from "@/services/task-executors/book-vectorize";
+import type { BookVectorizeResult } from "@/services/task-executors/book-vectorize";
+import { type PaperVectorizeResult, enqueuePaperVectorizeAndWait } from "@/services/task-executors/paper-vectorize";
 import type { BookWithStatus } from "@/types/simple-book";
-import { getCurrentVectorModelConfig } from "@/utils/model";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -26,103 +24,32 @@ function isVectorized(book: BookWithStatus): boolean {
   return vec?.status === "success";
 }
 
-/** 对单本书执行向量化，返回结果描述 */
-async function vectorizeSingle(
-  bookId: string,
-  bookTitle: string,
-  config: { embeddingsUrl: string; model: string; apiKey: string | null; dimension: number },
-): Promise<{ success: boolean; message: string; chunkCount?: number }> {
-  try {
-    await updateBookVectorizationMeta(bookId, {
-      status: "processing",
-      model: config.model,
-      dimension: config.dimension,
-      version: 1,
-      startedAt: Date.now(),
-    });
-
-    const res: EpubIndexResult = await indexEpub(bookId, {
-      dimension: config.dimension,
-      embeddingsUrl: config.embeddingsUrl,
-      model: config.model,
-      apiKey: config.apiKey,
-    });
-
-    if (res?.success && res.report) {
-      await updateBookVectorizationMeta(bookId, {
-        status: "success",
-        chunkCount: res.report.total_chunks,
-        dimension: res.report.vector_dimension,
-        finishedAt: Date.now(),
-      });
-      return {
-        success: true,
-        message: `《${bookTitle}》向量化完成，分块数：${res.report.total_chunks}`,
-        chunkCount: res.report.total_chunks,
-      };
-    }
-
-    await updateBookVectorizationMeta(bookId, {
-      status: "failed",
-      finishedAt: Date.now(),
-    });
-    return { success: false, message: `《${bookTitle}》向量化失败：${res?.message || "未知错误"}` };
-  } catch (error) {
-    await updateBookVectorizationMeta(bookId, {
-      status: "failed",
-      finishedAt: Date.now(),
-    }).catch(() => {});
-    return {
-      success: false,
-      message: `《${bookTitle}》向量化失败：${error instanceof Error ? error.message : "未知错误"}`,
-    };
-  }
+/** 拒入队/执行失败的错误消息 → 工具口径文案（队列幂等去重与冲突拒绝不算异常，给引导性描述） */
+function rejectionMessage(title: string, error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("已在该队列中")) return `《${title}》正在向量化或排队中，无需重复发起`;
+  if (raw.startsWith("《")) return raw;
+  return `《${title}》${raw}`;
 }
 
-/** 对单篇论文执行向量化（vectorizePaper 内部已管理 meta 状态与失败回写）。
- *  任务冲突模型守卫与打点收在本函数——AI 工具与设置页「全量重新向量化」（vectorizeItem）共用此入口：
- *  解析×向量化同篇互斥（向量化读旧产物，解析一替换就白算）；同篇向量化幂等去重。措辞与 PapersPage 同口径 */
-async function vectorizePaperSingle(
-  paperId: string,
-  paperTitle: string,
-  paperAuthor: string,
-): Promise<{ success: boolean; message: string; chunkCount?: number }> {
-  if (isPaperQueuedOrRunning(paperId)) {
-    return { success: false, message: `《${paperTitle}》正在解析队列中，完成后再向量化` };
-  }
-  if (isPaperVectorizing(paperId)) {
-    return { success: false, message: `《${paperTitle}》正在向量化中，无需重复发起` };
-  }
-  markPaperVectorizing(paperId, true);
-  try {
-    // trackSoloVectorize：右下角进度卡 + 圆环事件喂养（修复前 AI 路径卡片恒 0% 跳完成）
-    const res = await trackSoloVectorize({ id: paperId, title: paperTitle }, () =>
-      vectorizePaper({ id: paperId, title: paperTitle, author: paperAuthor }),
-    );
-    return {
-      success: true,
-      message: `《${paperTitle}》向量化完成，分块数：${res.report?.total_chunks ?? 0}`,
-      chunkCount: res.report?.total_chunks ?? 0,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: `《${paperTitle}》向量化失败：${error instanceof Error ? error.message : "未知错误"}`,
-    };
-  } finally {
-    markPaperVectorizing(paperId, false);
-  }
-}
-
-/** 按 format 执行向量化：EPUB → indexEpub；MARKDOWN → index_paper；其余拒绝（导出供设置页「全量重新向量化」复用，G1-3） */
-export function vectorizeItem(
+/** 对单个条目执行向量化（入队并阻塞等结算），返回结果描述 */
+async function vectorizeSingleQueued(
   item: BookWithStatus,
-  config: { embeddingsUrl: string; model: string; apiKey: string | null; dimension: number },
-) {
-  if (item.format === "MARKDOWN") {
-    return vectorizePaperSingle(item.id, item.title, item.author ?? "");
+): Promise<{ success: boolean; message: string; chunkCount?: number }> {
+  try {
+    if (item.format === "MARKDOWN") {
+      const task = await enqueuePaperVectorizeAndWait({ id: item.id, title: item.title, author: item.author ?? "" });
+      const result = task.result as PaperVectorizeResult | undefined;
+      const chunkCount = result?.chunkCount ?? 0;
+      return { success: true, message: `《${item.title}》向量化完成，分块数：${chunkCount}`, chunkCount };
+    }
+    const task = await enqueueBookVectorizeAndWait({ id: item.id, title: item.title });
+    const result = task.result as BookVectorizeResult | undefined;
+    const chunkCount = result?.chunkCount ?? 0;
+    return { success: true, message: `《${item.title}》向量化完成，分块数：${chunkCount}`, chunkCount };
+  } catch (error) {
+    return { success: false, message: rejectionMessage(item.title, error) };
   }
-  return vectorizeSingle(item.id, item.title, config);
 }
 
 export const vectorizeBookTool = tool({
@@ -133,12 +60,12 @@ export const vectorizeBookTool = tool({
 • kind 参数用于过滤目标：用户说"把书都向量化"传 kind=book，"把论文都向量化"传 kind=paper
 
 🎯 **核心功能**：
-• status：查询条目的向量化状态（不执行任何操作）
-• index + bookId：向量化指定条目
+• status：查询条目的向量化状态（不执行任何操作）；返回的 items 是全量条目清单（id+title+状态），可当发现清单用
+• index + bookId：向量化指定条目。**先用 getBooks(kind=paper 或 book) 按标题/作者查得条目 ID**；topic 式描述查不到时，先 action=status 列全部条目，让用户的描述与标题人工对齐后再执行
 • index + 省略 bookId：自动检测并逐个向量化所有未索引的条目
 
 ⚠️ **注意**：
-• 索引耗时较长（取决于内容长度和 Embedding 模型速度）
+• 索引耗时较长（取决于内容长度和 Embedding 模型速度），调用会阻塞到完成；已有任务在跑时自动排队接续
 • 需要已配置 Embedding 模型（外部 API 或本地模型）
 • 非 EPUB/MARKDOWN 格式（如 PDF 书籍）不支持，需先转 EPUB
 
@@ -148,7 +75,12 @@ export const vectorizeBookTool = tool({
   inputSchema: z.object({
     reasoning: z.string().min(1).describe("调用此工具的原因"),
     action: z.enum(["index", "status"]).default("index").describe("操作类型：index=执行向量化, status=仅查询状态"),
-    bookId: z.string().optional().describe("要向量化的条目 ID。省略时自动批量向量化所有未索引的条目"),
+    bookId: z
+      .string()
+      .optional()
+      .describe(
+        "要向量化的条目 ID。先用 getBooks 按标题/作者查得；topic 式描述查不到时先 action=status 列全部条目人工对齐。省略时自动批量向量化所有未索引的条目",
+      ),
     kind: z
       .enum(["book", "paper", "all"])
       .optional()
@@ -198,10 +130,6 @@ export const vectorizeBookTool = tool({
         };
       }
 
-      // ==================== 向量化模式 ====================
-      // 获取 Embedding 模型配置
-      const config = await getCurrentVectorModelConfig();
-
       // ==================== 单本模式 ====================
       if (bookId) {
         const books = await getBooksWithStatus({ limit: 200 });
@@ -238,7 +166,7 @@ export const vectorizeBookTool = tool({
           };
         }
 
-        const result = await vectorizeItem(book, config);
+        const result = await vectorizeSingleQueued(book);
 
         return {
           results: {
@@ -246,7 +174,7 @@ export const vectorizeBookTool = tool({
             message: result.message,
             chunkCount: result.chunkCount,
           },
-          meta: { reasoning, bookId, model: config.model, source: config.source },
+          meta: { reasoning, bookId },
         };
       }
 
@@ -275,13 +203,13 @@ export const vectorizeBookTool = tool({
         };
       }
 
-      // 逐个串行向量化（EPUB 走 indexEpub，MARKDOWN 走 index_paper）
+      // 逐条入队并阻塞等结算（通道内串行；单条失败/拒入不中断整批，结束统一汇总——语义同旧串行循环）
       let successCount = 0;
       let failCount = 0;
       const details: { title: string; success: boolean; message: string }[] = [];
 
       for (const item of vectorizable) {
-        const result = await vectorizeItem(item, config);
+        const result = await vectorizeSingleQueued(item);
         if (result.success) {
           successCount++;
         } else {
@@ -301,7 +229,7 @@ export const vectorizeBookTool = tool({
           skippedUnsupported: skippedUnsupported.length,
           details,
         },
-        meta: { reasoning, kind: kind ?? "all", model: config.model, source: config.source },
+        meta: { reasoning, kind: kind ?? "all" },
       };
     } catch (error) {
       throw new Error(`向量化失败: ${error instanceof Error ? error.message : "未知错误"}`);

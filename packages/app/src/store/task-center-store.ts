@@ -9,6 +9,17 @@
  */
 
 import { create } from "zustand";
+import {
+  getChannelDef,
+  getTaskConflictChecker,
+  registerTaskChannel,
+  setTaskConflictChecker,
+  __resetTaskExecutorRegistryForTests,
+} from "./task-executor-registry";
+
+// 注册表住独立叶子模块（task-executor-registry.ts，永不编辑 → HMR 不重估）：
+// 执行器模块加载自注册的通道在 store HMR 后不丢。此处 re-export 保持既有调用方 API 不变。
+export { registerTaskChannel, setTaskConflictChecker };
 
 export type TaskChannel = "paper-parse" | "paper-vectorize" | "paper-translate" | "book-convert" | "book-vectorize";
 export type TaskStatus = "queued" | "running" | "success" | "error" | "cancelled";
@@ -53,15 +64,6 @@ export interface TaskContext {
 
 export type TaskExecutor = (task: TaskItem, ctx: TaskContext) => Promise<void>;
 
-interface ChannelDef {
-  executor: TaskExecutor;
-  /** P2 恒 1；P3 解析通道可调 2（泵按并发槽调度） */
-  concurrency: number;
-}
-
-/** 冲突检查器：返回拒绝原因文案（null = 无冲突）。由 paper-conflict 适配层注入。 */
-type ConflictChecker = (channel: TaskChannel, targetId: string) => string | null;
-
 export interface EnqueueInput {
   channel: TaskChannel;
   targetId: string;
@@ -78,6 +80,8 @@ interface TaskCenterState {
   /** 全局入队顺序（展示用；运行/排队判定走 channel 过滤） */
   order: string[];
   runs: Record<string, TaskRun>;
+  /** 通道取消中标志（cancelChannel 置位，泵收尾清除——卡片"正在取消…"按钮态用） */
+  cancelling: Partial<Record<TaskChannel, boolean>>;
   enqueue: (input: EnqueueInput) => EnqueueResult;
   /** 入队并等待结算（AI 工具保持阻塞语义用）：成功 resolve 任务，失败/取消 reject */
   enqueueAndWait: (input: EnqueueInput) => Promise<TaskItem>;
@@ -90,22 +94,11 @@ interface TaskCenterState {
 }
 
 // ─── 模块级执行态（不进 zustand：句柄/泵位不可序列化，对齐既有 store 惯例） ───
+// （通道注册表与冲突检查器住 task-executor-registry.ts——独立叶子模块，HMR 不丢注册）
 
-const channelDefs = new Map<TaskChannel, ChannelDef>();
 const draining: Partial<Record<TaskChannel, boolean>> = {};
 const abortControllers = new Map<string, AbortController>();
 const waiters = new Map<string, { resolve: (task: TaskItem) => void; reject: (error: Error) => void }>();
-let conflictChecker: ConflictChecker | null = null;
-
-/** 通道注册（执行器模块初始化时调用；重复注册后者覆盖，便于 HMR/测试重置） */
-export function registerTaskChannel(channel: TaskChannel, def: ChannelDef): void {
-  channelDefs.set(channel, def);
-}
-
-/** 冲突检查器注入（paper-conflict 适配层在 P2-3 接入；图书通道可不注入） */
-export function setTaskConflictChecker(checker: ConflictChecker | null): void {
-  conflictChecker = checker;
-}
 
 const patchTask = (taskId: string, patch: Partial<TaskItem>) =>
   useTaskCenterStore.setState((s) => {
@@ -135,7 +128,7 @@ function settleWaiter(taskId: string, finalStatus: TaskStatus, error?: string): 
 /** 通道泵：串行逐任务执行；收尾后复查接续（运行期新入队不丢） */
 async function drainChannel(channel: TaskChannel): Promise<void> {
   if (draining[channel]) return;
-  const def = channelDefs.get(channel);
+  const def = getChannelDef(channel);
   if (!def) return;
   draining[channel] = true;
   try {
@@ -167,6 +160,9 @@ async function drainChannel(channel: TaskChannel): Promise<void> {
     }
   } finally {
     draining[channel] = false;
+    if (useTaskCenterStore.getState().cancelling[channel]) {
+      useTaskCenterStore.setState((s) => ({ cancelling: { ...s.cancelling, [channel]: false } }));
+    }
     // 收尾窗口内新入队的接续（对齐既有 drain 语义）
     if (nextQueued(channel)) void drainChannel(channel);
   }
@@ -176,9 +172,10 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
   tasks: {},
   order: [],
   runs: {},
+  cancelling: {},
 
   enqueue: (input) => {
-    const def = channelDefs.get(input.channel);
+    const def = getChannelDef(input.channel);
     if (!def) return { ok: false, reason: "no-executor" };
     const { tasks } = get();
     // 幂等去重：同通道同归属已在排队/运行中 → 拒入队（对齐既有队列口径）
@@ -189,7 +186,7 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
         (t.status === "queued" || t.status === "running"),
     );
     if (dup) return { ok: false, reason: "duplicate", detail: `《${input.title}》已在该队列中` };
-    const conflict = conflictChecker?.(input.channel, input.targetId) ?? null;
+    const conflict = getTaskConflictChecker()?.(input.channel, input.targetId) ?? null;
     if (conflict) return { ok: false, reason: "conflict", detail: conflict };
 
     const taskId = crypto.randomUUID();
@@ -237,10 +234,16 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
   },
 
   cancelChannel: (channel) => {
+    let any = false;
     for (const task of Object.values(get().tasks)) {
       if (task.channel !== channel) continue;
-      if (task.status === "queued" || task.status === "running") get().cancelTask(task.taskId);
+      if (task.status === "queued" || task.status === "running") {
+        get().cancelTask(task.taskId);
+        any = true;
+      }
     }
+    // 取消中标志：运行中任务收尾期间卡片按钮置灰（泵收尾时清除）；无可撤任务不置位
+    if (any) set((s) => ({ cancelling: { ...s.cancelling, [channel]: true } }));
   },
 
   dismissSettled: (channel) =>
@@ -271,7 +274,10 @@ export interface ChannelAggregate {
   settled: TaskItem[];
 }
 
-export function selectChannelAggregate(state: TaskCenterState, channel: TaskChannel): ChannelAggregate {
+export function selectChannelAggregate(
+  state: Pick<TaskCenterState, "tasks" | "order">,
+  channel: TaskChannel,
+): ChannelAggregate {
   let current: TaskItem | null = null;
   let queuedCount = 0;
   const settled: TaskItem[] = [];
@@ -287,10 +293,9 @@ export function selectChannelAggregate(state: TaskCenterState, channel: TaskChan
 
 /** 测试专用：清空全部状态与模块级执行态（勿在生产路径调用） */
 export function __resetTaskCenterForTests(): void {
-  channelDefs.clear();
+  __resetTaskExecutorRegistryForTests();
   waiters.clear();
   abortControllers.clear();
-  conflictChecker = null;
   for (const key of Object.keys(draining)) delete draining[key as TaskChannel];
-  useTaskCenterStore.setState({ tasks: {}, order: [], runs: {} });
+  useTaskCenterStore.setState({ tasks: {}, order: [], runs: {}, cancelling: {} });
 }

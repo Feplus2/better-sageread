@@ -44,13 +44,12 @@ import {
   type TranslateProgress,
   loadPaperTranslatedMeta,
   loadPaperTranslation,
-  translatePaper,
 } from "@/services/paper-translation-service";
 import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-store";
 import { isPaperQueuedOrRunning, useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
-import { usePaperTaskRegistry } from "@/store/paper-task-registry";
 import { usePaperTaskStore } from "@/store/paper-task-store";
+import { useTaskCenterStore } from "@/store/task-center-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
@@ -129,8 +128,29 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   /** 脚注译文（fn:<id> 独立键拆分出 id → 译文；不占块序号） */
   const [footnoteTranslationMap, setFootnoteTranslationMap] = useState<ReadonlyMap<string, string> | null>(null);
   const [translatedMeta, setTranslatedMeta] = useState<PaperTranslatedMeta | null>(null);
-  const [translating, setTranslating] = useState<TranslateProgress | null>(null);
-  const translateAbortRef = useRef<AbortController | null>(null);
+  // 翻译任务态（P2-3 起翻译走 task-center 的 paper-translate 通道）：按 paperId 匹配本篇任务，
+  // 页内进度读 readerTranslate 切片（通道执行器回写）；排队中也置忙、计数归零等执行器喂数
+  const translateTask = useTaskCenterStore((s) => {
+    for (const id of s.order) {
+      const t = s.tasks[id];
+      if (
+        t &&
+        t.channel === "paper-translate" &&
+        t.targetId === paperId &&
+        (t.status === "queued" || t.status === "running")
+      ) {
+        return t;
+      }
+    }
+    return null;
+  });
+  const readerTranslate = usePaperTaskStore((s) => s.readerTranslate);
+  const translating: TranslateProgress | null = translateTask
+    ? {
+        done: readerTranslate?.paperId === paperId ? readerTranslate.done : 0,
+        total: readerTranslate?.paperId === paperId ? readerTranslate.total : 0,
+      }
+    : null;
   // ─── T2 句对齐：覆盖情况（下拉"重建句对齐"显隐）+ 计算中标志 ───
   const [alignInfo, setAlignInfo] = useState<PaperAlignmentInfo | null>(null);
   const [aligning, setAligning] = useState(false);
@@ -177,8 +197,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     setFootnoteTranslationMap(null);
     setTranslatedMeta(null);
     reloadTranslation().catch((error) => console.warn("加载论文译本失败:", error));
-    // 切换论文时取消进行中的翻译（译本是按 paperId 隔离的）
-    return () => translateAbortRef.current?.abort();
+    // 切换论文不再中止翻译：翻译是通道任务（右下角通道卡/页内卡均可取消），
+    // 任务按 paperId 隔离匹配，换篇后旧篇任务继续在通道内执行
   }, [reloadTranslation]);
 
   // T2 句对齐覆盖情况：译本/原文就绪后异步核对（hash 比对），aligned < total 即"无对齐/陈旧"
@@ -281,75 +301,46 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
 
   const handleTranslate = useCallback(
     async (force: boolean) => {
-      if (!markdown || translateAbortRef.current) return;
-      // H 批量冲突模型：同篇解析/翻译中 → 拒绝；打点进注册表（批量按钮据此实时禁用）
+      if (!markdown || translateTask) return;
+      // H 批量冲突模型：同篇解析/翻译中 → 拒绝（入队口 conflictChecker 同口径兜底）
       const conflicts = paperConflicts(paperId, "translate");
       if (conflicts.length > 0) {
         toast.info(`该论文${conflictReasonText(conflicts)}，完成后再翻译`);
         return;
       }
-      usePaperTaskRegistry.getState().mark(paperId, "translate", true);
-      const controller = new AbortController();
-      translateAbortRef.current = controller;
-      setTranslating({ done: 0, total: 0 });
-      // 进度同步进右下角卡片栈（主页/文献库可见；阅读器页内由栈禁区隐藏，页内自有进度）；
-      // 取消回调注册给卡片取消按钮
-      usePaperTaskStore
-        .getState()
-        .startReaderTranslate({ paperId, title, done: 0, total: 0 }, () => controller.abort());
-      try {
-        const result = await translatePaper({
-          paperId,
-          markdown,
-          force,
-          signal: controller.signal,
-          onProgress: (p) => {
-            setTranslating(p);
-            usePaperTaskStore.getState().patchReaderTranslate({ done: p.done, total: p.total, detail: undefined });
-          },
-        });
-        await reloadTranslation();
-        if (result.cancelled) {
-          toast.info(`翻译已取消，已翻译的 ${result.translated} 块已保存，可随时续翻`);
-        } else if (result.failedBatches > 0) {
-          toast.warning(
-            `翻译完成：新翻 ${result.translated} 块，${result.failedBatches} 个批次失败已跳过（可重新翻译补齐）`,
-          );
-        } else {
-          toast.success(
-            result.translated > 0
-              ? `翻译完成：新翻 ${result.translated} 块，跳过已翻 ${result.skipped} 块`
-              : "翻译完成：所有块均已有译文",
-          );
-        }
-        // T2：翻译完成后自动计算句对齐（幂等；无嵌入能力时跳过并提示，不影响翻译本体）
-        if (!result.cancelled) {
-          usePaperTaskStore.getState().patchReaderTranslate({ detail: "句词对齐中…" });
-          await runAlignment(false, "auto");
-        }
-      } catch (error) {
-        if (controller.signal.aborted) {
-          toast.info("翻译已取消，已翻译部分已保存，可随时续翻");
-          await reloadTranslation();
-        } else {
-          console.error("论文翻译失败:", error);
-          toast.error(error instanceof Error ? error.message : "论文翻译失败");
-        }
-      } finally {
-        translateAbortRef.current = null;
-        usePaperTaskRegistry.getState().mark(paperId, "translate", false);
-        usePaperTaskStore.getState().clearReaderTranslate();
-        // 收尾即触发列表刷新（成功/取消/失败同口径——partial 戳记或新锚都要即时上徽标）
-        usePaperTaskStore.getState().onSettled?.();
-        setTranslating(null);
-      }
+      // P2-3：入统一翻译通道（执行器接管：translatePaper → readerTranslate 回写 → 句词对齐一条龙
+      // → toast/徽标刷新）；同篇在队/在跑由队列幂等拒入
+      const { enqueuePaperTranslate } = await import("@/services/task-executors/paper-translate");
+      const res = enqueuePaperTranslate({ id: paperId, title, force, reader: true });
+      if (!res.ok) toast.info(res.detail ?? "该论文已在翻译队列中");
     },
-    [markdown, paperId, title, reloadTranslation, runAlignment],
+    [markdown, paperId, title, translateTask],
   );
 
+  // 本篇翻译通道任务结算（成功/取消/失败）→ 重载译本与元数据译文
+  // （页外批量/AI 翻译本篇完成时同样触发——译文即时可读，无需手动刷新）
+  const prevTranslateTaskRef = useRef(translateTask);
+  useEffect(() => {
+    const prev = prevTranslateTaskRef.current;
+    prevTranslateTaskRef.current = translateTask;
+    if (prev && !translateTask) {
+      reloadTranslation().catch((error) => console.warn("翻译收尾后重载译本失败:", error));
+    }
+  }, [translateTask, reloadTranslation]);
+
   const handleCancelTranslate = useCallback(() => {
-    translateAbortRef.current?.abort();
-  }, []);
+    // 撤本篇的翻译通道任务（queued 直接撤，running 发 abort；已翻部分已落盘可续翻）
+    const { tasks, cancelTask } = useTaskCenterStore.getState();
+    for (const t of Object.values(tasks)) {
+      if (
+        t.channel === "paper-translate" &&
+        t.targetId === paperId &&
+        (t.status === "queued" || t.status === "running")
+      ) {
+        cancelTask(t.taskId);
+      }
+    }
+  }, [paperId]);
 
   // 打开时若该篇正在解析队列（含重解析）→ 提示当前为旧版本（每次打开至多提示一次）
   useEffect(() => {

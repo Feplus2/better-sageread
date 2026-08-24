@@ -11,16 +11,17 @@ import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
  *   异步执行（入队即返），去重/向量化互斥/标签页提示与文献库页完全同口径；
  *   产物整体替换，保留论文 id/文件夹归属/对话/标注
  *
- * 任务冲突模型（与 PapersPage 同口径）：translate/align 在该篇排队或解析中时拒绝执行
- * （解析会整体替换产物，翻译/对齐基于旧产物即白算）；执行期间打点 paper-task-registry
- * 的 translate 槽（开始/结束），使「解析×翻译」互斥在 AI 工具路径同样成立。
+ * P2-3：translate/align 改入 task-center 的 paper-translate 通道（enqueueAndWait 阻塞等结算，
+ * 返回语义不变）；任务冲突模型守卫移到入队口（utils/paper-conflict 注入的 conflictChecker，
+ * 与 PapersPage 批量按钮同一口径：解析×翻译同篇互斥、同篇翻译幂等去重），
+ * 执行期的注册表 translate 槽打点由通道执行器负责（重解析互斥在 AI 路径同样成立）。
  */
-import { alignPaperTranslation, inspectPaperAlignment } from "@/services/paper-alignment-service";
+import { type AlignResult, inspectPaperAlignment } from "@/services/paper-alignment-service";
 import { resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import { getPaperSourceStatus } from "@/services/paper-service";
-import { loadPaperTranslation, translatePaper } from "@/services/paper-translation-service";
-import { isPaperQueuedOrRunning, startPaperReparse } from "@/store/convert-progress-store";
-import { usePaperTaskRegistry } from "@/store/paper-task-registry";
+import { loadPaperTranslation } from "@/services/paper-translation-service";
+import { type PaperTranslateResult, enqueuePaperTranslateAndWait } from "@/services/task-executors/paper-translate";
+import { startPaperReparse } from "@/store/convert-progress-store";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
@@ -84,22 +85,19 @@ export const processPaperTool = tool({
       .describe("仅 reparse 用：源 PDF 的完整本地路径（默认自动定位，找不到时才需显式指定）"),
   }),
 
-  execute: async (
-    {
-      reasoning,
-      action,
-      paperId,
-      force,
-      filePath,
-    }: {
-      reasoning: string;
-      action: "status" | "translate" | "align" | "reparse";
-      paperId: string;
-      force?: boolean;
-      filePath?: string;
-    },
-    options?: { abortSignal?: AbortSignal },
-  ) => {
+  execute: async ({
+    reasoning,
+    action,
+    paperId,
+    force,
+    filePath,
+  }: {
+    reasoning: string;
+    action: "status" | "translate" | "align" | "reparse";
+    paperId: string;
+    force?: boolean;
+    filePath?: string;
+  }) => {
     const meta = { reasoning, action, paperId };
     try {
       // ==================== 状态查询 ====================
@@ -140,45 +138,23 @@ export const processPaperTool = tool({
       // ==================== 翻译（自动带对齐） ====================
       if (action === "translate") {
         const markdown = await readPaperMarkdown(paperId);
-        // 任务冲突模型：该篇排队/解析中时翻译读的是旧产物，解析一替换就白算——拒执行并引导
-        if (isPaperQueuedOrRunning(paperId)) {
-          const { metadata } = parsePaperMarkdown(markdown);
-          return {
-            results: {
-              success: false,
-              message: `《${metadata.title || paperId}》正在解析队列中，完成后再翻译`,
-            },
-            meta,
-          };
-        }
-        // 打点注册表 translate 槽（覆盖 translate+align 全程）：期间重解析该篇会被拒（白翻防护）
-        const taskMark = usePaperTaskRegistry.getState().mark;
-        taskMark(paperId, "translate", true);
+        const title = parsePaperMarkdown(markdown).metadata.title || paperId;
         try {
-          const result = await translatePaper({
-            paperId,
-            markdown,
-            force: force ?? false,
-            signal: options?.abortSignal,
-          });
-          if (result.cancelled) {
-            return {
-              results: {
-                success: false,
-                message: `翻译被中止，已翻译 ${result.translated} 块已保存，可用 action=translate 续翻`,
-                translation: result,
-              },
-              meta,
-            };
+          // 入翻译通道阻塞等结算（P2-3）：解析冲突/同篇幂等由入队口判定；翻译后自动对齐在执行器内
+          const task = await enqueuePaperTranslateAndWait({ id: paperId, title, force: force ?? false });
+          const settled = task.result as PaperTranslateResult | undefined;
+          const result = settled?.translation;
+          const align = settled?.alignment;
+          if (!result) {
+            return { results: { success: false, message: "翻译结算产物缺失" }, meta };
           }
-
-          // 翻译完成后自动对齐（与 UI 行为一致；无嵌入能力时内部跳过并给 reason，不抛错）
-          const align = await alignPaperTranslation({
-            paperId,
-            markdown,
-            force: false,
-            signal: options?.abortSignal,
-          });
+          // 对齐抛错（非取消）按旧口径整体失败（译本已落盘，可 action=align 补齐）
+          if (settled?.alignError) {
+            return { results: { success: false, message: `操作失败：${settled.alignError}` }, meta };
+          }
+          if (!align) {
+            return { results: { success: false, message: "翻译结算产物缺失" }, meta };
+          }
 
           const translateMsg =
             result.failedBatches > 0
@@ -206,8 +182,16 @@ export const processPaperTool = tool({
             },
             meta,
           };
-        } finally {
-          taskMark(paperId, "translate", false);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          if (msg.includes("已取消")) {
+            return {
+              results: { success: false, message: "翻译被中止，已翻译部分已保存，可用 action=translate 续翻" },
+              meta,
+            };
+          }
+          // 拒入队（冲突/重复）或执行失败：msg 已含引导或书名号，缺标题时补上
+          return { results: { success: false, message: msg.startsWith("《") ? msg : `《${title}》${msg}` }, meta };
         }
       }
 
@@ -255,30 +239,17 @@ export const processPaperTool = tool({
 
       // ==================== 仅对齐 ====================
       const markdown = await readPaperMarkdown(paperId);
-      // 任务冲突模型：同 translate——解析会整体替换产物，对齐基于旧产物即白算
-      if (isPaperQueuedOrRunning(paperId)) {
-        const { metadata } = parsePaperMarkdown(markdown);
-        return {
-          results: {
-            success: false,
-            message: `《${metadata.title || paperId}》正在解析队列中，完成后再对齐`,
-          },
-          meta,
-        };
-      }
-      // 打点注册表 translate 槽：对齐基于译文，期间重解析同样会使其白算
-      const taskMark = usePaperTaskRegistry.getState().mark;
-      taskMark(paperId, "translate", true);
-      let align: Awaited<ReturnType<typeof alignPaperTranslation>>;
+      const title = parsePaperMarkdown(markdown).metadata.title || paperId;
+      // 与 translate 同通道入队（alignOnly）：同篇互斥/幂等去重走入队口，force 透传为对齐重算标志
+      let align: AlignResult;
       try {
-        align = await alignPaperTranslation({
-          paperId,
-          markdown,
-          force: force ?? false,
-          signal: options?.abortSignal,
-        });
-      } finally {
-        taskMark(paperId, "translate", false);
+        const task = await enqueuePaperTranslateAndWait({ id: paperId, title, force: force ?? false, alignOnly: true });
+        const settledAlign = (task.result as PaperTranslateResult | undefined)?.alignment;
+        if (!settledAlign) throw new Error("对齐结算产物缺失");
+        align = settledAlign;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return { results: { success: false, message: msg.startsWith("《") ? msg : `《${title}》${msg}` }, meta };
       }
 
       if (align.status === "skipped") {

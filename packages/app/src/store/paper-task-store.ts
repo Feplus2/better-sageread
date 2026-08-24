@@ -1,35 +1,20 @@
-import { alignPaperTranslation } from "@/services/paper-alignment-service";
-import { vectorizePaper } from "@/services/paper-service";
-import { translatePaper } from "@/services/paper-translation-service";
-import { usePaperTaskRegistry } from "@/store/paper-task-registry";
-import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
-import { listen } from "@tauri-apps/api/event";
-import { appDataDir } from "@tauri-apps/api/path";
-import { readTextFile } from "@tauri-apps/plugin-fs";
-import { toast } from "sonner";
 import { create } from "zustand";
 
 /**
- * 论文批量任务队列（2026-08-23）：向量化/翻译通道队列化，对齐重解析的既有模式——
- * 单篇=批量=入队、运行中可加队、通道内串行、通道间（含解析通道）天然并行。
- * 同篇互斥在入队口经 utils/paper-conflict 统一判定（冲突矩阵见 paper-task-registry）。
- * 批量按钮的禁用态不在此判（页面按 selection×注册表实时推导），入队口的冲突拒绝
- * 仅作点击竞态的兜底，单条聚合提示。
+ * 论文任务配套状态（P2-3 收编后）：
+ * 向量化/翻译队列已迁入 task-center（执行器见 services/task-executors/paper-vectorize.ts /
+ * paper-translate.ts；入队口冲突判定经 utils/paper-conflict 注入，冲突矩阵仍在 paper-task-registry）。
+ * 本 store 只保留视图配套切片：
+ * - vectorizePercent：每篇向量化百分比（卡片圆环；由通道执行器/恢复扫描/页面监听喂）；
+ * - readerTranslate：阅读器单篇翻译的右下角小卡（执行器回写；阅读器页内由栈禁区隐藏）；
+ * - progress.vectorize：刷新后的「恢复监控」卡（Rust 侧 index_paper 跨刷新存活的挂载扫描恢复，
+ *   见 docs/task-queue-p2-plan.md §0 内存态保持原则）；
+ * - onSettled：通道收尾回调（PapersPage 注册刷新列表；由执行器模块的通道空闲沿触发）。
  */
 
 export type TaskKind = "vectorize" | "translate";
 
-interface TaskItem {
-  id: string;
-  title: string;
-  author?: string;
-  /** 单篇直发（卡片按钮）：完成时给该篇独立 toast；批量收尾只走进度卡汇总 */
-  solo?: boolean;
-  /** 翻译通道：true=全量重翻（已有译文作废重翻）；缺省幂等续翻 */
-  force?: boolean;
-}
-
-/** 进度卡状态（与 PapersPage 既有 BatchProgressCard 字段一一对应） */
+/** 进度卡状态（恢复监控卡沿用 PapersPage BatchProgressCard 字段口径） */
 export interface ChannelProgress {
   status: "running" | "success" | "error";
   index: number;
@@ -45,8 +30,8 @@ export interface ChannelProgress {
   cancelling?: boolean;
 }
 
-/** 阅读页单篇翻译的全局进度（阅读页内翻译不走队列：注册表打点防冲突照旧，
- *  进度经此切片进右下角卡片栈，主页/文献库可见；阅读器页内由栈的禁区规则隐藏，页内自有进度 UI） */
+/** 阅读页单篇翻译的全局进度（阅读器发起的翻译经翻译通道执行器回写此切片，
+ *  进右下角卡片栈，主页/文献库可见；阅读器页内由栈的禁区规则隐藏，页内自有进度 UI） */
 export interface ReaderTranslateState {
   paperId: string;
   title: string;
@@ -57,40 +42,22 @@ export interface ReaderTranslateState {
 }
 
 interface PaperTaskState {
-  vectorizeQueue: TaskItem[];
-  translateQueue: TaskItem[];
-  vectorizeDraining: boolean;
-  translateDraining: boolean;
-  /** 每通道独立进度卡（通道并行时各显示各的） */
+  /** 恢复监控卡（仅 vectorize 槽位在用；翻译无跨刷新恢复场景） */
   progress: Partial<Record<TaskKind, ChannelProgress>>;
   /** 每篇向量化百分比（卡片圆环用，与旧 setVectorizing 兼容） */
   vectorizePercent: Record<string, number>;
-  /** 阅读页单篇翻译进度（非队列路径；null=无）；onCancel 由发起方注册（卡片取消按钮用） */
+  /** 阅读页单篇翻译进度（null=无）；onCancel 由通道执行器注册（卡片取消按钮 → cancelTask） */
   readerTranslate: ReaderTranslateState | null;
   startReaderTranslate: (s: ReaderTranslateState, onCancel: () => void) => void;
   patchReaderTranslate: (patch: Partial<Pick<ReaderTranslateState, "done" | "total" | "detail">>) => void;
   clearReaderTranslate: () => void;
   cancelReaderTranslate: (() => void) | null;
-  enqueue: (kind: TaskKind, papers: TaskItem[]) => { ok: boolean; rejectedCount: number };
-  cancel: (kind: TaskKind) => void;
-  /** 通道收尾后回调（PapersPage 注册刷新列表用；阅读页单篇翻译收尾同样触发——徽标即时转绿/黄） */
+  /** 通道收尾后回调（PapersPage 注册刷新列表用；通道空闲沿触发——徽标即时转绿/黄） */
   onSettled: (() => void) | null;
   setOnSettled: (cb: (() => void) | null) => void;
 }
 
-const cancelVectorize = { current: false };
-let translateAbort: AbortController | null = null;
-
-const patchProgress = (kind: TaskKind, patch: Partial<ChannelProgress>) =>
-  usePaperTaskStore.setState((s) => ({
-    progress: { ...s.progress, [kind]: { ...(s.progress[kind] as ChannelProgress), ...patch } },
-  }));
-
-export const usePaperTaskStore = create<PaperTaskState>((set, get) => ({
-  vectorizeQueue: [],
-  translateQueue: [],
-  vectorizeDraining: false,
-  translateDraining: false,
+export const usePaperTaskStore = create<PaperTaskState>((set) => ({
   progress: {},
   vectorizePercent: {},
   onSettled: null,
@@ -101,342 +68,4 @@ export const usePaperTaskStore = create<PaperTaskState>((set, get) => ({
   patchReaderTranslate: (patch) =>
     set((state) => (state.readerTranslate ? { readerTranslate: { ...state.readerTranslate, ...patch } } : {})),
   clearReaderTranslate: () => set({ readerTranslate: null, cancelReaderTranslate: null }),
-
-  enqueue: (kind, papers) => {
-    const accepted: TaskItem[] = [];
-    let rejectedCount = 0;
-    const rejectedSamples: string[] = [];
-    // 入队口幂等：已在同通道队列中也算冲突（防重复入队）
-    const queuedIds = new Set((kind === "vectorize" ? get().vectorizeQueue : get().translateQueue).map((t) => t.id));
-    for (const paper of papers) {
-      if (queuedIds.has(paper.id)) {
-        rejectedCount += 1;
-        if (rejectedSamples.length < 3) rejectedSamples.push(`《${paper.title}》已在该队列中`);
-        continue;
-      }
-      const conflicts = paperConflicts(paper.id, kind);
-      if (conflicts.length > 0) {
-        rejectedCount += 1;
-        if (rejectedSamples.length < 3) rejectedSamples.push(`《${paper.title}》${conflictReasonText(conflicts)}`);
-        continue;
-      }
-      accepted.push(paper);
-    }
-    if (rejectedCount > 0) {
-      toast.info(
-        `跳过 ${rejectedCount} 篇：${rejectedSamples.join("；")}${rejectedCount > rejectedSamples.length ? " 等" : ""}`,
-        { duration: 6000 },
-      );
-    }
-    if (accepted.length === 0) return { ok: false, rejectedCount };
-
-    if (kind === "vectorize") {
-      set((s) => ({ vectorizeQueue: [...s.vectorizeQueue, ...accepted] }));
-      void drainVectorize();
-    } else {
-      set((s) => ({ translateQueue: [...s.translateQueue, ...accepted] }));
-      void drainTranslate();
-    }
-    return { ok: true, rejectedCount };
-  },
-
-  cancel: (kind) => {
-    if (kind === "vectorize") {
-      cancelVectorize.current = true;
-      set((s) => ({
-        vectorizeQueue: [],
-        progress: s.progress.vectorize
-          ? { ...s.progress, vectorize: { ...s.progress.vectorize, cancelling: true, detail: "正在取消…" } }
-          : s.progress,
-      }));
-    } else {
-      translateAbort?.abort();
-      set((s) => ({
-        translateQueue: [],
-        progress: s.progress.translate
-          ? { ...s.progress, translate: { ...s.progress.translate, cancelling: true, detail: "正在取消…" } }
-          : s.progress,
-      }));
-    }
-  },
 }));
-
-async function drainVectorize() {
-  const state = usePaperTaskStore.getState();
-  if (state.vectorizeDraining) return;
-  usePaperTaskStore.setState({ vectorizeDraining: true });
-  cancelVectorize.current = false;
-
-  const total = state.vectorizeQueue.length;
-  let done = 0;
-  const failedNames: string[] = [];
-  const mark = usePaperTaskRegistry.getState().mark;
-
-  usePaperTaskStore.setState({
-    progress: {
-      vectorize: {
-        status: "running",
-        index: 0,
-        total,
-        title: "",
-        detail: "准备向量化…",
-        percent: 0,
-        doneCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        failedNames: [],
-      },
-    },
-  });
-
-  while (true) {
-    const item = usePaperTaskStore.getState().vectorizeQueue[0];
-    if (!item) break;
-    // 取消语义对齐解析通道：cancel() 已就地清队，此后入队的项是新意图——
-    // 本泵遇到取消标即收尾（不二次清队），收尾后由结尾段重泵续跑新意图
-    if (cancelVectorize.current) break;
-    const index = done + failedNames.length;
-    patchProgress("vectorize", {
-      index,
-      title: item.title,
-      detail: "向量化中…",
-      percent: Math.round((index / total) * 100),
-    });
-    usePaperTaskStore.setState((s) => ({ vectorizePercent: { ...s.vectorizePercent, [item.id]: 0 } }));
-    mark(item.id, "vectorize", true);
-    try {
-      const res = await vectorizePaper({ id: item.id, title: item.title, author: item.author ?? "" });
-      done += 1;
-      if (item.solo) {
-        toast.success(`《${item.title}》向量化完成，分块数：${res.report?.total_chunks ?? "未知"}`);
-      }
-    } catch (error) {
-      failedNames.push(item.title);
-      console.error(`向量化论文失败: ${item.id}`, error);
-      if (item.solo) {
-        toast.error(`《${item.title}》向量化失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-    } finally {
-      mark(item.id, "vectorize", false);
-      // 按 id 摘除当前篇（不能 slice(1)：取消窗口内新入队的项占据了队首会被误吞）
-      usePaperTaskStore.setState((s) => {
-        const next = { ...s.vectorizePercent };
-        delete next[item.id];
-        return { vectorizePercent: next, vectorizeQueue: s.vectorizeQueue.filter((t) => t.id !== item.id) };
-      });
-      patchProgress("vectorize", { doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] });
-    }
-  }
-
-  const cancelled = cancelVectorize.current;
-  const remaining = Math.max(0, total - done - failedNames.length);
-  patchProgress("vectorize", {
-    status: failedNames.length > 0 ? "error" : "success",
-    percent: 100,
-    summary: cancelled
-      ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理`
-      : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}`,
-  });
-  if (!cancelled && total > 1) {
-    toast.success(`批量向量化完成 ${done} 篇${failedNames.length > 0 ? `，失败 ${failedNames.length} 篇` : ""}`);
-  }
-  usePaperTaskStore.setState({ vectorizeDraining: false });
-  usePaperTaskStore.getState().onSettled?.();
-  // 取消后又有新提交（新意图）：重新起泵接续（对齐解析通道 drainPaperQueue 收尾段语义）
-  if (cancelled && usePaperTaskStore.getState().vectorizeQueue.length > 0) void drainVectorize();
-}
-
-async function drainTranslate() {
-  const state = usePaperTaskStore.getState();
-  if (state.translateDraining) return;
-  usePaperTaskStore.setState({ translateDraining: true });
-
-  const total = state.translateQueue.length;
-  let done = 0;
-  const failedNames: string[] = [];
-  const mark = usePaperTaskRegistry.getState().mark;
-  const base = await appDataDir();
-
-  usePaperTaskStore.setState({
-    progress: {
-      translate: {
-        status: "running",
-        index: 0,
-        total,
-        title: "",
-        detail: "准备翻译…",
-        percent: 0,
-        doneCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        failedNames: [],
-      },
-    },
-  });
-
-  while (true) {
-    const item = usePaperTaskStore.getState().translateQueue[0];
-    if (!item) break;
-    const index = done + failedNames.length;
-    translateAbort = new AbortController();
-    patchProgress("translate", {
-      index,
-      title: item.title,
-      detail: "读取正文…",
-      percent: Math.round((index / total) * 100),
-    });
-    mark(item.id, "translate", true);
-    try {
-      const markdown = await readTextFile(`${base}/books/${item.id}/paper.md`);
-      const result = await translatePaper({
-        paperId: item.id,
-        markdown,
-        force: item.force ?? false,
-        signal: translateAbort.signal,
-        onProgress: ({ done: d, total: t }) =>
-          patchProgress("translate", {
-            detail: t > 0 ? `翻译块 ${d}/${t}` : undefined,
-            percent: Math.round(((index + (t > 0 ? d / t : 0)) / total) * 100),
-          }),
-      });
-      if (result.cancelled) break;
-      done += 1;
-      // 翻译收尾接句词对齐（与阅读器 handleTranslate / AI 工具 processPaper 同函数同口径，保证三条路径产物一致）：
-      // force=false 幂等补齐——force 重翻后译文 hash 全变，对齐自然全量重算；无嵌入能力时服务内部跳过不抛错
-      try {
-        patchProgress("translate", { detail: "句词对齐中…" });
-        await alignPaperTranslation({
-          paperId: item.id,
-          markdown,
-          force: false,
-          signal: translateAbort.signal,
-          onProgress: ({ done: d, total: t }) =>
-            patchProgress("translate", { detail: t > 0 ? `句词对齐 ${d}/${t}` : undefined }),
-        });
-      } catch (error) {
-        if (translateAbort.signal.aborted) break;
-        // 对齐失败不记该篇失败：译本是主产物，alignStatus 已在服务内落 partial/skipped（可经阅读器翻译菜单重建）
-        console.warn(`翻译后句词对齐失败: ${item.id}`, error);
-      }
-      if (item.solo) {
-        toast.success(
-          result.translated > 0
-            ? `《${item.title}》翻译完成：新翻 ${result.translated} 块，跳过已翻 ${result.skipped} 块`
-            : `《${item.title}》翻译完成：所有块均已有译文`,
-        );
-      }
-    } catch (error) {
-      if (translateAbort.signal.aborted) break;
-      failedNames.push(item.title);
-      console.error(`翻译论文失败: ${item.id}`, error);
-      if (item.solo) {
-        toast.error(`《${item.title}》翻译失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-    } finally {
-      mark(item.id, "translate", false);
-      // 按 id 摘除当前篇（不能 slice(1)：取消窗口内新入队的项占据了队首会被误吞）
-      usePaperTaskStore.setState((s) => ({ translateQueue: s.translateQueue.filter((t) => t.id !== item.id) }));
-      patchProgress("translate", { doneCount: done, failedCount: failedNames.length, failedNames: [...failedNames] });
-    }
-  }
-
-  const cancelled = translateAbort?.signal.aborted ?? false;
-  const remaining = Math.max(0, total - done - failedNames.length);
-  patchProgress("translate", {
-    status: failedNames.length > 0 ? "error" : "success",
-    percent: 100,
-    summary: cancelled
-      ? `已取消：完成 ${done} · 失败 ${failedNames.length}，剩余 ${remaining} 篇未处理（已翻部分已落盘，可续翻）`
-      : `完成 ${done} 篇${failedNames.length > 0 ? ` · 失败 ${failedNames.length}` : ""}`,
-  });
-  translateAbort = null;
-  usePaperTaskStore.setState({ translateDraining: false });
-  usePaperTaskStore.getState().onSettled?.();
-  // 取消后又有新提交（新意图）：重新起泵接续（对齐解析通道 drainPaperQueue 收尾段语义）
-  if (cancelled && usePaperTaskStore.getState().translateQueue.length > 0) void drainTranslate();
-}
-
-/** 队列容量探测（按钮禁用态的"排队中也算冲突"要与入队口径一致，供 paper-conflict 侧页面拼装） */
-export function queuedIdsOf(kind: TaskKind): Set<string> {
-  const s = usePaperTaskStore.getState();
-  return new Set((kind === "vectorize" ? s.vectorizeQueue : s.translateQueue).map((t) => t.id));
-}
-
-/**
- * 队列外单篇向量化（AI 工具 vectorizePaperSingle / 设置页全量向量化）的进度卡跟踪：
- * 建运行卡 → 订阅 paper://index-progress 实时喂 percent（兼喂 vectorizePercent 圆环，
- * 页面不在场也照喂——store 模块级与视图无关）→ 成败收尾卡（成功卡由页面 6s 自动消失）。
- * 通道队列在跑时不建卡（队列卡已覆盖通道，避免双写打架；圆环照常喂）。
- * 修复前实证（2026-08-24）：AI 路径无卡片喂养，用户只能看到恢复卡的恒 0%。
- */
-export async function trackSoloVectorize<T>(paper: { id: string; title: string }, run: () => Promise<T>): Promise<T> {
-  const st = usePaperTaskStore.getState();
-  // 通道队列在跑或已有 running 卡（另一篇 solo 在跑）时不建卡（圆环照喂）；
-  // success/error 收尾遗留卡不挡新卡（直接覆盖）
-  const cardActive =
-    !st.vectorizeDraining && st.vectorizeQueue.length === 0 && st.progress.vectorize?.status !== "running";
-  // 卡片所有权守卫：run 期间若通道队列开跑接管了卡片，本 solo 的进度/收尾一律不写
-  // （title+total=1 双重比对；队列卡的 total 由队列长度决定、title 逐篇轮换）
-  const ownsCard = () => {
-    const v = usePaperTaskStore.getState().progress.vectorize;
-    return v?.status === "running" && v.total === 1 && v.title === paper.title;
-  };
-  const patchSoloCard = (patch: Partial<ChannelProgress>) => {
-    if (!cardActive || !ownsCard()) return;
-    patchProgress("vectorize", patch);
-  };
-  if (cardActive) {
-    usePaperTaskStore.setState({
-      progress: {
-        ...st.progress,
-        vectorize: {
-          status: "running",
-          index: 0,
-          total: 1,
-          title: paper.title,
-          detail: "向量化中…",
-          percent: 0,
-          doneCount: 0,
-          failedCount: 0,
-          skippedCount: 0,
-          failedNames: [],
-        },
-      },
-    });
-  }
-  const unlisten = await listen<{ paper_id: string; percent: number }>("paper://index-progress", (e) => {
-    const p = e.payload;
-    if (p.paper_id !== paper.id) return;
-    const pct = Math.max(0, Math.min(100, Math.round(p.percent)));
-    usePaperTaskStore.setState((s) => ({
-      vectorizePercent: { ...s.vectorizePercent, [paper.id]: pct },
-    }));
-    patchSoloCard({ percent: pct });
-  });
-  try {
-    const res = await run();
-    patchSoloCard({
-      status: "success",
-      percent: 100,
-      doneCount: 1,
-      summary: `《${paper.title}》向量化完成`,
-    });
-    return res;
-  } catch (error) {
-    patchSoloCard({
-      status: "error",
-      percent: 100,
-      failedCount: 1,
-      failedNames: [paper.title],
-      summary: `《${paper.title}》向量化失败`,
-    });
-    throw error;
-  } finally {
-    unlisten();
-    usePaperTaskStore.setState((s) => {
-      const next = { ...s.vectorizePercent };
-      delete next[paper.id];
-      return { vectorizePercent: next };
-    });
-  }
-}

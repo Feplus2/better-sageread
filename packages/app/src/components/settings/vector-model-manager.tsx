@@ -1,4 +1,3 @@
-import { vectorizeItem } from "@/ai/tools/central/vectorize-book";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -6,7 +5,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { getBooksWithStatus } from "@/services/book-service";
 import { secretDelete, secretHas, secretSet } from "@/services/secret-service";
 import { type VectorModelConfig, useLlamaStore } from "@/store/llama-store";
-import { getCurrentVectorModelConfig, normalizeEmbeddingsUrl } from "@/utils/model";
+import { useTaskCenterStore } from "@/store/task-center-store";
+import { normalizeEmbeddingsUrl } from "@/utils/model";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type as getOsType } from "@tauri-apps/plugin-os";
@@ -104,10 +104,10 @@ export default function VectorModelManager() {
   const [localGuideOpen, setLocalGuideOpen] = useState(false);
   // G3：已向量化条目数（换模型警示用）
   const [vectorizedCount, setVectorizedCount] = useState(0);
-  // G1-3：全量重新向量化进度（null = 空闲）
+  // G1-3：全量重新向量化进度（null = 空闲；任务在 task-center 通道执行，此处只投影本批进度）
   const [revectorizeProgress, setRevectorizeProgress] = useState<{ done: number; total: number } | null>(null);
-  // G1-3 取消标记：条目间检查（单条不可中断，靠 embedding 超时兜底不悬死）
-  const revectorizeCancelRef = useRef(false);
+  // 本批入队的 taskId 集（进度与收尾统计只数本批，不混入其它来源的同通道任务）
+  const revectorizeTaskIdsRef = useRef<Set<string>>(new Set());
 
   const [formData, setFormData] = useState<Omit<VectorModelConfig, "id">>({
     name: "",
@@ -332,8 +332,9 @@ export default function VectorModelManager() {
 
   /**
    * G1-3：全量重新向量化——换模型/维度变化后旧向量全部失效，用当前模型逐条重建。
-   * 复用全局助手的单条向量化路径（书籍重索引删库重建、论文按 paper_id 先删后插，均幂等），
-   * 不另造「清空索引」后端命令；单条失败不中断，结束后统一汇报。
+   * P2-2/P2-3：逐条入 task-center 通道（图书→book-vectorize，论文→paper-vectorize；通道内串行），
+   * 通道幂等不变（书籍删库重建、论文按 paper_id 先删后插）；同条目在队/在跑由队列拒入并计数跳过，
+   * 不再与 book-item / AI vectorizeBook 双入口并发打架。
    */
   const handleRevectorizeAll = async () => {
     if (revectorizeProgress) return;
@@ -348,35 +349,54 @@ export default function VectorModelManager() {
       { title: "全量重新向量化", kind: "warning" },
     );
     if (!confirmed) return;
-    revectorizeCancelRef.current = false;
-    setRevectorizeProgress({ done: 0, total: targets.length });
-    let successCount = 0;
-    let failCount = 0;
-    let cancelled = false;
-    try {
-      const config = await getCurrentVectorModelConfig();
-      for (let i = 0; i < targets.length; i++) {
-        // 条目间检查取消标记（单条不可中断，靠 embedding 超时 60s 兜底不悬死）
-        if (revectorizeCancelRef.current) {
-          cancelled = true;
-          break;
-        }
-        // vectorizeItem 内部已兜底异常（返回 success:false），不会因单条失败中断整批
-        const result = await vectorizeItem(targets[i], config);
-        if (result.success) successCount++;
-        else failCount++;
-        setRevectorizeProgress({ done: i + 1, total: targets.length });
-      }
-    } finally {
-      setRevectorizeProgress(null);
+    const { enqueueBookVectorize } = await import("@/services/task-executors/book-vectorize");
+    const { enqueuePaperVectorize } = await import("@/services/task-executors/paper-vectorize");
+    const taskIds = new Set<string>();
+    let skipped = 0;
+    for (const t of targets) {
+      const res =
+        t.format === "MARKDOWN"
+          ? enqueuePaperVectorize({ id: t.id, title: t.title, author: t.author ?? "" })
+          : enqueueBookVectorize({ id: t.id, title: t.title });
+      if (res.ok) taskIds.add(res.taskId);
+      else skipped += 1;
     }
+    if (taskIds.size === 0) {
+      toast.info(`没有新条目可入队${skipped > 0 ? `（${skipped} 个已在队列中或冲突跳过）` : ""}`);
+      return;
+    }
+    if (skipped > 0) {
+      toast.info(`跳过 ${skipped} 个已在队列中或冲突的条目，其余 ${taskIds.size} 个已入队`);
+    }
+    revectorizeTaskIdsRef.current = taskIds;
+    setRevectorizeProgress({ done: 0, total: taskIds.size });
+  };
+
+  // G1-3：本批任务的进度投影与收尾汇总（单条不可中断，取消=撤排队项、当前条目跑完即停）
+  const taskCenterTasks = useTaskCenterStore((s) => s.tasks);
+  useEffect(() => {
+    if (!revectorizeProgress) return;
+    const ids = revectorizeTaskIdsRef.current;
+    if (ids.size === 0) return;
+    const settled = [...ids]
+      .map((id) => taskCenterTasks[id])
+      .filter((t) => t !== undefined && t.status !== "queued" && t.status !== "running");
+    if (settled.length < ids.size) {
+      if (settled.length !== revectorizeProgress.done) {
+        setRevectorizeProgress({ done: settled.length, total: ids.size });
+      }
+      return;
+    }
+    const successCount = settled.filter((t) => t.status === "success").length;
+    const failCount = settled.filter((t) => t.status === "error").length;
+    const cancelled = settled.some((t) => t.status === "cancelled");
+    revectorizeTaskIdsRef.current = new Set();
+    setRevectorizeProgress(null);
     countVectorized()
       .then(setVectorizedCount)
       .catch(() => {});
     if (cancelled) {
-      toast.info(
-        `已取消：完成 ${successCount + failCount}/${targets.length} 个（成功 ${successCount}，失败 ${failCount}）`,
-      );
+      toast.info(`已取消：完成 ${successCount + failCount}/${ids.size} 个（成功 ${successCount}，失败 ${failCount}）`);
     } else if (failCount > 0) {
       toast.warning(`重新向量化完成：成功 ${successCount} 个，失败 ${failCount} 个（失败条目可稍后重试）`, {
         duration: 8000,
@@ -384,7 +404,7 @@ export default function VectorModelManager() {
     } else {
       toast.success(`全量重新向量化完成：共 ${successCount} 个条目`);
     }
-  };
+  }, [taskCenterTasks, revectorizeProgress]);
 
   const selectedModel = vectorModels.find((m) => m.id === selectedVectorModelId);
 
@@ -465,7 +485,9 @@ export default function VectorModelManager() {
                   className="h-7 text-xs"
                   title="当前条目完成后停止"
                   onClick={() => {
-                    revectorizeCancelRef.current = true;
+                    // 取消=撤两通道排队项、当前条目跑完即停（对齐旧串行循环条目间检查语义）
+                    useTaskCenterStore.getState().cancelChannel("book-vectorize");
+                    useTaskCenterStore.getState().cancelChannel("paper-vectorize");
                   }}
                 >
                   取消（{revectorizeProgress.done}/{revectorizeProgress.total}）
