@@ -132,10 +132,9 @@ pub fn run() {
                 }
             }
             
-            // 启动自动检查更新已迁移到前端（reader-layout 挂载后延迟检查）：
-            // 发现新版本只弹确认框（版本号+更新说明），用户确认才下载——
-            // 此处绝不再静默 download_and_install（强制更新事故 2026-08-24：v0.2.1 此段
-            // 启动即下载安装，用户无拒绝机会）
+            // 启动不再自动检查更新（用户拍板 2026-08-25：不打扰优先）——更新检查仅在
+            // 设置页手动触发，确认框见前端 update-store + update-confirm-dialog；
+            // 此处绝不再静默 download_and_install（v0.2.1 启动强更事故，2026-08-24）
 
             tauri::async_runtime::spawn(async move {
                 // 启动时先应用待恢复数据（在数据库初始化之前）

@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useUpdateStore } from "@/store/update-store";
 
-/** 更新确认框（全局挂载于 ReaderLayout）：发现新版本展示版本号与更新说明，
- *  「立即更新」才下载安装，「以后再说」跳过；下载中禁止关闭防误触。
+/** 更新确认框（全局挂载于 ReaderLayout）：设置页手动「检查更新」发现新版本时弹出，
+ *  展示版本号与更新说明；「立即更新」才下载安装，「以后再说」跳过；下载中禁止关闭防误触。
+ *  启动不做自动检查（用户拍板：不打扰优先）。
  *  更新说明经对话同款 Markdown 渲染（chat-md/prose 主题跟随），按钮区按对话框规范留白 */
 export function UpdateConfirmDialog() {
   const pendingUpdate = useUpdateStore((s) => s.pendingUpdate);

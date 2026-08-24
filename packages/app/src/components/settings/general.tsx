@@ -24,7 +24,7 @@ export default function GeneralSettings() {
   const [dataPath, setDataPath] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [appVersion, setAppVersion] = useState("0.1.0");
-  // 更新检查/确认框状态收编 update-store（与启动自动检查共用；确认框全局挂载于 ReaderLayout）
+  // 更新检查/确认框状态收编 update-store（确认框全局挂载于 ReaderLayout；仅手动触发，启动不自动检查）
   const isCheckingUpdate = useUpdateStore((s) => s.isChecking);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
 
@@ -109,8 +109,7 @@ export default function GeneralSettings() {
     }
   };
 
-  // 手动检查更新（设置页按钮）：走 update-store 与启动自动检查同一条路径——
-  // 确认框全局挂载；已最新/失败在此口径如实 toast
+  // 手动检查更新（设置页按钮）：走 update-store 统一路径——确认框全局挂载；已最新/失败如实 toast
   const handleCheckForUpdates = async () => {
     await checkForUpdates();
   };
