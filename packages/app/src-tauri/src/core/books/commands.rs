@@ -1267,11 +1267,16 @@ fn extract_frontmatter(content: &str) -> Option<String> {
     None
 }
 
+/// sourceHash 统一口径：paper.md 内容 sha256 截 16 hex（论文 id、译文/向量版本锚共用）
+fn paper_source_hash(content: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(content))[..16].to_string()
+}
+
 /// 读取单个论文目录（必须含 paper.md），失败返回 None
 fn scan_one_paper_dir(dir: &std::path::Path) -> Option<ScannedPaper> {
     let paper_path = dir.join("paper.md");
     let content = fs::read(&paper_path).ok()?;
-    let id = format!("{:x}", Sha256::digest(&content))[..16].to_string();
+    let id = paper_source_hash(&content);
     let frontmatter = std::str::from_utf8(&content)
         .ok()
         .and_then(extract_frontmatter);
@@ -1474,7 +1479,7 @@ pub async fn replace_paper_content(
     app_handle: AppHandle,
     paper_id: String,
     source_dir: String,
-    metadata: serde_json::Value,
+    mut metadata: serde_json::Value,
 ) -> Result<(), String> {
     let db_pool = get_db_pool(&app_handle).await?;
 
@@ -1510,10 +1515,23 @@ pub async fn replace_paper_content(
         copy_dir_recursive(&source_images, &images_dir)?;
     }
 
+    // 翻译产物保全：title_zh/abstract_zh 是翻译服务写进旧 metadata.json 的（非解析产物，
+    // 新解析的 metadata 里没有），整体替换前从旧文件合并过来，避免用户译过的标题/摘要被抹掉；
+    // 解析产物字段（title/author/abstract 等）以新解析为准，不从旧值回填
+    if let Ok(old_raw) = fs::read_to_string(book_dir.join("metadata.json")) {
+        if let Ok(old_metadata) = serde_json::from_str::<serde_json::Value>(&old_raw) {
+            merge_translation_artifacts(&old_metadata, &mut metadata);
+        }
+    }
+
     let metadata_json = serde_json::to_string_pretty(&metadata)
         .map_err(|e| format!("序列化元数据失败: {}", e))?;
     fs::write(book_dir.join("metadata.json"), metadata_json)
         .map_err(|e| format!("保存元数据失败: {}", e))?;
+
+    // 死索引清理：旧分片/向量指向被替换的旧正文，先按 paper_id 清掉（与彻底删除同一清理路径，
+    // 内部连带失效 BM25 缓存）；清理后 get_paper_source_status 自然判 vectorizedStale=true
+    purge_paper_vectors(&app_data_dir, &paper_id);
 
     sqlx::query("UPDATE books SET file_size = ?, updated_at = ? WHERE id = ?")
         .bind(file_size)
@@ -1524,6 +1542,155 @@ pub async fn replace_paper_content(
         .map_err(|e| format!("更新书籍记录失败: {}", e))?;
 
     Ok(())
+}
+
+/// 翻译产物字段（译文键 → 原文键）：翻译服务写入 metadata.json，重解析换新时保留（解析产物以新解析为准，不在此列。
+/// vectorizedSourceHash 是向量化版本锚而非翻译产物，刻意不保留——换新后锚失效才判得出 stale）
+const TRANSLATION_ARTIFACT_KEYS: [(&str, &str); 2] = [("title_zh", "title"), ("abstract_zh", "abstract")];
+
+/// 把旧 metadata 中的翻译产物字段并入新 metadata（新值已存在时不动，防御性）。
+/// 原文没变才保译文：新解析提取的 title/abstract 若与旧值不同，旧中译已名不副实——丢弃待重翻
+/// （非 force 翻译对元数据有幂等跳过，留着旧译文会导致它一直挂错）
+fn merge_translation_artifacts(old: &serde_json::Value, new: &mut serde_json::Value) {
+    let (Some(old_obj), Some(new_obj)) = (old.as_object(), new.as_object_mut()) else {
+        return;
+    };
+    for (key, source_key) in TRANSLATION_ARTIFACT_KEYS {
+        if new_obj.contains_key(key) {
+            continue;
+        }
+        let sources_match = match (
+            old_obj.get(source_key).and_then(|v| v.as_str()),
+            new_obj.get(source_key).and_then(|v| v.as_str()),
+        ) {
+            (Some(old_src), Some(new_src)) => old_src.trim() == new_src.trim(),
+            _ => false,
+        };
+        if !sources_match {
+            continue;
+        }
+        if let Some(value) = old_obj.get(key).filter(|v| v.is_string()) {
+            new_obj.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+/// 译本陈旧判定：有译本但 sourceHash 缺失（老译本）或与当前 paper.md 不一致 → 按未翻译处理
+fn translation_stale(has_translation: bool, translation_hash: Option<&str>, source_hash: Option<&str>) -> bool {
+    has_translation && translation_hash != source_hash
+}
+
+/// 向量陈旧判定：版本锚缺失/不一致，或全局向量库中该论文已无分片
+/// （重解析清理 / 嵌入维度变更重建向量表）→ 需要重新向量化
+fn vectorized_stale(vectorized_hash: Option<&str>, source_hash: Option<&str>, chunk_count: i64) -> bool {
+    vectorized_hash != source_hash || chunk_count == 0
+}
+
+/// 全局论文向量库中该论文的现存分片数；库/表/列缺失或打开失败一律按 0 计（容错方向 = stale，安全）
+fn count_paper_chunks(db_path: &std::path::Path, paper_id: &str) -> i64 {
+    if !db_path.exists() {
+        return 0;
+    }
+    // 只读 document_chunks（普通表），不触 vec0 虚拟表，无需注册 sqlite-vec 扩展
+    let conn = match rusqlite::Connection::open(db_path) {
+        Ok(conn) => conn,
+        Err(e) => {
+            log::warn!("打开全局论文向量库失败: {}", e);
+            return 0;
+        }
+    };
+    let table_exists = |name: &str| -> rusqlite::Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    };
+    if !table_exists("document_chunks").unwrap_or(false) {
+        return 0;
+    }
+    // 老库（迁移前）没有 paper_id 列，不可能存在论文分片
+    let has_paper_id = conn
+        .prepare("PRAGMA table_info(document_chunks)")
+        .map(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .map(|mut rows| rows.any(|name| name.map(|n| n == "paper_id").unwrap_or(false)))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    if !has_paper_id {
+        return 0;
+    }
+    conn.query_row(
+        "SELECT COUNT(*) FROM document_chunks WHERE paper_id = ?1",
+        [paper_id],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+/// 论文产物版本锚状态：translation-zh.json 的 sourceHash / metadata.json 的 vectorizedSourceHash
+/// 与当前 paper.md 的 sourceHash（scan_papers_dir 的 id 同口径）比对，顺出陈旧判定。
+/// 低成本查询：读三个小文件 + 向量库一行 COUNT，供渲染防错配/重向量化引导使用。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaperSourceStatus {
+    /// 当前 paper.md 的 sourceHash（文件缺失为 null）
+    source_hash: Option<String>,
+    /// translation-zh.json 顶层 sourceHash（无译本或老译本未记录为 null）
+    translation_source_hash: Option<String>,
+    /// 有译本但 hash 缺失/不一致 → 陈旧（渲染侧按未翻译处理）
+    translation_stale: bool,
+    /// metadata.json 的 vectorizedSourceHash（向量化完成时写入；重解析换新后消失）
+    vectorized_source_hash: Option<String>,
+    /// 锚缺失/不一致，或向量库中该论文已无分片 → 需要（重新）向量化（未曾向量化亦为 true）
+    vectorized_stale: bool,
+}
+
+#[tauri::command]
+pub async fn get_paper_source_status(
+    app_handle: AppHandle,
+    paper_id: String,
+) -> Result<PaperSourceStatus, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用目录失败: {}", e))?;
+    let book_dir = app_data_dir.join("books").join(&paper_id);
+
+    let source_hash = fs::read(book_dir.join("paper.md"))
+        .ok()
+        .map(|content| paper_source_hash(&content));
+
+    let translation_raw = fs::read_to_string(book_dir.join("translation-zh.json")).ok();
+    let translation_source_hash = translation_raw
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.get("sourceHash")?.as_str().map(str::to_string));
+
+    let vectorized_source_hash = fs::read_to_string(book_dir.join("metadata.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("vectorizedSourceHash")?.as_str().map(str::to_string));
+
+    let chunk_count = count_paper_chunks(&app_data_dir.join("papers").join("vectors.sqlite"), &paper_id);
+
+    Ok(PaperSourceStatus {
+        translation_stale: translation_stale(
+            translation_raw.is_some(),
+            translation_source_hash.as_deref(),
+            source_hash.as_deref(),
+        ),
+        vectorized_stale: vectorized_stale(
+            vectorized_source_hash.as_deref(),
+            source_hash.as_deref(),
+            chunk_count,
+        ),
+        source_hash,
+        translation_source_hash,
+        vectorized_source_hash,
+    })
 }
 
 // ==================== Note 相关命令（笔记面板，2026-08 重建） ====================
@@ -1663,7 +1830,10 @@ pub async fn delete_note(app_handle: AppHandle, id: String) -> Result<(), String
 
 #[cfg(test)]
 mod tests {
-    use super::should_bump_position_changed;
+    use super::{
+        merge_translation_artifacts, paper_source_hash, should_bump_position_changed,
+        translation_stale, vectorized_stale,
+    };
 
     #[test]
     fn test_dwell_threshold() {
@@ -1675,5 +1845,82 @@ mod tests {
         assert!(should_bump_position_changed("cfi-A", "cfi-B", 120));
         // 位置没变：无论 dwell 多少都不推进（仅打开书/原地活动）
         assert!(!should_bump_position_changed("cfi-A", "cfi-A", 999));
+    }
+
+    #[test]
+    fn test_paper_source_hash() {
+        // 口径：sha256 截 16 hex（与 scan_papers_dir 的论文 id 一致）
+        assert_eq!(paper_source_hash(b"hello"), "2cf24dba5fb0a30e");
+        assert_eq!(paper_source_hash(b"").len(), 16);
+        assert!(paper_source_hash(b"abc").chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_merge_translation_artifacts() {
+        // 原文没变：翻译产物（title_zh/abstract_zh）从旧 metadata 并入新 metadata；解析产物以新解析为准
+        let old = serde_json::json!({
+            "title": "Some Title",
+            "abstract": "Some abstract",
+            "title_zh": "某标题",
+            "abstract_zh": "某摘要",
+            "vectorizedSourceHash": "oldhash"
+        });
+        let mut new = serde_json::json!({"title": "Some Title", "abstract": "Some abstract", "author": "New Author"});
+        merge_translation_artifacts(&old, &mut new);
+        assert_eq!(new["title_zh"], "某标题");
+        assert_eq!(new["abstract_zh"], "某摘要");
+        // 解析产物字段不被旧值覆盖
+        assert_eq!(new["author"], "New Author");
+        // 向量版本锚不是翻译产物，刻意不保留（重解析后锚失效才判得出 stale）
+        assert!(new.get("vectorizedSourceHash").is_none());
+
+        // 原文变了：旧中译名不副实，丢弃待重翻（trim 后比较，首尾空白差异不算变）
+        let mut changed = serde_json::json!({"title": "Some Title ", "abstract": "Different abstract"});
+        merge_translation_artifacts(&old, &mut changed);
+        assert_eq!(changed["title_zh"], "某标题");
+        assert!(changed.get("abstract_zh").is_none());
+
+        // 新值已存在时不动（防御性）
+        let old2 = serde_json::json!({"title_zh": "旧"});
+        let mut new2 = serde_json::json!({"title_zh": "新"});
+        merge_translation_artifacts(&old2, &mut new2);
+        assert_eq!(new2["title_zh"], "新");
+
+        // 非字符串/非对象的脏数据安全跳过
+        let old3 = serde_json::json!({"title_zh": 42});
+        let mut new3 = serde_json::json!({});
+        merge_translation_artifacts(&old3, &mut new3);
+        assert!(new3.get("title_zh").is_none());
+        let mut not_obj = serde_json::json!([]);
+        merge_translation_artifacts(&old, &mut not_obj);
+        assert!(not_obj.is_array());
+    }
+
+    #[test]
+    fn test_translation_stale() {
+        // 无译本 → 不陈旧
+        assert!(!translation_stale(false, None, Some("h")));
+        // 译本 hash 与当前 paper.md 一致 → 新鲜
+        assert!(!translation_stale(true, Some("h"), Some("h")));
+        // 重解析后不一致 → 陈旧（按未翻译处理）
+        assert!(translation_stale(true, Some("old"), Some("new")));
+        // 老译本未记录 sourceHash → 缺失即陈旧
+        assert!(translation_stale(true, None, Some("h")));
+        // paper.md 缺失（异常态）→ 有译本即陈旧
+        assert!(translation_stale(true, Some("h"), None));
+    }
+
+    #[test]
+    fn test_vectorized_stale() {
+        // 锚一致且有分片 → 新鲜
+        assert!(!vectorized_stale(Some("h"), Some("h"), 3));
+        // 未曾向量化（无锚无分片）→ 需要向量化
+        assert!(vectorized_stale(None, Some("h"), 0));
+        // 重解析后：metadata 换新锚消失 + 分片清空 → 陈旧
+        assert!(vectorized_stale(None, Some("new"), 0));
+        // 嵌入维度变更重建向量表：锚还在但分片清空 → 陈旧
+        assert!(vectorized_stale(Some("h"), Some("h"), 0));
+        // paper.md 变化锚未更新 → 陈旧
+        assert!(vectorized_stale(Some("old"), Some("new"), 3));
     }
 }

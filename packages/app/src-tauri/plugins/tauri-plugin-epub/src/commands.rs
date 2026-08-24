@@ -582,11 +582,39 @@ pub async fn index_paper<R: Runtime>(
     .await
     .map_err(|e| e.to_string())?;
 
+    // 版本锚：metadata.json.vectorizedSourceHash = 当前 paper.md 的 sourceHash（sha256 截 16 hex，
+    // 与 app 侧 scan_papers_dir 的 id 算法同口径）。重解析会换新 metadata.json 并清空向量分片，
+    // 锚随之失效 → get_paper_source_status 判 stale；写锚失败仅告警（方向安全：保持 stale）
+    if let Err(e) = record_vectorized_source_hash(&app_data_dir, &paper_id) {
+        log::warn!("记录论文向量版本锚失败 (paper_id={}): {}", paper_id, e);
+    }
+
     Ok(IndexResult {
         success: true,
         message: "indexed".into(),
         report: Some(report.into()),
     })
+}
+
+/// 向量化完成后把版本锚写进 {app_data}/books/{paper_id}/metadata.json
+/// （读改写，不动其他字段；sourceHash = paper.md 内容 sha256 截 16 hex）
+fn record_vectorized_source_hash(app_data_dir: &std::path::Path, paper_id: &str) -> anyhow::Result<()> {
+    use sha2::Digest;
+    let book_dir = app_data_dir.join("books").join(paper_id);
+    let content = std::fs::read(book_dir.join("paper.md"))?;
+    let source_hash = format!("{:x}", sha2::Sha256::digest(&content))[..16].to_string();
+
+    let meta_path = book_dir.join("metadata.json");
+    let raw = std::fs::read_to_string(&meta_path)?;
+    let mut metadata: serde_json::Value = serde_json::from_str(&raw)?;
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert(
+            "vectorizedSourceHash".to_string(),
+            serde_json::Value::String(source_hash),
+        );
+    }
+    std::fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -700,4 +728,40 @@ pub async fn get_paper_chunk_context<R: Runtime>(
 #[tauri::command]
 pub fn tokenize_zh(texts: Vec<String>) -> Vec<Vec<crate::text::zh_segmenter::ZhToken>> {
     crate::text::zh_segmenter::tokenize_zh(&texts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::record_vectorized_source_hash;
+
+    #[test]
+    fn test_record_vectorized_source_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let book_dir = dir.path().join("books").join("paper-x");
+        std::fs::create_dir_all(&book_dir).unwrap();
+        std::fs::write(book_dir.join("paper.md"), "# Hello").unwrap();
+        std::fs::write(book_dir.join("metadata.json"), r#"{"title":"Hello","title_zh":"你好"}"#).unwrap();
+
+        record_vectorized_source_hash(dir.path(), "paper-x").unwrap();
+
+        let metadata: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(book_dir.join("metadata.json")).unwrap()).unwrap();
+        // 版本锚写入，且与 scan_papers_dir 的 id 算法同口径（sha256("# Hello") 截 16 hex）
+        use sha2::Digest;
+        let expected = format!("{:x}", sha2::Sha256::digest(b"# Hello"));
+        assert_eq!(
+            metadata["vectorizedSourceHash"].as_str().unwrap(),
+            &expected[..16]
+        );
+        // 读改写：其他字段原样保留
+        assert_eq!(metadata["title"].as_str().unwrap(), "Hello");
+        assert_eq!(metadata["title_zh"].as_str().unwrap(), "你好");
+    }
+
+    #[test]
+    fn test_record_vectorized_source_hash_missing_paper() {
+        let dir = tempfile::tempdir().unwrap();
+        // paper.md 缺失 → 报错（调用方降级为告警，不阻断向量化结果）
+        assert!(record_vectorized_source_hash(dir.path(), "paper-none").is_err());
+    }
 }

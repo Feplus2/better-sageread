@@ -17,6 +17,7 @@ import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
  */
 import { alignPaperTranslation, inspectPaperAlignment } from "@/services/paper-alignment-service";
 import { resolvePaperSourcePdf } from "@/services/paper-reparse-service";
+import { getPaperSourceStatus } from "@/services/paper-service";
 import { loadPaperTranslation, translatePaper } from "@/services/paper-translation-service";
 import { isPaperQueuedOrRunning, startPaperReparse } from "@/store/convert-progress-store";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
@@ -47,7 +48,7 @@ export const processPaperTool = tool({
 📚 **适用范围**：仅文献库论文（MARKDOWN 格式）；书籍翻译请走 convertPdf 的转换链路。
 
 🎯 **核心功能**：
-• action=status：查询论文的翻译与对齐状态（有无译本、句/词对齐覆盖率）
+• action=status：查询论文的翻译与对齐状态（有无译本、句/词对齐覆盖率、译本/向量是否因重解析而陈旧）
 • action=translate：翻译论文（force=false 续翻跳过已翻，force=true 全部重翻）；
   翻译完成后**自动顺带执行句级+词级对齐**（与阅读器界面行为一致）
 • action=align：仅执行/重建对齐（force=false 幂等补齐，force=true 全量重算）
@@ -107,10 +108,16 @@ export const processPaperTool = tool({
         const file = await loadPaperTranslation(paperId);
         const alignInfo = await inspectPaperAlignment(markdown, file);
         const hasTranslation = !!file && Object.keys(file.blocks).length > 0;
+        // 版本锚判定：重解析后旧译本/旧向量即陈旧（陈旧译本阅读器不再显示，需重新翻译；向量需重向量化）
+        const source = await getPaperSourceStatus(paperId).catch(() => null);
+        const translationStale = source?.translationStale ?? false;
+        const vectorizedStale = source?.vectorizedStale ?? false;
         return {
           results: {
             success: true,
             hasTranslation,
+            translationStale,
+            vectorizedStale,
             alignStatus: file?.alignStatus ?? null,
             alignWStatus: file?.alignWStatus ?? null,
             alignment: alignInfo
@@ -120,9 +127,11 @@ export const processPaperTool = tool({
                   alignedWords: alignInfo.alignedW,
                 }
               : null,
-            message: hasTranslation
-              ? `已有译本；句对齐 ${alignInfo?.aligned ?? 0}/${alignInfo?.total ?? 0}，词对齐 ${alignInfo?.alignedW ?? 0}/${alignInfo?.total ?? 0}`
-              : "尚未翻译",
+            message: !hasTranslation
+              ? "尚未翻译"
+              : translationStale
+                ? "译本已陈旧：论文重新解析后旧译文不再显示，需重新翻译（action=translate）"
+                : `已有译本；句对齐 ${alignInfo?.aligned ?? 0}/${alignInfo?.total ?? 0}，词对齐 ${alignInfo?.alignedW ?? 0}/${alignInfo?.total ?? 0}`,
           },
           meta,
         };

@@ -26,6 +26,8 @@ export interface PaperMetadata {
   /** metadata.json 附加字段（翻译服务写入；frontmatter 没有，仅列表中文化显示用） */
   title_zh?: string;
   abstract_zh?: string;
+  /** 翻译运行状态戳记（翻译服务收尾写入）：complete=完整译本；partial=中断/部分批次失败的不完整译本 */
+  translationRunState?: "complete" | "partial";
   /** 本地扩展（契约 §三）：经 Zotero 导入的条目 key，去重链主键 */
   zotero_key?: string;
   /** 本地扩展：Zotero 侧源 PDF 绝对路径（重解析回链；拖入导入无此字段，PDF 拷在书库目录） */

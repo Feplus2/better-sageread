@@ -285,6 +285,25 @@ export async function trashPaper(id: string): Promise<void> {
   return deleteBook(id);
 }
 
+/** Rust get_paper_source_status 返回的论文产物版本锚状态（camelCase） */
+export interface PaperSourceStatus {
+  /** 当前 paper.md 的 sourceHash（文件缺失为 null） */
+  sourceHash: string | null;
+  /** translation-zh.json 顶层 sourceHash（无译本或老译本未记录为 null） */
+  translationSourceHash: string | null;
+  /** 有译本但 hash 缺失/不一致 → 陈旧（渲染侧按未翻译处理） */
+  translationStale: boolean;
+  /** metadata.json 的 vectorizedSourceHash（向量化完成时写入；重解析换新后消失） */
+  vectorizedSourceHash: string | null;
+  /** 锚缺失/不一致，或向量库中该论文已无分片 → 需要（重新）向量化（未曾向量化亦为 true） */
+  vectorizedStale: boolean;
+}
+
+/** 查询论文产物版本锚状态（低成本：小文件读取 + 向量库一行 COUNT；渲染防错配/重向量化引导用） */
+export async function getPaperSourceStatus(paperId: string): Promise<PaperSourceStatus> {
+  return invoke<PaperSourceStatus>("get_paper_source_status", { paperId });
+}
+
 /**
  * 向量化单篇论文：写入全局论文向量库 {app_data}/papers/vectors.sqlite（重索引先删后插）。
  * 进度经 paper://index-progress 事件发出（由页面监听）；状态合并写入 book_status.metadata.vectorization。

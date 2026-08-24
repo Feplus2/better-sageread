@@ -221,7 +221,17 @@ impl DatabaseConnection {
                 log::info!("vec0虚拟表创建成功，维度: {}", self.embedding_dimension);
             }
         } else {
-            log::warn!("向量表已存在，跳过创建");
+            // 维度自愈：vec0 表维度在建表时钉死（FLOAT[N]），换不同维度的嵌入模型后写不进——
+            // 检出表维度与当前模型维度不一致则重建（旧向量随表废弃，论文经 stale 判定引导重向量化）
+            match self.existing_vector_dimension() {
+                Ok(Some(existing)) if existing != self.embedding_dimension => {
+                    self.rebuild_vector_table()
+                        .with_context(|| "Failed to rebuild vector table for new embedding dimension")?;
+                }
+                Ok(Some(_)) => log::info!("向量表已存在且维度一致，跳过创建"),
+                Ok(None) => log::warn!("向量表已存在但维度无法解析，保持原样"),
+                Err(e) => log::warn!("读取向量表维度失败，保持原样: {}", e),
+            }
         }
 
         // 初始化BM25相关表
@@ -234,6 +244,46 @@ impl DatabaseConnection {
     }
 
 
+
+    /// 读取现有 vec0 表的向量维度（vec0 不向 PRAGMA table_info 报列类型，
+    /// 但 sqlite_master.sql 保留原始建表语句，形如 "embedding FLOAT[2048]"；解析失败返回 None）
+    fn existing_vector_dimension(&self) -> Result<Option<usize>> {
+        let sql: String = self.conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(parse_vec0_dimension(&sql))
+    }
+
+    /// 维度不一致时重建向量表：drop 旧 vec0/fallback 表、清全部分片与 BM25 统计
+    /// （分片脱离向量即成死索引，连同 document_chunks 一起清），再以当前维度重建。
+    /// 全库旧论文向量随之失效——状态查询（分片数=0）自然判 stale，引导重新向量化
+    fn rebuild_vector_table(&mut self) -> Result<()> {
+        log::warn!(
+            "嵌入模型维度变更：现有向量表维度与当前维度（{}）不一致，重建向量表（全库旧向量失效，需重新向量化）",
+            self.embedding_dimension
+        );
+        self.conn
+            .execute("DROP TABLE IF EXISTS chunk_embeddings", [])
+            .with_context(|| "Failed to drop chunk_embeddings")?;
+        self.conn
+            .execute("DROP TABLE IF EXISTS chunk_embeddings_fallback", [])
+            .with_context(|| "Failed to drop chunk_embeddings_fallback")?;
+        self.conn
+            .execute("DELETE FROM document_chunks", [])
+            .with_context(|| "Failed to clear document_chunks")?;
+        // bm25_stats 全库统计缓存，随内容清空（老库可能尚未建表，容错忽略）
+        let _ = self.conn.execute("DELETE FROM bm25_stats", []);
+
+        if let Err(e) = self.create_vector_table() {
+            log::warn!("sqlite-vec不可用，使用后备表: {}", e);
+            self.create_fallback_table()
+                .with_context(|| "Failed to create fallback vector table")?;
+        }
+        log::warn!("向量表已按维度 {} 重建完成", self.embedding_dimension);
+        Ok(())
+    }
 
     /// 创建向量表（简单版本）
     fn create_vector_table(&self) -> Result<()> {
@@ -332,3 +382,88 @@ impl DatabaseConnection {
     }
 
 }
+
+/// 从 vec0 建表语句解析向量维度（含 "FLOAT[2048]" → Some(2048)；不含/非法 → None，保持原样不重建）
+fn parse_vec0_dimension(create_sql: &str) -> Option<usize> {
+    let start = create_sql.find("FLOAT[")? + "FLOAT[".len();
+    let rest = &create_sql[start..];
+    let end = rest.find(']')?;
+    if end == 0 {
+        return None;
+    }
+    rest[..end].parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::DatabaseOperations;
+    use tempfile::NamedTempFile;
+
+    fn insert_one_chunk(db: &mut DatabaseConnection, dimension: usize, paper_id: &str) {
+        let chunk = crate::models::DocumentChunk {
+            id: None,
+            book_title: "Test Paper".to_string(),
+            book_author: "Test Author".to_string(),
+            paper_id: paper_id.to_string(),
+            md_file_path: "paper.md".to_string(),
+            file_order_in_book: 0,
+            related_chapter_titles: "Test Paper".to_string(),
+            chunk_text: "chunk text".to_string(),
+            chunk_order_in_file: 0,
+            total_chunks_in_file: 1,
+            embedding: vec![0.1; dimension],
+            global_chunk_index: 0,
+            is_references: false,
+        };
+        DatabaseOperations::new(db).insert_chunk(&chunk).unwrap();
+    }
+
+    fn chunk_count(db: &DatabaseConnection) -> i64 {
+        db.connection()
+            .query_row("SELECT COUNT(*) FROM document_chunks", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn test_parse_vec0_dimension() {
+        let create_sql = "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(\n chunk_id INTEGER PRIMARY KEY,\n embedding FLOAT[2048]\n)";
+        assert_eq!(parse_vec0_dimension(create_sql), Some(2048));
+        assert_eq!(parse_vec0_dimension("embedding FLOAT[384]"), Some(384));
+        // 非法形态一律 None（不重建，保持原样）
+        assert_eq!(parse_vec0_dimension("embedding FLOAT[]"), None);
+        assert_eq!(parse_vec0_dimension("CREATE TABLE t (embedding BLOB)"), None);
+        assert_eq!(parse_vec0_dimension(""), None);
+        assert_eq!(parse_vec0_dimension("embedding FLOAT[abc]"), None);
+    }
+
+    #[test]
+    fn test_dimension_unchanged_keeps_data() {
+        let temp_file = NamedTempFile::new().unwrap();
+        {
+            let mut db = DatabaseConnection::new(temp_file.path(), 4).unwrap();
+            insert_one_chunk(&mut db, 4, "paper-a");
+        }
+        // 同维度重开：不重建，分片保留
+        let db = DatabaseConnection::new(temp_file.path(), 4).unwrap();
+        assert_eq!(db.existing_vector_dimension().unwrap(), Some(4));
+        assert_eq!(chunk_count(&db), 1);
+    }
+
+    #[test]
+    fn test_dimension_change_rebuilds_table() {
+        let temp_file = NamedTempFile::new().unwrap();
+        {
+            let mut db = DatabaseConnection::new(temp_file.path(), 4).unwrap();
+            insert_one_chunk(&mut db, 4, "paper-a");
+        }
+        // 换不同维度的嵌入模型重开：vec0 表按新维度重建，旧分片/向量清空（stale 判定依赖分片数=0）
+        let mut db = DatabaseConnection::new(temp_file.path(), 8).unwrap();
+        assert_eq!(db.existing_vector_dimension().unwrap(), Some(8));
+        assert_eq!(chunk_count(&db), 0);
+        // 重建后可按新维度正常写入（自愈目标：不再因维度钉死而写不进）
+        insert_one_chunk(&mut db, 8, "paper-b");
+        assert_eq!(chunk_count(&db), 1);
+    }
+}
+

@@ -66,6 +66,12 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 | `view-settings.json` | 前端按书写的视图设置 | `src/lib/tauri-storage.ts:166-168` |
 | `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本） | `services/paper-translation-service.ts:24-25,123` |
 
+版本锚与状态戳记（2026-08-24，重解析/翻译/向量化的版本对齐基座）：
+
+- `translation-zh.json` 顶层 `sourceHash` = 所译 paper.md 内容的 sha256-16（`core/books/commands.rs` 的 `paper_source_hash`，与 scan 入库 id 同算法）；`metadata.json` 顶层 `vectorizedSourceHash`（`index_paper` 成功后写入）与 `translationRunState`（翻译收尾写入 `complete`/`partial`，中断/批次失败为 partial——列表三色徽标的「不完整」来源）
+- `get_paper_source_status(paperId)` 据锚比对 + 向量分片计数给出 `translationStale`/`vectorizedStale`；`replace_paper_content` 重解析时按「原文没变才保」并入旧 `title_zh/abstract_zh`，并调 `purge_paper_vectors` 清死向量
+- 陈旧译本阅读器不显示（防错配），续翻（force=false）补齐变化块后锚复原；换嵌入维度模型时 `initialize_schema` 比对 vec0 维度，不一致自动 drop 重建（全库向量随之判 stale）
+
 删除时整个目录 `remove_dir_all`（`books/commands.rs:321-324`）。
 
 `books/` 之外的 `{appData}` 目录：
