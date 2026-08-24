@@ -28,6 +28,8 @@ export interface TaskItem {
   /** 进度行文案 */
   detail: string;
   error?: string;
+  /** 执行器结算产物（如图书转换的 epubPath/imported；enqueueAndWait 调用方取用） */
+  result?: unknown;
   /** 归属批次（一次 enqueue 调用携带的 item 集合） */
   runId: string;
 }
@@ -43,6 +45,8 @@ export interface TaskRun {
 export interface TaskContext {
   /** 执行器报进度（percent 0-100；detail 缺省不变） */
   report: (percent: number, detail?: string) => void;
+  /** 执行器写结算产物（enqueueAndWait 的调用方在 resolve 的 TaskItem.result 上取到） */
+  setResult: (result: unknown) => void;
   /** 取消信号：执行器应在检查点响应（或把自己的 AbortController 接上来） */
   signal: AbortSignal;
 }
@@ -144,6 +148,7 @@ async function drainChannel(channel: TaskChannel): Promise<void> {
       try {
         await def.executor(task, {
           report: (percent, detail) => patchTask(task.taskId, detail === undefined ? { percent } : { percent, detail }),
+          setResult: (result) => patchTask(task.taskId, { result }),
           signal: ac.signal,
         });
         patchTask(task.taskId, { status: "success", percent: 100 });

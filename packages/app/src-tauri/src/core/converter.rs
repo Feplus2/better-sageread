@@ -103,6 +103,9 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
     }
 
     let app_handle = app.clone();
+    // 任务归属标识：随每条进度事件回传给前端，多任务/迟到事件时前端据此过滤（防串台，
+    // 与 paper_converter.rs 的注入模式同款）
+    let pdf_path = params.pdf_path.clone();
     tauri::async_runtime::spawn(async move {
         let mut buffer = String::new();
         while let Some(event) = rx.recv().await {
@@ -116,7 +119,15 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
                         if line.is_empty() {
                             continue;
                         }
-                        let _ = app_handle.emit("convert://progress", line);
+                        // 注入 pdf_path 任务标识；非 JSON 对象行（异常输出）按原样转发
+                        let payload = match serde_json::from_str::<serde_json::Value>(&line) {
+                            Ok(mut v) if v.is_object() => {
+                                v["pdf_path"] = serde_json::Value::String(pdf_path.clone());
+                                v.to_string()
+                            }
+                            _ => line,
+                        };
+                        let _ = app_handle.emit("convert://progress", payload);
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
@@ -131,15 +142,14 @@ pub async fn convert_pdf_to_epub(app: AppHandle, params: ConvertParams) -> Resul
                 CommandEvent::Terminated(status) => {
                     let success = status.code == Some(0);
                     log::info!("[Converter] 进程退出, code={:?}", status.code);
-                    let _ = app_handle.emit(
-                        "convert://progress",
-                        format!(r#"{{"type":"terminated","success":{}}}"#, success),
-                    );
+                    let payload =
+                        serde_json::json!({"type":"terminated","success":success,"pdf_path":pdf_path}).to_string();
+                    let _ = app_handle.emit("convert://progress", payload);
                     break;
                 }
                 CommandEvent::Error(e) => {
                     log::error!("[Converter] 进程错误: {}", e);
-                    let payload = serde_json::json!({"type":"error","message":e}).to_string();
+                    let payload = serde_json::json!({"type":"error","message":e,"pdf_path":pdf_path}).to_string();
                     let _ = app_handle.emit("convert://progress", payload);
                     break;
                 }

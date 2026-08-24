@@ -7,17 +7,15 @@
  * 现统一沉到模块级 store：队列与事件监听的生命周期独立于任何视图，
  * 右下角全局进度卡（components/global-convert-progress）跨页面呈现，
  * 仅在全局助手聊天页与书籍/论文阅读器三个视图豁免（避免遮挡正文）。
+ *
+ * P2-1（统一任务队列）：图书转换的执行（监听注册/阶段推进/结算/自动导入）已迁入
+ * services/task-executors/book-convert.ts 并注册为 task-center 的 book-convert 通道；
+ * 本 store 的 bookConvert 保留为转换大窗口详情数据源（由执行器回写），入口为 enqueue 薄壳。
  */
 
 import { callMcpServerTool, findZoteroBrainServer, parseMcpToolJson } from "@/ai/mcp/mcp-manager";
 import { type PaperMetadata, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
-import {
-  type ConvertProgress,
-  cancelConvert,
-  importConvertedEpub,
-  listenConvertProgress,
-  startConvert,
-} from "@/services/converter-service";
+import { importConvertedEpub } from "@/services/converter-service";
 import { invalidateLibraryPaperIndex } from "@/services/paper-reference-service";
 import { replacePaperWithConverted, resolvePaperSourcePdf } from "@/services/paper-reparse-service";
 import {
@@ -34,6 +32,7 @@ import {
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { useLibraryStore } from "@/store/library-store";
+import { useTaskCenterStore } from "@/store/task-center-store";
 import { findDegenerateLoop } from "@/utils/degenerate";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -128,8 +127,9 @@ const BOOK_CONVERT_INITIAL: BookConvertState = {
   importing: false,
 };
 
-/** 按是否翻译与引擎构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4） */
-function buildBookStages(withTranslate: boolean, engine: "mineru" | "paddleocr"): BookStageState[] {
+/** 按是否翻译与引擎构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4）。
+ *  导出给 book-convert 通道执行器复用（任务启动时定格运行态阶段） */
+export function buildBookStages(withTranslate: boolean, engine: "mineru" | "paddleocr"): BookStageState[] {
   const stages = [
     { n: 1, name: engine === "paddleocr" ? "PaddleOCR 解析" : "MinerU 解析" },
     { n: 2, name: "Hybrid 结构重建" },
@@ -162,12 +162,12 @@ interface ConvertProgressState {
   setBookConvertConfig: (
     patch: Partial<Pick<BookConvertState, "ocr" | "translate"> | { pdfPath: string | null }>,
   ) => void;
+  /** 大窗口「开始转换」提交：改为 book-convert 通道入队薄壳（P2-1；执行器在 services/task-executors/book-convert） */
   startBookConvert: () => Promise<void>;
-  /** AI 工具 convertPdf 的托管转换入口：单飞守卫 → 右下角小卡跟踪 → done 自动入库；10 分钟无终态兜底错误 */
-  startBookConvertAuto: (input: { pdfPath: string; ocr: boolean; translate?: string }) => Promise<void>;
   cancelBookConvert: () => Promise<void>;
-  importBookConvertResult: () => Promise<void>;
-  /** 丢弃图书转换状态（小卡 X / 换文件重置）：解除监听回到 idle */
+  /** 导入转换产物 EPUB 入库（大窗口按钮与执行器托管自动导入共用）；返回是否成功 */
+  importBookConvertResult: () => Promise<boolean>;
+  /** 丢弃图书转换状态（小卡 X / 换文件重置）：回 idle（任务监听在执行器内，结算即解除） */
   resetBookConvert: () => void;
 }
 
@@ -211,102 +211,37 @@ export const useConvertProgressStore = create<ConvertProgressState>()((set, get)
   startBookConvert: async () => {
     const { pdfPath, ocr, translate } = get().bookConvert;
     if (!pdfPath) return;
-    // 结果区重置 + 阶段流水线构建（与旧 ConverterPage.handleStart 一致）
-    set((s) => ({
-      bookConvert: {
-        ...s.bookConvert,
-        status: "converting",
-        percent: 0,
-        detail: "",
-        stages: buildBookStages(translate !== "none", useConverterStore.getState().engine),
-        errorMessage: "",
-        epubPath: null,
-        // 人工路径显式复位托管标记（防沿用上一轮 convertPdf 的 autoImport 而误自动入库）
-        autoImport: false,
-      },
-    }));
-    try {
-      bookUnlisten?.();
-      bookUnlisten = await listenConvertProgress(handleBookProgress);
-      await startConvert(pdfPath, ocr, translate === "none" ? undefined : translate);
-    } catch (e) {
-      markBookActiveError();
-      set((s) => ({
-        bookConvert: { ...s.bookConvert, status: "error", errorMessage: e instanceof Error ? e.message : String(e) },
-      }));
-    }
-  },
-
-  startBookConvertAuto: async ({ pdfPath, ocr, translate }) => {
-    // 后端为单子进程模型（converter.rs 单 child），事件无归属字段——单飞即归属，有任务在跑时拒起
-    if (get().bookConvert.status === "converting") {
-      throw new Error("已有 PDF 转换任务进行中，请待其完成后再试");
-    }
-    clearBookAutoTimeout();
-    set((s) => ({
-      bookConvert: {
-        ...s.bookConvert,
-        pdfPath,
-        ocr,
-        translate: translate ?? "none",
-        status: "converting",
-        percent: 0,
-        detail: "",
-        stages: buildBookStages(!!translate && translate !== "none", useConverterStore.getState().engine),
-        errorMessage: "",
-        epubPath: null,
-        autoImport: true,
-      },
-      // 托管路径无人盯大窗口：直接以右下角小卡呈现进度（与人工转换最小化同款卡片）
-      bookConvertMinimized: true,
-    }));
-    // 长超时兜底：进程静默卡死且连 terminated 都丢失时给出错误态（10 分钟足以覆盖正常转换）
-    bookAutoTimeout = setTimeout(() => {
-      bookAutoTimeout = null;
-      if (useConvertProgressStore.getState().bookConvert.status !== "converting") return;
-      markBookActiveError();
-      useConvertProgressStore.setState((s) => ({
-        bookConvert: { ...s.bookConvert, status: "error", errorMessage: "转换超时（10 分钟无完成回执），已取消进程" },
-      }));
-      void cancelConvert().catch(() => {});
-    }, BOOK_AUTO_TIMEOUT_MS);
-    try {
-      bookUnlisten?.();
-      bookUnlisten = await listenConvertProgress(handleBookProgress);
-      await startConvert(pdfPath, ocr, translate);
-    } catch (e) {
-      clearBookAutoTimeout();
-      markBookActiveError();
-      set((s) => ({
-        bookConvert: { ...s.bookConvert, status: "error", errorMessage: e instanceof Error ? e.message : String(e) },
-      }));
-      throw e;
-    }
+    // 动态导入打破 store ↔ 执行器模块环（执行器回写本 store）；模块加载即完成通道注册
+    const { enqueueBookConvert } = await import("@/services/task-executors/book-convert");
+    const result = enqueueBookConvert({ pdfPath, ocr, translate, autoImport: false });
+    if (!result.ok) toast.info(result.detail ?? "转换任务入队失败");
   },
 
   cancelBookConvert: async () => {
-    // 先落 idle 再杀进程：树杀（taskkill /T /F）期间 terminated 事件到达时，
-    // handleBookProgress 见状态非 converting 不再误报「意外退出」
+    // 队列化后取消 = 撤掉 book-convert 通道当前任务：cancelTask 触发 signal，
+    // 执行器内调既有 cancelConvert（Rust kill_tree 树杀）；先落 idle 使迟到的
+    // 状态回写不再被大窗口当作在跑任务展示
+    const { cancelBookConvertTask } = await import("@/services/task-executors/book-convert");
+    if (!cancelBookConvertTask()) return;
     set((s) => ({ bookConvert: { ...s.bookConvert, status: "idle" } }));
-    try {
-      await cancelConvert();
-    } catch (e) {
-      console.warn("取消转换失败:", e);
-    }
     toast.info("已取消转换");
   },
 
   importBookConvertResult: async () => {
     const { epubPath } = get().bookConvert;
-    if (!epubPath) return;
+    if (!epubPath) return false;
     set((s) => ({ bookConvert: { ...s.bookConvert, importing: true } }));
     try {
       await importConvertedEpub(epubPath);
       await useLibraryStore.getState().refreshBooks();
       toast.success("已导入图书馆");
+      // 入库成功即收尾：清掉通道已结算任务（小卡随之消失）并复位大窗口数据源
+      useTaskCenterStore.getState().dismissSettled("book-convert");
       resetBookConvertState();
+      return true;
     } catch (e) {
       toast.error(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     } finally {
       set((s) => ({ bookConvert: { ...s.bookConvert, importing: false } }));
     }
@@ -319,9 +254,6 @@ export const useConvertProgressStore = create<ConvertProgressState>()((set, get)
 
 // zustand 模块内辅助：直接走 setState，避免把 set 混进 state
 function resetBookConvertState() {
-  clearBookAutoTimeout();
-  bookUnlisten?.();
-  bookUnlisten = null;
   const prev = useConvertProgressStore.getState().bookConvert;
   // 配置项（文件/OCR/翻译）保留，运行结果清空
   useConvertProgressStore.setState({
@@ -330,78 +262,14 @@ function resetBookConvertState() {
   });
 }
 
-function markBookActiveError() {
+/** 把 active 阶段标错（执行器在启动失败/超时兜底时调用；导出给 book-convert 通道执行器复用） */
+export function markBookActiveError() {
   useConvertProgressStore.setState((s) => ({
     bookConvert: {
       ...s.bookConvert,
       stages: s.bookConvert.stages.map((st) => (st.status === "active" ? { ...st, status: "error" } : st)),
     },
   }));
-}
-
-/** Books_Converter 进度事件 → store（监听挂在模块级，视图卸载不影响接收） */
-let bookUnlisten: (() => void) | null = null;
-
-/** 托管转换（convertPdf 工具路径）的超时兜底定时器：10 分钟无终态 → 错误态 + 取消进程 */
-const BOOK_AUTO_TIMEOUT_MS = 10 * 60 * 1000;
-let bookAutoTimeout: ReturnType<typeof setTimeout> | null = null;
-
-function clearBookAutoTimeout() {
-  if (bookAutoTimeout) {
-    clearTimeout(bookAutoTimeout);
-    bookAutoTimeout = null;
-  }
-}
-
-function handleBookProgress(p: ConvertProgress) {
-  useConvertProgressStore.setState((s) => {
-    const bookConvert = s.bookConvert;
-    const patch: Partial<BookConvertState> = {};
-    if (p.percent !== undefined) patch.percent = p.percent;
-    if (p.detail) patch.detail = p.detail;
-    switch (p.type) {
-      case "progress":
-        if (p.stage !== undefined) {
-          patch.stages = bookConvert.stages.map((st) =>
-            st.n === p.stage && st.status !== "done" ? { ...st, status: "active" as BookStageStatus } : st,
-          );
-        }
-        break;
-      case "stage_done":
-        if (p.stage !== undefined) {
-          patch.stages = bookConvert.stages.map((st) =>
-            st.n === p.stage ? { ...st, status: "done" as BookStageStatus, elapsed: p.elapsed } : st,
-          );
-        }
-        break;
-      case "done":
-        patch.stages = bookConvert.stages.map((st) => ({ ...st, status: "done" as BookStageStatus }));
-        if (p.epub_path) patch.epubPath = p.epub_path;
-        patch.percent = 100;
-        patch.status = "done";
-        break;
-      case "error":
-        patch.stages = bookConvert.stages.map((st) => (st.status === "active" ? { ...st, status: "error" } : st));
-        patch.errorMessage = p.message || "转换失败";
-        patch.status = "error";
-        break;
-      case "terminated":
-        // 进程退出但未收到 done/error（崩溃等），避免状态卡死在 converting
-        if (bookConvert.status === "converting") {
-          patch.stages = bookConvert.stages.map((st) => (st.status === "active" ? { ...st, status: "error" } : st));
-          patch.errorMessage = "转换进程意外退出，请查看日志";
-          patch.status = "error";
-        }
-        break;
-    }
-    return { bookConvert: { ...bookConvert, ...patch } };
-  });
-  // 托管转换（autoImport）终态收尾：解除超时兜底；done 带产物 → 自动入库
-  // （导入失败时 importBookConvertResult 内部 toast 且卡片保留 done 态，可点小卡回大窗口手动重试）
-  if (p.type === "done" || p.type === "error" || p.type === "terminated") clearBookAutoTimeout();
-  if (p.type === "done" && p.epub_path && useConvertProgressStore.getState().bookConvert.autoImport) {
-    void useConvertProgressStore.getState().importBookConvertResult();
-  }
 }
 
 // ----------------------------------------------------------------------
