@@ -847,6 +847,19 @@ foliate-view {
   background-color: oklch(0.24 0 0);
 }
 
+/* 文内引文链接（#ref-N）恢复印刷上标排版：数据层是统一的 [N] 纯文本（链接匹配赖以工作，
+   上标仅表现层——与 GFM 脚注上标视觉一致）；line-height:0 防上标撑高行距
+   （P1 链接重建 + RSC 上标契约 2026-08-25） */
+.paper-content a[href^="#ref-"] {
+  vertical-align: super;
+  font-size: 0.75em;
+  line-height: 0;
+  text-decoration-line: none;
+}
+.paper-content a[href^="#ref-"]:hover {
+  text-decoration-line: underline;
+}
+
 /* ---------- Pandoc/GFM 脚注区（[^N] 引用点 + [^N]: 定义，remark-gfm 产物） ----------
  * 定义被 micromark 收拢到正文末尾的 <section data-footnotes>：收敛为分隔线 + 小号弱化文本；
  * 引用点/回跳链接的点击与定位闪烁走 paper-reader.tsx 的 # 链接路径（P1 机制）。 */
