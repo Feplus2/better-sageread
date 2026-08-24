@@ -31,7 +31,13 @@ import {
   parseReferencesJson,
   serializeReferences,
 } from "@/services/paper-reference-service";
-import { type Folder, type PaperFolderEntry, getPaperFolderMap, listFolders } from "@/services/paper-service";
+import {
+  type Folder,
+  type PaperFolderEntry,
+  getPaperFolderMap,
+  getPaperSourceStatus,
+  listFolders,
+} from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
   type PaperTranslationFile,
@@ -44,6 +50,7 @@ import { buildPaperFontFamily, useAppSettingsStore } from "@/store/app-settings-
 import { isPaperQueuedOrRunning, useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
+import { usePaperTaskStore } from "@/store/paper-task-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { Note, NoteLocation, NoteTocItem } from "@/types/note";
 import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
@@ -128,12 +135,29 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
 
   // 加载译本与元数据译文（paperId 切换 / 翻译或对齐完成后重载）
   const reloadTranslation = useCallback(async () => {
-    const [file, meta] = await Promise.all([loadPaperTranslation(paperId), loadPaperTranslatedMeta(paperId)]);
-    setTranslationFile(file);
+    // 版本锚比对（Rust 侧算 paper.md hash，TS 不对整篇算 sha256）：
+    // 重解析后译本 sourceHash 与当前 paper.md 不一致（或老译本未记录）→ 按未翻译处理，不显示旧译文；
+    // 状态查询失败时 fail-open（保持旧行为，不额外隐藏译本）
+    const [file, meta, status] = await Promise.all([
+      loadPaperTranslation(paperId),
+      loadPaperTranslatedMeta(paperId),
+      getPaperSourceStatus(paperId).catch((error) => {
+        console.warn("查询论文版本锚状态失败:", error);
+        return null;
+      }),
+    ]);
+    const stale = file !== null && status?.translationStale === true;
+    if (stale) {
+      console.info("论文重解析后旧译文已错配，按未翻译处理（可重新翻译）:", paperId);
+    }
+    const effectiveFile = stale ? null : file;
+    setTranslationFile(effectiveFile);
     setTranslationMap(
-      file ? new Map(Object.entries(file.blocks).map(([index, block]) => [Number(index), block.text])) : null,
+      effectiveFile
+        ? new Map(Object.entries(effectiveFile.blocks).map(([index, block]) => [Number(index), block.text]))
+        : null,
     );
-    setTranslatedMeta(meta);
+    setTranslatedMeta(stale ? null : meta);
   }, [paperId]);
 
   useEffect(() => {
@@ -255,13 +279,21 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       const controller = new AbortController();
       translateAbortRef.current = controller;
       setTranslating({ done: 0, total: 0 });
+      // 进度同步进右下角卡片栈（主页/文献库可见；阅读器页内由栈禁区隐藏，页内自有进度）；
+      // 取消回调注册给卡片取消按钮
+      usePaperTaskStore
+        .getState()
+        .startReaderTranslate({ paperId, title, done: 0, total: 0 }, () => controller.abort());
       try {
         const result = await translatePaper({
           paperId,
           markdown,
           force,
           signal: controller.signal,
-          onProgress: setTranslating,
+          onProgress: (p) => {
+            setTranslating(p);
+            usePaperTaskStore.getState().patchReaderTranslate({ done: p.done, total: p.total, detail: undefined });
+          },
         });
         await reloadTranslation();
         if (result.cancelled) {
@@ -278,7 +310,10 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
           );
         }
         // T2：翻译完成后自动计算句对齐（幂等；无嵌入能力时跳过并提示，不影响翻译本体）
-        if (!result.cancelled) await runAlignment(false, "auto");
+        if (!result.cancelled) {
+          usePaperTaskStore.getState().patchReaderTranslate({ detail: "句词对齐中…" });
+          await runAlignment(false, "auto");
+        }
       } catch (error) {
         if (controller.signal.aborted) {
           toast.info("翻译已取消，已翻译部分已保存，可随时续翻");
@@ -290,10 +325,13 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       } finally {
         translateAbortRef.current = null;
         usePaperTaskRegistry.getState().mark(paperId, "translate", false);
+        usePaperTaskStore.getState().clearReaderTranslate();
+        // 收尾即触发列表刷新（成功/取消/失败同口径——partial 戳记或新锚都要即时上徽标）
+        usePaperTaskStore.getState().onSettled?.();
         setTranslating(null);
       }
     },
-    [markdown, paperId, reloadTranslation, runAlignment],
+    [markdown, paperId, title, reloadTranslation, runAlignment],
   );
 
   const handleCancelTranslate = useCallback(() => {

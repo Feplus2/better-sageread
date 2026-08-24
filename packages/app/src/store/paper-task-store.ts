@@ -1,3 +1,4 @@
+import { alignPaperTranslation } from "@/services/paper-alignment-service";
 import { vectorizePaper } from "@/services/paper-service";
 import { translatePaper } from "@/services/paper-translation-service";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
@@ -24,6 +25,8 @@ interface TaskItem {
   author?: string;
   /** 单篇直发（卡片按钮）：完成时给该篇独立 toast；批量收尾只走进度卡汇总 */
   solo?: boolean;
+  /** 翻译通道：true=全量重翻（已有译文作废重翻）；缺省幂等续翻 */
+  force?: boolean;
 }
 
 /** 进度卡状态（与 PapersPage 既有 BatchProgressCard 字段一一对应） */
@@ -42,6 +45,17 @@ export interface ChannelProgress {
   cancelling?: boolean;
 }
 
+/** 阅读页单篇翻译的全局进度（阅读页内翻译不走队列：注册表打点防冲突照旧，
+ *  进度经此切片进右下角卡片栈，主页/文献库可见；阅读器页内由栈的禁区规则隐藏，页内自有进度 UI） */
+export interface ReaderTranslateState {
+  paperId: string;
+  title: string;
+  done: number;
+  total: number;
+  /** 收尾阶段（如「句词对齐中…」）；正文翻译阶段为 undefined */
+  detail?: string;
+}
+
 interface PaperTaskState {
   vectorizeQueue: TaskItem[];
   translateQueue: TaskItem[];
@@ -51,9 +65,15 @@ interface PaperTaskState {
   progress: Partial<Record<TaskKind, ChannelProgress>>;
   /** 每篇向量化百分比（卡片圆环用，与旧 setVectorizing 兼容） */
   vectorizePercent: Record<string, number>;
+  /** 阅读页单篇翻译进度（非队列路径；null=无）；onCancel 由发起方注册（卡片取消按钮用） */
+  readerTranslate: ReaderTranslateState | null;
+  startReaderTranslate: (s: ReaderTranslateState, onCancel: () => void) => void;
+  patchReaderTranslate: (patch: Partial<Pick<ReaderTranslateState, "done" | "total" | "detail">>) => void;
+  clearReaderTranslate: () => void;
+  cancelReaderTranslate: (() => void) | null;
   enqueue: (kind: TaskKind, papers: TaskItem[]) => { ok: boolean; rejectedCount: number };
   cancel: (kind: TaskKind) => void;
-  /** 通道收尾后回调（PapersPage 注册刷新列表用） */
+  /** 通道收尾后回调（PapersPage 注册刷新列表用；阅读页单篇翻译收尾同样触发——徽标即时转绿/黄） */
   onSettled: (() => void) | null;
   setOnSettled: (cb: (() => void) | null) => void;
 }
@@ -75,6 +95,12 @@ export const usePaperTaskStore = create<PaperTaskState>((set, get) => ({
   vectorizePercent: {},
   onSettled: null,
   setOnSettled: (cb) => set({ onSettled: cb }),
+  readerTranslate: null,
+  cancelReaderTranslate: null,
+  startReaderTranslate: (s, onCancel) => set({ readerTranslate: s, cancelReaderTranslate: onCancel }),
+  patchReaderTranslate: (patch) =>
+    set((state) => (state.readerTranslate ? { readerTranslate: { ...state.readerTranslate, ...patch } } : {})),
+  clearReaderTranslate: () => set({ readerTranslate: null, cancelReaderTranslate: null }),
 
   enqueue: (kind, papers) => {
     const accepted: TaskItem[] = [];
@@ -265,7 +291,7 @@ async function drainTranslate() {
       const result = await translatePaper({
         paperId: item.id,
         markdown,
-        force: false,
+        force: item.force ?? false,
         signal: translateAbort.signal,
         onProgress: ({ done: d, total: t }) =>
           patchProgress("translate", {
@@ -275,6 +301,23 @@ async function drainTranslate() {
       });
       if (result.cancelled) break;
       done += 1;
+      // 翻译收尾接句词对齐（与阅读器 handleTranslate / AI 工具 processPaper 同函数同口径，保证三条路径产物一致）：
+      // force=false 幂等补齐——force 重翻后译文 hash 全变，对齐自然全量重算；无嵌入能力时服务内部跳过不抛错
+      try {
+        patchProgress("translate", { detail: "句词对齐中…" });
+        await alignPaperTranslation({
+          paperId: item.id,
+          markdown,
+          force: false,
+          signal: translateAbort.signal,
+          onProgress: ({ done: d, total: t }) =>
+            patchProgress("translate", { detail: t > 0 ? `句词对齐 ${d}/${t}` : undefined }),
+        });
+      } catch (error) {
+        if (translateAbort.signal.aborted) break;
+        // 对齐失败不记该篇失败：译本是主产物，alignStatus 已在服务内落 partial/skipped（可经阅读器翻译菜单重建）
+        console.warn(`翻译后句词对齐失败: ${item.id}`, error);
+      }
       if (item.solo) {
         toast.success(
           result.translated > 0

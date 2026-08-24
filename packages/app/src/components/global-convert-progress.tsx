@@ -1,9 +1,11 @@
 /**
  * 全局转换进度层（右下角浮层，挂在 ReaderLayout——独立于任何路由页面）。
  *
- * 两张卡纵向堆叠（互不重叠）：
+ * 三类卡纵向堆叠（互不重叠）：
  * - 论文 PDF 解析进度卡：状态在 convert-progress-store，跨页面持续呈现；
- * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现，点击还原大窗口。
+ * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现，点击还原大窗口；
+ * - 阅读页单篇翻译小卡：状态在 paper-task-store（readerTranslate），阅读器内发起的翻译
+ *   在主页/文献库可见；阅读器页内由栈禁区隐藏（页内自有进度 UI）。
  *
  * 豁免视图（不渲染任何卡，避免遮挡正文）：全局助手聊天页（/chat）、
  * 书籍阅读器 tab、论文阅读器 tab——即任何阅读器 tab 激活期间。
@@ -18,6 +20,7 @@ import {
   dismissPaperImport,
   useConvertProgressStore,
 } from "@/store/convert-progress-store";
+import { usePaperTaskStore } from "@/store/paper-task-store";
 import clsx from "clsx";
 import { BookText, Check, FileText, X } from "lucide-react";
 import { useEffect } from "react";
@@ -191,14 +194,42 @@ function BookConvertMiniCard({ bookConvert }: { bookConvert: BookConvertState })
   );
 }
 
+/** 阅读页单篇翻译小卡（队列外路径；完成/取消/失败即清除，取消按钮调发起方注册的回调） */
+function ReaderTranslateCard() {
+  const rt = usePaperTaskStore((s) => s.readerTranslate);
+  if (!rt) return null;
+  const percent = rt.total > 0 ? Math.round((rt.done / rt.total) * 100) : 0;
+  return (
+    <BottomRightPortal>
+      <div className="pointer-events-auto w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="min-w-0 flex-1 truncate font-medium text-sm">{rt.title}</span>
+          <span className="shrink-0 text-muted-foreground text-xs">翻译中</span>
+          <button
+            type="button"
+            title="取消翻译（已翻部分会保存，可续翻）"
+            className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+            onClick={() => usePaperTaskStore.getState().cancelReaderTranslate?.()}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+        <Progress value={percent} className="h-1.5" />
+        <div className="mt-1.5 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+          <span className="min-w-0 flex-1 truncate">{rt.detail ?? `已翻译 ${rt.done}/${rt.total || "…"} 块`}</span>
+          <span className="shrink-0">{percent}%</span>
+        </div>
+      </div>
+    </BottomRightPortal>
+  );
+}
+
 export default function GlobalConvertProgress() {
   const paperImport = useConvertProgressStore((s) => s.paperImport);
   const bookConvert = useConvertProgressStore((s) => s.bookConvert);
   const bookConvertMinimized = useConvertProgressStore((s) => s.bookConvertMinimized);
 
   // 禁区由 BottomRightStackHost 统一管理（display:none），此处不再判豁免
-  if (!paperImport && !bookConvertMinimized) return null;
-
   return (
     <>
       {paperImport && (
@@ -211,6 +242,7 @@ export default function GlobalConvertProgress() {
           <BookConvertMiniCard bookConvert={bookConvert} />
         </BottomRightPortal>
       )}
+      <ReaderTranslateCard />
     </>
   );
 }

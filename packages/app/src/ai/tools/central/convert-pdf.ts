@@ -1,12 +1,7 @@
 /**
  * 全局助手工具：PDF 转 EPUB 并入库
  */
-import {
-  type ConvertProgress,
-  importConvertedEpub,
-  listenConvertProgress,
-  startConvert,
-} from "@/services/converter-service";
+import { useConvertProgressStore } from "@/store/convert-progress-store";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -59,25 +54,10 @@ export const convertPdfTool = tool({
         };
       }
 
-      // 启动转换（异步）
-      await startConvert(pdfPath, ocr, translate);
-
-      // 设置进度监听，转换完成后自动入库
-      const unlisten = await listenConvertProgress((progress: ConvertProgress) => {
-        if (progress.type === "done" && progress.epub_path) {
-          // 自动导入
-          importConvertedEpub(progress.epub_path)
-            .then(() => {
-              console.log("[ConvertPdf] 转换完成并已入库:", progress.epub_path);
-            })
-            .catch((e) => {
-              console.error("[ConvertPdf] 入库失败:", e);
-            });
-        }
-      });
-
-      // 5秒后取消监听（避免内存泄漏，实际进度由 UI 组件处理）
-      setTimeout(() => unlisten(), 5000);
+      // 启动托管转换（convert-progress-store）：持续监听直到终态（修复前工具自挂监听 5 秒即解除，
+      // 「完成后自动导入」永不兑现、也无进度卡）；右下角进度卡呈现进度，done 后自动入库，
+      // 10 分钟无终态有超时兜底错误态。有任务在跑时 store 侧拒起并抛错
+      await useConvertProgressStore.getState().startBookConvertAuto({ pdfPath, ocr, translate });
 
       return {
         results: {

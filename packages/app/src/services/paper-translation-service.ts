@@ -45,6 +45,9 @@ export interface PaperTranslationFile {
   version: 1;
   lang: string;
   updatedAt: string;
+  /** 版本锚：翻译时 paper.md 内容的 sha256 前 16 hex（与 Rust 侧 sourceHash 同口径）。
+   * 重解析后 paper.md 变更 → 锚不一致 → 渲染侧按未翻译处理（不显示旧译文） */
+  sourceHash?: string;
   /** T2 句对齐状态（缺省 = 尚未计算对齐） */
   alignStatus?: PaperAlignStatus;
   /** T3 词对齐状态（缺省 = 尚未计算词对齐） */
@@ -234,7 +237,17 @@ function parseBatchResponse(raw: string): { index: number; text: string }[] {
   const start = cleaned.indexOf("[");
   const end = cleaned.lastIndexOf("]");
   if (start === -1 || end <= start) throw new Error("模型响应中未找到 JSON 数组");
-  const parsed = JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+  const slice = cleaned.slice(start, end + 1);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(slice);
+  } catch {
+    // LaTeX 密集批次的高发失败：模型漏双写反斜杠（\vartheta 的 \v 等为非法 JSON 转义）→ 保守修复。
+    // 交替顺序保证合法转义（\\ \" \n \uXXXX…）作为整体先被消费、原样保留——只双写落单的反斜杠，
+    // 对已合法输出幂等（不能像 /\\(?![…])/ 那样只看单个反斜杠，否则 \\ 的第二个反斜杠会被误判）
+    const repaired = slice.replace(/\\(?:[\\/"bfnrtu]|u[0-9a-fA-F]{4})|\\/g, (m) => (m.length > 1 ? m : "\\\\"));
+    parsed = JSON.parse(repaired); // 仍失败则抛给上层（严格措辞重试/跳过该批）
+  }
   if (!Array.isArray(parsed)) throw new Error("模型响应不是 JSON 数组");
   return parsed.map((item) => {
     const record = item as { index?: unknown; text?: unknown };
@@ -312,6 +325,20 @@ async function translateMetadata(
   await writeTextFile(metaPath, JSON.stringify(metadata, null, 2));
 }
 
+/** 翻译运行状态戳记：读改写 metadata.json 的 translationRunState（"complete"|"partial"），
+ *  供列表徽标区分完整/不完整译本（中断、批次失败 → partial）。
+ *  重解析换新 metadata.json 后戳记消失，但此时译本必然 stale——徽标走陈旧口径，不依赖戳记 */
+async function stampTranslationRunState(dir: string, state: "complete" | "partial"): Promise<void> {
+  try {
+    const metaPath = await join(dir, "metadata.json");
+    const metadata = JSON.parse(await readTextFile(metaPath)) as Record<string, unknown>;
+    metadata.translationRunState = state;
+    await writeTextFile(metaPath, JSON.stringify(metadata, null, 2));
+  } catch (error) {
+    console.warn("写入翻译状态戳记失败:", error);
+  }
+}
+
 /**
  * 翻译论文正文块 + 元数据。
  * force=false 时 hash 匹配的块跳过重翻（幂等/断点续翻）；force=true 全部重翻。
@@ -339,6 +366,8 @@ export async function translatePaper(options: {
   const dir = await paperDirOf(paperId);
   const blocks = cutPaperBlocks(markdown);
   const translatable = blocks.filter((block) => block.translatable);
+  // 版本锚：所译内容的整篇 hash（调用方传入的均为 paper.md 原文，口径同 Rust 侧 paper.md 文件 sha256）
+  const sourceHash = await hashBlockText(markdown);
 
   const existing = force ? null : await loadPaperTranslation(paperId);
   const working: Record<string, PaperTranslationBlock> = { ...(existing?.blocks ?? {}) };
@@ -375,6 +404,7 @@ export async function translatePaper(options: {
       version: 1,
       lang: PAPER_TRANSLATION_LANG,
       updatedAt: new Date().toISOString(),
+      sourceHash,
       ...(glossary ? { glossary } : {}),
       blocks: working,
     };
@@ -443,6 +473,7 @@ export async function translatePaper(options: {
   await Promise.all(Array.from({ length: Math.min(TRANSLATE_CONCURRENCY, batches.length) }, () => runWorker()));
   if (signal?.aborted) {
     await save();
+    await stampTranslationRunState(dir, "partial");
     return result(true);
   }
 
@@ -459,9 +490,13 @@ export async function translatePaper(options: {
       taskOptions,
     );
   } catch (error) {
-    if (signal?.aborted) return result(true);
+    if (signal?.aborted) {
+      await stampTranslationRunState(dir, "partial");
+      return result(true);
+    }
     console.warn("论文元数据翻译失败（正文译本不受影响）:", error);
   }
 
+  await stampTranslationRunState(dir, failedBatches > 0 ? "partial" : "complete");
   return result(false);
 }

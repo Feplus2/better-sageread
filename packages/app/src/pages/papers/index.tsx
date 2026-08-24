@@ -40,6 +40,7 @@ import {
   createFolder,
   deleteFolder,
   getPaperFolderMap,
+  getPaperSourceStatus,
   importPapers,
   listFolders,
   listPapers,
@@ -48,6 +49,7 @@ import {
   setPaperFolders,
   trashPaper,
 } from "@/services/paper-service";
+import { PAPER_TRANSLATION_LANG } from "@/services/paper-translation-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import {
@@ -174,6 +176,29 @@ function VectorizationRing({ paper, vectorizePercent }: { paper: BookWithStatus;
         </div>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** 已翻译徽标：译本文件（translation-zh.json）在库时显示；与向量化绿环同排，未翻译不占位。
+ *  绿色=完整且新鲜；黄色=陈旧（重解析后旧译文不再显示）或不完整（中断/批次失败），tooltip 区分原因 */
+function PaperTranslatedBadge({ state }: { state: { stale: boolean; partial: boolean } }) {
+  const degraded = state.stale || state.partial;
+  const tip = state.stale
+    ? "译本已陈旧：论文重新解析后旧译文不再显示，重新翻译后恢复"
+    : state.partial
+      ? "译本不完整：上次翻译中断或部分批次失败，重新翻译可补齐"
+      : "已翻译（含中文译文）";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Languages
+          className={
+            degraded ? "size-3.5 text-amber-500 dark:text-amber-400" : "size-3.5 text-green-600 dark:text-green-500"
+          }
+        />
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tip}</TooltipContent>
     </Tooltip>
   );
 }
@@ -431,6 +456,9 @@ export default function PapersPage() {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [metaMap, setMetaMap] = useState<Record<string, PaperMetadata>>({});
+  /** 已翻译标记（paperId → 译本状态）：卡片「已翻译」徽标与右键「重新翻译」入口用。
+   *  stale=陈旧（重解析后锚不匹配，阅读器不再显示旧译文）；partial=不完整（中断/批次失败戳记） */
+  const [translatedMap, setTranslatedMap] = useState<Record<string, { stale: boolean; partial: boolean }>>({});
   const openPaper = useLayoutStore((state) => state.openPaper);
   // 检索关键词（列表工具栏；排序与元数据语言持久化在 app-settings）
   const [searchQuery, setSearchQuery] = useState("");
@@ -560,6 +588,60 @@ export default function PapersPage() {
     };
   }, []);
 
+  /** 已翻译标记实查：逐篇探测 translation-zh.json 存在性（一次 stat/篇）；有译本的再逐篇查陈旧锚
+   * （invoke 量小，fail-open 按不陈旧）；不完整戳记（translationRunState）读 metaCacheRef——
+   * 调用前须先跑 loadMeta（loadAll 与任务收尾回调均保证此顺序）。 */
+  const checkTranslated = useCallback(async (list: BookWithStatus[]) => {
+    const base = await appDataDir();
+    const existsPairs = await Promise.all(
+      list.map(async (paper): Promise<[string, boolean]> => {
+        try {
+          return [
+            paper.id,
+            await exists(await join(base, "books", paper.id, `translation-${PAPER_TRANSLATION_LANG}.json`)),
+          ];
+        } catch {
+          return [paper.id, false];
+        }
+      }),
+    );
+    const entries = await Promise.all(
+      existsPairs.map(async ([id, has]) => {
+        if (!has) return [id, undefined] as const;
+        let stale = false;
+        try {
+          stale = (await getPaperSourceStatus(id)).translationStale;
+        } catch {
+          // 状态查询失败按不陈旧处理（宁可绿不可误黄）
+        }
+        const partial = metaCacheRef.current.get(id)?.translationRunState === "partial";
+        return [id, { stale, partial }] as const;
+      }),
+    );
+    const map: Record<string, { stale: boolean; partial: boolean }> = {};
+    for (const [id, state] of entries) if (state) map[id] = state;
+    setTranslatedMap(map);
+  }, []);
+
+  /** 元数据读取：metaCacheRef 缓存，已缓存的跳过；任务收尾/删除等场景先失效对应条目再调用即重读 */
+  const loadMeta = useCallback(async (list: BookWithStatus[]) => {
+    const base = await appDataDir();
+    const cache = metaCacheRef.current;
+    await Promise.all(
+      list.map(async (paper) => {
+        if (cache.has(paper.id)) return;
+        try {
+          const raw = await readTextFile(await join(base, "books", paper.id, "metadata.json"));
+          cache.set(paper.id, JSON.parse(raw) as PaperMetadata);
+        } catch (error) {
+          console.warn(`读取论文元数据失败: ${paper.id}`, error);
+          cache.set(paper.id, {});
+        }
+      }),
+    );
+    setMetaMap(Object.fromEntries(cache));
+  }, []);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -575,28 +657,15 @@ export default function PapersPage() {
         return next.size === prev.size ? prev : next;
       });
 
-      const base = await appDataDir();
-      const cache = metaCacheRef.current;
-      await Promise.all(
-        list.map(async (paper) => {
-          if (cache.has(paper.id)) return;
-          try {
-            const raw = await readTextFile(await join(base, "books", paper.id, "metadata.json"));
-            cache.set(paper.id, JSON.parse(raw) as PaperMetadata);
-          } catch (error) {
-            console.warn(`读取论文元数据失败: ${paper.id}`, error);
-            cache.set(paper.id, {});
-          }
-        }),
-      );
-      setMetaMap(Object.fromEntries(cache));
+      await loadMeta(list);
+      await checkTranslated(list);
     } catch (error) {
       console.error("加载文献库失败:", error);
       toast.error("加载文献库失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadMeta, checkTranslated]);
 
   useEffect(() => {
     loadAll();
@@ -730,12 +799,30 @@ export default function PapersPage() {
   // loadAll 经 ref 间接引用：注册一次，刷新函数始终取最新
   const loadAllRef = useRef(loadAll);
   loadAllRef.current = loadAll;
+  const papersRef = useRef(papers);
+  papersRef.current = papers;
   useEffect(() => {
     setPaperImportRefresh(() => {
       void loadAllRef.current();
     });
-    return () => setPaperImportRefresh(null);
-  }, []);
+    // 向量化/翻译通道收尾回调（paper-task-store 预留的 PapersPage 注册口）：静默重查译本存在性 +
+    // 失效重读元数据（翻译落盘的 title_zh/abstract_zh 即时上列表，metaCacheRef 不再挡新值）——
+    // 不走 loadAll（setLoading 会整表闪屏）；向量化收尾触发同样的重查，无害
+    usePaperTaskStore.getState().setOnSettled(() => {
+      const current = papersRef.current;
+      const cache = metaCacheRef.current;
+      for (const p of current) cache.delete(p.id);
+      // 先重读元数据再重查译本标记：checkTranslated 的不完整戳记读 metaCacheRef，乱序会短暂误绿
+      void (async () => {
+        await loadMeta(current);
+        await checkTranslated(current);
+      })();
+    });
+    return () => {
+      setPaperImportRefresh(null);
+      usePaperTaskStore.getState().setOnSettled(null);
+    };
+  }, [loadMeta, checkTranslated]);
 
   // 论文变更总线（2026-08-24）：状态变化按 id 局部刷新该篇（向量化完成圆环即转绿，不靠重挂载）；
   // 列表变化（新条目入库）去抖 400ms 增量重载——AI 工具 importPaper 等不过队列收尾的入口也覆盖。
@@ -1306,23 +1393,47 @@ export default function PapersPage() {
     if (manageMode && selectedIds.size > 0) setManageMode(false);
   };
 
-  /** 批量翻译：入队（幂等续翻；队列与进度在 paper-task-store） */
-  const handleBatchTranslate = async () => {
-    if (selectedPapers.length === 0) return;
+  /** 翻译入队（幂等续翻；队列与进度在 paper-task-store）。
+   *  paper 直发 = 右键菜单单篇（solo 独立完成 toast），缺省走选择集批量；
+   *  force=true 全量重翻（「重新翻译」入口，确认后入队——已有译文作废，耗时/额度与首翻相当） */
+  const handleBatchTranslate = async (paper?: BookWithStatus, force = false) => {
+    const targets = paper ? [paper] : selectedPapers;
+    if (targets.length === 0) return;
     if (!getUtilityModel()) {
       toast.error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
       return;
     }
+    if (force) {
+      let confirmed = false;
+      try {
+        confirmed = await ask(
+          paper
+            ? `将全量重新翻译《${paper.title}》：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`
+            : `将全量重新翻译选中的 ${targets.length} 篇论文：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`,
+          { title: "重新翻译", kind: "warning" },
+        );
+      } catch (error) {
+        console.error("确认对话框失败:", error);
+      }
+      if (!confirmed) return;
+    }
     usePaperTaskStore.getState().enqueue(
       "translate",
-      selectedPapers.map((p) => ({ id: p.id, title: p.title })),
+      targets.map((p) => ({
+        id: p.id,
+        title: p.title,
+        ...(paper ? { solo: true } : {}),
+        ...(force ? { force: true } : {}),
+      })),
     );
-    if (manageMode && selectedIds.size > 0) setManageMode(false);
+    if (!paper && manageMode && selectedIds.size > 0) setManageMode(false);
   };
 
-  /** 重新解析：确认后逐篇入全局解析队列（silent 聚合拒绝，单条 toast） */
-  const handleBatchReparse = async () => {
-    if (selectedPapers.length === 0) return;
+  /** 重新解析：确认后逐篇入全局解析队列（silent 聚合拒绝，单条 toast）。
+   *  paper 直发 = 右键菜单单篇，缺省走选择集批量 */
+  const handleBatchReparse = async (paper?: BookWithStatus) => {
+    const targets = paper ? [paper] : selectedPapers;
+    if (targets.length === 0) return;
     const tokenError = paperEngineTokenError(paperEngine);
     if (tokenError) {
       toast.error(tokenError);
@@ -1331,8 +1442,10 @@ export default function PapersPage() {
     let confirmed = false;
     try {
       confirmed = await ask(
-        `将用最新解析引擎重新解析选中的 ${selectedPapers.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
-        { title: selectedPapers.length > 1 ? `重新解析（${selectedPapers.length} 篇）` : "重新解析", kind: "warning" },
+        paper
+          ? `将用最新解析引擎重新解析《${paper.title}》的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`
+          : `将用最新解析引擎重新解析选中的 ${targets.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
+        { title: !paper && targets.length > 1 ? `重新解析（${targets.length} 篇）` : "重新解析", kind: "warning" },
       );
     } catch (error) {
       console.error("确认对话框失败:", error);
@@ -1340,8 +1453,8 @@ export default function PapersPage() {
     if (!confirmed) return;
     let queued = 0;
     const rejected: string[] = [];
-    for (const paper of selectedPapers) {
-      const res = startPaperReparse({ id: paper.id, title: paper.title }, { silent: true });
+    for (const p of targets) {
+      const res = startPaperReparse({ id: p.id, title: p.title }, { silent: true });
       if (res.ok) queued += 1;
       else rejected.push(res.message);
     }
@@ -1351,8 +1464,8 @@ export default function PapersPage() {
       });
     }
     if (queued > 0) {
-      toast.success(`已加入解析队列：${queued} 篇`);
-      if (manageMode && selectedIds.size > 0) setManageMode(false);
+      toast.success(paper ? `《${paper.title}》已加入解析队列` : `已加入解析队列：${queued} 篇`);
+      if (!paper && manageMode && selectedIds.size > 0) setManageMode(false);
     }
   };
   /** 批量任务取消（按通道）：向量化当前篇跑完即停；翻译 abort 当前篇+清队列。
@@ -1525,6 +1638,17 @@ export default function PapersPage() {
                   >
                     <Languages className="size-4" />
                     翻译
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={batchLocked || selectedIds.size === 0 || taskTranslateBlockers.length > 0}
+                    title={blockerHint(taskTranslateBlockers, "重新翻译") ?? "已有译文作废，全量重翻"}
+                    onClick={() => void handleBatchTranslate(undefined, true)}
+                  >
+                    <Languages className="size-4" />
+                    重新翻译
                   </Button>
                   <Button
                     variant="ghost"
@@ -1740,6 +1864,12 @@ export default function PapersPage() {
                   const venueLine = renderVenueLine(paper);
                   const vectorizePercent = vectorizing[paper.id];
                   const isVectorized = paper.status?.metadata?.vectorization?.status === "success";
+                  // 右键菜单单篇操作的禁用口径：同篇任务撞车（进行中或已排队）才禁，无任务时可用
+                  const translateBlocked =
+                    busyTranslate.has(paper.id) || paperConflicts(paper.id, "translate").length > 0;
+                  const reparseBlockers = paperConflicts(paper.id, "parse");
+                  const translationState = translatedMap[paper.id];
+                  const isTranslated = translationState !== undefined;
                   // 元数据中文化：用翻译服务已落盘的 title_zh/abstract_zh，缺省回退原文
                   const displayTitle = metaLang === "zh" ? meta?.title_zh || paper.title : paper.title;
                   const displayAbstract = metaLang === "zh" ? meta?.abstract_zh || meta?.abstract : meta?.abstract;
@@ -1808,6 +1938,7 @@ export default function PapersPage() {
                             </div>
                             <div className="flex items-center gap-1.5">
                               <VectorizationRing paper={paper} vectorizePercent={vectorizePercent} />
+                              {translationState && <PaperTranslatedBadge state={translationState} />}
                               <PaperCloudBadge paper={paper} />
                               <PaperStatusBadge status={paper.status} />
                             </div>
@@ -1826,14 +1957,23 @@ export default function PapersPage() {
                           )}
                           {isVectorized ? "重新向量化" : "向量化"}
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => void handleBatchTranslate()}>
+                        {/* 右键单篇只给一个翻译入口：未翻译→翻译（幂等首翻/续翻走阅读页），已翻译→重新翻译（force 全量） */}
+                        <ContextMenuItem
+                          disabled={translateBlocked}
+                          title={translateBlocked ? "该篇翻译进行中或已排队，完成后再试" : undefined}
+                          onClick={() => void handleBatchTranslate(paper, isTranslated)}
+                        >
                           <Languages className="mr-2 size-4" />
-                          翻译
+                          {isTranslated ? "重新翻译" : "翻译"}
                         </ContextMenuItem>
                         <ContextMenuItem
-                          disabled={batchLocked || selectedIds.size === 0 || taskReparseBlockers.length > 0}
-                          title={blockerHint(taskReparseBlockers, "重新解析") ?? ""}
-                          onClick={() => void handleBatchReparse()}
+                          disabled={batchLocked || reparseBlockers.length > 0}
+                          title={
+                            reparseBlockers.length > 0
+                              ? `该篇${conflictReasonText(reparseBlockers)}，完成后再重新解析`
+                              : undefined
+                          }
+                          onClick={() => void handleBatchReparse(paper)}
                         >
                           <RefreshCw className="mr-2 size-4" />
                           重新解析
