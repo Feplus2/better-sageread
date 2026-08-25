@@ -106,6 +106,8 @@ impl L2RunGuard {
             .l2_running
             .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
+            // 日志侧长期可查（2026-08-26 补）：拒绝信息此前只经 Err 回前端/console.warn，Rust 日志无落行
+            log::debug!("L2 同步已在进行中，本轮跳过");
             return Err("L2 同步已在进行中，本轮跳过".to_string());
         }
         Ok(Self(app.clone()))
