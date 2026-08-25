@@ -152,6 +152,10 @@ pub struct SyncState {
     /// 每包应用失败次数（key = device_id/seq_end）：失败不推水位下轮重试，满 3 次跳过
     #[serde(default)]
     pub failed_packs: std::collections::HashMap<String, u8>,
+    /// 每包传输性失败次数（解压失败等半截包，key 同上）：不计入内容性 3 次上限，
+    /// 独立计次满更高天花板（40 轮）才按永久坏包跳过（P3 修复，audit P3）
+    #[serde(default)]
+    pub failed_packs_transient: std::collections::HashMap<String, u8>,
     /// 云端目录布局（sageread/{sync,backups}）已完成迁移的 endpoint（防重复 PROPFIND）
     #[serde(default)]
     pub cloud_layout_migrated_for: Option<String>,

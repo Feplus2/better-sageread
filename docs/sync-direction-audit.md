@@ -2,7 +2,8 @@
 
 > 背景：坚果云 502 风暴期间观察到「同步拉取覆盖本地较新状态」。本审计回答"方向逻辑是否有缺陷"。
 > 全部为静态代码审计结论，证据到文件:行号。**P0/P1/P4 已修复（2026-08-25，用户拍板范围）；
-> P2/P3/P5 挂账**（修法见各条）。
+> P2/P3/P5 已修复（2026-08-26，修法见各条「已修」注记）**——至此本审计缺陷清单全部清零，
+> 仅剩 P6 备查的已知取舍。
 
 ## 方向机制现状（无全局方向决策）
 
@@ -29,17 +30,20 @@
 共用，Drop 释放）。冲突时返回「L2 同步已在进行中，本轮跳过」——调度器本就静默
 （console.warn），手动按钮弹出该提示语义正确。
 
-### P2 拉取循环尾部无条件跳到 `info.latest_seq`（挂账，未修）
+### P2 拉取循环尾部无条件跳到 `info.latest_seq` —— ✅ 已修（2026-08-26）
 
-`engine.rs:1078-1080`：不看指针里实际应用到哪。坚果云读视图不一致
-（devices.json 新、设备指针旧）→ 水位越过未应用的包 → 水位单调短路（:994/:1010）致永久空洞。
-修法：尾部水位只推到本设备最后一个成功应用的 `seq_end`。
+`engine.rs` 拉取循环：原尾部不看指针里实际应用到哪。坚果云读视图不一致
+（devices.json 新、设备指针旧）→ 水位越过未应用的包 → 水位单调短路致永久空洞。
+修法已落地：循环内跟踪本轮实际处理到的最大 seq_end（`reached`，应用成功/缺失跳过/
+坏包跳过均计入），尾部水位只推到 `reached`，不再跳到 `info.latest_seq`。
 
-### P3 失败 3 次即永久跳包（挂账，未修）
+### P3 失败 3 次即永久跳包 —— ✅ 已修（2026-08-26）
 
-`engine.rs:141-147, 1063-1073`：半截 gzip（PUT 非原子，:165-169 自承）导致的解压失败
-也计入失败计数（:1029-1032）→ 暂时性坏包 3 轮后永久丢弃。
-修法：区分传输性失败（不计入）与内容性失败；或提高上限 + 用户可见告警。
+`engine.rs`：原半截 gzip（PUT 非原子，自承）导致的解压失败也计入内容性失败计数
+→ 暂时性坏包 3 轮后永久丢弃。修法已落地：解压失败归为传输性失败，计入独立计数器
+`failed_packs_transient`（sync-state.json 新字段，serde default 向后兼容），不推水位、
+下轮重试、不碰内容性 3 次上限；独立天花板 40 轮（≈20 分钟）不愈合才按永久坏包跳过。
+应用成功时两类计数一并清除。单测 `test_transient_pack_failure_counter_independent` 守护。
 
 ### ~~P4 无 L2 同步互斥锁，多入口可并发跑~~（已修，见前「P4」节）
 
@@ -47,12 +51,16 @@
 Agent 工具互不共享标志（state.rs:5-8 只有 backup_running）。两份 SyncState 读-改-写互覆。
 修法：Rust 侧加 `l2_running` AtomicBool（与备份同款）。
 
-### P5 book_status 回落比较键可被"只打开不翻页"的对端顶翻（挂账，未修）
+### P5 book_status 回落比较键可被"只打开不翻页"的对端顶翻 —— ✅ 已修（2026-08-26）
 
-`engine.rs:429-452`：`position_changed_at` 为 NULL 时回落 `last_read_at`；
-而 `position_changed_at` 仅在真翻页且停留 ≥30s 时推进（books/commands.rs:495-505）。
-A 端读到 50%（t1）；B 端只打开不合（NULL + last_read_at=t2>t1）→ B 旧位置胜出覆盖。
-修法：远端键 NULL 时不用 last_read_at 顶替参与比较。
+`engine.rs` `apply_book_status_upsert`：原远端 `position_changed_at` 为 NULL 时回落
+`last_read_at` 参与比较；而 `position_changed_at` 仅在真翻页且停留 ≥30s 时推进
+（books/commands.rs:495-505）。A 端读到 50%（t1）；B 端只打开不合
+（NULL + last_read_at=t2>t1）→ B 旧位置胜出覆盖。
+修法已落地：远端 `position_changed_at` 为 NULL 且本地有真进度时，远端不得竞争
+（直接跳过）；仅当双端都无真进度（旧库场景）才回落 last_read_at 对 last_read_at。
+单测 `test_book_status_remote_null_position_cannot_overwrite_real_progress` 守护；
+原 `test_book_status_merge_null_fallback_last_read_at`（双端 NULL 回落）行为不变。
 
 ### P6 备查（已知取舍）
 

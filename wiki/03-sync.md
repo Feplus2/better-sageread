@@ -60,13 +60,13 @@
 
 ### Pull（`pull_from_devices`，`engine.rs:947-1101`）
 
-读 devices.json（**读失败禁止当空表**，:955-962）→ 发现未引导新 peer 且本地有书 → 全量回填一次（`bootstrap_peers` 防重复，:966-984）→ 按设备指针逐包拉取：包缺失则跳过并推进水位；首个应用前做 VACUUM INTO 安全快照（保留 3 份，`engine.rs:17,219-249`）；应用失败**不推水位、阻塞该设备后续包、下轮重试，满 3 次才跳过告警**（`MAX_PACK_FAILURES=3`，:141-147,1063-1074）→ 把自己的应用水位发布到指针供他端修剪（:1083-1094）。
+读 devices.json（**读失败禁止当空表**，:955-962）→ 发现未引导新 peer 且本地有书 → 全量回填一次（`bootstrap_peers` 防重复，:966-984）→ 按设备指针逐包拉取：包缺失则跳过并推进水位；首个应用前做 VACUUM INTO 安全快照（保留 3 份，`engine.rs:17,219-249`）；**解压失败（半截包）走传输性计次**（`failed_packs_transient`，不推水位下轮重试，满 40 轮才跳过）；**应用失败走内容性计次**（不推水位、阻塞该设备后续包、下轮重试，满 3 次才跳过告警，`MAX_PACK_FAILURES=3`）；**尾部水位只推到本轮实际处理到的最大 seq_end**（`reached`，不跳 `info.latest_seq`——防云端读视图不一致造成永久空洞，P2）→ 把自己的应用水位发布到指针供他端修剪。
 
 ### 应用层分派（`apply_change_row`，`engine.rs:710-735`）
 
 - DELETE → 墓碑 LWW（:392-411）
 - `threads` → **消息级并集合并**（锚点位置归并排序，同 id 按 `metadata.updatedAt` 取新，其余字段整行 LWW；`merge.rs:42-192`）
-- `book_status` → 按 `position_changed_at`（NULL 回落 last_read_at）大者整体采用（:413-454）
+- `book_status` → 按 `position_changed_at` 大者整体采用；远端为 NULL（只打开未翻页）且本地有真进度时远端不得竞争，仅双端皆 NULL 才回落 last_read_at 对 last_read_at（P5）
 - `reading_sessions`/`paper_folders` → INSERT OR IGNORE 只增不改（:456-486）
 - `skills`/`tags` → 同 id LWW，异 id 同名按 name 归并保本地 id（:488-586）
 - `prompt_presets` → LWW + `is_active` 同 scope 互斥（:670-708）
@@ -139,8 +139,8 @@ bettersageread/
 
 - 墓碑 LWW 与"输于更新的重建"（`engine.rs:392-411` + 测试 :1507-1543）
 - threads 消息级并集合并（`merge.rs:42-192`）
-- `position_changed_at` 决定真进度归属（`engine.rs:413-454`）
-- 失败包满 3 次跳过（`MAX_PACK_FAILURES=3`）；本地日志留 100 条；云端 changesets 留 5~50 个；应用前安全快照留 3 份
+- `position_changed_at` 决定真进度归属；远端 NULL 真进度不得顶翻本地真进度（P5，有测试）
+- 失败包分类计次：内容性失败满 3 次跳过（`MAX_PACK_FAILURES=3`）；传输性失败（半截包）独立计次满 40 轮才跳过（P3，有测试）；拉取尾部水位只推到实际处理处（P2）；本地日志留 100 条；云端 changesets 留 5~50 个；应用前安全快照留 3 份
 - 25s 推送轮询 / 30s 拉取兜底 / 退出前推送 5s 超时
 - 备份默认保留 10 份（`models.rs:11-13`）
 - L1 写 sync-state 时保留已有 L2 水位字段（`backup.rs:88-98`，有回归测试）

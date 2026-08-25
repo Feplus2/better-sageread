@@ -152,9 +152,10 @@ impl SyncState {
         *count
     }
 
-    /// 应用成功：清除该包失败记录
+    /// 应用成功：清除该包失败记录（内容性与传输性一并清）
     fn clear_pack_failure(&mut self, device_id: &str, seq_end: i64) {
         self.failed_packs.remove(&pack_failure_key(device_id, seq_end));
+        self.failed_packs_transient.remove(&pack_failure_key(device_id, seq_end));
     }
 }
 
@@ -165,9 +166,25 @@ fn pack_failure_key(device_id: &str, seq_end: i64) -> String {
 /// 单包应用失败重试上限：满后跳过并告警（防永久坏包卡死拉取水位）
 const MAX_PACK_FAILURES: u8 = 3;
 
+/// 传输性失败（半截 gzip 等）重试天花板：远高于内容性失败的 3 次。
+/// PUT 非原子（put_path_atomic 自承）产生的半截包在下一轮读视图一致后即可恢复；
+/// 40 轮（30s/轮 ≈ 20 分钟）不愈合才按永久坏包跳过并告警（P3 修复，audit P3）
+const MAX_TRANSIENT_PACK_FAILURES: u8 = 40;
+
 /// 失败包处置：累计失败次数，返回 true 表示已达上限应跳过（调用方推进水位），false 留下轮重试
 fn note_pack_failure(state: &mut SyncState, device_id: &str, seq_end: i64) -> bool {
     state.record_pack_failure(device_id, seq_end) >= MAX_PACK_FAILURES
+}
+
+/// 传输性失败处置：计入独立计数器（不碰内容性 3 次上限——暂时性坏包不该 3 轮就被永久丢弃），
+/// 返回 true 表示已达天花板应跳过（调用方推进水位），false 留下轮重试
+fn note_transient_pack_failure(state: &mut SyncState, device_id: &str, seq_end: i64) -> bool {
+    let count = state
+        .failed_packs_transient
+        .entry(pack_failure_key(device_id, seq_end))
+        .or_insert(0);
+    *count += 1;
+    *count >= MAX_TRANSIENT_PACK_FAILURES
 }
 
 /* ---------------- 云端指针与索引 ---------------- */
@@ -434,7 +451,11 @@ async fn apply_delete(
     Ok(())
 }
 
-/// book_status：按 position_changed_at 大者整体采用（真进度；NULL 时回落 last_read_at）
+/// book_status：按 position_changed_at 大者整体采用（真进度）。
+/// P5 修复（audit P5）：远端 position_changed_at 为 NULL（只打开未真翻页）时，不再拿
+/// last_read_at 顶替参与比较——否则「A 端读到 50%（t1）；B 端只打开不合
+///（NULL + last_read_at=t2>t1）→ B 旧位置胜出覆盖」的事故就会成立。
+/// 仅当本地也是 NULL（双端旧库都无真进度）时，才回落 last_read_at 对 last_read_at 比较。
 async fn apply_book_status_upsert(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     row: &ChangeRow,
@@ -450,12 +471,7 @@ async fn apply_book_status_upsert(
         .await
         .map_err(|e| format!("读取本地进度失败: {e}"))?;
 
-    // 真进度比较键：position_changed_at 优先，NULL 回落 last_read_at
-    let remote_key = data
-        .get("position_changed_at")
-        .and_then(value_to_i64)
-        .or_else(|| data.get("last_read_at").and_then(value_to_i64))
-        .unwrap_or(0);
+    let remote_position = data.get("position_changed_at").and_then(value_to_i64);
 
     match existing {
         None => {
@@ -463,11 +479,20 @@ async fn apply_book_status_upsert(
             applied.push((row.table.clone(), row.id.clone(), "INSERT".to_string()));
         }
         Some(local_row) => {
-            let local_key = local_row
+            // 本地真进度比较键：position_changed_at 优先，NULL 回落 last_read_at（旧库未回填场景）
+            let local_position = local_row
                 .try_get::<Option<i64>, _>("position_changed_at")
-                .unwrap_or(None)
+                .unwrap_or(None);
+            let local_key = local_position
                 .or_else(|| local_row.try_get::<Option<i64>, _>("last_read_at").unwrap_or(None))
                 .unwrap_or(0);
+            let remote_key = match remote_position {
+                Some(p) => p,
+                // 远端「只打开未翻页」不得顶翻本地真进度（P5）
+                None if local_position.is_some() => return Ok(()),
+                // 双端都无真进度：回落 last_read_at 对 last_read_at（旧库兼容）
+                None => data.get("last_read_at").and_then(value_to_i64).unwrap_or(0),
+            };
             if remote_key > local_key {
                 update_row(tx, table, &row.id, data).await?;
                 applied.push((row.table.clone(), row.id.clone(), "UPDATE".to_string()));
@@ -1038,6 +1063,11 @@ async fn pull_from_devices(
 
         // 失败包不推水位、阻塞同设备后续包（父行可能就在失败包里，跳过去应用仍会失败）
         let mut blocked = false;
+        // P2：本轮实际处理到的最大 seq_end（应用成功/缺失跳过/坏包跳过都算"处理到"）。
+        // 尾部水位只准推到 reached，不准跳到 info.latest_seq——云端读视图不一致
+        //（devices.json 新、设备指针旧）时，旧指针没列出的包若被水位越过，
+        // 水位单调短路（上方 latest_seq <= last_pulled）会让这些包永不被应用，形成永久空洞
+        let mut reached = last_pulled;
 
         for cs in &pointer.changesets {
             if cs.seq_end <= last_pulled {
@@ -1047,6 +1077,7 @@ async fn pull_from_devices(
             let Some(bytes) = webdav::get_path(config, &path).await? else {
                 log::warn!("changeset 缺失（跳过）: {path}");
                 state.set_last_pulled(remote_id, cs.seq_end);
+                reached = cs.seq_end;
                 watermark_changed = true;
                 continue;
             };
@@ -1058,11 +1089,27 @@ async fn pull_from_devices(
                 snapshot_done = true;
             }
 
-            // 解压（gzip 魔数嗅探，兼容压缩前的裸 JSONL 存量包）；解压失败按应用失败处理（计次/重试）
-            let apply_result = match changelog::decode_changeset(&bytes) {
-                Ok(raw) => apply_changeset(pool, &raw).await,
-                Err(e) => Err(e),
+            // 解压（gzip 魔数嗅探，兼容压缩前的裸 JSONL 存量包）。
+            // 解压失败 = 传输性失败（PUT 非原子的半截包，协议 §10 注）：不计入内容性 3 次上限，
+            // 不推水位下轮重试；独立计次满天花板才按永久坏包跳过（P3 修复，audit P3）
+            let raw = match changelog::decode_changeset(&bytes) {
+                Ok(raw) => raw,
+                Err(e) => {
+                    if note_transient_pack_failure(state, remote_id, cs.seq_end) {
+                        log::error!(
+                            "changeset 传输性失败满 {MAX_TRANSIENT_PACK_FAILURES} 次，按永久坏包跳过: {path}: {e}"
+                        );
+                        state.set_last_pulled(remote_id, cs.seq_end);
+                        reached = cs.seq_end;
+                        watermark_changed = true;
+                        continue;
+                    }
+                    log::warn!("changeset 解压失败（疑似半截包），不推水位，下轮重试: {path}: {e}");
+                    blocked = true;
+                    break;
+                }
             };
+            let apply_result = apply_changeset(pool, &raw).await;
             match apply_result {
                 Ok(applied) => {
                     if applied.books_count > 0 {
@@ -1091,12 +1138,14 @@ async fn pull_from_devices(
                     outcome.books_count += applied.books_count;
                     state.set_last_pulled(remote_id, cs.seq_end);
                     state.clear_pack_failure(remote_id, cs.seq_end);
+                    reached = cs.seq_end;
                     watermark_changed = true;
                 }
                 Err(e) => {
                     if note_pack_failure(state, remote_id, cs.seq_end) {
                         log::error!("应用 changeset 失败满 {MAX_PACK_FAILURES} 次，跳过并告警: {path}: {e}");
                         state.set_last_pulled(remote_id, cs.seq_end);
+                        reached = cs.seq_end;
                         watermark_changed = true;
                     } else {
                         // 不推进水位，下轮重试（如乱序包：引导包到达后自动恢复）
@@ -1109,7 +1158,8 @@ async fn pull_from_devices(
         }
 
         if !blocked {
-            state.set_last_pulled(remote_id, info.latest_seq.max(state.last_pulled_of(remote_id)));
+            // P2 修复：尾部水位只推到本轮实际处理到的 reached，不再无条件跳到 info.latest_seq
+            state.set_last_pulled(remote_id, reached.max(state.last_pulled_of(remote_id)));
         }
     }
 
@@ -1776,6 +1826,37 @@ mod tests {
         assert_eq!(status_location(&pool, "b1").await.as_deref(), Some("cfi-remote"));
     }
 
+    /// P5 事故场景：本地有真进度（position_changed_at 非 NULL），远端「只打开未翻页」
+    ///（position_changed_at=NULL + last_read_at 更大）不得顶翻本地位置
+    #[tokio::test]
+    async fn test_book_status_remote_null_position_cannot_overwrite_real_progress() {
+        let pool = setup_pool().await;
+
+        // 本地读到 50%：真进度 position_changed_at=2000，last_read_at=3000（打开时间更晚也无妨）
+        sqlx::query(
+            "INSERT INTO book_status (book_id, status, progress_current, progress_total, location, last_read_at, position_changed_at, dwell_seconds, created_at, updated_at)
+             VALUES ('b1', 'reading', 50, 100, 'cfi-real', 3000, 2000, 60, 1000, 3000)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 远端只打开未翻页：position_changed_at=NULL，last_read_at=6000 > 本地一切时间戳
+        // → P5 修复前会拿 last_read_at 顶替比较键顶翻本地；修复后不得竞争
+        let applied = apply_changeset(&pool, &changeset_bytes(&[status_row("b1", 6000, None, "cfi-open-only")]))
+            .await
+            .unwrap();
+        assert_eq!(applied.count, 0, "远端 NULL 真进度不得顶翻本地真进度");
+        assert_eq!(status_location(&pool, "b1").await.as_deref(), Some("cfi-real"));
+
+        // 对照：远端带真进度且更新（position_changed_at=5000）→ 正常胜出
+        let applied2 = apply_changeset(&pool, &changeset_bytes(&[status_row("b1", 6000, Some(5000), "cfi-remote-real")]))
+            .await
+            .unwrap();
+        assert_eq!(applied2.count, 1);
+        assert_eq!(status_location(&pool, "b1").await.as_deref(), Some("cfi-remote-real"));
+    }
+
     /// books / book_notes 实际变更时置对应信号；无实际变更（重放幂等）时不置
     #[tokio::test]
     async fn test_books_notes_changed_flags() {
@@ -2286,6 +2367,34 @@ mod tests {
         assert!(!note_pack_failure(&mut state2, "dev-a", 20));
         assert!(!note_pack_failure(&mut state2, "dev-a", 20));
         assert!(note_pack_failure(&mut state2, "dev-a", 20), "第 3 次失败应跳过并告警");
+    }
+
+    /// P3 传输性计次：独立于内容性 3 次上限，40 轮才跳过；成功后两类计数一并清除
+    #[tokio::test]
+    async fn test_transient_pack_failure_counter_independent() {
+        let mut state = SyncState::default();
+
+        // 传输性失败不碰内容性计数器，39 次内不跳过
+        for _ in 0..MAX_TRANSIENT_PACK_FAILURES - 1 {
+            assert!(!note_transient_pack_failure(&mut state, "dev-a", 30));
+        }
+        assert_eq!(state.failed_packs.get("dev-a/30"), None, "传输性失败不得计入内容性 3 次上限");
+        assert!(note_transient_pack_failure(&mut state, "dev-a", 30), "满 40 轮应按永久坏包跳过");
+
+        // 内容性失败也不碰传输性计数器
+        assert!(!note_pack_failure(&mut state, "dev-a", 31));
+        assert_eq!(state.failed_packs_transient.get("dev-a/31"), None);
+
+        // 应用成功：两类计数一并清除
+        state.clear_pack_failure("dev-a", 30);
+        assert_eq!(state.failed_packs.get("dev-a/30"), None);
+        assert!(state.failed_packs_transient.is_empty());
+
+        // serde 兼容：旧 sync-state.json 无该字段 → 默认空表
+        let old_json = serde_json::json!({"device_id": "d", "failed_packs": {"d/1": 2}});
+        let parsed: SyncState = serde_json::from_value(old_json).unwrap();
+        assert!(parsed.failed_packs_transient.is_empty());
+        assert_eq!(parsed.failed_packs.get("d/1"), Some(&2));
     }
 
     /// skills 跨设备同名冲突：本地已有同名默认技能（id 不同），对端同名义 INSERT 按 name 合并 UPDATE
