@@ -45,3 +45,5 @@ packages/app/src-tauri/binaries/*.bak*
 # 官网：本地中间产物（demo 帧/源视频母带），不进库不部署
 site/prototype/
 .tmp-site-prototype/
+.tmp-e2e/
+.tmp-webdav-root/
