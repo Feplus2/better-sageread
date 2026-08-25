@@ -135,6 +135,31 @@
   animation-name: motion-card-out;
 }
 
+/* ---------- 批次 3：保活层交叉淡入（reader tab 层 / 主页路由层 /chat 常驻层共用） ----------
+ * 可见性 = opacity 淡 + visibility 延迟链：离场播完淡出再 hidden，进场立即 visible 再淡入；
+ * 非活跃层停在 translateY(var(--motion-slide))，激活归 0——fade-only/reduced 下位移归零自动退化为纯 fade。
+ * 活跃态 transform 用 none 而非 translateY(0)：终态不产生 transform 包含块，
+ * 层内 position:fixed 后代（如拖放罩）语义与硬切时代完全一致。只碰 transform/opacity，第一宪法。 */
+.tab-layer {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(var(--motion-slide));
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease),
+    visibility 0s linear var(--motion-dur-slow); /* 离场：播完再 hidden */
+}
+
+.tab-layer[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  z-index: 1;
+  pointer-events: auto;
+  transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease),
+    visibility 0s linear 0s; /* 进场：立即 visible 再淡入 */
+}
+
 @theme {
   --breakpoint-lxg: 1120px;
 }

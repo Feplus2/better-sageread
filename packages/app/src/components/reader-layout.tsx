@@ -474,13 +474,9 @@ export default function ReaderLayout() {
             （书籍 TOC/聊天工具卡等）都会把 main 滚出 20px 左右，整版面上移没入顶栏（2026-08-13 复发根因）；
             clip 不是滚动容器，scrollTop 恒 0，从机制上免疫 */}
         <main className="relative flex-1 overflow-clip rounded-md">
-          <div
-            className="absolute inset-0"
-            style={{
-              visibility: isHomeActive ? "visible" : "hidden",
-              zIndex: isHomeActive ? 1 : 0,
-            }}
-          >
+          {/* 保活层可见性改走 .tab-layer + data-active（index.css 批次 3）：
+              硬切 → 交叉淡入 + 位移归位；zIndex 语义不变（active=1 否则 0），休眠/保活逻辑不动 */}
+          <div className="tab-layer absolute inset-0" data-active={isHomeActive}>
             <HomeLayout />
           </div>
 
@@ -490,11 +486,8 @@ export default function ReaderLayout() {
               return (
                 <div
                   key={tab.id}
-                  className="absolute inset-0 flex bg-background p-1"
-                  style={{
-                    visibility: tab.id === activeTabId ? "visible" : "hidden",
-                    zIndex: tab.id === activeTabId ? 1 : 0,
-                  }}
+                  className="tab-layer absolute inset-0 flex bg-background p-1"
+                  data-active={tab.id === activeTabId}
                 >
                   <PaperReaderView paperId={tab.bookId} title={tab.title} viewSleeping={sleptTabs.has(tab.id)} />
                 </div>
@@ -607,13 +600,7 @@ export default function ReaderLayout() {
 
             return (
               <ReaderProvider store={store} key={tab.id}>
-                <div
-                  className="absolute inset-0 flex bg-background p-1"
-                  style={{
-                    visibility: tab.id === activeTabId ? "visible" : "hidden",
-                    zIndex: tab.id === activeTabId ? 1 : 0,
-                  }}
-                >
+                <div className="tab-layer absolute inset-0 flex bg-background p-1" data-active={tab.id === activeTabId}>
                   {swapSidebars && <PreviewPanel />}
                   {swapSidebars ? chatSidebar : notepadSidebar}
 
