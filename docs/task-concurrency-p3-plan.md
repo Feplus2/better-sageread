@@ -21,10 +21,9 @@
 1. Rust：`PaperConverterState` 改 `HashMap<pdf_path, Child>` + `pending_done` 改
    `Vec<PaperConvertDone>`（或 HashMap<pdf_path, Done>）；取消/状态查询/清除命令按 pdf_path 寻址
    （`cancel_paper_convert`、`paper_convert_status`、`clear_paper_convert_pending_done` 加参数）。
-2. staging 撞车待核点（**动手前先核**）：converter 侧 `_staging/{标题}-{短hex}` 的后缀是否内容
-   digest——若是随机/时间戳后缀，同 PDF 两进程并发安全；若是内容 digest，同内容并发撞车
-   （但前端内容哈希预去重 paper-dedup 已挡住同内容并发入队，残余风险是"同内容不同任务"边角）。
-   结论写进本文档再实施。
+2. staging 撞车待核点（**已核，2026-08-25**）：`_staging/{stem}-{md5(内容)前6}`（pipeline.py:441-444）——
+   后缀是内容 digest：不同内容并发天然分目录；同内容并发会共享目录，但前端内容哈希
+   预去重（paper-dedup）已挡同内容并发入队。结论：解析有界并发 2 在 staging 层安全。
 3. 前端：task-center 的 paper-parse 通道 `concurrency: 2`（P2-0 的通道注册表字段）。
    取消按钮按 taskId→pdf_path 映射定向取消。
 
