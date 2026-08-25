@@ -190,9 +190,9 @@ while (Date.now() - tA < 6 * 60 * 1000) {
   if (snap.settled.some((t) => t.status === "success" && t.recovered === true)) seenRecoveredSuccessA = true;
   const changed = mtimeOf() !== mtimeA0;
   console.log(
-    `[A ${Math.round((Date.now() - tA) / 1000)}s] mtime=${changed ? "已变" : "未变"} current=${snap.current?.status ?? "-"} pendingDone=${st?.pendingDone ? "有" : "无"}`,
+    `[A ${Math.round((Date.now() - tA) / 1000)}s] mtime=${changed ? "已变" : "未变"} current=${snap.current?.status ?? "-"} pendingDone=${st?.pendingDones?.length > 0 ? "有" : "无"}`,
   );
-  if (changed && !snap.current && !st?.pendingDone) {
+  if (changed && !snap.current && !(st?.pendingDones?.length > 0)) {
     doneA = true;
     break;
   }
@@ -292,8 +292,8 @@ for (let attempt = 1; attempt <= 3 && !passB; attempt++) {
   const stB2 = await rustStatus();
   assert(hit?.status === "success", `情形 B 恢复任务 success 结算（got ${JSON.stringify(hit)}）`);
   assert(changedB, "情形 B 补落库：paper.md 已更新");
-  assert(!stB2?.pendingDone, "情形 B pending_done 槽已清空");
-  passB = hit?.status === "success" && changedB && !stB2?.pendingDone;
+  assert(!(stB2?.pendingDones?.length > 0), "情形 B pending_done 槽已清空");
+  passB = hit?.status === "success" && changedB && !(stB2?.pendingDones?.length > 0);
 }
 
 console.log(failed === 0 ? "\nRECOVERY P2 E2E PASS" : `\nRECOVERY P2 E2E FAIL（${failed} 项）`);

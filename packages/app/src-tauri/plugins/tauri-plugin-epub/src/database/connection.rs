@@ -80,6 +80,9 @@ impl DatabaseConnection {
         conn.query_row("SELECT 1", [], |_row| Ok(()))
             .with_context(|| "Database connection is not functional")?;
 
+        // 多写撞锁兜底（P3 §2）：检索路径也会写 BM25 表（initialize_bm25_tables），与写入路径同口径等锁
+        let _ = conn.execute("PRAGMA busy_timeout=5000", []);
+
         log::info!("Database connection established for search");
 
         let db = Self {
@@ -153,6 +156,9 @@ impl DatabaseConnection {
         let _ = self.conn.execute("PRAGMA synchronous=NORMAL", []);
         let _ = self.conn.execute("PRAGMA cache_size=10000", []);
         let _ = self.conn.execute("PRAGMA temp_store=memory", []);
+        // 多写撞锁兜底（P3 §2）：单篇内并行 embed 后批量 INSERT 与检索读并发时等锁而非立即报错；
+        // 正确性不依赖它（写库单线程 + 通道内不并行多篇）
+        let _ = self.conn.execute("PRAGMA busy_timeout=5000", []);
         log::info!("SQLite pragmas configured");
 
         // 创建主表

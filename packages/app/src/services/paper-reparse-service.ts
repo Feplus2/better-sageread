@@ -77,7 +77,10 @@ export async function reparsePapers(
   const total = items.length;
 
   let settleCurrent: ((outcome: ConvertOutcome) => void) | null = null;
+  // 当前篇的 pdf_path（P3 归属过滤：队列通道并发解析与本自持链路共用事件通道，不归当前篇的一律忽略）
+  let currentPdfPath: string | null = null;
   const unlisten = await listenPaperConvertProgress((p) => {
+    if (currentPdfPath && p.pdf_path && p.pdf_path !== currentPdfPath) return;
     if (p.type === "start" || p.type === "progress" || p.type === "stage_done") {
       callbacks.onItemProgress?.(p);
       return;
@@ -125,6 +128,7 @@ export async function reparsePapers(
       const conversion = new Promise<ConvertOutcome>((resolve) => {
         settleCurrent = resolve;
       });
+      currentPdfPath = pdfPath;
       try {
         await startPaperPdfImport(pdfPath);
       } catch (error) {
@@ -151,7 +155,7 @@ export async function reparsePapers(
       try {
         const suspect = await replaceWithConverted(item, outcome.paperDir, metaById[item.id]);
         // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
-        void clearPaperConvertPendingDone().catch(() => {});
+        void clearPaperConvertPendingDone(pdfPath).catch(() => {});
         report.done.push(item);
         // 本地检测 + converter 质量守卫（done.degenerate）+ 完整性闸（done.incomplete）三通道
         if (suspect || outcome.degenerate || outcome.incomplete) report.suspect.push(item);
@@ -163,7 +167,8 @@ export async function reparsePapers(
     unlisten();
     if (callbacks.isCancelled?.()) {
       report.cancelled = true;
-      await cancelPaperPdfImport().catch(() => {});
+      // 定向杀当前篇进程（P3 多句柄：不误杀队列通道并发的其它解析任务）
+      await cancelPaperPdfImport(currentPdfPath ?? undefined).catch(() => {});
     }
   }
   return report;

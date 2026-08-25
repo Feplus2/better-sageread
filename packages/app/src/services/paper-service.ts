@@ -265,8 +265,9 @@ export async function startPaperPdfImport(pdfPath: string): Promise<void> {
   await invoke("convert_paper_pdf", { params });
 }
 
-export async function cancelPaperPdfImport(): Promise<void> {
-  await invoke("cancel_paper_convert");
+/** 取消解析进程：pdfPath 定向取消本任务（P3 多句柄）；缺省取消全部在跑（旧语义，Zotero 对话框取消钮用） */
+export async function cancelPaperPdfImport(pdfPath?: string): Promise<void> {
+  await invoke("cancel_paper_convert", { pdfPath: pdfPath ?? null });
 }
 
 /** 解析产物 done 快照（Rust pending_done 槽；camelCase 对齐 serde rename_all） */
@@ -279,20 +280,22 @@ export interface PaperConvertPendingDone {
   incomplete?: boolean;
 }
 
-/** 解析通道状态（页面刷新后的恢复探测）：在跑任务 + 可能未被消费的 done 产物 */
+/** 解析通道状态（页面刷新后的恢复探测）：全部在跑任务 + 全部可能未被消费的 done 产物（P3 多数组） */
 export interface PaperConvertStatus {
-  runningPdfPath: string | null;
-  pendingDone: PaperConvertPendingDone | null;
+  runningPdfPaths: string[];
+  pendingDones: PaperConvertPendingDone[];
 }
 
-/** 查询解析通道状态：页面刷新后 Rust 侧进程/产物仍在，前端据此恢复进度卡与落库链路 */
-export async function getPaperConvertStatus(): Promise<PaperConvertStatus> {
-  return invoke<PaperConvertStatus>("paper_convert_status");
+/** 查询解析通道状态：页面刷新后 Rust 侧进程/产物仍在，前端据此恢复进度卡与落库链路。
+ *  pdfPath 给了则定向过滤该篇，缺省返回全部 */
+export async function getPaperConvertStatus(pdfPath?: string): Promise<PaperConvertStatus> {
+  return invoke<PaperConvertStatus>("paper_convert_status", { pdfPath: pdfPath ?? null });
 }
 
-/** 落库（import/replace）成功后确认清除 Rust 侧 pending_done 槽（幂等，fire-and-forget 用） */
-export async function clearPaperConvertPendingDone(): Promise<void> {
-  await invoke("clear_paper_convert_pending_done");
+/** 落库（import/replace）成功后确认清除 Rust 侧 pending_done 槽：pdfPath 定向清该篇；
+ *  缺省清空全部（旧语义）。幂等，fire-and-forget 用 */
+export async function clearPaperConvertPendingDone(pdfPath?: string): Promise<void> {
+  await invoke("clear_paper_convert_pending_done", { pdfPath: pdfPath ?? null });
 }
 
 export async function listenPaperConvertProgress(

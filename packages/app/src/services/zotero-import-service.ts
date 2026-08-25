@@ -510,7 +510,11 @@ export async function executeZoteroImport(
   });
 
   let settleCurrent: ((outcome: ConvertOutcome) => void) | null = null;
+  // 当前篇的 pdf_path（P3 归属过滤：队列通道并发解析与本自持链路共用同一事件通道，
+  // 不归当前篇的进度/终态事件一律忽略，防串台——队列任务的 done 不得结算本链路）
+  let currentPdfPath: string | null = null;
   const unlisten = await listenPaperConvertProgress((p) => {
+    if (currentPdfPath && p.pdf_path && p.pdf_path !== currentPdfPath) return;
     if (p.type === "start" || p.type === "progress" || p.type === "stage_done") {
       callbacks.onItemProgress?.(p);
       return;
@@ -540,8 +544,9 @@ export async function executeZoteroImport(
       const conversion = new Promise<ConvertOutcome>((resolve) => {
         settleCurrent = resolve;
       });
+      currentPdfPath = item.pdfPath as string;
       try {
-        await startPaperPdfImport(item.pdfPath as string);
+        await startPaperPdfImport(currentPdfPath);
       } catch (error) {
         settleCurrent = null;
         report.failed.push({ key: item.key, title: item.title, error: String(error) });
@@ -567,7 +572,7 @@ export async function executeZoteroImport(
           ctx.trashedFolderIds,
         );
         // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留供下次启动重试）
-        void clearPaperConvertPendingDone().catch(() => {});
+        void clearPaperConvertPendingDone(item.pdfPath as string).catch(() => {});
         if (paperId.duplicate) {
           // 哈希兜底：save_paper 判"已存在"→ 按收养处理
           report.skippedDup.push({ key: item.key, title: item.title, via: "hash" });
@@ -588,7 +593,8 @@ export async function executeZoteroImport(
     unlisten();
     if (callbacks.isCancelled?.()) {
       report.cancelled = true;
-      await cancelPaperPdfImport().catch(() => {});
+      // 定向杀当前篇进程（P3 多句柄：不误杀队列通道并发的其它解析任务）
+      await cancelPaperPdfImport(currentPdfPath ?? undefined).catch(() => {});
     }
   }
   return report;

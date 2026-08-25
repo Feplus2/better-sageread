@@ -1,8 +1,9 @@
 /**
- * 统一任务中心（P2 地基，docs/task-queue-p2-plan.md）。
+ * 统一任务中心（P2 地基，docs/task-queue-p2-plan.md；P3 有界并发，docs/task-concurrency-p3-plan.md）。
  *
  * 五通道（图书解析/图书向量化/论文解析/论文向量化/论文翻译）共用一张任务表 + 一套队列泵：
- * 通道内串行（P3 才放开有界并发）、UI 与 AI 入口统一 enqueue、卡片按通道聚合订阅。
+ * 通道内按注册表 concurrency 有界并发（默认 1，paper-parse 为 2）、UI 与 AI 入口统一 enqueue、
+ * 卡片按通道聚合订阅。
  *
  * 本模块是叶子：不 import 任何其它 store/service（冲突判定经 setConflictChecker 注入，
  * 保持与 paper-task-registry 的无环约束同款）。
@@ -10,6 +11,7 @@
 
 import { create } from "zustand";
 import {
+  type ChannelDef,
   __resetTaskExecutorRegistryForTests,
   getChannelDef,
   getTaskConflictChecker,
@@ -101,9 +103,10 @@ interface TaskCenterState {
   cancelChannel: (channel: TaskChannel) => void;
   /** 清掉通道的已结算任务（卡片关闭/下次入队前的视觉复位） */
   dismissSettled: (channel: TaskChannel) => void;
-  /** 刷新恢复占用（P2-4 paper-parse）：以 running 态注入任务并占住通道泵位（旧 paperDraining
-   *  占位等价物）——恢复期间新 enqueue 排队不并发，settleRecoveredTask 释放后自动接续。
-   *  返回绑定到该任务的 report/reportExtra/setResult 与取消 signal；通道已被占用时返回 null */
+  /** 刷新恢复占用（P2-4 paper-parse；P3 起按并发槽计）：以 running 态注入任务并占住一个并发槽
+   * （旧 paperDraining 占位等价物）——占用期间新 enqueue 只能填剩余空槽，settleRecoveredTask
+   *  释放后自动接续。返回绑定到该任务的 report/reportExtra/setResult 与取消 signal；
+   *  槽位已满时返回 null */
   occupyForRecovery: (input: EnqueueInput) => {
     taskId: string;
     signal: AbortSignal;
@@ -123,10 +126,10 @@ interface TaskCenterState {
   endMirrorTask: (taskId: string) => void;
 }
 
-// ─── 模块级执行态（不进 zustand：句柄/泵位不可序列化，对齐既有 store 惯例） ───
+// ─── 模块级执行态（不进 zustand：句柄不可序列化，对齐既有 store 惯例） ───
 // （通道注册表与冲突检查器住 task-executor-registry.ts——独立叶子模块，HMR 不丢注册）
+// P3 有界并发：泵位不再用 draining 旗标，通道在跑任务数（status==="running" 且非镜像）即并发槽占用。
 
-const draining: Partial<Record<TaskChannel, boolean>> = {};
 const abortControllers = new Map<string, AbortController>();
 const waiters = new Map<string, { resolve: (task: TaskItem) => void; reject: (error: Error) => void }>();
 
@@ -163,47 +166,67 @@ function settleWaiter(taskId: string, finalStatus: TaskStatus, error?: string): 
   else waiter.reject(new Error(error ?? (finalStatus === "cancelled" ? "任务已取消" : "任务失败")));
 }
 
-/** 通道泵：串行逐任务执行；收尾后复查接续（运行期新入队不丢） */
-async function drainChannel(channel: TaskChannel): Promise<void> {
-  if (draining[channel]) return;
+/** 通道在跑任务数（并发槽占用；恢复占用注入的任务也是 running，镜像不算） */
+function runningCount(channel: TaskChannel): number {
+  const { tasks } = useTaskCenterStore.getState();
+  let n = 0;
+  for (const id of Object.keys(tasks)) {
+    const t = tasks[id];
+    if (t.channel === channel && !t.mirror && t.status === "running") n += 1;
+  }
+  return n;
+}
+
+/** 通道彻底空闲（无在跑无排队）时清掉「取消中」按钮态（对齐旧泵收尾清除语义） */
+function maybeClearCancelling(channel: TaskChannel): void {
+  if (!useTaskCenterStore.getState().cancelling[channel]) return;
+  if (runningCount(channel) > 0 || nextQueued(channel)) return;
+  useTaskCenterStore.setState((s) => ({ cancelling: { ...s.cancelling, [channel]: false } }));
+}
+
+/** 启动单个任务（同步落 running 态再异步执行：并发槽占用即时可见，紧接着的 pump 循环不会超发） */
+function launchTask(def: ChannelDef, task: TaskItem): void {
+  const ac = new AbortController();
+  abortControllers.set(task.taskId, ac);
+  patchTask(task.taskId, { status: "running", startedAt: Date.now() });
+  const channel = task.channel;
+  void (async () => {
+    try {
+      await def.executor(task, {
+        report: (percent, detail) => patchTask(task.taskId, detail === undefined ? { percent } : { percent, detail }),
+        reportExtra: (patch) => mergeTaskExtra(task.taskId, patch),
+        setResult: (result) => patchTask(task.taskId, { result }),
+        signal: ac.signal,
+      });
+      patchTask(task.taskId, { status: "success", percent: 100 });
+      settleWaiter(task.taskId, "success");
+    } catch (error) {
+      const cancelled = ac.signal.aborted;
+      const message = error instanceof Error ? error.message : String(error);
+      patchTask(task.taskId, {
+        status: cancelled ? "cancelled" : "error",
+        error: cancelled ? undefined : message,
+      });
+      settleWaiter(task.taskId, cancelled ? "cancelled" : "error", message);
+    } finally {
+      abortControllers.delete(task.taskId);
+      // 槽位释放：接续排队任务（运行期新入队不丢，对齐旧 drain 收尾语义）
+      drainChannel(channel);
+      maybeClearCancelling(channel);
+    }
+  })();
+}
+
+/** 通道泵（P3 有界并发槽语义）：同通道最多 concurrency 个 running；有空槽即按入队序启动排队任务。
+ *  触发点：enqueue / 单任务结算 / settleRecoveredTask 释放恢复占用。 */
+function drainChannel(channel: TaskChannel): void {
   const def = getChannelDef(channel);
   if (!def) return;
-  draining[channel] = true;
-  try {
-    for (;;) {
-      const task = nextQueued(channel);
-      if (!task) break;
-      const ac = new AbortController();
-      abortControllers.set(task.taskId, ac);
-      patchTask(task.taskId, { status: "running", startedAt: Date.now() });
-      try {
-        await def.executor(task, {
-          report: (percent, detail) => patchTask(task.taskId, detail === undefined ? { percent } : { percent, detail }),
-          reportExtra: (patch) => mergeTaskExtra(task.taskId, patch),
-          setResult: (result) => patchTask(task.taskId, { result }),
-          signal: ac.signal,
-        });
-        patchTask(task.taskId, { status: "success", percent: 100 });
-        settleWaiter(task.taskId, "success");
-      } catch (error) {
-        const cancelled = ac.signal.aborted;
-        const message = error instanceof Error ? error.message : String(error);
-        patchTask(task.taskId, {
-          status: cancelled ? "cancelled" : "error",
-          error: cancelled ? undefined : message,
-        });
-        settleWaiter(task.taskId, cancelled ? "cancelled" : "error", message);
-      } finally {
-        abortControllers.delete(task.taskId);
-      }
-    }
-  } finally {
-    draining[channel] = false;
-    if (useTaskCenterStore.getState().cancelling[channel]) {
-      useTaskCenterStore.setState((s) => ({ cancelling: { ...s.cancelling, [channel]: false } }));
-    }
-    // 收尾窗口内新入队的接续（对齐既有 drain 语义）
-    if (nextQueued(channel)) void drainChannel(channel);
+  const limit = Math.max(1, def.concurrency);
+  while (runningCount(channel) < limit) {
+    const task = nextQueued(channel);
+    if (!task) return;
+    launchTask(def, task);
   }
 }
 
@@ -250,7 +273,7 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
         [item.runId]: { runId: item.runId, channel: input.channel, taskIds: [taskId], startedAt: item.enqueuedAt },
       },
     }));
-    void drainChannel(input.channel);
+    drainChannel(input.channel);
     return { ok: true, taskId };
   },
 
@@ -313,8 +336,10 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
     }),
 
   occupyForRecovery: (input) => {
-    // 通道已被占（泵在跑/已有恢复占用）→ 拒绝，调用方按「实时通道健在」处理
-    if (draining[input.channel]) return null;
+    // 并发槽已满（在跑任务 + 已有恢复占用达到通道上限）→ 拒绝，调用方按「实时通道健在」处理
+    const def = getChannelDef(input.channel);
+    if (!def) return null;
+    if (runningCount(input.channel) >= Math.max(1, def.concurrency)) return null;
     const taskId = crypto.randomUUID();
     const item: TaskItem = {
       taskId,
@@ -337,7 +362,6 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
         [item.runId]: { runId: item.runId, channel: input.channel, taskIds: [taskId], startedAt: item.enqueuedAt },
       },
     }));
-    draining[input.channel] = true;
     const ac = new AbortController();
     abortControllers.set(taskId, ac);
     return {
@@ -358,9 +382,9 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
       ...(error !== undefined ? { error } : {}),
     });
     abortControllers.delete(taskId);
-    draining[task.channel] = false;
-    // 恢复期间新提交的排队任务接续（对齐旧 settleRecovered → drainPaperQueue 收尾语义）
-    if (nextQueued(task.channel)) void drainChannel(task.channel);
+    // 释放并发槽：恢复期间新提交的排队任务接续（对齐旧 settleRecovered → drainPaperQueue 收尾语义）
+    drainChannel(task.channel);
+    maybeClearCancelling(task.channel);
   },
 
   beginMirrorTask: (input) => {
@@ -412,8 +436,10 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
 
 export interface ChannelAggregate {
   channel: TaskChannel;
-  /** 运行中任务（无则 null） */
+  /** 运行中任务（无则 null；并发槽下为最近一个在跑，全量在 running） */
   current: TaskItem | null;
+  /** 全部运行中任务（P3 有界并发下可多于一个；按入队序） */
+  running: TaskItem[];
   /** 排队数 */
   queuedCount: number;
   /** 最近一次批次的已结算任务（卡片收尾展示；dismissSettled 后清空） */
@@ -425,16 +451,19 @@ export function selectChannelAggregate(
   channel: TaskChannel,
 ): ChannelAggregate {
   let current: TaskItem | null = null;
+  const running: TaskItem[] = [];
   let queuedCount = 0;
   const settled: TaskItem[] = [];
   for (const id of state.order) {
     const task = state.tasks[id];
     if (!task || task.channel !== channel || task.mirror) continue;
-    if (task.status === "running") current = task;
-    else if (task.status === "queued") queuedCount += 1;
+    if (task.status === "running") {
+      current = task;
+      running.push(task);
+    } else if (task.status === "queued") queuedCount += 1;
     else settled.push(task);
   }
-  return { channel, current, queuedCount, settled };
+  return { channel, current, running, queuedCount, settled };
 }
 
 /** 测试专用：清空全部状态与模块级执行态（勿在生产路径调用） */
@@ -442,6 +471,5 @@ export function __resetTaskCenterForTests(): void {
   __resetTaskExecutorRegistryForTests();
   waiters.clear();
   abortControllers.clear();
-  for (const key of Object.keys(draining)) delete draining[key as TaskChannel];
   useTaskCenterStore.setState({ tasks: {}, order: [], runs: {}, cancelling: {} });
 }

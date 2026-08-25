@@ -1,5 +1,6 @@
 // 统一任务中心（task-center-store）队列语义单测：
-// 串行泵序、进度上报、排队/运行取消、幂等去重、冲突拒绝、enqueueAndWait 结算、收尾接续。
+// 串行泵序、进度上报、排队/运行取消、幂等去重、冲突拒绝、enqueueAndWait 结算、收尾接续；
+// P3 并发槽：concurrency=2 并行起跑/槽满排队/取消隔离/恢复占用按槽计。
 // 运行：node scripts/test-task-center.mjs
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -194,6 +195,73 @@ await check("收尾接续：执行期间入队的新任务在泵收尾后接续�
   const second = useTaskCenterStore.getState().enqueueAndWait({ channel: "paper-parse", targetId: "s", title: "S" });
   await Promise.all([first, second]);
   assert(log.join(",") === "start:F,done:F,start:S,done:S", `接续失败: ${log.join(",")}`);
+});
+
+// ─── P3 有界并发槽语义（docs/task-concurrency-p3-plan.md §1） ───
+
+await check("并发槽：concurrency=2 同通道最多两个 running，第三个排队等槽释放", async () => {
+  const log = [];
+  registerTaskChannel("paper-parse", { executor: makeExecutor(log, 30), concurrency: 2 });
+  const waits = ["A", "B", "C"].map((t) =>
+    useTaskCenterStore.getState().enqueueAndWait({ channel: "paper-parse", targetId: t, title: t }),
+  );
+  await sleep(5);
+  // A/B 并行起跑（launch 同步落 running），C 因槽满排队
+  assert(log.includes("start:A") && log.includes("start:B"), `A/B 应并行起跑: ${log.join(",")}`);
+  assert(!log.includes("start:C"), `C 应等槽位: ${log.join(",")}`);
+  const agg = selectChannelAggregate(useTaskCenterStore.getState(), "paper-parse");
+  assert(
+    agg.running.length === 2 && agg.queuedCount === 1,
+    `并发槽占用异常: running=${agg.running.length} queued=${agg.queuedCount}`,
+  );
+  await Promise.all(waits);
+  const idxFirstDone = Math.min(log.indexOf("done:A"), log.indexOf("done:B"));
+  assert(log.indexOf("start:C") > idxFirstDone, `C 应在首个槽位释放后启动: ${log.join(",")}`);
+});
+
+await check("并发下取消其一：另一个继续到 success，waiter 语义不变", async () => {
+  const log = [];
+  registerTaskChannel("paper-parse", { executor: makeExecutor(log, 30), concurrency: 2 });
+  const a = useTaskCenterStore.getState().enqueueAndWait({ channel: "paper-parse", targetId: "A", title: "A" });
+  const b = useTaskCenterStore.getState().enqueueAndWait({ channel: "paper-parse", targetId: "B", title: "B" });
+  await sleep(5);
+  const idA = Object.values(useTaskCenterStore.getState().tasks).find((t) => t.title === "A").taskId;
+  useTaskCenterStore.getState().cancelTask(idA);
+  await a.then(
+    () => {
+      throw new Error("A 应 reject");
+    },
+    () => {}, // 拒绝文案随执行器抛错透传（真实执行器为「任务已取消」），此处只断 reject 发生
+  );
+  const bTask = await b;
+  assert(bTask.status === "success", "B 应不受 A 取消影响跑到 success");
+  assert(useTaskCenterStore.getState().tasks[idA].status === "cancelled", "A 应为 cancelled");
+  assert(log.includes("done:B") && !log.includes("done:A"), `执行序列异常: ${log.join(",")}`);
+});
+
+await check("恢复占用按并发槽计：占满拒占、释放后排队任务接续", async () => {
+  const log = [];
+  registerTaskChannel("paper-parse", { executor: makeExecutor(log, 20), concurrency: 2 });
+  const s = useTaskCenterStore.getState();
+  const occ1 = s.occupyForRecovery({ channel: "paper-parse", targetId: "r1.pdf", title: "恢复1" });
+  assert(occ1, "空通道 occupy 应成功");
+  const occ2 = s.occupyForRecovery({ channel: "paper-parse", targetId: "r2.pdf", title: "恢复2" });
+  assert(occ2, "第二槽 occupy 应成功");
+  assert(
+    s.occupyForRecovery({ channel: "paper-parse", targetId: "r3.pdf", title: "恢复3" }) === null,
+    "槽满 occupy 应拒绝",
+  );
+  // 槽满时新入队只排队不启动
+  const queued = s.enqueue({ channel: "paper-parse", targetId: "Q", title: "Q" });
+  assert(queued.ok, "Q 应入队成功");
+  assert(!log.includes("start:Q"), "槽满时 Q 不应启动");
+  // 释放一个恢复槽 → Q 同步接续启动
+  s.settleRecoveredTask(occ1.taskId, "success");
+  const q = useTaskCenterStore.getState().tasks[queued.taskId];
+  assert(q.status === "running", `Q 应在槽位释放后启动，got ${q.status}`);
+  s.settleRecoveredTask(occ2.taskId, "success");
+  await useTaskCenterStore.getState().waitTask(queued.taskId);
+  assert(log.includes("done:Q"), `Q 应执行完成: ${log.join(",")}`);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

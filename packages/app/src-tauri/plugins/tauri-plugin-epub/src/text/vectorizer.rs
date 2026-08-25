@@ -42,7 +42,8 @@ pub struct TextVectorizer {
     model_name: String,
     embeddings_url: String,
     tokenizer: tiktoken_rs::CoreBPE,
-    embedding_dimension: Option<usize>, // 缓存检测到的维度
+    /// 缓存检测到的维度（set-once：P3 起 vectorize_text 取 &self 供多路并发 embed，改内部可变性）
+    embedding_dimension: std::sync::OnceLock<usize>,
 }
 
 
@@ -66,12 +67,13 @@ impl TextVectorizer {
             model_name: config.model_name,
             embeddings_url: config.embeddings_url,
             tokenizer,
-            embedding_dimension: None, // 初始化时未知，首次调用时检测
+            embedding_dimension: std::sync::OnceLock::new(), // 初始化时未知，首次调用时检测
         })
     }
 
-    /// 将文本转换为向量
-    pub async fn vectorize_text(&mut self, text: &str) -> Result<Vec<f32>> {
+    /// 将文本转换为向量（embed HTTP 失败有限指数退避重试：3 次、500ms 起、429 同等对待——P3 §2；
+    /// &self：单篇内 4 路并发 embed 共享同一 vectorizer）
+    pub async fn vectorize_text(&self, text: &str) -> Result<Vec<f32>> {
         // 使用统一的 token 限制配置
         let tokens = self.tokenizer.encode_with_special_tokens(text);
         let processed_text = if tokens.len() > MAX_CHUNK_TOKENS {
@@ -90,6 +92,37 @@ impl TextVectorizer {
             text.to_string()
         };
 
+        const MAX_RETRIES: u32 = 3;
+        let mut attempt: u32 = 0;
+        loop {
+            match self.embed_once(&processed_text).await {
+                Ok(embedding) => {
+                    // 首次调用时检测并缓存维度（并发下多任务同值 set-once，竞写无害）
+                    if self.embedding_dimension.get().is_none() {
+                        let detected_dimension = embedding.len();
+                        log::info!("检测到向量维度: {}", detected_dimension);
+                        let _ = self.embedding_dimension.set(detected_dimension);
+                    }
+                    return Ok(embedding);
+                }
+                Err(e) => {
+                    attempt += 1;
+                    if attempt > MAX_RETRIES {
+                        return Err(e);
+                    }
+                    let backoff = std::time::Duration::from_millis(500u64 << (attempt - 1));
+                    log::warn!(
+                        "embed 请求失败，第 {}/{} 次重试（{:?} 后）: {}",
+                        attempt, MAX_RETRIES, backoff, e
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+
+    /// 单次 embed HTTP 调用（重试时重建请求；429/超时/网络错误同等对待，由调用方退避）
+    async fn embed_once(&self, processed_text: &str) -> Result<Vec<f32>> {
         // 判断是否为 Ollama API（根据 URL 结尾）
         let is_ollama = self.embeddings_url.ends_with("/api/embed");
 
@@ -101,13 +134,13 @@ impl TextVectorizer {
             // Ollama 格式：input 是字符串
             let request = OllamaEmbeddingRequest {
                 model: self.model_name.clone(),
-                input: processed_text,
+                input: processed_text.to_string(),
             };
             req = req.json(&request);
         } else {
             // OpenAI 格式：input 是数组
             let request = OpenAIEmbeddingRequest {
-                input: vec![processed_text],
+                input: vec![processed_text.to_string()],
                 model: self.model_name.clone(),
                 encoding_format: "float".to_string(),
             };
@@ -124,8 +157,9 @@ impl TextVectorizer {
             .context("Failed to send request to embedding API")?;
 
         if !response.status().is_success() {
+            let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("Embedding API error: {}", error_text);
+            anyhow::bail!("Embedding API error ({}): {}", status, error_text);
         }
 
         let embedding = if is_ollama {
@@ -154,22 +188,15 @@ impl TextVectorizer {
             embedding_response.data[0].embedding.clone()
         };
 
-        // 首次调用时检测并缓存维度
-        if self.embedding_dimension.is_none() {
-            let detected_dimension = embedding.len();
-            log::info!("检测到向量维度: {}", detected_dimension);
-            self.embedding_dimension = Some(detected_dimension);
-        }
-
         Ok(embedding)
     }
 
 
 
     /// 检测向量维度（通过发送测试文本）
-    pub async fn detect_embedding_dimension(&mut self) -> Result<usize> {
-        if let Some(dimension) = self.embedding_dimension {
-            return Ok(dimension);
+    pub async fn detect_embedding_dimension(&self) -> Result<usize> {
+        if let Some(dimension) = self.embedding_dimension.get() {
+            return Ok(*dimension);
         }
 
         // 发送测试文本来检测维度

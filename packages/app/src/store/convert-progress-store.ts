@@ -249,7 +249,7 @@ export function markBookActiveError() {
 // ----------------------------------------------------------------------
 // 论文 PDF 解析导入：入口薄壳（P2-4）
 // 队列/执行/恢复迁入 task-center 的 paper-parse 通道（执行器：services/task-executors/paper-parse.ts，
-// 模块加载即自注册）。Rust 侧 convert_paper_pdf 仍是单子进程，通道串行（并发 1）语义不变。
+// 模块加载即自注册）。P3：Rust 侧 convert_paper_pdf 已多句柄化，通道有界并发 2。
 // ----------------------------------------------------------------------
 
 /** 解析通道聚合快照（薄壳共用） */

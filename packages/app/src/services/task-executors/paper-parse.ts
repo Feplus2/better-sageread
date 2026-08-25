@@ -16,7 +16,8 @@
  * 卡片数据源：paperParseCardOf 把通道聚合视图折算回 PaperImportState 形状（卡片 markup 不动）。
  * AI importPaper 链路（importPaperPdf）以 payload.silent 抑制执行器 toast（旧自持监听全程静默）。
  *
- * 模块加载即自注册 paper-parse 通道（并发 1：Rust 侧 convert_paper_pdf 单 child）并注入冲突检查器。
+ * 模块加载即自注册 paper-parse 通道（P3 有界并发 2：Rust 侧 convert_paper_pdf 已多句柄化，
+ * 取消/pending_done/状态查询均按 pdf_path 定向）并注入冲突检查器。
  * 注意：本模块不得静态 import convert-progress-store（其入口薄壳经动态 import 调本模块）——
  * reparsedPapers 写入与 paperRefresh 调用走动态 import，保持无环。
  */
@@ -127,11 +128,12 @@ function batchTotalNow(): number {
   const processed = agg.settled.filter(
     (t) => t.startedAt && !(t.payload as { recovered?: boolean } | undefined)?.recovered,
   );
-  return processed.length + (agg.current ? 1 : 0) + agg.queuedCount;
+  return processed.length + agg.running.length + agg.queuedCount;
 }
 
 // ----------------------------------------------------------------------
-// 刷新恢复锚点（localStorage 记录；键名与字段不变，跨版本恢复兼容）
+// 刷新恢复锚点（localStorage 记录；键名不变。P3 起按 pdfPath 分键存多条——并发 2 下两篇
+// 同时在跑时各自留锚；旧版单对象记录读取时静默迁移为 map 形态，跨版本恢复兼容）
 // ----------------------------------------------------------------------
 const PAPER_TASK_RECORD_KEY = "paperImportCurrentTask";
 
@@ -144,31 +146,46 @@ interface PaperTaskRecord {
   startedAt: number;
 }
 
-function writePaperTaskRecord(record: PaperTaskRecord): void {
+function readAllPaperTaskRecords(): Record<string, PaperTaskRecord> {
   try {
-    localStorage.setItem(PAPER_TASK_RECORD_KEY, JSON.stringify(record));
+    const raw = localStorage.getItem(PAPER_TASK_RECORD_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, PaperTaskRecord> | PaperTaskRecord;
+    // 旧版单对象（自带 pdfPath 字段）→ 迁移为按 pdfPath 分键的 map
+    if ("pdfPath" in parsed && typeof parsed.pdfPath === "string") {
+      const legacy = parsed as PaperTaskRecord;
+      return legacy.pdfPath ? { [legacy.pdfPath]: legacy } : {};
+    }
+    const out: Record<string, PaperTaskRecord> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, PaperTaskRecord>)) {
+      if (v && typeof v.pdfPath === "string" && v.pdfPath) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeAllPaperTaskRecords(records: Record<string, PaperTaskRecord>): void {
+  try {
+    if (Object.keys(records).length === 0) localStorage.removeItem(PAPER_TASK_RECORD_KEY);
+    else localStorage.setItem(PAPER_TASK_RECORD_KEY, JSON.stringify(records));
   } catch {
     // 持久化失败不阻断解析
   }
 }
 
-function readPaperTaskRecord(): PaperTaskRecord | null {
-  try {
-    const raw = localStorage.getItem(PAPER_TASK_RECORD_KEY);
-    if (!raw) return null;
-    const r = JSON.parse(raw) as PaperTaskRecord;
-    return typeof r.pdfPath === "string" && r.pdfPath ? r : null;
-  } catch {
-    return null;
-  }
+function writePaperTaskRecord(record: PaperTaskRecord): void {
+  const all = readAllPaperTaskRecords();
+  all[record.pdfPath] = record;
+  writeAllPaperTaskRecords(all);
 }
 
-function clearPaperTaskRecord(): void {
-  try {
-    localStorage.removeItem(PAPER_TASK_RECORD_KEY);
-  } catch {
-    // ignore
-  }
+function clearPaperTaskRecord(pdfPath: string): void {
+  const all = readAllPaperTaskRecords();
+  if (!(pdfPath in all)) return;
+  delete all[pdfPath];
+  writeAllPaperTaskRecords(all);
 }
 
 // ----------------------------------------------------------------------
@@ -211,16 +228,16 @@ async function runParseInner(
       if (settled) return;
       settled = true;
       cleanup();
-      clearPaperTaskRecord();
-      // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽）；失败则保留，下次启动恢复重试
-      void clearPaperConvertPendingDone().catch(() => {});
+      clearPaperTaskRecord(pdfPath);
+      // 落库成功 → 确认清除 Rust 侧 pending_done（刷新恢复槽；失败则保留，下次启动恢复重试）
+      void clearPaperConvertPendingDone(pdfPath).catch(() => {});
       resolve(outcome);
     };
     const settleFailure = (stage: "download" | "parse" | "import", message: string) => {
       if (settled) return;
       settled = true;
       cleanup();
-      clearPaperTaskRecord();
+      clearPaperTaskRecord(pdfPath);
       ctx.setResult({ outcome: "failed", stage, error: message } satisfies PaperParseResult);
       reject(new Error(message));
     };
@@ -228,15 +245,15 @@ async function runParseInner(
       if (settled) return;
       settled = true;
       cleanup();
-      clearPaperTaskRecord();
+      clearPaperTaskRecord(pdfPath);
       reject(new Error("任务已取消"));
     };
     // 取消语义：先结算再杀进程——树杀（taskkill /T /F）把取消等待拉长到百毫秒级，
     // terminated 事件可能先于 invoke 返回到达；settled 闸 + 卡片状态守卫挡住它，
-    // 保证取消语义落在「已取消」而非「异常退出」。
+    // 保证取消语义落在「已取消」而非「异常退出」。P3：按 pdfPath 定向杀本任务进程。
     const onAbort = () => {
       settleCancelled();
-      void cancelPaperPdfImport().catch(() => {});
+      void cancelPaperPdfImport(pdfPath).catch(() => {});
     };
     ctx.signal.addEventListener("abort", onAbort);
 
@@ -583,7 +600,7 @@ useTaskCenterStore.subscribe((s) => {
 
 // ─── 通道注册（模块加载即完成；冲突检查器幂等注入，与向量化/翻译通道同一实现） ───
 
-registerTaskChannel("paper-parse", { executor: executePaperParse, concurrency: 1 });
+registerTaskChannel("paper-parse", { executor: executePaperParse, concurrency: 2 });
 ensurePaperTaskConflictChecker();
 
 /** 通道空闲时清掉已结算任务（新批次卡片从 0 计起，对齐旧 drain 重置进度卡语义）。
@@ -756,7 +773,7 @@ async function settleRecoveredDone(
           reparsedPapers: { ...s.reparsedPapers, [paperId]: Date.now() },
         }));
       }
-      void clearPaperConvertPendingDone().catch(() => {});
+      void clearPaperConvertPendingDone(done.pdfPath).catch(() => {});
       return { outcome: "imported" };
     } catch (error) {
       const message = `解析成功但落库失败：${errMsg(error)}`;
@@ -777,7 +794,7 @@ async function settleRecoveredDone(
     occ.report(100, `已入库《${label}》`);
     if (result.skipped > 0 && result.imported === 0) {
       toast.info("该论文已入库过（内容未变化）");
-      void clearPaperConvertPendingDone().catch(() => {});
+      void clearPaperConvertPendingDone(done.pdfPath).catch(() => {});
       return { outcome: "skipped" };
     }
     toast.success(`论文解析入库完成：${label}`);
@@ -801,7 +818,7 @@ async function settleRecoveredDone(
     }
     // acquire 来源的恢复也走这里：入库后失效在库检查索引（引用卡片「打开」即时可见）
     invalidateLibraryPaperIndex();
-    void clearPaperConvertPendingDone().catch(() => {});
+    void clearPaperConvertPendingDone(done.pdfPath).catch(() => {});
     return { outcome: "imported" };
   } catch (error) {
     const message = `解析成功但入库失败：${errMsg(error)}`;
@@ -823,62 +840,9 @@ function recoveredPayload(rec: PaperTaskRecord | null, pdfPath: string, fileName
 const recoveredTargetId = (rec: PaperTaskRecord | null, pdfPath: string) =>
   rec?.kind === "reparse" && rec.paperId ? rec.paperId : pdfPath;
 
-/** 页面刷新后的解析通道恢复（GlobalConvertProgress 挂载时经 convert-progress-store 薄壳调用一次；幂等）。 */
-export async function recoverPaperParseAfterReload(): Promise<void> {
-  if (paperRecoveryAttempted) return;
-  paperRecoveryAttempted = true;
-  // 实时通道健在（未刷新/已起泵/运行中任务在）→ 不恢复（对齐旧「draining 或卡在跑」判定）
+/** 情形 A 单篇接管：占住一个并发槽（新提交只能填剩余空槽，结算后自动接续），恢复进度卡与完成监听 */
+async function recoverRunningTask(runningPdf: string, rec: PaperTaskRecord | null): Promise<void> {
   const st = useTaskCenterStore.getState();
-  const agg0 = selectChannelAggregate(st, "paper-parse");
-  if (agg0.current !== null || agg0.queuedCount > 0) return;
-
-  const status = await getPaperConvertStatus().catch(() => null);
-  if (!status) return;
-  const record = readPaperTaskRecord();
-
-  // 情形 B：done 产物滞留（含「done 已发但进程未退」的刷新瞬间——产物已可消费，不必再等进程）
-  if (status.pendingDone) {
-    const pending = status.pendingDone;
-    const rec = record?.pdfPath === pending.pdfPath ? record : null;
-    const fileName = rec?.title || pending.title || pdfFileName(pending.pdfPath);
-    const occ = st.occupyForRecovery({
-      channel: "paper-parse",
-      targetId: recoveredTargetId(rec, pending.pdfPath),
-      title: fileName,
-      payload: recoveredPayload(rec, pending.pdfPath, fileName),
-    });
-    if (!occ) return;
-    occ.report(100, "恢复解析产物入库（页面刷新前已完成解析）…");
-    const settledDone = await settleRecoveredDone(pending, rec, occ, occ.taskId);
-    clearPaperTaskRecord();
-    st.settleRecoveredTask(
-      occ.taskId,
-      settledDone.outcome === "failed" ? "error" : "success",
-      settledDone.outcome === "failed" ? settledDone.error : undefined,
-    );
-    if (!status.runningPdfPath || status.runningPdfPath === pending.pdfPath) return;
-    // 防御：pending 与在跑任务不同源（正常不会发生——新任务启动即清 pending），继续走情形 A
-  }
-
-  const runningPdf = status.runningPdfPath;
-  if (!runningPdf) {
-    // 情形 C：有残留记录但进程/产物都没了 = error/terminated 丢失在刷新窗口
-    if (record) {
-      clearPaperTaskRecord();
-      const fileName = record.title || pdfFileName(record.pdfPath);
-      const occ = st.occupyForRecovery({
-        channel: "paper-parse",
-        targetId: recoveredTargetId(record, record.pdfPath),
-        title: fileName,
-        payload: recoveredPayload(record, record.pdfPath, fileName),
-      });
-      if (occ) st.settleRecoveredTask(occ.taskId, "error", "解析在页面刷新期间中断，请重新发起");
-    }
-    return;
-  }
-
-  // 情形 A：解析仍在跑——占住泵位（新提交排队，结算后自动接续），恢复进度卡与完成监听
-  const rec = record?.pdfPath === runningPdf ? record : null;
   const fileName = rec?.title || pdfFileName(runningPdf);
   const occ = st.occupyForRecovery({
     channel: "paper-parse",
@@ -886,6 +850,8 @@ export async function recoverPaperParseAfterReload(): Promise<void> {
     title: fileName,
     payload: recoveredPayload(rec, runningPdf, fileName),
   });
+  // 槽位满（正常不会发生：刷新后 store 为空，在跑数 ≤ 通道并发上限）——放弃监控，
+  // 该篇 done 会落 pending_done 槽，下次启动走情形 B 补落库
   if (!occ) return;
   occ.reportExtra({ stages: buildPdfStages() });
   occ.report(0, "解析进行中（页面刷新后恢复监控）…");
@@ -897,15 +863,15 @@ export async function recoverPaperParseAfterReload(): Promise<void> {
     if (settled) return;
     settled = true;
     unlisten?.();
-    clearPaperTaskRecord();
-    // 释放泵位 + 排队接续在 settleRecoveredTask 内完成（对齐旧 settleRecovered 收尾语义）；
+    clearPaperTaskRecord(runningPdf);
+    // 释放并发槽 + 排队接续在 settleRecoveredTask 内完成（对齐旧 settleRecovered 收尾语义）；
     // 列表刷新由通道活跃→空闲沿的订阅统一触发
     useTaskCenterStore.getState().settleRecoveredTask(occ.taskId, finalStatus, error);
   };
-  // 取消按钮（cancelPaperImport → cancelTask → signal）驱动恢复任务即时结算：先结算再杀进程
+  // 取消按钮（cancelPaperImport → cancelTask → signal）驱动恢复任务即时结算：先结算再定向杀进程
   occ.signal.addEventListener("abort", () => {
     settleRecovered("cancelled");
-    void cancelPaperPdfImport().catch(() => {});
+    void cancelPaperPdfImport(runningPdf).catch(() => {});
   });
 
   try {
@@ -956,19 +922,84 @@ export async function recoverPaperParseAfterReload(): Promise<void> {
       }
     });
   } catch {
-    // 监听注册失败：进程还在跑但接不上事件——按中断处理并释放泵位
+    // 监听注册失败：进程还在跑但接不上事件——按中断处理并释放并发槽
     settleRecovered("error", "恢复解析监控失败，请查看日志后重新发起");
     return;
   }
 
   // 竞态收口：监听挂好的空窗内进程可能已退场（done/error 无人接收）→ 复查状态直结
   const recheck = await getPaperConvertStatus().catch(() => null);
-  if (!settled && recheck && recheck.runningPdfPath !== runningPdf) {
-    if (recheck.pendingDone && recheck.pendingDone.pdfPath === runningPdf) {
-      const r = await settleRecoveredDone(recheck.pendingDone, rec, occ, occ.taskId);
+  if (!settled && recheck && !recheck.runningPdfPaths.includes(runningPdf)) {
+    const pending = recheck.pendingDones.find((d) => d.pdfPath === runningPdf);
+    if (pending) {
+      const r = await settleRecoveredDone(pending, rec, occ, occ.taskId);
       settleRecovered(r.outcome === "failed" ? "error" : "success", r.outcome === "failed" ? r.error : undefined);
-    } else if (!recheck.pendingDone) {
+    } else {
       settleRecovered("error", "解析在恢复监控前已中断");
     }
+  }
+}
+
+/** 页面刷新后的解析通道恢复（GlobalConvertProgress 挂载时经 convert-progress-store 薄壳调用一次；幂等）。
+ *  P3 多任务版：pending_dones 逐条情形 B 补落库、running_pdf_paths 逐条情形 A 接管、
+ *  两边都不搭界的残留记录按情形 C 出错误卡。 */
+export async function recoverPaperParseAfterReload(): Promise<void> {
+  if (paperRecoveryAttempted) return;
+  paperRecoveryAttempted = true;
+  // 实时通道健在（未刷新/已起泵/运行中任务在）→ 不恢复（对齐旧「draining 或卡在跑」判定）
+  const st = useTaskCenterStore.getState();
+  const agg0 = selectChannelAggregate(st, "paper-parse");
+  if (agg0.current !== null || agg0.queuedCount > 0) return;
+
+  const status = await getPaperConvertStatus().catch(() => null);
+  if (!status) return;
+  const records = readAllPaperTaskRecords();
+
+  // 情形 B：done 产物滞留（可多条；含「done 已发但进程未退」的刷新瞬间——产物已可消费，不必再等进程）
+  const pendingPdfs = new Set<string>();
+  for (const pending of status.pendingDones) {
+    pendingPdfs.add(pending.pdfPath);
+    const rec = records[pending.pdfPath] ?? null;
+    delete records[pending.pdfPath];
+    const fileName = rec?.title || pending.title || pdfFileName(pending.pdfPath);
+    const occ = st.occupyForRecovery({
+      channel: "paper-parse",
+      targetId: recoveredTargetId(rec, pending.pdfPath),
+      title: fileName,
+      payload: recoveredPayload(rec, pending.pdfPath, fileName),
+    });
+    // 槽位满（理论上不会发生）→ 滞留槽保留在 pending_done，下次启动重试
+    if (!occ) continue;
+    occ.report(100, "恢复解析产物入库（页面刷新前已完成解析）…");
+    const settledDone = await settleRecoveredDone(pending, rec, occ, occ.taskId);
+    clearPaperTaskRecord(pending.pdfPath);
+    useTaskCenterStore
+      .getState()
+      .settleRecoveredTask(
+        occ.taskId,
+        settledDone.outcome === "failed" ? "error" : "success",
+        settledDone.outcome === "failed" ? settledDone.error : undefined,
+      );
+  }
+
+  // 情形 A：仍在跑的逐条接管（pending 已覆盖的同源跳过——done 已落槽被情形 B 消费）
+  for (const runningPdf of status.runningPdfPaths) {
+    if (pendingPdfs.has(runningPdf)) continue;
+    const rec = records[runningPdf] ?? null;
+    delete records[runningPdf];
+    await recoverRunningTask(runningPdf, rec);
+  }
+
+  // 情形 C：残留记录既不在跑也无产物 = error/terminated 丢失在刷新窗口（每条一张错误卡）
+  for (const record of Object.values(records)) {
+    clearPaperTaskRecord(record.pdfPath);
+    const fileName = record.title || pdfFileName(record.pdfPath);
+    const occ = st.occupyForRecovery({
+      channel: "paper-parse",
+      targetId: recoveredTargetId(record, record.pdfPath),
+      title: fileName,
+      payload: recoveredPayload(record, record.pdfPath, fileName),
+    });
+    if (occ) st.settleRecoveredTask(occ.taskId, "error", "解析在页面刷新期间中断，请重新发起");
   }
 }

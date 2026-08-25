@@ -155,7 +155,7 @@ where
         opts.vectorizer.model_name,
         if opts.vectorizer.api_key.is_some() { "***" } else { "None" }
     );
-    let mut vectorizer = TextVectorizer::new(opts.vectorizer.clone())
+    let vectorizer = TextVectorizer::new(opts.vectorizer.clone())
         .await
         .with_context(|| format!("Failed to initialize text vectorizer with embeddings_url: {}, model: {}",
             opts.vectorizer.embeddings_url, opts.vectorizer.model_name))?;
@@ -454,7 +454,7 @@ pub async fn search_db_with_mode<P: AsRef<Path>>(
         }
         _ => {
             // 需要向量化的模式
-            let mut v = TextVectorizer::new(vectorizer).await?;
+            let v = TextVectorizer::new(vectorizer).await?;
             let actual_dimension = v.detect_embedding_dimension().await
                 .context("Failed to detect embedding dimension")?;
 
@@ -605,7 +605,7 @@ pub async fn process_manual_to_db<P: AsRef<Path>>(
         opts.vectorizer.embeddings_url,
         opts.vectorizer.model_name
     );
-    let mut vectorizer = TextVectorizer::new(opts.vectorizer.clone())
+    let vectorizer = TextVectorizer::new(opts.vectorizer.clone())
         .await
         .with_context(|| {
             format!(
@@ -748,7 +748,7 @@ where
         opts.vectorizer.embeddings_url,
         opts.vectorizer.model_name
     );
-    let mut vectorizer = TextVectorizer::new(opts.vectorizer.clone())
+    let vectorizer = TextVectorizer::new(opts.vectorizer.clone())
         .await
         .with_context(|| {
             format!(
@@ -783,24 +783,68 @@ where
 
     let batch_size = opts.batch_size.unwrap_or(10);
     let absolute_md_path = md_file_path.to_string_lossy().to_string();
-    let mut batch: Vec<DocumentChunk> = Vec::new();
     let mut total_processed_chunks = 0;
     let mut error_stats = ErrorStats::new();
 
+    // 单篇内分片 embed 有界并行（P3 §2，默认 4 路）：HTTP 并发由信号量封顶，
+    // 结果按 chunk_index 重排后仍单线程批量 INSERT（入库顺序与串行口径一致，撞锁语义不变）。
+    // 不引 futures 依赖：tokio Semaphore 限流 + JoinSet 收结果。
+    const EMBED_CONCURRENCY: usize = 4;
+    let vectorizer = std::sync::Arc::new(vectorizer);
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(EMBED_CONCURRENCY));
+    #[allow(clippy::type_complexity)]
+    let mut join_set: tokio::task::JoinSet<(usize, String, bool, Result<Vec<f32>>)> =
+        tokio::task::JoinSet::new();
+    let mut total_embed_jobs = 0usize;
     for (chunk_index, (chunk_content, is_references)) in chunks.into_iter().enumerate() {
         if chunk_content.trim().is_empty() {
             continue;
         }
+        total_embed_jobs += 1;
+        let v = vectorizer.clone();
+        let sem = semaphore.clone();
+        join_set.spawn(async move {
+            let _permit = sem.acquire().await.expect("embed semaphore closed");
+            let result = v.vectorize_text(&chunk_content).await;
+            (chunk_index, chunk_content, is_references, result)
+        });
+    }
 
-        let embedding = match vectorizer.vectorize_text(&chunk_content).await {
-            Ok(emb) => emb,
-            Err(e) => {
+    // 收结果（完成序任意）：进度按已完成数单调推进；失败分片跳过口径与串行版一致
+    let mut embedded: Vec<(usize, String, bool, Vec<f32>)> = Vec::new();
+    let mut completed_jobs = 0usize;
+    while let Some(joined) = join_set.join_next().await {
+        completed_jobs += 1;
+        match joined {
+            Ok((chunk_index, _, _, Err(e))) => {
                 log::error!("论文分片向量化失败 (paper_id: {}, 分片: {}): {}", paper_id, chunk_index, e);
                 error_stats.add_chunk_error();
-                continue;
             }
-        };
+            Ok((chunk_index, chunk_content, is_references, Ok(embedding))) => {
+                embedded.push((chunk_index, chunk_content, is_references, embedding));
+            }
+            Err(e) => {
+                log::error!("论文分片向量化任务异常 (paper_id: {}): {}", paper_id, e);
+                error_stats.add_chunk_error();
+            }
+        }
+        if let Some(cb) = on_progress.as_mut() {
+            cb(ProgressUpdate {
+                current: completed_jobs,
+                total: total_embed_jobs,
+                percent: (completed_jobs as f32 / total_embed_jobs.max(1) as f32) * 100.0,
+                md_file_path: absolute_md_path.clone(),
+                // 并行完成序与分片序不再对应；chunk_index 字段仅作占位（消费方只用 current/total/percent）
+                chunk_index: 0,
+                related_chapter_titles: title.to_string(),
+            });
+        }
+    }
 
+    // 按原分片序重排 → 单线程批量 INSERT（与串行版写库口径一致）
+    embedded.sort_by_key(|(chunk_index, _, _, _)| *chunk_index);
+    let mut batch: Vec<DocumentChunk> = Vec::new();
+    for (chunk_index, chunk_content, is_references, embedding) in embedded {
         batch.push(DocumentChunk {
             id: None,
             book_title: title.to_string(),
@@ -822,17 +866,6 @@ where
                 .map_err(|e| anyhow::anyhow!("论文分片入库失败: {}", e))?;
             total_processed_chunks += batch.len();
             batch.clear();
-        }
-
-        if let Some(cb) = on_progress.as_mut() {
-            cb(ProgressUpdate {
-                current: chunk_index + 1,
-                total: total_chunks_in_file,
-                percent: ((chunk_index + 1) as f32 / total_chunks_in_file as f32) * 100.0,
-                md_file_path: absolute_md_path.clone(),
-                chunk_index,
-                related_chapter_titles: title.to_string(),
-            });
         }
     }
 
@@ -894,7 +927,7 @@ pub async fn search_papers_global<P: AsRef<Path>>(
     match vectorizer {
         // 有嵌入配置：向量化查询，走 hybrid 融合检索
         Some(vectorizer_config) => {
-            let mut v = TextVectorizer::new(vectorizer_config).await?;
+            let v = TextVectorizer::new(vectorizer_config).await?;
             let actual_dimension = v.detect_embedding_dimension().await
                 .context("Failed to detect embedding dimension")?;
             log::info!("检测到向量维度: {}", actual_dimension);
