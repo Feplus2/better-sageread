@@ -3,6 +3,7 @@
 //  C) 主页路由两槽交叉淡入：连切不叠三层、/chat 常驻层、几何等价、帧探针
 //  D) Tabs 滑动 pill：首帧无飞入、滑动中途、触发器样式解耦（embedding-dialog / 书籍笔记 / 论文笔记三使用方）
 //  E) 三档退化：fade-only 位移归零、reduced 硬切   F) 大 DOM 压力：论文 tab 切换帧探针
+// 隐藏模型双轨感知（index.css data-tab-hide）：visibility 相关断言按启动时读到的模型自动适配（TAB_HIDE）。
 // 高负载机器友好：所有终态断言走轮询（pollUntil），不用固定 sleep 拍脑袋。
 // 用法：node scripts/cdp-motion-batch3-verify.mjs
 const LIST_URL = "http://127.0.0.1:9223/json/list";
@@ -61,6 +62,18 @@ const pollUntil = async (fn, timeout = 3000, step = 200) => {
   return null;
 };
 
+// 隐藏模型感知（index.css 批次 3 双轨 data-tab-hide）：
+// visibility 模型非活跃终态 = visibility:hidden；opacity 模型恒 visible，终态判据 = opacity 0 + 位移态。
+// 采样串格式 `${active}:${opacity(4字符)}:${visibility}:${transform}`，下同。
+const TAB_HIDE = await evalJs(`document.documentElement.dataset.tabHide ?? "opacity"`);
+console.log("TAB-HIDE-MODEL", TAB_HIDE);
+const layerOpacity = (s) => Number.parseFloat(s.split(":")[1]);
+// 非活跃层是否到终态（visibility: :hidden:tf；opacity: 0:visible:tf）
+const isInactiveSettled = (s) =>
+  TAB_HIDE === "visibility" ? s.endsWith(":hidden:tf") : layerOpacity(s) === 0 && s.endsWith(":visible:tf");
+// 「可见」语义统一为 opacity > 0.05（opacity 模型下 visibility 恒 visible，不能当判据）
+const isVisuallyOn = (s) => layerOpacity(s) > 0.05;
+
 // ---------- 通用探针 ----------
 // store 调用统一走 async IIFE（Runtime.evaluate 经典脚本不支持顶层 await；vite dev 模块与 app 同实例）
 const storeCall = async (body) =>
@@ -75,8 +88,9 @@ const storeState = async () =>
 // reader tab 层采样（main.overflow-clip 直属 .tab-layer）
 const READER_LAYER_EXPR = `[...document.querySelectorAll("main.overflow-clip > .tab-layer")].map((l) => { const c = getComputedStyle(l); return \`\${l.dataset.active}:\${c.opacity.slice(0, 4)}:\${c.visibility}:\${c.transform === "none" ? "notf" : "tf"}\`; })`;
 const readerLayers = async () => JSON.parse(await evalJs(`JSON.stringify(${READER_LAYER_EXPR})`));
-// 路由/chat 层采样（app-main 直属 .tab-layer；chat 层带 shadow-around）
-const ROUTE_LAYER_EXPR = `(() => { const am = document.querySelector('[data-region="app-main"]'); if (!am) return ["no-am"]; return [...am.children].filter((c) => c.classList?.contains("tab-layer")).map((l) => { const c = getComputedStyle(l); return \`\${l.classList.contains("shadow-around") ? "chat" : "route"}:\${l.dataset.active}:\${c.opacity.slice(0, 4)}:\${c.visibility}\`; }); })()`;
+// 路由/chat 层采样（app-main 直属 .tab-layer；chat 常驻层以 data-region="chat-layer" 标识——
+// 路由页根卡片也带 shadow-around，不能按类名区分）
+const ROUTE_LAYER_EXPR = `(() => { const am = document.querySelector('[data-region="app-main"]'); if (!am) return ["no-am"]; return [...am.children].filter((c) => c.classList?.contains("tab-layer")).map((l) => { const c = getComputedStyle(l); return \`\${l.dataset.region === "chat-layer" ? "chat" : "route"}:\${l.dataset.active}:\${c.opacity.slice(0, 4)}:\${c.visibility}\`; }); })()`;
 const routeLayers = async () => JSON.parse(await evalJs(`JSON.stringify(${ROUTE_LAYER_EXPR})`));
 
 // rAF 采样器：注入后 windowMs 内每帧记录 expr 值与时间戳（帧间隔即卡顿证据）
@@ -186,9 +200,9 @@ if (!bookTabId) {
     const midEvidence = await pollUntil(
       async () => {
         const ls = await readerLayers();
-        const visCount = ls.filter((s) => s.endsWith(":visible:notf") || s.endsWith(":visible:tf")).length;
+        const visCount = ls.filter(isVisuallyOn).length;
         const midFade = ls.some((s) => {
-          const o = Number.parseFloat(s.split(":")[1]);
+          const o = layerOpacity(s);
           return o > 0.05 && o < 0.95;
         });
         return visCount >= 2 && midFade ? ls.join(" ") : null;
@@ -201,35 +215,37 @@ if (!bookTabId) {
     await shot("b3-02-tab-settled");
     const samples = await readSampler();
     const fs = frameStats(samples);
-    const bothVisible =
-      !!midEvidence ||
-      samples.some((x) => x.s.filter((s) => s.endsWith(":visible:notf") || s.endsWith(":visible:tf")).length >= 2);
+    const bothVisible = !!midEvidence || samples.some((x) => x.s.filter(isVisuallyOn).length >= 2);
     const anyMidFade =
       !!midEvidence ||
       samples.some((x) =>
         x.s.some((s) => {
-          const o = Number.parseFloat(s.split(":")[1]);
+          const o = layerOpacity(s);
           return o > 0.05 && o < 0.95;
         }),
       );
-    const noBlank =
-      samples.length > 0 &&
-      samples.every((x) => x.s.some((s) => s.endsWith(":visible:notf") || s.endsWith(":visible:tf")));
+    const noBlank = samples.length > 0 && samples.every((x) => x.s.some(isVisuallyOn));
     check("B1 交叉淡入双层同帧", bothVisible && anyMidFade, midEvidence ?? `frames=${fs.frames} maxGap=${fs.maxGap}ms`);
     check("B1 全程无空白帧", noBlank, `frames=${fs.frames} span=${fs.spanMs}ms`);
-    // 终态轮询：单层 active opacity1 transform-none，余层 hidden
+    // 终态轮询：单层 active opacity1 transform-none，余层到隐藏终态（按模型）
     const settled = await pollUntil(async () => {
       const ls = await readerLayers();
       const ok =
         ls.filter((s) => s.startsWith("true:1:visible:notf")).length === 1 &&
-        ls.filter((s) => !s.startsWith("true")).every((s) => s.endsWith(":hidden:tf"));
+        ls.filter((s) => !s.startsWith("true")).every(isInactiveSettled);
       return ok ? ls.join(" ") : null;
     }, 2500);
     check(
-      "B1 终态：单层 active opacity1 transform-none，余层 hidden",
+      `B1 终态：单层 active opacity1 transform-none，余层隐藏终态（${TAB_HIDE} 模型）`,
       !!settled,
       settled ?? (await readerLayers()).join(" "),
     );
+    // 隐藏隔离（批次 opacity 实验新增）：非活跃层 inert + aria-hidden，活跃层皆无
+    const isoOk = await evalJs(`(() => {
+      const ls = [...document.querySelectorAll("main.overflow-clip > .tab-layer")];
+      return ls.every((l) => (l.dataset.active === "true" ? !l.inert && !l.getAttribute("aria-hidden") : l.inert && l.getAttribute("aria-hidden") === "true"));
+    })()`);
+    check("B1 隐藏隔离：非活跃层 inert + aria-hidden，活跃层无", isoOk === true, String(isoOk));
 
     // B2 快速连切 target→from→target（间隔 80ms）
     await startSampler(READER_LAYER_EXPR);
@@ -365,16 +381,19 @@ const routeMax = routeSamples.length
   ? Math.max(...routeSamples.map((x) => x.s.filter((s) => s.startsWith("route")).length))
   : -1;
 check("C2 快速连切全程路由层 ≤2（不叠三层）", routeMax >= 0 && routeMax <= 2, `max=${routeMax}`);
-// 终态轮询：非活跃层可能因负载延迟卸载，但必须先达到「视觉终态」（opacity 0 + hidden），最终卸载
+// 终态轮询：非活跃层可能因负载延迟卸载，但必须先达到「视觉终态」（opacity 0 + 模型对应隐藏态），最终卸载
+//（route 采样串格式 type:active:opacity:visibility，与 reader 层不同）
 const routeVisualSettled = await pollUntil(async () => {
   const ls = await routeLayers();
   const routes = ls.filter((s) => s.startsWith("route"));
   const active = routes.filter((s) => s.startsWith("route:true:1:visible")).length === 1;
-  const restHidden = routes.filter((s) => !s.startsWith("route:true")).every((s) => s.includes(":0:hidden"));
+  const restHidden = routes
+    .filter((s) => !s.startsWith("route:true"))
+    .every((s) => (TAB_HIDE === "visibility" ? s.includes(":0:hidden") : s.includes(":0:visible")));
   return active && restHidden ? ls.join(" ") : null;
 }, 3000);
 check(
-  "C2 视觉终态：单层 active，余层已隐藏",
+  `C2 视觉终态：单层 active，余层已隐藏（${TAB_HIDE} 模型）`,
   !!routeVisualSettled,
   routeVisualSettled ?? (await routeLayers()).join(" "),
 );
@@ -392,8 +411,9 @@ await shot("b3-13-chat-mid");
 await sleep(600);
 await shot("b3-14-chat-settled");
 const chatSamples = await readSampler();
+// 交叉淡化证据统一看 opacity（opacity 模型下 visibility 恒 visible，不能当判据；route 串 opacity 在 split[2]）
 const chatBothVisible = chatSamples.some((x) => {
-  const vis = x.s.filter((s) => s.endsWith(":visible"));
+  const vis = x.s.filter((s) => Number.parseFloat(s.split(":")[2]) > 0.05);
   return vis.some((s) => s.startsWith("chat:true")) && vis.some((s) => s.startsWith("route:"));
 });
 check("C3 切进 /chat 交叉淡入（chat 淡入 + 路由层播离场同帧）", chatBothVisible);
@@ -407,15 +427,18 @@ check("C3 /chat 终态：chat active、路由层清空", !!chatSettled, chatSett
 await evalJs(`location.hash = "#/"`);
 const chatKept = await pollUntil(async () => {
   const v = await evalJs(`(() => {
-    const chat = [...document.querySelectorAll('[data-region="app-main"] > .tab-layer')].find((l) => l.classList.contains("shadow-around"));
+    const chat = document.querySelector('[data-region="app-main"] > [data-region="chat-layer"]');
     const c = chat ? getComputedStyle(chat) : null;
-    return JSON.stringify({ present: !!chat, active: chat?.dataset.active ?? null, visibility: c?.visibility ?? null, mountedChildren: chat?.childElementCount ?? 0 });
+    return JSON.stringify({ present: !!chat, active: chat?.dataset.active ?? null, visibility: c?.visibility ?? null, opacity: c?.opacity ?? null, inert: chat?.inert ?? null, mountedChildren: chat?.childElementCount ?? 0 });
   })()`);
   const o = JSON.parse(v);
-  return o.present && o.active === "false" && o.visibility === "hidden" && o.mountedChildren > 0 ? v : null;
-}, 3000);
+  // 隐藏终态按模型：visibility 模型 = hidden；opacity 模型 = opacity 0 + inert
+  const hiddenOk = TAB_HIDE === "visibility" ? o.visibility === "hidden" : o.opacity === "0" && o.inert === true;
+  return o.present && o.active === "false" && hiddenOk && o.mountedChildren > 0 ? v : null;
+  // 超时放宽 6s：回 #/ 时 LibraryPage 重挂载 + 数据加载可能堵主线程 2s+，叠 visibility 0.3s 延迟链
+}, 6000);
 await shot("b3-15-back-library");
-check("C3 切出 /chat 后常驻挂载语义未破（隐藏但子树在）", !!chatKept, chatKept ?? "timeout");
+check(`C3 切出 /chat 后常驻挂载语义未破（隐藏但子树在，${TAB_HIDE} 模型）`, !!chatKept, chatKept ?? "timeout");
 
 // C4 路由切换帧探针（#/ → #/papers）
 await startSampler(ROUTE_LAYER_EXPR);
@@ -705,14 +728,14 @@ const reducedTokens = await evalJs(
     const reduced = await pollUntil(
       async () => {
         const ls = await readerLayers();
-        return ls.filter((s) => !s.startsWith("true")).every((s) => s.includes(":hidden:")) ? ls.join(" ") : null;
+        return ls.filter((s) => !s.startsWith("true")).every(isInactiveSettled) ? ls.join(" ") : null;
       },
       4000,
       100,
     );
     await shot("b3-31-reduced-tab");
     check(
-      "E reduced：0.01ms 硬切（离场层立即 hidden）",
+      `E reduced：0.01ms 硬切（离场层立即到隐藏终态，${TAB_HIDE} 模型）`,
       !!reduced,
       `${reducedTokens} ${reduced ?? (await readerLayers()).join(" ")}`,
     );
@@ -721,9 +744,12 @@ const reducedTokens = await evalJs(
 await evalJs(`document.documentElement.dataset.motion = ${JSON.stringify(initialMotion)}`);
 
 // ---------- F) 大 DOM 压力（对照探针） ----------
-// 重论文 unhide 的历史强制重算墙（index.css:697 记载）会饿死 rAF，帧采样在此无意义；
+// 切换卡顿墙会饿死 rAF，帧采样在此无意义；
 // 改为定量对照：同一切换在 full / reduced 两档各跑一次，比较「提交耗时 / 强制重算 / 下一绘制帧」，
-// 若两档同量级 → 卡顿来自 pre-existing unhide 墙，动效（合成器属性）未添主线程成本。
+// 若两档同量级 → 卡顿是 pre-existing，动效（合成器属性）未添主线程成本。
+//（2026-08-25 opacity A/B 实验修正归因：墙 = activateTab 后 React 同步 render 单个 long task
+// ——PaperReaderView 未 memo，全保活树 ~11 万元素重 reconcile；翻转后强制样式重算两隐藏模型均 ≈0ms，
+// content-visibility:auto 已护住屏外块。）
 const probeSwitch = async (targetId) =>
   JSON.parse(
     await evalJs(`(async () => {

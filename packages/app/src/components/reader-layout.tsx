@@ -476,19 +476,24 @@ export default function ReaderLayout() {
             clip 不是滚动容器，scrollTop 恒 0，从机制上免疫 */}
         <main className="relative flex-1 overflow-clip rounded-md">
           {/* 保活层可见性改走 .tab-layer + data-active（index.css 批次 3）：
-              硬切 → 交叉淡入 + 位移归位；zIndex 语义不变（active=1 否则 0），休眠/保活逻辑不动 */}
-          <div className="tab-layer absolute inset-0" data-active={isHomeActive}>
+              硬切 → 交叉淡入 + 位移归位；zIndex 语义不变（active=1 否则 0），休眠/保活逻辑不动。
+              非活跃层 inert + aria-hidden：opacity 隐藏模型下无 visibility 遮挡，
+              焦点/键盘/无障碍树隔离由这两个属性兜底（visibility 模型下同属 belt+braces） */}
+          <div className="tab-layer absolute inset-0" data-active={isHomeActive} inert={!isHomeActive} aria-hidden={!isHomeActive || undefined}>
             <HomeLayout />
           </div>
 
           {tabs.map((tab) => {
             // 论文 tab：三段式阅读视图（左笔记占位 | 中 PaperHeaderBar+PaperReader | 右论文助手），无 foliate reader store
             if ((tab.type ?? "book") === "paper") {
+              const isActiveTab = tab.id === activeTabId;
               return (
                 <div
                   key={tab.id}
                   className="tab-layer absolute inset-0 flex bg-background p-1"
-                  data-active={tab.id === activeTabId}
+                  data-active={isActiveTab}
+                  inert={!isActiveTab}
+                  aria-hidden={!isActiveTab || undefined}
                 >
                   <PaperReaderView paperId={tab.bookId} title={tab.title} viewSleeping={sleptTabs.has(tab.id)} />
                 </div>
@@ -607,7 +612,12 @@ export default function ReaderLayout() {
 
             return (
               <ReaderProvider store={store} key={tab.id}>
-                <div className="tab-layer absolute inset-0 flex bg-background p-1" data-active={tab.id === activeTabId}>
+                <div
+                  className="tab-layer absolute inset-0 flex bg-background p-1"
+                  data-active={tab.id === activeTabId}
+                  inert={tab.id !== activeTabId}
+                  aria-hidden={tab.id !== activeTabId || undefined}
+                >
                   {/* 批次 4：侧栏开合冻结编排——动画期间内容钉层宽度钉死（EPUB 不逐帧重分页），
                       结束帧拆钉一次性 reflow，此时才发一次 foliate-resize-update（detail 同拖拽处现有用法） */}
                   <SidebarMotionProvider

@@ -106,6 +106,7 @@ const AnimatedRouteLayers = () => {
     <div
       key={path}
       data-active={path === activePath}
+      inert={path !== activePath}
       aria-hidden={path !== activePath || undefined}
       className="tab-layer absolute inset-0 p-1"
     >
@@ -254,7 +255,13 @@ const HomeLayout = () => {
               此前 /chat 随 Routes 卸载——卸载清理清空仍在流式的 Chat 实例消息表，孤儿流 finish 以
               残缺 [assistant] 覆盖落库（2026-08-24 消息丢失根修）。常驻后切页不断流、回页即续接。
               批次 3 仅把 display 硬切换成 .tab-layer data-active 交叉淡入，常驻挂载语义不变 */}
-          <div data-active={location.pathname === "/chat"} className="tab-layer absolute inset-0 p-1">
+          <div
+            data-region="chat-layer"
+            data-active={location.pathname === "/chat"}
+            inert={location.pathname !== "/chat"}
+            aria-hidden={location.pathname !== "/chat" || undefined}
+            className="tab-layer absolute inset-0 p-1"
+          >
             {/* 嵌套结构：层管定位+p-1，内层原样保留硬切时代的卡片类（rounded/shadow 在 4px 净空内，
                 若把 p-1 与 shadow-around 压在同一层，阴影会贴 app-main 边被 overflow-hidden 裁掉） */}
             <div className="flex h-full flex-1 flex-col overflow-hidden rounded-xl shadow-around">
