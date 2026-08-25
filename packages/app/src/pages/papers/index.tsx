@@ -1,5 +1,6 @@
 import { getUtilityModel } from "@/ai/providers/factory";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
+import { TaskRunPanel } from "@/components/task-run-panel";
 import { MotionStackCard } from "@/components/ui/bottom-right-stack";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -512,7 +513,11 @@ function BatchProgressCard({
         <button
           type="button"
           className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-          onClick={onDismiss}
+          onClick={(e) => {
+            // 卡本体已接 TaskRunPanel 触发器：阻止冒泡，dismiss 不触发面板开合
+            e.stopPropagation();
+            onDismiss();
+          }}
         >
           <X className="size-3.5" />
         </button>
@@ -538,7 +543,11 @@ function BatchProgressCard({
               variant="outline"
               size="sm"
               className="h-7 px-2.5 text-xs"
-              onClick={onCancel}
+              onClick={(e) => {
+                // 同上：取消整批不触发面板开合
+                e.stopPropagation();
+                onCancel();
+              }}
               disabled={card.cancelling === true}
             >
               {card.cancelling ? "正在取消…" : "取消"}
@@ -2257,17 +2266,22 @@ export default function PapersPage() {
       {/* 后台解析进度卡已上移为全局浮层（components/global-convert-progress）——跨页面持续呈现 */}
 
       {/* 批量任务进度卡（共享右下角栈，与解析/Zotero 卡纵向堆叠不覆盖；向量化/翻译双通道可并行各出一张；running 时关闭即取消）。
-          出入场走 MotionStackCard 延迟卸载编排：通道进度清空后先播离场动画（定格收尾快照）再卸载。 */}
+          出入场走 MotionStackCard 延迟卸载编排：通道进度清空后先播离场动画（定格收尾快照）再卸载。
+          P2-5：点击卡片经 TaskRunPanel 弹出该通道子任务清单（单项取消在面板内）。
+          渲染修正（P2-5）：数据源是通道聚合折算的 batchCards（channelCardOf 含恢复监控回落）——
+          此前误读 storeProgress[kind]（P2-3 后该切片只剩恢复监控卡），实时通道卡未渲染。 */}
       {(["vectorize", "translate"] as const).map((kind) => {
-        const progress = storeProgress[kind];
+        const progress = batchCards.find((c) => c.kind === kind);
         return (
           <MotionStackCard key={kind} show={!!progress}>
             {progress && (
-              <BatchProgressCard
-                card={{ kind, ...progress }}
-                onCancel={() => handleCancelBatch(kind)}
-                onDismiss={() => handleDismissBatchProgress({ kind, ...progress })}
-              />
+              <TaskRunPanel channel={kind === "vectorize" ? "paper-vectorize" : "paper-translate"}>
+                <BatchProgressCard
+                  card={progress}
+                  onCancel={() => handleCancelBatch(kind)}
+                  onDismiss={() => handleDismissBatchProgress(progress)}
+                />
+              </TaskRunPanel>
             )}
           </MotionStackCard>
         );

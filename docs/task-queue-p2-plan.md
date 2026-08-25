@@ -6,8 +6,11 @@
 >
 > **进度（2026-08-25）**：P2-0 ✅（地基 + test-task-center 8/8）；P2-1 ✅（图书转换通道，
 > CDP 实盘 E2E 通过，顺手根除 convertPdf 5s 监听 bug）；P2-2 ✅（图书向量化通道）；
-> P2-3 ✅（论文向量化/翻译迁入，三通道实盘验证）；P2-4 施工中（解析通道）；
-> P2-5 待开工。额外产出：task-executor-registry.ts 独立叶子模块（dev HMR 丢注册的根修）。
+> P2-3 ✅（论文向量化/翻译迁入，三通道实盘验证）；P2-4 ✅（解析通道）；
+> P2-5 ✅（卡片点开子任务面板 task-run-panel.tsx；顺手根修 P2-3 遗留：papers 页双通道卡
+> 渲染误读 storeProgress 导致实时卡不渲染，改读 batchCards；CDP 实盘 cdp-e2e-task-run-panel /
+> cdp-smoke-task-panel-global 双 PASS）。
+> 额外产出：task-executor-registry.ts 独立叶子模块（dev HMR 丢注册的根修）。
 
 ---
 
