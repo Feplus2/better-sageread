@@ -57,6 +57,8 @@
   --motion-slide: 8px; /* 滑入位移量（fade-only/reduced 归零 → 退化为纯 fade） */
   --motion-scale: 0.98; /* 卡片出入场缩放（fade-only/reduced 归 1） */
   --motion-pop-scale: 0.6; /* 复选框 pop 起点缩放（fade-only/reduced 归 1） */
+  --motion-sidebar-shift: 100%; /* 阅读器侧栏滑入位移（自身宽度比例；fade-only/reduced 归零 → 纯 fade） */
+  --motion-collapse-from: 0; /* 小面板开合宽度起点系数（1 = 无宽度过渡，纯 fade） */
 }
 
 /* fade-only（性能模式）：时长压短 + 位移/缩放退化，对齐 iOS「减弱动态效果」口径 */
@@ -66,6 +68,8 @@
   --motion-slide: 0px;
   --motion-scale: 1;
   --motion-pop-scale: 1;
+  --motion-sidebar-shift: 0%;
+  --motion-collapse-from: 1;
 }
 
 /* reduced（system 档命中 prefers-reduced-motion 时）：一切动效瞬时完成，等同硬切（逃生舱） */
@@ -76,6 +80,8 @@
   --motion-slide: 0px;
   --motion-scale: 1;
   --motion-pop-scale: 1;
+  --motion-sidebar-shift: 0%;
+  --motion-collapse-from: 1;
 }
 
 /* 动效工具类（批次 1：管理态 + 进度卡）。只碰 transform/opacity，第一宪法。 */
@@ -158,6 +164,25 @@
   pointer-events: auto;
   transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease),
     visibility 0s linear 0s; /* 进场：立即 visible 再淡入 */
+}
+
+/* ---------- 批次 4：侧栏开合（docs/motion-system-plan.md 裁定三口径 2 冻结式 + 序 4） ----------
+ * 阅读器侧栏壳：只碰 transform/opacity（第一宪法），CSS transition 天然可中断反向；
+ * 位移量 token 化（--motion-sidebar-shift），fade-only 归零退化为纯 fade、reduced 0.01ms 硬切。
+ * 动画期间内容区宽度冻结由 SidebarMotionProvider 钉层负责（不逐帧重排/重分页），
+ * 结束帧拆钉一次性 reflow + foliate-resize-update——本类自身无 layout 属性动画。
+ * 不加 will-change：rest 态须与硬切时代一致（will-change:transform 会常驻 transform 包含块，
+ * 改变层内 position:fixed 后代语义，同批次 3 tab-layer 活跃态用 none 的考量）。 */
+.motion-sidebar {
+  transition: transform var(--motion-dur-base) var(--motion-ease), opacity var(--motion-dur-base) var(--motion-ease);
+}
+
+/* 书库侧栏标签列表开合（无 iframe/大 DOM，真推移）。
+ * 受控例外：width 过渡动 layout 属性（第一宪法例外）——仅 w-48 侧栏内小组件，每帧重排成本可忽略；
+ * 内部内容定宽防文字动画中折行；fade-only 下 --motion-collapse-from=1 → 宽度差归零纯 fade。 */
+.motion-sidebar-collapse {
+  overflow: hidden;
+  transition: width var(--motion-dur-base) var(--motion-ease), opacity var(--motion-dur-base) var(--motion-ease);
 }
 
 @theme {

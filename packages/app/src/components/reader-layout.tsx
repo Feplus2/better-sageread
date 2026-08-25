@@ -1,6 +1,7 @@
 import GlobalConvertProgress from "@/components/global-convert-progress";
 import HomeLayout from "@/components/home-layout";
 import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
+import { MotionSidebar, SidebarMotionPin, SidebarMotionProvider } from "@/components/motion/sidebar-motion";
 import { NotepadContainer } from "@/components/notepad";
 import NotificationDropdown from "@/components/notification-dropdown";
 import { PreviewPanel } from "@/components/preview/preview-panel";
@@ -499,122 +500,143 @@ export default function ReaderLayout() {
             const store = getReaderStore(tab.id);
             if (!store) return null;
 
-            const notepadSidebar = isNotepadVisible && (
-              <Resizable
-                defaultSize={{
-                  width: 360,
-                  height: "100%",
-                }}
-                minWidth={260}
-                maxWidth={800}
-                enable={{
-                  top: false,
-                  right: !swapSidebars,
-                  bottom: false,
-                  left: swapSidebars,
-                  topRight: false,
-                  bottomRight: false,
-                  bottomLeft: false,
-                  topLeft: false,
-                }}
-                handleComponent={
-                  swapSidebars
-                    ? { left: <div className="custom-resize-handle" /> }
-                    : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-                }
-                // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
-                handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
-                className="h-full"
-                onResize={() => {
-                  if (!showOverlay) {
-                    setShowOverlay(true);
+            // 批次 4：侧栏经 MotionSidebar 滑入滑出（冻结式，裁定三口径 2）——触发语义不变，
+            // 壳只加一层 h-full 包裹 div，终态布局/宽度/间距与硬切时代逐像素一致
+            const notepadSidebar = (
+              <MotionSidebar open={isNotepadVisible} side={swapSidebars ? "right" : "left"}>
+                <Resizable
+                  defaultSize={{
+                    width: 360,
+                    height: "100%",
+                  }}
+                  minWidth={260}
+                  maxWidth={800}
+                  enable={{
+                    top: false,
+                    right: !swapSidebars,
+                    bottom: false,
+                    left: swapSidebars,
+                    topRight: false,
+                    bottomRight: false,
+                    bottomLeft: false,
+                    topLeft: false,
+                  }}
+                  handleComponent={
+                    swapSidebars
+                      ? { left: <div className="custom-resize-handle" /> }
+                      : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
                   }
-                }}
-                onResizeStop={() => {
-                  setShowOverlay(false);
-                  window.dispatchEvent(
-                    new CustomEvent("foliate-resize-update", {
-                      detail: { bookId: tab.bookId, source: "resize-drag" },
-                    }),
-                  );
-                }}
-              >
-                <div
-                  data-region="notepad-panel"
-                  className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
+                  // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+                  handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+                  className="h-full"
+                  onResize={() => {
+                    if (!showOverlay) {
+                      setShowOverlay(true);
+                    }
+                  }}
+                  onResizeStop={() => {
+                    setShowOverlay(false);
+                    window.dispatchEvent(
+                      new CustomEvent("foliate-resize-update", {
+                        detail: { bookId: tab.bookId, source: "resize-drag" },
+                      }),
+                    );
+                  }}
                 >
-                  <NotepadContainer bookId={tab.bookId} />
-                </div>
-              </Resizable>
+                  <div
+                    data-region="notepad-panel"
+                    className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
+                  >
+                    <NotepadContainer bookId={tab.bookId} />
+                  </div>
+                </Resizable>
+              </MotionSidebar>
             );
 
-            const chatSidebar = isChatVisible && (
-              <Resizable
-                defaultSize={{
-                  width: 370,
-                  height: "100%",
-                }}
-                minWidth={320}
-                maxWidth={800}
-                enable={{
-                  top: false,
-                  right: swapSidebars,
-                  bottom: false,
-                  left: !swapSidebars,
-                  topRight: false,
-                  bottomRight: false,
-                  bottomLeft: false,
-                  topLeft: false,
-                }}
-                handleComponent={
-                  swapSidebars
-                    ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-                    : { left: <div className="custom-resize-handle" /> }
-                }
-                // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
-                handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
-                className="h-full"
-                onResize={() => {
-                  if (!showOverlay) {
-                    setShowOverlay(true);
+            const chatSidebar = (
+              <MotionSidebar open={isChatVisible} side={swapSidebars ? "left" : "right"}>
+                <Resizable
+                  defaultSize={{
+                    width: 370,
+                    height: "100%",
+                  }}
+                  minWidth={320}
+                  maxWidth={800}
+                  enable={{
+                    top: false,
+                    right: swapSidebars,
+                    bottom: false,
+                    left: !swapSidebars,
+                    topRight: false,
+                    bottomRight: false,
+                    bottomLeft: false,
+                    topLeft: false,
+                  }}
+                  handleComponent={
+                    swapSidebars
+                      ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
+                      : { left: <div className="custom-resize-handle" /> }
                   }
-                }}
-                onResizeStop={() => {
-                  setShowOverlay(false);
-                  window.dispatchEvent(
-                    new CustomEvent("foliate-resize-update", {
-                      detail: { bookId: tab.bookId, source: "resize-drag" },
-                    }),
-                  );
-                }}
-              >
-                <div
-                  className={
-                    swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
-                  }
+                  // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+                  handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+                  className="h-full"
+                  onResize={() => {
+                    if (!showOverlay) {
+                      setShowOverlay(true);
+                    }
+                  }}
+                  onResizeStop={() => {
+                    setShowOverlay(false);
+                    window.dispatchEvent(
+                      new CustomEvent("foliate-resize-update", {
+                        detail: { bookId: tab.bookId, source: "resize-drag" },
+                      }),
+                    );
+                  }}
                 >
-                  <SideChat key={`chat-${tab.id}`} bookId={tab.bookId} />
-                </div>
-              </Resizable>
+                  <div
+                    className={
+                      swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
+                    }
+                  >
+                    <SideChat key={`chat-${tab.id}`} bookId={tab.bookId} />
+                  </div>
+                </Resizable>
+              </MotionSidebar>
             );
 
             return (
               <ReaderProvider store={store} key={tab.id}>
                 <div className="tab-layer absolute inset-0 flex bg-background p-1" data-active={tab.id === activeTabId}>
-                  {swapSidebars && <PreviewPanel />}
-                  {swapSidebars ? chatSidebar : notepadSidebar}
+                  {/* 批次 4：侧栏开合冻结编排——动画期间内容钉层宽度钉死（EPUB 不逐帧重分页），
+                      结束帧拆钉一次性 reflow，此时才发一次 foliate-resize-update（detail 同拖拽处现有用法） */}
+                  <SidebarMotionProvider
+                    onReflow={() => {
+                      window.dispatchEvent(
+                        new CustomEvent("foliate-resize-update", {
+                          detail: { bookId: tab.bookId, source: "sidebar-motion" },
+                        }),
+                      );
+                    }}
+                  >
+                    {swapSidebars && <PreviewPanel />}
+                    {swapSidebars ? chatSidebar : notepadSidebar}
 
-                  <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
-                    {/* P2 休眠态：卸载 foliate 视图（阅读位置由 reader store 恢复），侧栏/聊天保活 */}
-                    {!isSlept && <ReaderViewer />}
+                    <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
+                      {/* 内容钉层：正常态纯透传（h-full 无样式差异）；冻结态钉宽+裁剪由编排器内联控制 */}
+                      <SidebarMotionPin className="h-full">
+                        {/* P2 休眠态：卸载 foliate 视图（阅读位置由 reader store 恢复），侧栏/聊天保活 */}
+                        {!isSlept && <ReaderViewer />}
+                      </SidebarMotionPin>
 
-                    {showOverlay && (
-                      <div className="absolute inset-0 z-50 flex items-center justify-center rounded-md bg-background/80 backdrop-blur-sm dark:bg-neutral-900/60" />
-                    )}
-                  </div>
+                      {showOverlay && (
+                        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-md bg-background/80 backdrop-blur-sm dark:bg-neutral-900/60" />
+                      )}
+                    </div>
 
-                  {swapSidebars ? notepadSidebar : chatSidebar}
-                  {!swapSidebars && <PreviewPanel />}
+                    {swapSidebars ? notepadSidebar : chatSidebar}
+                    {!swapSidebars && <PreviewPanel />}
+                  </SidebarMotionProvider>
                 </div>
               </ReaderProvider>
             );

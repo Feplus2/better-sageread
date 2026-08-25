@@ -1,4 +1,5 @@
 import { ImageInteractions } from "@/components/media/image-interactions";
+import { MotionSidebar, SidebarMotionPin, SidebarMotionProvider } from "@/components/motion/sidebar-motion";
 import { PreviewPanel } from "@/components/preview/preview-panel";
 import {
   type PaperFigureItem,
@@ -557,111 +558,119 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
   );
 
   // 笔记面板（位置/宽度边界与书籍 Notepad 一致，可拖拽调宽、可折叠；swap 时换手柄与间隙方向）
-  const notepadSidebar = notesOpen && (
-    <Resizable
-      defaultSize={{
-        width: 360,
-        height: "100%",
-      }}
-      minWidth={260}
-      maxWidth={800}
-      enable={{
-        top: false,
-        right: !swapSidebars,
-        bottom: false,
-        left: swapSidebars,
-        topRight: false,
-        bottomRight: false,
-        bottomLeft: false,
-        topLeft: false,
-      }}
-      handleComponent={
-        swapSidebars
-          ? { left: <div className="custom-resize-handle" /> }
-          : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-      }
-      // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘）
-      // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
-      handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
-      className="h-full"
-    >
-      {/* 与书籍 Notepad 同款包装：region 钩子 + 4px 间隙 + 顶栏对齐高度 */}
-      <div
-        data-region="notepad-panel"
-        className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
+  // 批次 4：经 MotionSidebar 滑入滑出（冻结式）——触发语义与终态布局不变
+  const notepadSidebar = (
+    <MotionSidebar open={notesOpen} side={swapSidebars ? "right" : "left"}>
+      <Resizable
+        defaultSize={{
+          width: 360,
+          height: "100%",
+        }}
+        minWidth={260}
+        maxWidth={800}
+        enable={{
+          top: false,
+          right: !swapSidebars,
+          bottom: false,
+          left: swapSidebars,
+          topRight: false,
+          bottomRight: false,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        handleComponent={
+          swapSidebars
+            ? { left: <div className="custom-resize-handle" /> }
+            : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
+        }
+        // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘）
+        // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
+        handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
+        className="h-full"
       >
-        <PaperNotepadPanel
-          annotations={annotations}
-          paperId={paperId}
-          paperTitle={title}
-          markdown={markdown}
-          onLocateQuotes={(quotes) => paperReaderRef.current?.locateQuotes(quotes) ?? quotes.map(() => null)}
-          onCreateAiAnnotations={createAiAnnotations}
-          onClearAiAnnotations={clearAiAnnotations}
-          onLocateAnnotation={setFocusAnnotationId}
-          paperDir={paperDir ?? ""}
-          translationMap={translationMap}
-          onLocateFigure={handleLocateFigure}
-          noteLocation={noteLocation}
-          noteTocItems={noteTocItems}
-          onLocateNote={handleLocateNote}
-          onUpdateNote={(id, note) => updateAnnotation(id, { note })}
-          onDeleteAnnotation={deleteAnnotation}
-          onToggleStar={toggleStar}
-          onDeleteAnnotations={deleteAnnotations}
-        />
-      </div>
-    </Resizable>
+        {/* 与书籍 Notepad 同款包装：region 钩子 + 4px 间隙 + 顶栏对齐高度 */}
+        <div
+          data-region="notepad-panel"
+          className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
+        >
+          <PaperNotepadPanel
+            annotations={annotations}
+            paperId={paperId}
+            paperTitle={title}
+            markdown={markdown}
+            onLocateQuotes={(quotes) => paperReaderRef.current?.locateQuotes(quotes) ?? quotes.map(() => null)}
+            onCreateAiAnnotations={createAiAnnotations}
+            onClearAiAnnotations={clearAiAnnotations}
+            onLocateAnnotation={setFocusAnnotationId}
+            paperDir={paperDir ?? ""}
+            translationMap={translationMap}
+            onLocateFigure={handleLocateFigure}
+            noteLocation={noteLocation}
+            noteTocItems={noteTocItems}
+            onLocateNote={handleLocateNote}
+            onUpdateNote={(id, note) => updateAnnotation(id, { note })}
+            onDeleteAnnotation={deleteAnnotation}
+            onToggleStar={toggleStar}
+            onDeleteAnnotations={deleteAnnotations}
+          />
+        </div>
+      </Resizable>
+    </MotionSidebar>
   );
 
   // 论文助手（默认宽度/边界与书籍 AI 面板一致；swap 时换手柄与间隙方向）
-  const chatSidebar = chatOpen && (
-    <Resizable
-      defaultSize={{
-        width: 370,
-        height: "100%",
-      }}
-      minWidth={320}
-      maxWidth={800}
-      enable={{
-        top: false,
-        right: swapSidebars,
-        bottom: false,
-        left: !swapSidebars,
-        topRight: false,
-        bottomRight: false,
-        bottomLeft: false,
-        topLeft: false,
-      }}
-      handleComponent={
-        swapSidebars
-          ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-          : { left: <div className="custom-resize-handle" /> }
-      }
-      // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘的滚动条）
-      // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
-      handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
-      className="h-full"
-    >
-      {/* 与书籍 SideChat 同款包装：四周 4px（顶部除外）间隙 + 顶栏对齐高度 */}
-      <div
-        className={swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`}
+  const chatSidebar = (
+    <MotionSidebar open={chatOpen} side={swapSidebars ? "left" : "right"}>
+      <Resizable
+        defaultSize={{
+          width: 370,
+          height: "100%",
+        }}
+        minWidth={320}
+        maxWidth={800}
+        enable={{
+          top: false,
+          right: swapSidebars,
+          bottom: false,
+          left: !swapSidebars,
+          topRight: false,
+          bottomRight: false,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        handleComponent={
+          swapSidebars
+            ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
+            : { left: <div className="custom-resize-handle" /> }
+        }
+        // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区边缘的滚动条）
+        // 手柄感应区移到面板外侧间隙（0px 时会盖住自身内容滚动条，见 2026-08-04 反馈）
+        handleStyles={{ left: { left: "0px" }, right: { right: "-6px" } }}
+        className="h-full"
       >
-        <PaperChatPanel
-          paperId={paperId}
-          paperTitle={title}
-          markdown={markdown ?? ""}
-          currentHeading={currentHeading}
-          folders={folders}
-          members={members}
-        />
-      </div>
-    </Resizable>
+        {/* 与书籍 SideChat 同款包装：四周 4px（顶部除外）间隙 + 顶栏对齐高度 */}
+        <div
+          className={swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`}
+        >
+          <PaperChatPanel
+            paperId={paperId}
+            paperTitle={title}
+            markdown={markdown ?? ""}
+            currentHeading={currentHeading}
+            folders={folders}
+            members={members}
+          />
+        </div>
+      </Resizable>
+    </MotionSidebar>
   );
 
   return (
     // min-w-0：宽 HTML 表格的 min-content 会把本行撑出视口、把右侧栏挤没（2026-08-05 实测）
     <div className="flex min-h-0 min-w-0 flex-1">
+      {/* 批次 4：侧栏开合冻结编排——动画期间正文钉层宽度钉死（5 万+ 元素大 DOM 不逐帧重排），
+          结束帧拆钉一次性 reflow；论文无 foliate，无需 onReflow */}
+      <SidebarMotionProvider>
       {/* E5 补挂：预览面板跟随 swapSidebars 互换（与书籍 tab 同款） */}
       {swapSidebars && <PreviewPanel />}
       {swapSidebars ? chatSidebar : notepadSidebar}
@@ -725,7 +734,8 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
             <div className="text-neutral-500 text-xs dark:text-neutral-500">视图已休眠，切回自动恢复</div>
           </div>
         ) : (
-          <div className="min-h-0 flex-1" ref={paperContentHostRef}>
+          /* 内容钉层（批次 4 冻结目标）：正常态 min-h-0 flex-1 纯透传；冻结态钉宽+锚定由编排器内联控制 */
+          <SidebarMotionPin className="min-h-0 flex-1" ref={paperContentHostRef}>
             {/* T4：正文图片右键主题菜单（点击预览由 per-img 自带，勿重复启用） */}
             <ImageInteractions containerRef={paperContentHostRef} onQuote={(img) => handleQuoteImageToChat(img)} />
             <PaperReader
@@ -753,7 +763,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
               sourceBlocks={sourceBlocks}
               onReferenceClick={handleReferenceClick}
             />
-          </div>
+          </SidebarMotionPin>
         )}
       </div>
 
@@ -788,6 +798,7 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
         }}
         onEnriched={handleReferenceEnriched}
       />
+      </SidebarMotionProvider>
     </div>
   );
 }

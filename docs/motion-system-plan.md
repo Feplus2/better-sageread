@@ -1,9 +1,12 @@
 # 动效体系：平滑转场 + 性能模式 实施计划（2026-08-24 讨论定稿）
 
-> **状态：批次 1、3 已实施（批次 1：2026-08-25，commit c6e2a44，地基三档 + 管理态 + 进度卡离场编排；
+> **状态：批次 1、3、4 已实施（批次 1：2026-08-25，commit c6e2a44，地基三档 + 管理态 + 进度卡离场编排；
 > 批次 3：2026-08-26，tab/路由交叉淡入 + /chat 常驻层淡入淡出 + Tabs 滑动气泡指示器，
-> CDP 实盘验证 21 项全过（scripts/cdp-motion-batch3-verify.mjs 可复跑）。批次 2、4（侧栏）待续；
-> 二期（共享元素/手势）立项见 docs/motion-phase2-plan.md。**
+> CDP 实盘验证 21 项全过（scripts/cdp-motion-batch3-verify.mjs 可复跑）；
+> 批次 4：2026-08-26，阅读器侧栏冻结式滑入滑出（书籍+论文共用 SidebarMotionProvider/MotionSidebar，
+> 动画期内容钉宽、结束帧一次性 reflow + foliate-resize-update）+ 书库标签列表宽度推移（MotionSidebarCollapse，
+> width 过渡为第一宪法受控例外），CDP 实盘验证 21 项全过（scripts/cdp-motion-batch4-verify.mjs 可复跑）。
+> 批次 2 内容已并入批次 1。二期（共享元素/手势）立项见 docs/motion-phase2-plan.md。**
 > 来源：用户提出——应用内大量"动作"（卡片弹出、侧边栏、进入管理状态、划线等）帧间硬切无过渡，想要 iOS 式连贯丝滑；同时接受动效有卡顿风险，须在设置页提供性能模式开关，用户说了算。
 > 结论：**能实现，且本项目底子好于一般 Web 应用**。90% 丝滑感来自纯 CSS 即可覆盖的部分；framer-motion 仅在三个 CSS 干不了的场合启用；性能模式是"降级三档"而非"全关"。
 

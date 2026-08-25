@@ -1,4 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { MotionSidebarCollapse } from "@/components/motion/sidebar-motion";
 import CreateTagDialog from "@/pages/library/components/create-tag-dialog";
 import EditTagDialog from "@/pages/library/components/edit-tag-dialog";
 import SearchToggle from "@/pages/library/components/search-toggle";
@@ -215,20 +216,24 @@ export default function Sidebar() {
                   </Link>
                 )}
 
-                {item.path === "/" && isLibraryExpanded && (
-                  <TagList
-                    tags={tags}
-                    selectedTag={selectedTagFromUrl}
-                    selectedTagsForDelete={selectedTagsForDelete}
-                    handleTagClick={handleTagClick}
-                    handleEditTag={handleEditTag}
-                    handleDeleteTag={handleDeleteTag}
-                    handleBatchDeleteTags={handleBatchDeleteTags}
-                    handleNewTagClick={handleNewTagClick}
-                    books={booksWithStatus}
-                    onBookUpdate={handleBookUpdate}
-                    onRefresh={refreshBooks}
-                  />
+                {/* 批次 4 场景 2：标签列表宽度推移开合（无 iframe/大 DOM，受控例外见 index.css）；
+                    closing 态保持挂载播离场，触发语义（Chevron 按钮）不变 */}
+                {item.path === "/" && (
+                  <MotionSidebarCollapse open={isLibraryExpanded}>
+                    <TagList
+                      tags={tags}
+                      selectedTag={selectedTagFromUrl}
+                      selectedTagsForDelete={selectedTagsForDelete}
+                      handleTagClick={handleTagClick}
+                      handleEditTag={handleEditTag}
+                      handleDeleteTag={handleDeleteTag}
+                      handleBatchDeleteTags={handleBatchDeleteTags}
+                      handleNewTagClick={handleNewTagClick}
+                      books={booksWithStatus}
+                      onBookUpdate={handleBookUpdate}
+                      onRefresh={refreshBooks}
+                    />
+                  </MotionSidebarCollapse>
                 )}
               </div>
             );
