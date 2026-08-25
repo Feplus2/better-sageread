@@ -1,17 +1,16 @@
 /**
  * 全局转换进度层（右下角浮层，挂在 ReaderLayout——独立于任何路由页面）。
  *
- * 三类卡纵向堆叠（互不重叠）：
+ * 卡纵向堆叠（互不重叠）：
  * - 论文 PDF 解析进度卡：P2-4 起数据源是 task-center 的 paper-parse 通道聚合（跨页面持续呈现）；
- * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现；
- * - 阅读页单篇翻译小卡：状态在 paper-task-store（readerTranslate），阅读器内发起的翻译
- *   在主页/文献库可见；阅读器页内由栈禁区隐藏（页内自有进度 UI）。
+ * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现，点击卡片还原详情窗口；
+ * - 向量化/翻译通道卡：papers 页经 BottomRightPortal 入同一栈（统一队列后不再区分
+ *   单篇/批量卡片——2026-08-26 用户拍板，原「阅读页单篇翻译小卡」与通道卡重复，已退役）。
  *
  * 豁免视图（不渲染任何卡，避免遮挡正文）：全局助手聊天页（/chat）、
  * 书籍阅读器 tab、论文阅读器 tab——即任何阅读器 tab 激活期间。
  * 豁免只影响可见性：进度状态与事件接收在 store，退出豁免视图即恢复呈现。
- * 解析卡/小卡点击经 TaskRunPanel 弹出子任务面板（P2-5；小卡的"还原大窗口"收进面板的
- * 「打开详情窗口」入口）；阅读页翻译卡是队列外路径（无 task-center 任务可列），不接面板。
+ * 解析卡点击经 TaskRunPanel 弹出子任务面板（P2-5）。
  */
 
 import { TaskRunPanel } from "@/components/task-run-panel";
@@ -25,7 +24,6 @@ import {
   recoverPaperImportAfterReload,
   useConvertProgressStore,
 } from "@/store/convert-progress-store";
-import { type ReaderTranslateState, usePaperTaskStore } from "@/store/paper-task-store";
 import { type ChannelAggregate, selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import clsx from "clsx";
 import { BookText, Check, FileText, X } from "lucide-react";
@@ -119,8 +117,8 @@ function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
   );
 }
 
-/** 图书转换小卡（大窗口最小化/未开时呈现；P2-5 起点击卡片弹子任务面板，「打开详情窗口」
- *  入口在面板底部，X 丢弃状态）。
+/** 图书转换小卡（大窗口最小化/未开时呈现；点击卡片直接还原详情窗口——不需要中间面板层，
+ *  2026-08-26 用户拍板：图书转换只有卡片态/详情窗口态两种；X 丢弃状态）。
  *  P2-1 起可见性与进度读 task-center 的 book-convert 通道聚合（agg 由父组件传入，
  *  离场动画期定格快照）；阶段行/错误文案仍读 convert-progress-store.bookConvert
  *  （执行器回写的大窗口详情数据源） */
@@ -154,99 +152,77 @@ function BookConvertMiniCard({ agg, bookConvert }: { agg: ChannelAggregate; book
   };
 
   return (
-    <TaskRunPanel channel="book-convert" detailAction={{ label: "打开详情窗口", onClick: restore }}>
-      <div className="pointer-events-auto w-80 rounded-xl border bg-background p-3.5 shadow-lg transition-colors hover:border-primary/40">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate font-medium text-sm">
-            <BookText className="size-3.5 shrink-0 text-primary" />
-            <span className="truncate">PDF 转 EPUB · {fileName}</span>
-          </span>
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-            onClick={(e) => {
-              e.stopPropagation();
-              dismiss();
-            }}
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-
-        {/* 阶段行（与论文卡同款紧凑样式） */}
-        <div className="mb-2.5 flex items-center gap-1.5">
-          {bookConvert.stages.map((stage) => (
-            <span
-              key={stage.n}
-              className={clsx(
-                "flex size-4 items-center justify-center rounded-full text-[9px]",
-                stage.status === "done" && "bg-primary text-primary-foreground",
-                stage.status === "active" && "border border-primary text-primary",
-                stage.status === "pending" && "border text-muted-foreground",
-                stage.status === "error" && "bg-destructive text-destructive-foreground",
-              )}
-            >
-              {stage.status === "done" ? <Check className="size-2.5" /> : stage.n}
-            </span>
-          ))}
-          <span className="ml-1 truncate text-muted-foreground text-xs">
-            {active?.name ?? (mode === "done" ? "完成" : mode === "error" ? "失败" : "准备中")}
-          </span>
-        </div>
-
-        {mode === "converting" && (
-          <>
-            <Progress value={agg.current?.percent ?? 0} className="h-1.5" />
-            <div className="mt-1.5 flex items-center justify-between gap-2 text-muted-foreground text-xs">
-              <span className="min-w-0 flex-1 truncate">{agg.current?.detail ?? "排队中…"}</span>
-              <span className="shrink-0">{agg.current?.percent ?? 0}%</span>
-            </div>
-          </>
-        )}
-        {mode === "done" && (
-          <p className="flex items-center gap-1.5 truncate text-green-600 text-xs dark:text-green-400">
-            <FileText className="size-3 shrink-0" />
-            转换完成，点击查看并导入图书馆
-          </p>
-        )}
-        {mode === "error" && (
-          <p className="truncate text-red-600 text-xs dark:text-red-400">
-            {displayTask?.error ?? bookConvert.errorMessage}
-          </p>
-        )}
-      </div>
-    </TaskRunPanel>
-  );
-}
-
-/** 阅读页单篇翻译小卡（队列外路径；完成/取消/失败即清除，取消按钮调发起方注册的回调）。
- *  出入场由 MotionStackCard 编排：rt 清空后先播离场动画再卸载，closing 期定格最后一份进度快照。 */
-function ReaderTranslateCard() {
-  const rt = usePaperTaskStore((s) => s.readerTranslate);
-  return <MotionStackCard show={!!rt}>{rt && <ReaderTranslateCardBody rt={rt} />}</MotionStackCard>;
-}
-
-function ReaderTranslateCardBody({ rt }: { rt: ReaderTranslateState }) {
-  const percent = rt.total > 0 ? Math.round((rt.done / rt.total) * 100) : 0;
-  return (
-    <div className="pointer-events-auto w-80 rounded-xl border bg-background p-3.5 shadow-lg">
+    <div
+      className="pointer-events-auto w-80 cursor-pointer rounded-xl border bg-background p-3.5 shadow-lg transition-colors hover:border-primary/40"
+      role="button"
+      tabIndex={0}
+      title="点击查看转换详情"
+      onClick={restore}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          restore();
+        }
+      }}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium text-sm">{rt.title}</span>
-        <span className="shrink-0 text-muted-foreground text-xs">翻译中</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate font-medium text-sm">
+          <BookText className="size-3.5 shrink-0 text-primary" />
+          <span className="truncate">PDF 转 EPUB · {fileName}</span>
+        </span>
         <button
           type="button"
-          title="取消翻译（已翻部分会保存，可续翻）"
           className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-          onClick={() => usePaperTaskStore.getState().cancelReaderTranslate?.()}
+          onClick={(e) => {
+            e.stopPropagation();
+            dismiss();
+          }}
         >
           <X className="size-3.5" />
         </button>
       </div>
-      <Progress value={percent} className="h-1.5" />
-      <div className="mt-1.5 flex items-center justify-between gap-2 text-muted-foreground text-xs">
-        <span className="min-w-0 flex-1 truncate">{rt.detail ?? `已翻译 ${rt.done}/${rt.total || "…"} 块`}</span>
-        <span className="shrink-0">{percent}%</span>
+
+      {/* 阶段行（与论文卡同款紧凑样式） */}
+      <div className="mb-2.5 flex items-center gap-1.5">
+        {bookConvert.stages.map((stage) => (
+          <span
+            key={stage.n}
+            className={clsx(
+              "flex size-4 items-center justify-center rounded-full text-[9px]",
+              stage.status === "done" && "bg-primary text-primary-foreground",
+              stage.status === "active" && "border border-primary text-primary",
+              stage.status === "pending" && "border text-muted-foreground",
+              stage.status === "error" && "bg-destructive text-destructive-foreground",
+            )}
+          >
+            {stage.status === "done" ? <Check className="size-2.5" /> : stage.n}
+          </span>
+        ))}
+        <span className="ml-1 truncate text-muted-foreground text-xs">
+          {active?.name ?? (mode === "done" ? "完成" : mode === "error" ? "失败" : "准备中")}
+        </span>
       </div>
+
+      {mode === "converting" && (
+        <>
+          <Progress value={agg.current?.percent ?? 0} className="h-1.5" />
+          <div className="mt-1.5 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+            <span className="min-w-0 flex-1 truncate">{agg.current?.detail ?? "排队中…"}</span>
+            <span className="shrink-0">{agg.current?.percent ?? 0}%</span>
+          </div>
+        </>
+      )}
+      {mode === "done" && (
+        <p className="flex items-center gap-1.5 truncate text-green-600 text-xs dark:text-green-400">
+          <FileText className="size-3 shrink-0" />
+          转换完成，点击查看并导入图书馆
+        </p>
+      )}
+      {mode === "error" && (
+        <p className="truncate text-red-600 text-xs dark:text-red-400">
+          {displayTask?.error ?? bookConvert.errorMessage}
+        </p>
+      )}
     </div>
   );
 }
@@ -302,7 +278,6 @@ export default function GlobalConvertProgress() {
           />
         )}
       </MotionStackCard>
-      <ReaderTranslateCard />
     </>
   );
 }

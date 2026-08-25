@@ -934,13 +934,10 @@ foliate-view {
   background-color: oklch(0.24 0 0);
 }
 
-/* 文内引文链接（#ref-N）恢复印刷上标排版：数据层是统一的 [N] 纯文本（链接匹配赖以工作，
-   上标仅表现层——与 GFM 脚注上标视觉一致）；line-height:0 防上标撑高行距
-   （P1 链接重建 + RSC 上标契约 2026-08-25） */
+/* 文内引文链接（#ref-N）：统一为 [2,3] 正常字号（2026-08-26 用户拍板：上标数字 +
+   正常括号/逗号/短杠的混排观感不佳；数据层本为 [N] 纯文本，链接匹配不依赖上标形态）。
+   脚注 [^N] 引用点保持上标（GFM 渲染默认 <sup>，与引文区分）。 */
 .paper-content a[href^="#ref-"] {
-  vertical-align: super;
-  font-size: 0.75em;
-  line-height: 0;
   text-decoration-line: none;
 }
 .paper-content a[href^="#ref-"]:hover {

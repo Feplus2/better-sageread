@@ -1,7 +1,7 @@
 import { getUtilityModel } from "@/ai/providers/factory";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { TaskRunPanel } from "@/components/task-run-panel";
-import { MotionStackCard } from "@/components/ui/bottom-right-stack";
+import { BottomRightPortal, MotionStackCard } from "@/components/ui/bottom-right-stack";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1566,23 +1566,29 @@ export default function PapersPage() {
     if (manageMode && selectedIds.size > 0) setManageMode(false);
   };
 
-  /** 翻译入队（幂等续翻；P2-3 起走 task-center 的 paper-translate 通道）。
-   *  paper 直发 = 右键菜单单篇（solo 独立完成 toast），缺省走选择集批量；
-   *  force=true 全量重翻（「重新翻译」入口，确认后入队——已有译文作废，耗时/额度与首翻相当） */
-  const handleBatchTranslate = async (paper?: BookWithStatus, force = false) => {
+  /** 翻译入队（P2-3 起走 task-center 的 paper-translate 通道；2026-08-26 菜单统一为单「翻译」入口：
+   *  未翻译/部分/陈旧 → 幂等翻译（续翻补齐，成本最低）；已有完整译本 → 全量重翻（force，先确认——
+   *  已有译文作废，耗时/额度与首翻相当）。「继续翻译」交互语义只在阅读器内翻译菜单。
+   *  paper 直发 = 右键菜单单篇（solo 独立完成 toast），缺省走选择集批量。 */
+  const handleBatchTranslate = async (paper?: BookWithStatus) => {
     const targets = paper ? [paper] : selectedPapers;
     if (targets.length === 0) return;
     if (!getUtilityModel()) {
       toast.error("未配置 AI 模型：请先在设置中配置辅助模型（或聊天模型）后再翻译");
       return;
     }
-    if (force) {
+    const isComplete = (p: BookWithStatus) => {
+      const st = translatedMap[p.id];
+      return st !== undefined && !st.partial && !st.stale;
+    };
+    const forceTargets = targets.filter(isComplete);
+    if (forceTargets.length > 0) {
       let confirmed = false;
       try {
         confirmed = await ask(
           paper
-            ? `将全量重新翻译《${paper.title}》：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`
-            : `将全量重新翻译选中的 ${targets.length} 篇论文：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`,
+            ? `将全量重新翻译《${forceTargets[0].title}》：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`
+            : `将全量重新翻译 ${forceTargets.length} 篇已有完整译本的论文：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`,
           { title: "重新翻译", kind: "warning" },
         );
       } catch (error) {
@@ -1596,7 +1602,7 @@ export default function PapersPage() {
         id: p.id,
         title: p.title,
         ...(paper ? { solo: true } : {}),
-        ...(force ? { force: true } : {}),
+        ...(isComplete(p) ? { force: true } : {}),
       })),
     );
     if (!paper && manageMode && selectedIds.size > 0) setManageMode(false);
@@ -1819,22 +1825,11 @@ export default function PapersPage() {
                     size="sm"
                     className="h-8 shrink-0"
                     disabled={batchLocked || selectedIds.size === 0 || taskTranslateBlockers.length > 0}
-                    title={blockerHint(taskTranslateBlockers, "翻译") ?? ""}
+                    title={blockerHint(taskTranslateBlockers, "翻译") ?? "未翻译的正常翻译，已有完整译本的重新翻译"}
                     onClick={() => void handleBatchTranslate()}
                   >
                     <Languages className="size-4" />
                     翻译
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 shrink-0"
-                    disabled={batchLocked || selectedIds.size === 0 || taskTranslateBlockers.length > 0}
-                    title={blockerHint(taskTranslateBlockers, "重新翻译") ?? "已有译文作废，全量重翻"}
-                    onClick={() => void handleBatchTranslate(undefined, true)}
-                  >
-                    <Languages className="size-4" />
-                    重新翻译
                   </Button>
                   <Button
                     variant="ghost"
@@ -2055,7 +2050,6 @@ export default function PapersPage() {
                     busyTranslate.has(paper.id) || paperConflicts(paper.id, "translate").length > 0;
                   const reparseBlockers = paperConflicts(paper.id, "parse");
                   const translationState = translatedMap[paper.id];
-                  const isTranslated = translationState !== undefined;
                   // 元数据中文化：用翻译服务已落盘的 title_zh/abstract_zh，缺省回退原文
                   const displayTitle = metaLang === "zh" ? meta?.title_zh || paper.title : paper.title;
                   const displayAbstract = metaLang === "zh" ? meta?.abstract_zh || meta?.abstract : meta?.abstract;
@@ -2143,14 +2137,15 @@ export default function PapersPage() {
                           )}
                           {isVectorized ? "重新向量化" : "向量化"}
                         </ContextMenuItem>
-                        {/* 右键单篇只给一个翻译入口：未翻译→翻译（幂等首翻/续翻走阅读页），已翻译→重新翻译（force 全量） */}
+                        {/* 右键单篇统一「翻译」入口（2026-08-26 用户拍板）：未翻译→正常翻译，
+                            已有完整译本→全量重翻（handler 内确认）；部分/陈旧走幂等续翻 */}
                         <ContextMenuItem
                           disabled={translateBlocked}
                           title={translateBlocked ? "该篇翻译进行中或已排队，完成后再试" : undefined}
-                          onClick={() => void handleBatchTranslate(paper, isTranslated)}
+                          onClick={() => void handleBatchTranslate(paper)}
                         >
                           <Languages className="mr-2 size-4" />
-                          {isTranslated ? "重新翻译" : "翻译"}
+                          翻译
                         </ContextMenuItem>
                         <ContextMenuItem
                           disabled={batchLocked || reparseBlockers.length > 0}
@@ -2269,23 +2264,26 @@ export default function PapersPage() {
           出入场走 MotionStackCard 延迟卸载编排：通道进度清空后先播离场动画（定格收尾快照）再卸载。
           P2-5：点击卡片经 TaskRunPanel 弹出该通道子任务清单（单项取消在面板内）。
           渲染修正（P2-5）：数据源是通道聚合折算的 batchCards（channelCardOf 含恢复监控回落）——
-          此前误读 storeProgress[kind]（P2-3 后该切片只剩恢复监控卡），实时通道卡未渲染。 */}
-      {(["vectorize", "translate"] as const).map((kind) => {
-        const progress = batchCards.find((c) => c.kind === kind);
-        return (
-          <MotionStackCard key={kind} show={!!progress}>
-            {progress && (
-              <TaskRunPanel channel={kind === "vectorize" ? "paper-vectorize" : "paper-translate"}>
-                <BatchProgressCard
-                  card={progress}
-                  onCancel={() => handleCancelBatch(kind)}
-                  onDismiss={() => handleDismissBatchProgress(progress)}
-                />
-              </TaskRunPanel>
-            )}
-          </MotionStackCard>
-        );
-      })}
+          此前误读 storeProgress[kind]（P2-3 后该切片只剩恢复监控卡），实时通道卡未渲染。
+          P2-3 曾误删 BottomRightPortal 包裹（卡片渲染进页面流而非右下角栈，全程不可见）——已恢复。 */}
+      <BottomRightPortal>
+        {(["vectorize", "translate"] as const).map((kind) => {
+          const progress = batchCards.find((c) => c.kind === kind);
+          return (
+            <MotionStackCard key={kind} show={!!progress}>
+              {progress && (
+                <TaskRunPanel channel={kind === "vectorize" ? "paper-vectorize" : "paper-translate"}>
+                  <BatchProgressCard
+                    card={progress}
+                    onCancel={() => handleCancelBatch(kind)}
+                    onDismiss={() => handleDismissBatchProgress(progress)}
+                  />
+                </TaskRunPanel>
+              )}
+            </MotionStackCard>
+          );
+        })}
+      </BottomRightPortal>
 
       {/* 页面级拖入感应遮罩（拖 PDF 到文献库页任意位置直接解析） */}
       {pdfDragOver && !pdfPickerOpen && (

@@ -216,6 +216,9 @@ async function runParseInner(
   const { pdfPath, stageOffset = 0, silent = false, fileName, batchTotal } = opts;
   let filePercent = 0;
   let settled = false;
+  /** 收尾中标志：done 事件已进入落库/替换路径——此后取消不再翻转成功结算
+   *  （实况：done→替换→report(100) 的毫秒窗口内 abort 抢闸，成功任务被记 cancelled） */
+  let finishing = false;
   let unlisten: (() => void) | null = null;
 
   return new Promise<"imported" | "skipped">((resolve, reject) => {
@@ -251,7 +254,9 @@ async function runParseInner(
     // 取消语义：先结算再杀进程——树杀（taskkill /T /F）把取消等待拉长到百毫秒级，
     // terminated 事件可能先于 invoke 返回到达；settled 闸 + 卡片状态守卫挡住它，
     // 保证取消语义落在「已取消」而非「异常退出」。P3：按 pdfPath 定向杀本任务进程。
+    // finishing 守卫：done 已进落库路径后取消不生效（产物已可落库，翻转成 cancelled 是假态）。
     const onAbort = () => {
+      if (finishing) return;
       settleCancelled();
       void cancelPaperPdfImport(pdfPath).catch(() => {});
     };
@@ -284,6 +289,8 @@ async function runParseInner(
         return;
       }
       if (progress.type === "done" && progress.paper_dir) {
+        // 进入落库路径即标记收尾中（abort 自此不翻转——done 产物已可落库）
+        finishing = true;
         // 自定义落库路径（重解析的产物整体替换）：委托给调用方的 onParsed（自带成功卡/toast/result）
         if (opts.onParsed) {
           try {
