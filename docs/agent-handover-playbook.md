@@ -31,6 +31,26 @@
 5. **文档同步**：改了代码口径（wiki 七章、用户手册、提示词、AGENTS.md 有对应描述的），
    同 commit 更新文档，不许留旧口径。
 
+### 中断交接通则（接手中断任务时先读）
+
+任何一张卡都可能以上游 Agent 中断的形态落到你手里。接手规程：
+
+1. **先盘点现场，再决定续作还是重做**：
+   - `git status --short` + `git log --oneline -10`：看任务相关改动是已 commit 还是
+     还在工作区（未 commit）。对照任务卡的「改动文件清单预期」判断完成度。
+   - `git diff --stat`：改动规模与任务卡规格对得上 → 大概率接近完工，进入「验证优先」
+     流程；只有零星改动 → 当作刚开工，按施工规格从头做，**保留**已有改动在其基础上续作。
+2. **工作区未提交改动一律视为在制品（WIP），禁止 `git checkout -- .` / `git clean -fd`
+   / `git stash` 清场**——那是上一个 Agent 的半成品，不是垃圾。确实需要放弃时先
+   `git diff > 备份.patch` 留底。
+3. **验证优先**：接近完工的现场，先跑任务卡的验收基线（tsc / cargo test / 指定回归
+   脚本）。全绿 → 直接按纪律 commit 收尾；有红 → 以失败信息为锚续作。
+4. **WIP 快照**：`.tmp-e2e/wip/` 下有主 Agent 拍的中断前快照（status + patch，
+   文件名带时间戳）。现场意外被清时用 `git apply` 恢复；现场还在则快照仅作参照，
+   以工作区实际内容为准（快照可能落后于最新进度）。
+5. **中断任务的 commit 边界**：你完成的部分与捡来的 WIP 可以合并为一个 commit，
+   commit message 里注明「含上游中断遗留 WIP 的续作与验证」。
+
 ### 验证基线（别拿空转当绿）
 
 - `cd packages/app && pnpm tsc -b` 零错（**必须 `-b`，裸 tsc 历史上空转过**）。
@@ -47,8 +67,17 @@
 ## 任务卡 1：memo 拆墙（切 tab 的 ~2s React render 墙 → ms 级）
 
 **状态**：主 Agent 的子代理（agent-92）在跑/可能已将改动落工作区未提交。
-**接手方法**：先 `git status` + `git log --oneline -5` 看工作区有无未提交的相关改动与
-`perf` commit；若改动在但未提交，验证后直接按纪律 commit；若改动残缺，接着做完。
+**接手方法**（先按「中断交接通则」盘点，再用本清单判完成度）：
+2026-08-26 08:32 快照（`.tmp-e2e/wip/`）显示在制改动已覆盖——`home-layout.tsx`、
+`reader-layout.tsx`、`side-chat/`（index/chat-input-area/chat-messages）、`chat/index.tsx`、
+`library/components/book-item.tsx`、`paper-reader-view.tsx`、`papers/paper-chat-panel.tsx`、
+`reader/components/`（header-bar/reader-viewer）、`store/layout-store.ts`、三个 CDP 脚本
+适配 + 新探针 `scripts/cdp-tab-switch-wall.mjs`（未跟踪）。完成度判据：
+- [ ] `PaperReaderView` 与 `HomeLayout` 已包 React.memo；
+- [ ] 订阅面收窄改动（layout-store/side-chat 等）有注释说明；
+- [ ] `scripts/cdp-tab-switch-wall.mjs` 可跑出 tWall 数据；
+- [ ] tWall 中位 < 200ms（10 轮）；批次 3 回归 22 项全绿；tsc 零错。
+四项齐 → 验证后直接 commit 收尾；缺哪项续哪项。
 **背景**：`scripts/cdp-opacity-ab.mjs` A/B 实盘已证：切 tab 墙不是 CSS 隐藏模型问题
 （tReflow≈0），而是 `activateTab` 触发 ReaderLayout 全保活树（~11 万元素/三层论文）
 重 reconcile 的单个 long task——`PaperReaderView` 未 memo。
