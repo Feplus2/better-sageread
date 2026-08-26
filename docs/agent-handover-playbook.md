@@ -218,6 +218,27 @@ SageRead binaries 后 CDP 实盘一篇。
 
 ## 任务卡 6：SageRead 侧 XML 导入链路与 UI 文案适配
 
+**状态**：✅ 已完成并提交（CDP 实盘 `scripts/cdp-xml-import-verify.mjs` 9/9 全绿：
+XML 经导入入口 → 任务卡（阶段名「XML 解析」跟随 converter 实报）→ 落库 →
+阅读器目录/公式/图（data-paper-src blob 渲染）/引用锚点 → references.json
+结构化落库；重跑同内容 outcome=skipped 顺带实证去重语义；tsc 零错；文案 grep
+复查零遗漏——导入入口/弹窗/拖放罩/任务卡/设置页/AI 工具描述/提示词/用户手册
+01+03 章全按「PDF / XML」口径，书籍转换器（PDF→EPUB）与 Zotero 条目附件盘点
+的 PDF 字样属别的语义不动）。**链路实现**：Rust convert_paper_pdf 本就路径直通
+（零改动），converter CLI 按扩展名分派；TS 侧改扩展名闸门（importPaperPdf/
+拖入过滤/文件对话框）+ 阶段名跟随 + terminated 竞态修复（见下）。
+**顺手修复的 pre-existing bug（单列）**：paper-parse 执行器 `terminated` 事件缺
+`finishing` 守卫——done 进落库路径后进程退场的 terminated 会把成功任务误记
+「已取消」；XML 管线秒级解析把该竞态从偶发撑到必现，已在 terminated 分支补
+finishing 判断（PDF 路径同步受益）。**PDF 零回归依据**：pipeline.py 的 PDF 分支
+逐字未动（仅在其前加 .xml 分支）+ Papers_Converter 全仓 243 测试绿 + 重打 exe
+（已部署 binaries，bak-pre-xml 留底）；PDF 实盘导入未跑（烧 OCR 配额），
+留用户日常使用验证。**遗留**：XML 导入论文的「重新解析」找不到 source.pdf
+（XML 管线无源 PDF 拷贝）会走 zotero 回链/失败提示——接受（重解析对 XML 论文
+本就应重抓）；Elsevier 真实样本联调待 key。
+
+<details><summary>原任务卡（存档）</summary>
+
 **状态**：未开工。**前置**：任务卡 5 的 exe 已部署到 SageRead binaries。
 **施工规格**：
 - 导入入口双格式：拖入/菜单/ZBS 推送接受 `.xml`（与 `.pdf` 同链路），paper-parse
@@ -226,6 +247,8 @@ SageRead binaries 后 CDP 实盘一篇。
   按"PDF / XML"口径更新（用户点名项，一处不漏——grep `PDF` 全仓逐条判）。
 **验收标准**：CDP 实盘拖入一篇 XML → 任务卡正常 → 落库可读；PDF 路径零回归；
 文案 grep 复查零遗漏；tsc 零错。
+
+</details>
 
 ---
 

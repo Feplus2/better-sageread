@@ -1,6 +1,6 @@
 # 文献库与论文
 
-文献库是论文的独立家园：PDF 导入后自动解析为 Markdown 阅读，保留图、表、公式与图注锚点。
+文献库是论文的独立家园：PDF / XML 全文导入后自动解析为 Markdown 阅读（XML 为 JATS/Elsevier 全文，如 Zotero Brain 订阅级产物），保留图、表、公式与图注锚点。
 
 ## 导入论文
 

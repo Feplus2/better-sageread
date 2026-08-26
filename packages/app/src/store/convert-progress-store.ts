@@ -1,5 +1,5 @@
 /**
- * 全局转换进度 store：论文 PDF 解析导入 + 图书 PDF→EPUB 转换。
+ * 全局转换进度 store：论文全文解析导入（PDF/XML）+ 图书 PDF→EPUB 转换。
  *
  * 两类长任务此前都把运行状态放在页面组件里（PapersPage / ConverterPage），
  * 离开页面即丢卡（论文）或丢监听（图书——窗口被点掉后转换进程还在跑，

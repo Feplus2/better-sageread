@@ -403,7 +403,7 @@ export interface PaperPdfImportOutcome {
 const PAPER_PARSE_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
- * 解析单篇 PDF 论文并导入文献库（AI 工具 importPaper 的链路）。
+ * 解析单篇论文全文（PDF 或 XML）并导入文献库（AI 工具 importPaper 的链路）。
  * P2-4 起改走统一队列：入队 task-center 的 paper-parse 通道并阻塞等结算（返回语义保持）——
  * 拿到队列可见性/冲突检查，不改变 AI 的回答节奏。payload.silent 抑制执行器 toast
  * （旧自持监听链路全程静默，只回消息）。中止/超时经 cancelTask 落到任务取消
@@ -414,10 +414,11 @@ export async function importPaperPdf(
   folderId?: string,
   abortSignal?: AbortSignal,
 ): Promise<PaperPdfImportOutcome> {
-  // 1. 基本校验（同旧链路）
+  // 1. 基本校验（同旧链路）。XML（JATS/Elsevier 全文，ZBS 订阅级产物）与 PDF 同链路：
+  //    converter CLI 按扩展名分派（.xml 走 XML 管线，见 paper-format-contract 同构产物）
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-  if (ext !== "pdf") {
-    return { success: false, message: `仅支持 PDF 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。` };
+  if (ext !== "pdf" && ext !== "xml") {
+    return { success: false, message: `仅支持 PDF / XML 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。` };
   }
   const exists = await invoke<boolean>("path_exists", { path: filePath }).catch(() => false);
   if (!exists) {

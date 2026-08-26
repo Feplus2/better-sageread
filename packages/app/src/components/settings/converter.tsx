@@ -52,7 +52,7 @@ export default function ConverterSettings() {
       <div className="space-y-2">
         <h2 className="font-semibold text-lg dark:text-neutral-100">PDF 转换</h2>
         <p className="text-neutral-600 text-sm dark:text-neutral-400">
-          书籍转换（PDF→EPUB）与论文解析（PDF→Markdown 论文）由各自引擎驱动，Token 配置两侧共享。
+          书籍转换（PDF→EPUB）与论文解析（PDF/XML→Markdown 论文）由各自引擎驱动，Token 配置两侧共享。
         </p>
       </div>
 
@@ -143,7 +143,7 @@ export default function ConverterSettings() {
         <div className="space-y-1">
           <h3 className="font-medium text-base dark:text-neutral-100">论文解析</h3>
           <p className="text-neutral-600 text-sm dark:text-neutral-400">
-            文献库「导入 PDF」把单篇论文解析为 Markdown 论文（Papers_Converter 驱动）。
+            文献库「导入 PDF / XML」把单篇论文全文（PDF，或 JATS/Elsevier XML）解析为 Markdown 论文（Papers_Converter 驱动）。
           </p>
         </div>
         <div className="space-y-2">

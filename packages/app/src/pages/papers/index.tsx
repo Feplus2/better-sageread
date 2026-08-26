@@ -680,16 +680,20 @@ export default function PapersPage() {
           setPdfDragOver(false);
         } else if (payload.type === "drop") {
           setPdfDragOver(false);
-          const pdfs = payload.paths.filter((p) => p.toLowerCase().endsWith(".pdf"));
+          // PDF / XML 同链路（converter 按扩展名分派：.xml 走 XML 管线）
+          const pdfs = payload.paths.filter((p) => {
+            const ext = p.toLowerCase().split(".").pop();
+            return ext === "pdf" || ext === "xml";
+          });
           if (pdfs.length === 0) {
             if (payload.paths.length > 0) {
-              toast.error("文献库只支持导入 PDF（书籍请去图书馆页拖入）");
+              toast.error("文献库只支持导入 PDF / XML（书籍请去图书馆页拖入）");
             }
             return;
           }
           const ignored = payload.paths.length - pdfs.length;
           if (ignored > 0) {
-            toast.info(`已忽略 ${ignored} 个非 PDF 文件`);
+            toast.info(`已忽略 ${ignored} 个非 PDF / XML 文件`);
           }
           if (pdfPickerOpenRef.current) {
             setPdfCandidates((prev) => mergePdfCandidates(prev, pdfs));
@@ -1333,8 +1337,8 @@ export default function PapersPage() {
       const selected = await open({
         multiple: true,
         directory: false,
-        title: "选择论文 PDF（可多选）",
-        filters: [{ name: "PDF", extensions: ["pdf"] }],
+        title: "选择论文 PDF / XML（可多选）",
+        filters: [{ name: "论文全文", extensions: ["pdf", "xml"] }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length > 0) setPdfCandidates((prev) => mergePdfCandidates(prev, paths));
@@ -1687,7 +1691,7 @@ export default function PapersPage() {
           {/* 解析运行中不禁用：提交进全局队列排队（convert-progress-store 串行接续） */}
           <Button onClick={handleImportPdf} disabled={importing}>
             <FileDown className="size-4" />
-            导入 PDF
+            导入 PDF / XML
           </Button>
           <Button
             variant="outline"
@@ -1709,7 +1713,7 @@ export default function PapersPage() {
             <DropdownMenuContent align="end" className="w-72 p-2">
               <div className="px-2 py-1.5 text-muted-foreground text-xs leading-relaxed">
                 适用于已用 Papers_Converter 转换好的目录（含 paper.md 与 images/）。普通用户请直接用「导入
-                PDF」，无需关心此处。
+                PDF / XML」，无需关心此处。
               </div>
               <DropdownMenuItem onSelect={() => handleImport("选择论文目录（含 paper.md）")}>
                 <FolderOpen className="size-4" />
@@ -1981,13 +1985,13 @@ export default function PapersPage() {
               <div className="max-w-lg space-y-3 text-center">
                 <h2 className="font-bold text-neutral-900 text-xl dark:text-neutral-100">文献库还是空的</h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
-                  把论文 PDF 拖进本页，或点下方按钮选择文件，即可自动解析、入库管理并阅读。 已有 Papers_Converter
+                  把论文 PDF / XML 拖进本页，或点下方按钮选择文件，即可自动解析、入库管理并阅读。 已有 Papers_Converter
                   转换产物（含 paper.md 与 images/ 的目录）可走右上角「高级」导入。
                 </p>
               </div>
               <Button onClick={handleImportPdf} disabled={importing || paperImportRunning}>
                 <FileDown className="size-4" />
-                导入 PDF
+                导入 PDF / XML
               </Button>
               <Button
                 variant="outline"
@@ -2186,7 +2190,7 @@ export default function PapersPage() {
       <Dialog open={pdfPickerOpen} onOpenChange={setPdfPickerOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="px-5">
-            <DialogTitle>导入 PDF 论文</DialogTitle>
+            <DialogTitle>导入 PDF / XML 论文</DialogTitle>
             <DialogDescription className="px-0">
               解析为 Markdown 论文并入库（后台串行运行，完成时提醒）
             </DialogDescription>
@@ -2204,7 +2208,7 @@ export default function PapersPage() {
             >
               <FileDown className={clsx("size-8", pdfDragOver ? "text-primary" : "text-neutral-400")} />
               <span className="font-medium text-sm">
-                {pdfDragOver ? "松开以添加 PDF" : "点击选择或拖入 PDF（可多选）"}
+                {pdfDragOver ? "松开以添加 PDF / XML" : "点击选择或拖入 PDF / XML（可多选）"}
               </span>
               <span className="text-muted-foreground text-xs">多篇将逐篇串行解析，每篇约需十几秒到几分钟</span>
             </button>
@@ -2290,7 +2294,7 @@ export default function PapersPage() {
         <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-2xl border-2 border-primary border-dashed bg-primary/5">
           <div className="flex flex-col items-center gap-2 text-primary">
             <FileDown className="size-10" />
-            <span className="font-medium text-sm">松开导入 PDF 并解析</span>
+            <span className="font-medium text-sm">松开导入 PDF / XML 并解析</span>
           </div>
         </div>
       )}

@@ -281,8 +281,13 @@ async function runParseInner(
         if (progress.percent != null) filePercent = progress.percent;
         const stage = progress.stage === undefined ? undefined : progress.stage + stageOffset;
         if (stage !== undefined) {
+          // 阶段名跟随 converter 实报（XML 管线 stage1 是「XML 解析」而非「OCR 解析」；
+          // 引擎名同理），静态 PDF_STAGE_NAMES 只是初值
+          const renamed = progress.stage_name
+            ? stagesOf(task.taskId).map((s) => (s.n === stage ? { ...s, name: progress.stage_name! } : s))
+            : stagesOf(task.taskId);
           ctx.reportExtra({
-            stages: markStages(stagesOf(task.taskId), stage, progress.type === "stage_done" ? "done" : "active"),
+            stages: markStages(renamed, stage, progress.type === "stage_done" ? "done" : "active"),
           });
         }
         ctx.report(filePercent, progress.detail);
@@ -370,8 +375,11 @@ async function runParseInner(
         return;
       }
       if (progress.type === "terminated") {
+        // finishing 守卫：done 已进落库路径（importPapers 进行中）时进程退场是正常时序
+        // （done → 进程退出 → terminated），不算取消——落库路径自会 settle。
+        // XML 管线秒级解析把该窗口撑到必现（PDF 路径 PyInstaller 收尾慢，历史上偶隐）
         if (progress.success === false) settleFailure("parse", "解析进程异常退出");
-        else settleCancelled();
+        else if (!finishing) settleCancelled();
       }
     };
 

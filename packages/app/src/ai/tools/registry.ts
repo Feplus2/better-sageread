@@ -219,7 +219,7 @@ registerTools([
     name: "importPaper",
     scope: "central",
     tool: importPaperTool as Tool,
-    description: "解析单篇 PDF 论文并导入文献库（paper.md 链路，非书库）",
+    description: "解析单篇论文全文（PDF 或 XML）并导入文献库（paper.md 链路，非书库）",
   },
   {
     name: "manageSync",
