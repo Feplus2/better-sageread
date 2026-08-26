@@ -16,10 +16,11 @@ import "./index.css";
 
 mountFontsToMainApp();
 
-// 保活层隐藏模型 A/B 开关（index.css 批次 3 双轨）：默认 visibility 模型（2026-08-25 A/B 裁决：
-// 拆墙假设证伪，墙在 React render，详见 index.css 批次 3 注释与 .tmp-motion-verify/ab-results.json）；
-// 运行期翻 documentElement.dataset.tabHide = "opacity" 即切实验组，免重编。??= 保留外部预置值（HMR 幂等）
-document.documentElement.dataset.tabHide ??= "visibility";
+// 保活层隐藏模型开关（index.css 批次 3 双轨）：默认 opacity 模型（2026-08-27 转正：
+// keepalive 大层 visibility 翻转触发全量 raster——图书馆↔文献库 620ms 墙实测 65ms，详见
+// index.css 批次 3 注释）。运行期翻 documentElement.dataset.tabHide = "visibility"
+// 即切旧模型（AT 全隐藏/省纹理内存，低端机逃生门）。??= 保留外部预置值（HMR 幂等）
+document.documentElement.dataset.tabHide ??= "opacity";
 
 // 批次 A：localStorage 存量密钥迁入 keyring，并把 keyring 中的 key 载入内存 store
 initSecrets().catch((error) => {

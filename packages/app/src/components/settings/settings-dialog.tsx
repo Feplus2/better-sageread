@@ -246,8 +246,11 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
             <nav className="space-y-1">{settingsItems.map((item) => renderSidebarItem(item))}</nav>
           </div>
 
-          {/* 批次 5：key={activeKey} 切设置项重挂载 → 进场动画重播（token 驱动） */}
-          <div key={activeKey} className="motion-enter-slide-up min-w-0 flex-1 overflow-y-auto dark:bg-neutral-900">
+          {/* 批次 5：key={activeKey} 切设置项重挂载 → 进场动画重播。用纯 fade（非 slide-up）：
+              弹层 DialogContent 是 overflow-y-auto，slide-up 的 translateY(8px) 起步帧会让
+              内容超出弹层底边 8px → 弹层自身滚动条闪现一帧（用户实测"尾巴没收好"）；
+              fade 不动位移，滚动条恒稳。AI 中心/笔记面板动画容器父级非滚动容器，无此问题 */}
+          <div key={activeKey} className="motion-enter-fade min-w-0 flex-1 overflow-y-auto dark:bg-neutral-900">
             {renderSettingsContent()}
           </div>
         </div>

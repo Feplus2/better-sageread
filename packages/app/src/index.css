@@ -142,49 +142,52 @@
 }
 
 /* ---------- 批次 3：保活层交叉淡入（reader tab 层 / 主页路由层 /chat 常驻层共用） ----------
- * 隐藏模型双轨（documentElement data-tab-hide="visibility|opacity"，默认 visibility，运行期翻转免重编）：
- * - visibility（默认/对照组）：opacity 淡 + visibility 延迟链，离场播完淡出再 hidden，进场立即 visible 再淡入。
- * - opacity（实验组/逃生门）：非活跃 = opacity:0 + 位移 + z-index:0 + pointer-events:none，无 visibility，
- *   焦点/无障碍隔离由 React 侧 inert + aria-hidden 兜底；transition 只留 opacity + transform。
- *   2026-08-25 A/B 实盘（scripts/cdp-opacity-ab.mjs）：终态干净/指针隔离/焦点隔离/像素级终态一致全过，
- *   但「拆 unhide 样式重算墙」假设证伪——切 tab 的 ~1.7-2s 墙是 React 同步 render 单个 long task
- *   （PaperReaderView 未 memo，全保活树重 reconcile），两模型 tReflow 均 ≈0ms，故 visibility 留任默认。
+ * 隐藏模型双轨（documentElement data-tab-hide="opacity|visibility"，默认 opacity，运行期翻转免重编）：
+ * - opacity（默认，2026-08-27 转正）：非活跃 = opacity:0 + 位移 + z-index:0 + pointer-events:none，
+ *   无 visibility——层恒保持栅格化，切换是纯合成器透明度变化。批次 5 keepalive 化后路由层
+ *   （图书馆网格/文献库 97 行列表）的 visibility 翻转要全量重新 raster+paint：A/B 实测
+ *   图书馆↔文献库 620ms 长任务 → opacity 模型 65ms（三段对照闭环）。真因是栅格化而非
+ *   React——批次 1 时代的 tReflow≈0 结论只覆盖 forced reflow，不覆盖 raster/paint。
+ *   焦点/无障碍隔离由 React 侧 inert + aria-hidden 兜底（c42afca 实验全验）。
+ * - visibility（逃生门，旧默认）：opacity 淡 + visibility 延迟链。AT 天然完全隐藏、
+ *   隐藏层不占纹理内存；代价即上述 raster 墙——低端机内存紧张时可切回。
+ * pointer-events 不上层（2026-08-27 移除）：pe 是继承属性，层上翻 none↔auto 会把整棵
+ * 子树计算样式全部弄脏（keepalive 大层实测 89ms/层的全子树 style recalc）。交互隔离
+ * 由 inert（React 侧，连焦点一起挡）+ 活跃层恒 inset-0 盖顶（命中测试实测：隐藏层
+ * pe 强制 auto 时点击仍命中的是活跃层内容）共同承担；opacity 0 与 z-index 0 保其
+ * 视觉与命中顺序。
  * 非活跃层停在 translateY(var(--motion-slide))，激活归 0——fade-only/reduced 下位移归零自动退化为纯 fade。
  * 活跃态 transform 用 none 而非 translateY(0)：终态不产生 transform 包含块，
  * 层内 position:fixed 后代（如拖放罩）语义与硬切时代完全一致。只碰 transform/opacity，第一宪法。 */
-:root:not([data-tab-hide="opacity"]) .tab-layer {
+:root:not([data-tab-hide="visibility"]) .tab-layer {
+  opacity: 0;
+  transform: translateY(var(--motion-slide));
+  z-index: 0;
+  transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease);
+}
+
+:root:not([data-tab-hide="visibility"]) .tab-layer[data-active="true"] {
+  opacity: 1;
+  transform: none;
+  z-index: 1;
+}
+
+:root[data-tab-hide="visibility"] .tab-layer {
   opacity: 0;
   visibility: hidden;
   transform: translateY(var(--motion-slide));
   z-index: 0;
-  pointer-events: none;
   transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease),
     visibility 0s linear var(--motion-dur-slow); /* 离场：播完再 hidden */
 }
 
-:root:not([data-tab-hide="opacity"]) .tab-layer[data-active="true"] {
+:root[data-tab-hide="visibility"] .tab-layer[data-active="true"] {
   opacity: 1;
   visibility: visible;
   transform: none;
   z-index: 1;
-  pointer-events: auto;
   transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease),
     visibility 0s linear 0s; /* 进场：立即 visible 再淡入 */
-}
-
-:root[data-tab-hide="opacity"] .tab-layer {
-  opacity: 0;
-  transform: translateY(var(--motion-slide));
-  z-index: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-dur-slow) var(--motion-ease), transform var(--motion-dur-slow) var(--motion-ease);
-}
-
-:root[data-tab-hide="opacity"] .tab-layer[data-active="true"] {
-  opacity: 1;
-  transform: none;
-  z-index: 1;
-  pointer-events: auto;
 }
 
 /* ---------- 批次 4：侧栏开合（docs/motion-system-plan.md 裁定三口径 2 冻结式 + 序 4） ----------

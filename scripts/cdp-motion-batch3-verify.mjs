@@ -693,30 +693,29 @@ console.log("E fade-tokens", fadeTokens);
   const other =
     st.tabs.find((t) => t.id === bookTabId && t.id !== st.activeTabId) ?? st.tabs.find((t) => t.id !== st.activeTabId);
   if (other) {
-    // 构造级证据（确定性）：fade-only 下非活跃层 transition-duration 压到 0.12s、位移分量 ty=0
-    //（对照 full 档 0.3s + ty=8）→ 纯 fade + 时长压短由 token 引用保证，不赌采样运气。
-    // 注意 token 翻转本身触发 transform 过渡（不可见、无害），须等过渡沉降后再测
-    await sleep(500);
-    const proofFade = JSON.parse(
-      await evalJs(`(() => {
-      const l = [...document.querySelectorAll("main.overflow-clip > .tab-layer")].find((x) => x.dataset.active !== "true");
-      const c = getComputedStyle(l);
-      const m = /matrix\\(([^)]+)\\)/.exec(c.transform);
-      const ty = m ? Number.parseFloat(m[1].split(",")[5]) : 0;
-      return JSON.stringify({ dur: c.transitionDuration, ty });
-    })()`),
-    );
+    // 构造级证据（确定性）：探针层直接读规则计算值。不用存量层实测——运行期翻 token
+    // 时 transform 过渡不保证重启（opacity/visibility 两模型下均有陈旧态伪象，2026-08-27
+    // 实测），新鲜元素无过渡历史，gCS 即终值。fade-only 下非活跃层 0.12s + ty=0，
+    // 对照 full 档 0.3s + ty=8 → 纯 fade + 时长压短由 token 引用保证
+    const probeLayer = () =>
+      evalJs(`(() => {
+        const main = document.querySelector("main.overflow-clip") ?? document.body;
+        const d = document.createElement("div");
+        d.className = "tab-layer";
+        main.appendChild(d);
+        const c = getComputedStyle(d);
+        const m = /matrix\\(([^)]+)\\)/.exec(c.transform);
+        const ty = m ? Number.parseFloat(m[1].split(",")[5]) : 0;
+        const out = JSON.stringify({ dur: c.transitionDuration, ty, op: c.opacity });
+        d.remove();
+        return out;
+      })()`);
+    await evalJs(`document.documentElement.dataset.motion = "fade-only"`);
+    await sleep(300);
+    const proofFade = JSON.parse(await probeLayer());
     await evalJs(`document.documentElement.dataset.motion = "full"`);
-    await sleep(500);
-    const proofFull = JSON.parse(
-      await evalJs(`(() => {
-      const l = [...document.querySelectorAll("main.overflow-clip > .tab-layer")].find((x) => x.dataset.active !== "true");
-      const c = getComputedStyle(l);
-      const m = /matrix\\(([^)]+)\\)/.exec(c.transform);
-      const ty = m ? Number.parseFloat(m[1].split(",")[5]) : 0;
-      return JSON.stringify({ dur: c.transitionDuration, ty });
-    })()`),
-    );
+    await sleep(300);
+    const proofFull = JSON.parse(await probeLayer());
     await evalJs(`document.documentElement.dataset.motion = "fade-only"`);
     check(
       "E fade-only：时长压短 0.12s + 位移归零（对照 full 0.3s + ty=8）",

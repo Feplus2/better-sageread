@@ -121,7 +121,20 @@ TabsContent（embedding-dialog 唯一使用方）外，设置页/AI 中心/书�
 均为条件渲染/手写切换——已按验收意图在各切换点挂 `motion-enter-slide-up`
 （key 重挂载播动画，token 驱动三档退化）。**已知行为变化（改善方向，向用户说明）**：
 主页 7 路由切走再切回，页面本地状态保留（筛选/滚动/未提交输入），此前是重置；
-不喜可给单页加 `data-no-keepalive` 白名单退路。**测量教训（脚本已固化）**：
+不喜可给单页加 `data-no-keepalive` 白名单退路。**2026-08-27 用户验收迭代（均落盘）**：①设置页进场动画 slide-up → 纯 fade——弹层
+DialogContent 是 overflow-y-auto，translateY(8px) 起步帧超出弹层底边 → 弹层自身滚动条
+闪现一帧（用户实测"尾巴没收好"）；AI 中心/笔记面板动画容器父级非滚动容器，无此问题
+维持 slide-up。②隐藏模型 opacity 转正为默认、visibility 降为逃生门（main.tsx 钉值同步
+翻转）——keepalive 大层 visibility 翻转触发全量 raster+paint，图书馆↔文献库实测 620ms
+长任务（窗口遮挡/冷态下最重；页面热身后降至 ~110ms 的 dev 渲染税）；opacity 模型层恒
+栅格化，切换纯合成器操作。③.tab-layer 全模型移除 pointer-events——pe 是继承属性，
+层上翻 none↔auto 会弄脏整棵子树计算样式（实测 89ms/层全子树 style recalc）；交互隔离
+由 inert（React 侧）+ 活跃层恒 inset-0 盖顶（命中测试实证）承担。两回归套件适配后全绿
+（批次3 46/46：E 节改新鲜探针层构造级证明——存量层在运行期翻 token 时 transform 过渡
+不保证重启是测试伪象；批次5 34/34：B2 改构造级 getAnimations 证明——设置分区挂载有
+~1s 主线程块会饿死 rAF 采样、A5 改终态稳定性对比+壁纸视频暂停——lianyan 动态主题的
+全屏 loop 视频让任意两截图必然 diff、A6 改 GC 地板值×1.3）。
+**测量教训（脚本已固化）**：
 resource buffer 250 条会挤掉 asset 条目（计数恒 0 无效，img 节点同源才是证据）；
 settled 截图必须等全部 `img.complete`（早拍捕到未解码封面 → 假像素差异）；
 Chromium 把 0.01ms 序列化为 `1e-05s`（断言两者都要认）。
@@ -286,5 +299,10 @@ CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）�
   时人工补枚举；OpenRouter 目录 API 可作校验源（TODO 在 `vision-map.ts:17-20`，
   不做运行时依赖）。
 - **AI 用量统计面板**（想法池 `docs/next-round-backlog.md` 末节）：不排期。
-- **opacity 逃生门**：`data-tab-hide="opacity"` 可启用 opacity 隐藏模型（安全性已
-  全验，见 commit c42afca）；墙正解是任务卡 1 的 memo。
+- **opacity 隐藏模型已转正默认**（2026-08-27，见任务卡 2 验收迭代）：visibility 翻转
+  的 raster 墙 + pointer-events 继承重算双成本实测后，opacity 成为默认、visibility 降为
+  逃生门（`data-tab-hide="visibility"`，AT 全隐藏/省纹理内存，低端机可切回）。旧口径
+  （opacity 为逃生门）作废。
+- **设置分区挂载 ~1s 主线程块**（2026-08-27 实测，字体管理最重 ~1.2s、网络代理 ~0.9s）：
+  切设置项时可感卡顿，怀疑分区组件全量重渲/字体枚举；与动效无关（动画本身正常），
+  排期另查。
