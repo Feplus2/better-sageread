@@ -263,3 +263,18 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
   单价随厂家调价会变，表要小、好维护、标注日期与来源。
 - 数据源：聊天侧 AI SDK 的 usage 回调（streamText onFinish usage / providerMetadata），
   按 thread/message 落库一张 usage 流水表即可支撑全部图表。
+
+## Agent 召回本次对话（readThread 工具）——2026-08-27 立项，未排期
+
+**场景**：上下文自动截断后，用户让 Agent"整理本次对话存到笔记"——Agent 看不到早期
+消息。用户口径：这类任务不需要工具调用返回结果，只要用户提问 + AI 答复（与导出对话
+的渲染口径一致：text/quote 保留，tool/reasoning 跳过）。
+
+**现状（已查证，基建 90% 在）**：消息落库不滞后（每条 AI 回复 onFinish 即 editThread，
+存储侧已做 tool 结果截断）；`renderMessageMarkdown` 管线现成（只留 text/quote）；
+`manage-threads` 工具已有列表/搜索/导出——但导出走文件对话框（Agent 用不了），且无
+"读内容"动作，Agent 也无从知道"当前对话"的 threadId。
+
+**方案（约 40 行）**：manage-threads 加 `action: "read"`——不带 threadId 默认取当前
+scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。注意：末条消息流式中
+落库滞后一条，返回里注明。

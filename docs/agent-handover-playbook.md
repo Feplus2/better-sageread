@@ -121,7 +121,7 @@ TabsContent（embedding-dialog 唯一使用方）外，设置页/AI 中心/书�
 均为条件渲染/手写切换——已按验收意图在各切换点挂 `motion-enter-slide-up`
 （key 重挂载播动画，token 驱动三档退化）。**已知行为变化（改善方向，向用户说明）**：
 主页 7 路由切走再切回，页面本地状态保留（筛选/滚动/未提交输入），此前是重置；
-不喜可给单页加 `data-no-keepalive` 白名单退路。**2026-08-27 用户验收迭代（均落盘）**：①设置页进场动画 slide-up → 纯 fade——弹层
+不喜可给单页加 `data-no-keepalive` 白名单退路。**2026-08-27 用户验收迭代（①落盘保留；②③已回退）**：①设置页进场动画 slide-up → 纯 fade——弹层
 DialogContent 是 overflow-y-auto，translateY(8px) 起步帧超出弹层底边 → 弹层自身滚动条
 闪现一帧（用户实测"尾巴没收好"）；AI 中心/笔记面板动画容器父级非滚动容器，无此问题
 维持 slide-up。②隐藏模型 opacity 转正为默认、visibility 降为逃生门（main.tsx 钉值同步
@@ -134,6 +134,13 @@ DialogContent 是 overflow-y-auto，translateY(8px) 起步帧超出弹层底边 
 不保证重启是测试伪象；批次5 34/34：B2 改构造级 getAnimations 证明——设置分区挂载有
 ~1s 主线程块会饿死 rAF 采样、A5 改终态稳定性对比+壁纸视频暂停——lianyan 动态主题的
 全屏 loop 视频让任意两截图必然 diff、A6 改 GC 地板值×1.3）。
+**回退记录（同日晚，用户实测否决）**：②③上线后原丝滑路由（AI 中心/全局助手/
+阅读统计）出现新卡顿——opacity 常驻栅格化的 GPU 合成开销在多保活大层下扩散到
+全部路由，得不偿失（图书馆↔文献库的 raster 墙只是换了个形态分摊）。index.css
+与 main.tsx 已 revert 回 visibility 默认 + pointer-events 版本；归因知识与脚本
+健壮化保留（批次3/5 回归仍全绿——两套件模型感知，visibility 下按旧断言跑）。
+教训：A/B 探针测的是切换瞬间的长任务，没测常驻合成态的持续开销——单点指标
+优化被全局面感否决，**性能改动必须整组路由手感验收后再定去留**。
 **测量教训（脚本已固化）**：
 resource buffer 250 条会挤掉 asset 条目（计数恒 0 无效，img 节点同源才是证据）；
 settled 截图必须等全部 `img.complete`（早拍捕到未解码封面 → 假像素差异）；
@@ -299,10 +306,11 @@ CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）�
   时人工补枚举；OpenRouter 目录 API 可作校验源（TODO 在 `vision-map.ts:17-20`，
   不做运行时依赖）。
 - **AI 用量统计面板**（想法池 `docs/next-round-backlog.md` 末节）：不排期。
-- **opacity 隐藏模型已转正默认**（2026-08-27，见任务卡 2 验收迭代）：visibility 翻转
-  的 raster 墙 + pointer-events 继承重算双成本实测后，opacity 成为默认、visibility 降为
-  逃生门（`data-tab-hide="visibility"`，AT 全隐藏/省纹理内存，低端机可切回）。旧口径
-  （opacity 为逃生门）作废。
+- **opacity 隐藏模型试验与回退**（2026-08-27）：raster 墙/pe 继承税两项归因实测成立，
+  但 opacity 默认上线后被用户实测否决——常驻栅格化把合成开销扩散到原丝滑路由。
+  已 revert 回 visibility 默认。结论留存：图书馆↔文献库冷态 620ms 墙的真因是
+  visibility 翻转的全量 raster（非 React），若未来再优化，方向是 content-visibility
+  或层的按需降级，而非恒驻栅格化。
 - **设置分区挂载 ~1s 主线程块**（2026-08-27 实测，字体管理最重 ~1.2s、网络代理 ~0.9s）：
   切设置项时可感卡顿，怀疑分区组件全量重渲/字体枚举；与动效无关（动画本身正常），
   排期另查。
