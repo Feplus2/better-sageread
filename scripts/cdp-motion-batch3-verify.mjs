@@ -1,6 +1,6 @@
 // 动效批次 3 CDP 实盘验证 v2（dev 1420 + CDP 9223，HMR 已应用改动）：
 //  0) 预唤醒休眠 tab + 开一本书（供书籍场景）   B) reader tab 交叉淡入：单次/快速连切/保活标记/休眠唤醒
-//  C) 主页路由两槽交叉淡入：连切不叠三层、/chat 常驻层、几何等价、帧探针
+//  C) 主页路由交叉淡入（批次 5 keepalive 化：visited 层常驻只增不减）：单活跃不变式、/chat 常驻层、几何等价、帧探针
 //  D) Tabs 滑动 pill：首帧无飞入、滑动中途、触发器样式解耦（embedding-dialog / 书籍笔记 / 论文笔记三使用方）
 //  E) 三档退化：fade-only 位移归零、reduced 硬切   F) 大 DOM 压力：论文 tab 切换帧探针
 // 隐藏模型双轨感知（index.css data-tab-hide）：visibility 相关断言按启动时读到的模型自动适配（TAB_HIDE）。
@@ -372,7 +372,18 @@ const geoOk =
   Math.abs(geo.inner[3] - (geo.am[3] - 8)) <= 1;
 check("C1 路由层几何与改动前逐像素等价（层=inset-0，内容=p-1 内缩）", geoOk, JSON.stringify(geo));
 
-// C2 快速连切 #/ → #/papers → #/converter（100ms 间隔）：全程 route 层 ≤2
+// C2 快速连切 #/ → #/papers → #/converter（100ms 间隔）——批次 5 keepalive 化后断言语义反转：
+// 访问过的路由层常驻挂载（只增不减），离场层不再卸载；不变式 = 每帧恰好一个 active 层
+// + 终态单活跃其余隐藏终态 + 既有层节点零重挂载（expando 标记实证，重跑脚本亦成立）
+const routeMark = async () =>
+  evalJs(`(() => {
+    const am = document.querySelector('[data-region="app-main"]');
+    [...am.children].filter((c) => c.classList?.contains("tab-layer") && c.dataset.region !== "chat-layer")
+      .forEach((l, i) => { if (!l.__b5mark) l.__b5mark = \`m\${i}\`; });
+    return [...am.children].filter((c) => c.__b5mark).map((l) => l.__b5mark).join(",");
+  })()`);
+const marksBefore = await routeMark();
+const routeCountBefore = marksBefore ? marksBefore.split(",").length : 0;
 await startSampler(ROUTE_LAYER_EXPR);
 await evalJs(`location.hash = "#/papers"`);
 await sleep(100);
@@ -382,11 +393,13 @@ await shot("b3-11-route-mid");
 await sleep(600);
 await shot("b3-12-route-converter");
 const routeSamples = await readSampler();
-const routeMax = routeSamples.length
-  ? Math.max(...routeSamples.map((x) => x.s.filter((s) => s.startsWith("route")).length))
-  : -1;
-check("C2 快速连切全程路由层 ≤2（不叠三层）", routeMax >= 0 && routeMax <= 2, `max=${routeMax}`);
-// 终态轮询：非活跃层可能因负载延迟卸载，但必须先达到「视觉终态」（opacity 0 + 模型对应隐藏态），最终卸载
+const activeCounts = routeSamples.map((x) => x.s.filter((s) => s.startsWith("route:true")).length);
+check(
+  "C2 快速连切每帧恰好一个 active 路由层（无双活跃/零活跃卡帧）",
+  routeSamples.length > 0 && activeCounts.every((n) => n === 1),
+  `frames=${routeSamples.length} activeCounts=${[...new Set(activeCounts)].join(",")}`,
+);
+// 终态轮询：常驻层全部到达隐藏终态（opacity 0 + 模型对应隐藏态）
 //（route 采样串格式 type:active:opacity:visibility，与 reader 层不同）
 const routeVisualSettled = await pollUntil(async () => {
   const ls = await routeLayers();
@@ -402,11 +415,18 @@ check(
   !!routeVisualSettled,
   routeVisualSettled ?? (await routeLayers()).join(" "),
 );
-const routeUnmounted = await pollUntil(async () => {
-  const ls = await routeLayers();
-  return ls.filter((s) => s.startsWith("route")).length === 1 ? ls.join(" ") : null;
-}, 3000);
-check("C2 离场层最终卸载（单层挂载）", !!routeUnmounted, routeUnmounted ?? (await routeLayers()).join(" "));
+const routeKeptAlive = await evalJs(`(() => {
+  const am = document.querySelector('[data-region="app-main"]');
+  const routes = [...am.children].filter((c) => c.classList?.contains("tab-layer") && c.dataset.region !== "chat-layer");
+  const kept = routes.filter((l) => l.__b5mark);
+  return JSON.stringify({ total: routes.length, keptMarks: kept.length });
+})()`);
+const rk = JSON.parse(routeKeptAlive);
+check(
+  "C2 离场层保持挂载（keepalive 常驻：数量只增不减 + 既有层节点未重挂载）",
+  rk.total >= routeCountBefore && rk.keptMarks === routeCountBefore && rk.total >= 3,
+  `before=${routeCountBefore} after=${JSON.stringify(rk)}（/, papers, converter 至少三层常驻）`,
+);
 
 // C3 /chat 常驻层：切进交叉淡入，切出后仍挂载。
 // 重叠证据走轮询（6s 窗口）：/chat 首进提交在负载机可慢至秒级，900ms rAF 采样窗会落在真重叠之前（2026-08-26 复跑实证）
@@ -422,11 +442,14 @@ await sleep(600);
 await shot("b3-14-chat-settled");
 const chatSettled = await pollUntil(async () => {
   const ls = await routeLayers();
-  return ls.some((s) => s.startsWith("chat:true:1:visible")) && !ls.some((s) => s.startsWith("route"))
-    ? ls.join(" ")
-    : null;
+  const chatOk = ls.some((s) => s.startsWith("chat:true:1:visible"));
+  // 批次 5 keepalive：路由层常驻不卸载，断言改为全部到达隐藏终态
+  const routesHidden = ls
+    .filter((s) => s.startsWith("route"))
+    .every((s) => (TAB_HIDE === "visibility" ? s.includes(":0:hidden") : s.includes(":0:visible")));
+  return chatOk && routesHidden ? ls.join(" ") : null;
 }, 3000);
-check("C3 /chat 终态：chat active、路由层清空", !!chatSettled, chatSettled ?? (await routeLayers()).join(" "));
+check("C3 /chat 终态：chat active、路由层全部隐藏终态（keepalive 常驻不可见）", !!chatSettled, chatSettled ?? (await routeLayers()).join(" "));
 await evalJs(`location.hash = "#/"`);
 const chatKept = await pollUntil(async () => {
   const v = await evalJs(`(() => {

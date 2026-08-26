@@ -98,7 +98,8 @@ export const NotepadContainer = ({ bookId }: NotepadContainerProps) => {
   return (
     <div className="flex h-full flex-col bg-background">
       <NotepadHeader tab={tab} onTabChange={setTab} />
-      <div className="flex-1 overflow-hidden">
+      {/* 批次 5：key={tab} 让切 tab 时容器重挂载 → 进场动画重播（motion-enter-slide-up，token 驱动） */}
+      <div key={tab} className="motion-enter-slide-up flex-1 overflow-hidden">
         {tab === "annotations" ? <NotepadContent bookId={bookId} /> : <BookNotes bookId={bookId} />}
       </div>
     </div>

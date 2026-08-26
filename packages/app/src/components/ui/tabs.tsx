@@ -144,6 +144,9 @@ const TabsTrigger = React.forwardRef<
 });
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 
+// 批次 5：进场动画走 CSS animation（radix 每次切换重 mount，transition 对 mount 无效）；
+// motion-enter-slide-up 复用批次 1 工具类（token 驱动：full 200ms 淡入+8px 上移、
+// fade-only 位移归零纯 fade、reduced 0.01ms 硬切），只碰 transform/opacity 不动布局
 const TabsContent = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
@@ -151,7 +154,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "motion-enter-slide-up mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
       className,
     )}
     {...props}

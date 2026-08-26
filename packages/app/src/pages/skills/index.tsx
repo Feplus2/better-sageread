@@ -44,7 +44,8 @@ export default function AIHubPage() {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* 批次 5：key={activeTab} 切 tab 重挂载 → 进场动画重播（token 驱动） */}
+      <div key={activeTab} className="motion-enter-slide-up flex-1 overflow-y-auto">
         {activeTab === "commands" && <QuickCommandsTab />}
         {activeTab === "prompts" && <PromptsTab />}
         {activeTab === "skills" && <SkillsTab />}

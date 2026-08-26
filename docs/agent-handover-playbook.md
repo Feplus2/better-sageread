@@ -112,6 +112,22 @@ tsc 零错。
 
 ## 任务卡 2：动效批次 5——路由 keepalive + TabsContent 进场动画
 
+**状态**：✅ 已完成并提交（现场盘点确认无上游源码 WIP——`.tmp-motion-verify/` 遗留
+是任务卡 1 收尾验证产物，卡 2 从零施工；批次 5 验证脚本
+`scripts/cdp-motion-batch5-verify.mjs` 17/17 全绿，批次 3 回归适配 keepalive 断言后
+22/22 全绿，tsc -b 零错）。2A 已按 visited 集合落地（7 路由懒挂载常驻、二次访问
+零重挂载、滚动/img 节点同源、往返像素 diff=0、heap 序列无泄漏形态）；2B 除 radix
+TabsContent（embedding-dialog 唯一使用方）外，设置页/AI 中心/书籍+论文笔记面板
+均为条件渲染/手写切换——已按验收意图在各切换点挂 `motion-enter-slide-up`
+（key 重挂载播动画，token 驱动三档退化）。**已知行为变化（改善方向，向用户说明）**：
+主页 7 路由切走再切回，页面本地状态保留（筛选/滚动/未提交输入），此前是重置；
+不喜可给单页加 `data-no-keepalive` 白名单退路。**测量教训（脚本已固化）**：
+resource buffer 250 条会挤掉 asset 条目（计数恒 0 无效，img 节点同源才是证据）；
+settled 截图必须等全部 `img.complete`（早拍捕到未解码封面 → 假像素差异）；
+Chromium 把 0.01ms 序列化为 `1e-05s`（断言两者都要认）。
+
+<details><summary>原任务卡（存档）</summary>
+
 **状态**：未开工。**前置**：任务卡 1 落盘（同碰 `home-layout.tsx`，必须串行）。
 **背景**：用户实测图书馆↔文献库切换"过渡没被覆盖 + 卡顿"。根因：批次 3 的路由转场是
 两槽 keepalive（旧页播完离场即卸载），每次切换目标页**冷挂载**——React 重建网格 +
@@ -147,6 +163,8 @@ effect 计数实证）；② 滚动位置/筛选保持；③ 封面不重新取�
 **审计方法**：CDP 中途截图（动画进行中 opacity 中间态）+ 终态截图对比 + 三档构造级
 computed 断言；脚本沉淀 `scripts/cdp-motion-batch5-verify.mjs`，截图 `.tmp-motion-verify/`。
 **报告格式**：两子项各自的实现要点/取舍 + 验收证据 + 行为变化说明 + 改动文件清单。
+
+</details>
 
 ---
 

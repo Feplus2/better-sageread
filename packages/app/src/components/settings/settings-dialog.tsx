@@ -246,7 +246,10 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
             <nav className="space-y-1">{settingsItems.map((item) => renderSidebarItem(item))}</nav>
           </div>
 
-          <div className="min-w-0 flex-1 overflow-y-auto dark:bg-neutral-900">{renderSettingsContent()}</div>
+          {/* 批次 5：key={activeKey} 切设置项重挂载 → 进场动画重播（token 驱动） */}
+          <div key={activeKey} className="motion-enter-slide-up min-w-0 flex-1 overflow-y-auto dark:bg-neutral-900">
+            {renderSettingsContent()}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

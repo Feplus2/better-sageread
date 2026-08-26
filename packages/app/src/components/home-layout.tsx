@@ -60,49 +60,28 @@ const ROUTE_ELEMENTS: Record<string, ReactNode> = {
   ),
 };
 
-/** 读 --motion-dur-slow 计算值（ms）；解析不到按 300ms 兜底 */
-const readMotionSlowMs = (): number => {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--motion-dur-slow").trim();
-  const m = /^([\d.]+)(ms|s)$/.exec(raw);
-  if (!m) return 300;
-  const v = Number.parseFloat(m[1]);
-  return m[2] === "s" ? v * 1000 : v;
-};
-
 /**
- * 自绘 AnimatedRoutes（动效批次 3）：两槽 keepalive 交叉淡入，替代原 react-router <Routes> 硬切。
- * - 当前 path 淡入（.tab-layer data-active），旧层保留挂载播离场（opacity 1→0，aria-hidden）；
- * - 离场计时（--motion-dur-slow 读值 + 缓冲）到点卸载旧层；reduced 档 token 为 0.01ms 即卸，等同硬切；
- * - 快速连切 A→B→C 时未播完的更旧层立即卸载（slice(-2)），不叠三层；
- * - key=path 保持实例跨位移不 remount（[A,B]→[B,C] 时 B 被保留移动，同节点 reparent 保滚动位置）；
- * - 未知 path（map 无匹配）：与原 <Routes> 一致最终渲染空（旧层播完离场即空）。
+ * 自绘 AnimatedRoutes（动效批次 3 交叉淡入 → 批次 5 keepalive 化）：visited 集合常驻层。
+ * - 首访才挂载（懒挂载保启动速度），访问过的路由层只增不减——二次切换零重挂载：
+ *   key=path 复用实例与 DOM，网格/封面/筛选/滚动位置等页面本地状态原样保留，
+ *   交叉淡入播在真内容上而非冷挂载空壳（图书馆↔文献库每次切换重建网格 + 封面重新取图解码的根修）；
+ * - 非活跃层隐藏终态与隔离开关不变：.tab-layer data-active 交叉淡入（批次 3 CSS 原样），
+ *   inert + aria-hidden 隔离；快速连切只是淡出中的层多停留 300ms，无叠层失控（z-index 单活跃置顶）；
+ * - 未知 path（map 无匹配）：无层 active，全部播离场到空——与原 <Routes> 渲染空一致（层保留挂载不可见）；
+ * - /chat 常驻层由 HomeLayout 直挂（data-region="chat-layer"），不在此列。
  */
 const AnimatedRouteLayers = () => {
   const { pathname } = useLocation();
   const activePath = pathname in ROUTE_ELEMENTS ? pathname : null;
-  const [layers, setLayers] = useState<string[]>(() => (activePath ? [activePath] : []));
+  const [visited, setVisited] = useState<string[]>(() => (activePath ? [activePath] : []));
 
-  // 路径变化：新 path 入列置顶（已存在则上移复用），尾部截断保两层
+  // 首访 append（按首次访问顺序），已访问的不动——层与实例保活，无卸载路径
   useEffect(() => {
-    setLayers((prev) => {
-      const last = prev[prev.length - 1];
-      if (last === activePath) return prev;
-      if (activePath === null) return prev.slice(-1); // 未知 path：最近一层播离场后到点卸载
-      return [...prev.filter((p) => p !== activePath), activePath].slice(-2);
-    });
+    if (activePath === null) return;
+    setVisited((prev) => (prev.includes(activePath) ? prev : [...prev, activePath]));
   }, [activePath]);
 
-  // 离场计时：到点卸载所有非活跃层
-  useEffect(() => {
-    if (layers.every((p) => p === activePath)) return;
-    const timer = setTimeout(
-      () => setLayers((prev) => prev.filter((p) => p === activePath)),
-      readMotionSlowMs() + 50, // 50ms 缓冲等最后一帧落地
-    );
-    return () => clearTimeout(timer);
-  }, [layers, activePath]);
-
-  return layers.map((path) => (
+  return visited.map((path) => (
     <div
       key={path}
       data-active={path === activePath}

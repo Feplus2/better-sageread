@@ -670,7 +670,10 @@ export function PaperNotepadPanel({
         </div>
       )}
 
-      {activeTab === "annotations" ? (
+      {/* 批次 5：key={activeTab} 切 tab 重挂载 → 进场动画重播（token 驱动，fade-only 纯 fade / reduced 硬切）；
+          包裹层 flex-col 与 main 同构，各分支根（flex-1/空态 flex-1）布局不变 */}
+      <div key={activeTab} className="motion-enter-slide-up flex min-h-0 flex-1 flex-col">
+        {activeTab === "annotations" ? (
         visible.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-6">
             <p className="text-center text-neutral-400 text-sm leading-relaxed dark:text-neutral-500">
@@ -793,6 +796,7 @@ export function PaperNotepadPanel({
           onLocate={onLocateNote}
         />
       )}
+      </div>
 
       {/* 多选管理底栏：导出（四种格式）/ 批量删除 / 退出（样式同历史对话批量操作条） */}
       {activeTab === "annotations" && selectionMode && (
