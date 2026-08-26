@@ -1,0 +1,209 @@
+# 交接施工总册（2026-08-26，主 Agent 额度休整期间的执行指南）
+
+> **本册定位**：主 Agent（大脑/决策层）不在场时，执行 Agent 按任务卡施工。每张卡 =
+> 目标 / 背景指针 / 施工规格 / 验收标准 / 审计方法 / 报告格式。
+> **先读「全局纪律」再挑卡。** 拿不准的地方**停下来问用户**，不许自由发挥。
+
+## 全局纪律（每张卡都适用）
+
+### 仓库与环境速查
+
+| 项 | 值 |
+|---|---|
+| SageRead 主仓 | `F:\MyProjects\SageRead`（git 分支 `local`；远端 main 经 `local:main` 推） |
+| Papers_Converter 仓 | `F:\MyProjects\Papers_Converter`（分支 main） |
+| zotero-brain-slim 仓 | `F:\MyProjects\zotero-brain-slim` |
+| dev 实例 | `packages/app` 下 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223" pnpm tauri dev`（vite 1420 / CDP 9223） |
+| dev 数据目录 | `C:/Users/20995/AppData/Roaming/com.bettersageread.dev/`（用户真实开发库，**只许读，不许做删除类操作**） |
+| 同步 E2E 环境 | `scripts/sync-e2e/README.md`（dufs `.tools/dufs.exe` + dev2/dev3 worktree 双实例，复跑手册在案） |
+| 站点仓 | `F:\MyProjects\SageRead\site`（腾讯云 EdgeOne 静态站） |
+
+### 铁律
+
+1. **不 push、不发版、不删数据**。本地 commit 可以（conventional prefix + 中文长正文：
+   根因链 + 验证证据，参考 `git log` 近 10 条风格）。push 由用户审验后统一执行
+   （push 要代理：`git -c http.proxy=http://127.0.0.1:7897 push`）。
+2. **最小改动**：任务卡没点名的文件不碰；不顺手重构；发现既有问题记入报告「发现的问题」
+   一节，不擅自修（例外：挡住主任务的 pre-existing bug，修完必须在报告里单列）。
+3. **交付前自证**：测试/截图/CDP 实测定论，不许"看起来正常"。报告里每条 PASS 都要带证据指针。
+4. **行为等价优先**：涉及 UI/交互的任务，首末态必须与施工前一致（除非任务卡明说行为变化），
+   只加中间过程。
+5. **文档同步**：改了代码口径（wiki 七章、用户手册、提示词、AGENTS.md 有对应描述的），
+   同 commit 更新文档，不许留旧口径。
+
+### 验证基线（别拿空转当绿）
+
+- `cd packages/app && pnpm tsc -b` 零错（**必须 `-b`，裸 tsc 历史上空转过**）。
+- `cd packages/app/src-tauri && cargo test --lib` 基线 **54 绿**；EPUB 插件在
+  `plugins/tauri-plugin-epub` 目录单独跑，基线 **25 绿**。
+- 翻译容错：`node --test scripts/test-paper-translation-tolerance.mjs`（8/8 基线）。
+- CDP 三坑（高发，已在多份脚本注释里）：① Vite HMR `?t=`——动态 import store 必须从
+  消费方转换源码抠版本 URL（`scripts/cdp-e2e-task-channels.mjs` 开头探法是对的）；
+  ② 裸 URL 裸 import 拿到的是页面启动代的旧模块；③ evalJS 模板里正则 `/^\\?t=\\d+/`
+  单层转义，awaitPromise 要求表达式尾部直接是 Promise（`.then(...)` 结尾）。
+
+---
+
+## 任务卡 1：memo 拆墙（切 tab 的 ~2s React render 墙 → ms 级）
+
+**状态**：主 Agent 的子代理（agent-92）在跑/可能已将改动落工作区未提交。
+**接手方法**：先 `git status` + `git log --oneline -5` 看工作区有无未提交的相关改动与
+`perf` commit；若改动在但未提交，验证后直接按纪律 commit；若改动残缺，接着做完。
+**背景**：`scripts/cdp-opacity-ab.mjs` A/B 实盘已证：切 tab 墙不是 CSS 隐藏模型问题
+（tReflow≈0），而是 `activateTab` 触发 ReaderLayout 全保活树（~11 万元素/三层论文）
+重 reconcile 的单个 long task——`PaperReaderView` 未 memo。
+**施工规格**：
+- `React.memo` 包 `PaperReaderView`（props 仅 paperId/title/viewSleeping 三原始值）；
+  memo 只许跳过重渲，不许改变渲染结果——逐一核对其 store/context 订阅在 activateTab
+  时不变（变了的在报告点名）。
+- `React.memo` 包 `HomeLayout`（无 props 直接包导出）。
+- 书籍 tab 层先量后动：书籍内容在 foliate iframe（React DOM 浅），实测不贵就不抽组件。
+- 排查 SideChat/PreviewPanel 订阅面：activateTab 不应触发其 store 变化；有全局
+  activeTab 订阅导致全量重渲的，点名 + 收窄建议（改动克制）。
+**验收标准**：同靶子（11.4 万元素三层论文 tab）同探针 10 轮采样，**tWall 中位 < 200ms**；
+回归 `scripts/cdp-motion-batch3-verify.mjs` 22 项全绿；休眠唤醒/阅读位置/chat 流式不断；
+tsc 零错。
+**审计方法**：探针数据前后对比表（中位/均值/p90）+ React Profiler 或插桩归因剩余瓶颈；
+回归脚本输出留档。
+**报告格式**：tWall 对比表 + memo 清单（包了谁/没包谁及理由）+ 订阅面审计 + 回归证据 +
+改动文件清单。
+
+---
+
+## 任务卡 2：动效批次 5——路由 keepalive + TabsContent 进场动画
+
+**状态**：未开工。**前置**：任务卡 1 落盘（同碰 `home-layout.tsx`，必须串行）。
+**背景**：用户实测图书馆↔文献库切换"过渡没被覆盖 + 卡顿"。根因：批次 3 的路由转场是
+两槽 keepalive（旧页播完离场即卸载），每次切换目标页**冷挂载**——React 重建网格 +
+封面重新走 asset 协议取图解码（`book-item.tsx:482` convertFileSrc），300ms 淡入播在
+空壳上。两个子项：
+
+### 2A. 主页路由 keepalive 化（治根）
+
+**施工规格**（`packages/app/src/components/home-layout.tsx` AnimatedRouteLayers）：
+- 两槽 `[prev, current]` 改为 **visited 集合**：按首次访问顺序 append，只增不减
+  （懒挂载——首访才 mount，之后常驻；不启动时全挂，保启动速度）。
+- `key=path` 保持实例；`.tab-layer data-active` 交叉淡入不变；非活跃层 inert/aria-hidden
+  （已有）；/chat 层本就常驻，不动。
+- 7 条路由全部适用；未知 path 仍渲染空（行为不变）。
+**已知行为变化（向用户说明，属改善方向）**：切走再切回，页面本地状态保留（管理态/
+筛选/滚动位置/未提交的输入）——此前是重置。若用户验收不喜，退路是给单页加
+`data-no-keepalive` 白名单。
+**验收标准**：图书馆→文献库→转换器→回图书馆：① 二次访问零重挂载（expando 标记或
+effect 计数实证）；② 滚动位置/筛选保持；③ 封面不重新取图（Performance resource
+计数对比）；④ 终态与施工前逐像素一致；⑤ JS heap 简单采样无失控；⑥ 批次 3 回归
+22 项全绿（keepalive 断言需适配更新）；tsc 零错。
+
+### 2B. TabsContent 进场动画（覆盖设置页/AI 中心/全部 Tabs）
+
+**施工规格**（`packages/app/src/components/ui/tabs.tsx`）：
+- TabsContent 挂载即播进场动画：radix 每次切换重 mount → CSS **animation**（非
+  transition，mount 无过渡）自然播放。复用批次 1 工具类（index.css `motion-fade-in` /
+  `motion-slide-up-in`，token 驱动，fade-only 纯 fade、reduced 0.01ms 硬切自动生效）。
+- 只加动画类，不动 mt-2 等布局类；三个已知使用方（paper-notepad-panel、notepad-header、
+  embedding-dialog）+ 设置页 + AI 中心逐个人肉核对。
+**验收标准**：设置页/AI 中心/笔记面板 tab 切换有 80-200ms 淡入+微位移；三档退化正确；
+布局零变化；tsc 零错。
+**审计方法**：CDP 中途截图（动画进行中 opacity 中间态）+ 终态截图对比 + 三档构造级
+computed 断言；脚本沉淀 `scripts/cdp-motion-batch5-verify.mjs`，截图 `.tmp-motion-verify/`。
+**报告格式**：两子项各自的实现要点/取舍 + 验收证据 + 行为变化说明 + 改动文件清单。
+
+---
+
+## 任务卡 3：动效二期（共享元素转场 + 手势侧栏）
+
+**状态**：立项文档在 `docs/motion-phase2-plan.md`（含开工门禁、工程量评估、风险）。
+**前置**：批次 5 落盘 + 一期整体稳定运行一段（用户手感签字）。
+按该文档执行即可；候选 A（封面→阅读器 layoutId）先做 spike 最小闭环验证再全面铺，
+候选 B（手势拖拽）先把热区地图画出来给用户过目再动手。
+
+---
+
+## 任务卡 4：ZBS 适配 Phase 1——zotero-brain-slim Elsevier 级基建
+
+**状态**：未开工。**施工蓝本**：`zotero-brain-slim/docs/roadmap_legit_channels.md`
+（改动项清单 A 节逐条照做，合规红线先读）。
+**前置人工（Phase 0，用户做）**：dev.elsevier.com 自助注册个人 API key。
+若用户尚未持有 key：基建照做，真实联调留待 key 到位（mock 先行，与蓝本一致）。
+**验收标准**：`tests/` elsevier 级 mock 测试四类场景全过（命中/无权限/未收录/无 key）；
+下载结果结构泛化（XML 产物：后缀/contentType/source 标记）不破坏既有 PDF 路径
+（既有测试全绿）；`no_pdf` 文案含"挂交大 VPN 可解锁"；README 同步。
+**审计方法**：pytest 输出 + 既有套件回归 + 一份手工 mock 瀑布演示日志（六级全败 →
+elsevier 级命中 XML 落盘）。
+**报告格式**：清单 A 节逐条勾选状态 + 测试证据 + 遗留（VPN 实测待 Phase 1.5）。
+
+---
+
+## 任务卡 5：ZBS 适配 Phase 2——Papers_Converter XML→MD 转换器
+
+**状态**：未开工。**蓝本**：`roadmap_legit_channels.md` B 节 +
+`SageRead/docs/zotero-brain-xml-pipeline-plan.md`（立项五问先回答进报告）。
+**施工规格**：
+- 标准 JATS 先试 `pandoc -f jats -t markdown`；Elsevier 变体 pandoc 不认则轻量解析
+  （正文/标题层级/图表占位/参考文献）。
+- 输出严格对齐契约 **`SageRead/docs/paper-format-contract.md`**（Pandoc MD + YAML
+  frontmatter 对齐 CSL、slug citekey 优先、images/ 相对路径、必填不留空）。
+- 参考文献从 `<ref-list>` 结构化提取生成 references.json（比 PDF 路径正则重建可靠，
+  质量下限：DOI/标题/作者齐的条目比例不低于 PDF 路径）。
+- 公式 MathML→LaTeX、图表实体引用→本地 images/ 落盘；与 PDF 路径产物**同构**
+  （阅读器/向量化/翻译不感知来源）。
+**验收标准**：fixtures 至少 3 篇（PMC JATS / Elsevier 变体 / 带公式表格各一），
+产物导入 dev 实例阅读器人肉核验（目录/图/公式/参考文献转跳链接全部可用）；
+CLI 回归（既有 PDF fixtures 全绿）；契约校验脚本（若有）零告警。
+**审计方法**：产物 diff 对照 + 阅读器截图 + 回归输出；重打 exe
+（`.venv/Scripts/pyinstaller.exe papers_converter_cli.spec --noconfirm`）并部署到
+SageRead binaries 后 CDP 实盘一篇。
+**报告格式**：立项五问答案 + fixtures 清单与产物质量 + 回归证据 + 与 PDF 路径的
+产物同构性说明。
+
+---
+
+## 任务卡 6：SageRead 侧 XML 导入链路与 UI 文案适配
+
+**状态**：未开工。**前置**：任务卡 5 的 exe 已部署到 SageRead binaries。
+**施工规格**：
+- 导入入口双格式：拖入/菜单/ZBS 推送接受 `.xml`（与 `.pdf` 同链路），paper-parse
+  任务通道 payload 带输入类型，converter CLI 按类型分派参数。
+- UI 文案全扫：导入入口/任务卡片/错误提示/设置页转换引擎说明中"PDF"字样的地方
+  按"PDF / XML"口径更新（用户点名项，一处不漏——grep `PDF` 全仓逐条判）。
+**验收标准**：CDP 实盘拖入一篇 XML → 任务卡正常 → 落库可读；PDF 路径零回归；
+文案 grep 复查零遗漏；tsc 零错。
+
+---
+
+## 任务卡 7：站点/备案线收尾（人工为主）
+
+**状态**：等外部审核。bettersageread.cn 备案审核中、EdgeOne KV 审核中。
+- 备案批后：EdgeOne 绑域名 → 页脚填备案号 → 公安联网备案（用户人工，辅以指引）。
+- KV 批后：配 `DL_KV` + counterEndpoint 下载计数（site 仓边缘函数，见 `site/DEPLOY.md`）。
+- COS 桶保留最新版包即可（历史版本清理口径：保留最新 1-2 版）。
+
+---
+
+## 任务卡 8：发版 v0.3.0（最后做，前置全齐才动）
+
+**前置条件（逐条核）**：① 动效批次 5 落盘；② ZBS 适配 Phase 1-2 落盘（用户的
+发版口径：动效全批 + ZBS 适配齐后发）；③ 用户已审验并 push 全部本地 commit；
+④ 发版巡检三件套：**wiki 七章/提示词/用户手册** 与代码口径一致（逐章核，改代码
+没改文档的补齐）；⑤ RELEASE_NOTES.md 更新（动效一期+opacity 实验+memo 拆墙+
+sync 修复+E2E+ZBS XML 管线）。
+**步骤**：版本号 bump（tauri.conf.json + 相关处）→ commit → push → tag `v0.3.0` →
+CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）→ 发布 → cos-sync
+自动进桶 → curl 验 200 → 盯一次真实更新链路（更新确认框/快捷方式/版本小红点）。
+**发版后用户侧盯办**：桌面/开始菜单快捷方式是否重复（历史 bug，复现要留现场排查）。
+
+---
+
+## 挂账记录（不修只记，防遗忘）
+
+- **sync P6 已知取舍**（`docs/sync-direction-audit.md` 末节）：20MB 大行静默跳过、
+  >50 包兜底删除、防回环 DELETE 并发窗口、ui-config 前端 LWW——备查不动。
+- **foliate-resize-update dead dispatch**：全部发送方发 `{bookId}` 单数、消费方
+  `event-manager.ts:63` 读 `{bookIds}` 数组——全死；重分页实际靠 paginator 自身
+  ResizeObserver 兜底。建议维持现状（修活会双重重分页）；要清理另立任务。
+- **多模态/思考映射表例行维护**（`vision-map.ts`/`reasoning-map.ts`）：新型号上线
+  时人工补枚举；OpenRouter 目录 API 可作校验源（TODO 在 `vision-map.ts:17-20`，
+  不做运行时依赖）。
+- **AI 用量统计面板**（想法池 `docs/next-round-backlog.md` 末节）：不排期。
+- **opacity 逃生门**：`data-tab-hide="opacity"` 可启用 opacity 隐藏模型（安全性已
+  全验，见 commit c42afca）；墙正解是任务卡 1 的 memo。
