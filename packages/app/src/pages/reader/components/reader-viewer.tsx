@@ -61,7 +61,9 @@ const ReaderViewerContent: React.FC = () => {
 
   // T3+T4：书籍图片交互——点击大图预览 + 右键主题菜单（复制/另存为/引用）。
   // 引用走 imageToChat 事件（reader 侧输入区接收，与划词引用同链路）；面板未展开先展开再派发
-  const { isChatVisible, toggleChatSidebar } = useLayoutStore();
+  // selector 订阅：整店订阅会被 activateTab 翻动拖出每次切 tab 的重渲（2026-08-26 切 tab 墙治理）
+  const isChatVisible = useLayoutStore((s) => s.isChatVisible);
+  const toggleChatSidebar = useLayoutStore((s) => s.toggleChatSidebar);
   const handleQuoteImage = useCallback(
     (image: { dataUrl: string; mediaType: string; name: string }) => {
       if (!isChatVisible) toggleChatSidebar();
@@ -106,10 +108,11 @@ export default function ReaderViewer() {
   const { settings } = useAppSettingsStore();
   const { booksWithStatus } = useLibraryStore();
 
-  // 判断当前 tab 是否可见（不在首页 && 当前激活的 tab）
-  const { activeTabId, isHomeActive } = useLayoutStore();
+  // 判断当前 tab 是否可见（不在首页 && 当前激活的 tab）。
+  // 布尔 selector：激活态只在「本 tab 被切进/切走」翻转；paper↔paper 切换值恒 false 不重渲
+  //（整店/双字段订阅会被每次 activateTab 翻动——切 tab 墙治理，2026-08-26）
   const tabId = `reader-${bookId}`;
-  const isTabVisible = !isHomeActive && activeTabId === tabId;
+  const isTabVisible = useLayoutStore((s) => !s.isHomeActive && s.activeTabId === tabId);
 
   // bookId 可为 null（无书打开）——空串占位，钩子内部对空 id 自行短路
   const { sessionStats, isInitialized: isSessionInitialized } = useReadingSession(bookId ?? "", {

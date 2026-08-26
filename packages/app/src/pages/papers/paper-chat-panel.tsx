@@ -24,7 +24,7 @@ import { type Folder, type FolderTreeNode, type PaperFolderEntry, buildFolderTre
 import { useThemeStore } from "@/store/theme-store";
 import type { Thread } from "@/types/thread";
 import { FileText, Folder as FolderIcon, History, ListChecks, MessageCirclePlus } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 /** 注入提示词的"当前小节正文"上限（字符），超出截断 */
 const MAX_ACTIVE_SECTION_CHARS = 3000;
@@ -92,6 +92,9 @@ export function PaperChatPanel({
   const { autoScroll } = useThemeStore();
   const [currentThread, setCurrentThread] = useState<Thread | null>(null);
   const [scope, setScope] = useState<PaperChatScope>({ kind: "paper" });
+  // StickToBottom 上下文 ref：随 ChatContainerRoot contextRef 下发并透传 ChatMessages（命令式读
+  // scrollToBottom，避免 context 值对象重建把整条消息列表拖入切 tab 重渲，见 chat-messages.tsx 注释）
+  const stickContextRef = useRef<any>(null);
   // 引用标兜底来源：本面板内未被消息映射命中的 [N] 一律按当前论文取数/跳转
   const citationFallback = useMemo<CitationSource>(
     () => ({ kind: "paper", paperId, title: paperTitle }),
@@ -360,7 +363,7 @@ export function PaperChatPanel({
         ) : messages.length === 0 && isInit.current ? (
           <EmptyState />
         ) : (
-          <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll}>
+          <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll} contextRef={stickContextRef}>
             <ChatMessages
               messages={messages}
               status={status}
@@ -376,6 +379,7 @@ export function PaperChatPanel({
               selectionMode={selectionMode}
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
+              stickContextRef={stickContextRef}
             />
             <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
               <div className="pointer-events-auto">

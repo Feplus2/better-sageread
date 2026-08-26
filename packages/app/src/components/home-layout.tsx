@@ -16,7 +16,7 @@ import { useLlamaStore } from "@/store/llama-store";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import clsx from "clsx";
 import { Upload as UploadIcon } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, memo, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import Sidebar from "./sidebar";
@@ -277,4 +277,7 @@ const HomeLayout = () => {
   );
 };
 
-export default HomeLayout;
+// React.memo：主页层与论文/书籍 tab 层同槽保活，切 tab 时 ReaderLayout 重渲但 HomeLayout 无 props
+// → 整树跳过 reconcile（其订阅的 library/app-settings/convert/llama store 与 router location
+// 均不随 activateTab 变化，变化即重渲属正确行为）。
+export default memo(HomeLayout);

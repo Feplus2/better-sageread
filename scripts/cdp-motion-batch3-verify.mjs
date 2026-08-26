@@ -75,9 +75,14 @@ const isInactiveSettled = (s) =>
 const isVisuallyOn = (s) => layerOpacity(s) > 0.05;
 
 // ---------- 通用探针 ----------
-// store 调用统一走 async IIFE（Runtime.evaluate 经典脚本不支持顶层 await；vite dev 模块与 app 同实例）
+// store 调用统一走 async IIFE（Runtime.evaluate 经典脚本不支持顶层 await）；
+// 模块 URL 从 resource 条目解析——vite HMR 给改过的模块挂 ?t= 版本串，裸路径会静默命中旧实例
 const storeCall = async (body) =>
-  evalJs(`(async () => { const S = (await import("/src/store/layout-store.ts")).useLayoutStore; ${body} })()`);
+  evalJs(`(async () => {
+    const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.includes("/src/store/layout-store.ts")) ?? "/src/store/layout-store.ts";
+    const S = (await import(url)).useLayoutStore;
+    ${body}
+  })()`);
 const storeState = async () =>
   JSON.parse(
     await storeCall(`const s = S.getState(); return JSON.stringify({
@@ -403,20 +408,18 @@ const routeUnmounted = await pollUntil(async () => {
 }, 3000);
 check("C2 离场层最终卸载（单层挂载）", !!routeUnmounted, routeUnmounted ?? (await routeLayers()).join(" "));
 
-// C3 /chat 常驻层：切进交叉淡入，切出后仍挂载
-await startSampler(ROUTE_LAYER_EXPR);
+// C3 /chat 常驻层：切进交叉淡入，切出后仍挂载。
+// 重叠证据走轮询（6s 窗口）：/chat 首进提交在负载机可慢至秒级，900ms rAF 采样窗会落在真重叠之前（2026-08-26 复跑实证）
 await evalJs(`location.hash = "#/chat"`);
-await sleep(130);
+const chatBothVisible = await pollUntil(async () => {
+  const ls = await routeLayers();
+  const vis = ls.filter((s) => Number.parseFloat(s.split(":")[2]) > 0.05);
+  return vis.some((s) => s.startsWith("chat:true")) && vis.some((s) => s.startsWith("route:")) ? ls.join(" ") : null;
+}, 6000, 60);
 await shot("b3-13-chat-mid");
+check("C3 切进 /chat 交叉淡入（chat 淡入 + 路由层播离场同帧）", !!chatBothVisible, chatBothVisible ?? "timeout");
 await sleep(600);
 await shot("b3-14-chat-settled");
-const chatSamples = await readSampler();
-// 交叉淡化证据统一看 opacity（opacity 模型下 visibility 恒 visible，不能当判据；route 串 opacity 在 split[2]）
-const chatBothVisible = chatSamples.some((x) => {
-  const vis = x.s.filter((s) => Number.parseFloat(s.split(":")[2]) > 0.05);
-  return vis.some((s) => s.startsWith("chat:true")) && vis.some((s) => s.startsWith("route:"));
-});
-check("C3 切进 /chat 交叉淡入（chat 淡入 + 路由层播离场同帧）", chatBothVisible);
 const chatSettled = await pollUntil(async () => {
   const ls = await routeLayers();
   return ls.some((s) => s.startsWith("chat:true:1:visible")) && !ls.some((s) => s.startsWith("route"))
@@ -753,7 +756,8 @@ await evalJs(`document.documentElement.dataset.motion = ${JSON.stringify(initial
 const probeSwitch = async (targetId) =>
   JSON.parse(
     await evalJs(`(async () => {
-    const S = (await import("/src/store/layout-store.ts")).useLayoutStore;
+    const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.includes("/src/store/layout-store.ts")) ?? "/src/store/layout-store.ts";
+    const S = (await import(url)).useLayoutStore;
     const main = document.querySelector("main.overflow-clip");
     let tFlip = 0;
     const mo = new MutationObserver(() => { if (!tFlip) tFlip = performance.now(); });

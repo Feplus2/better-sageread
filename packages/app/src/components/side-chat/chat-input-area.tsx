@@ -1,6 +1,5 @@
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import { Button } from "@/components/ui/button";
-import { useIsChatPage } from "@/hooks/use-is-chat-page";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { type AgentScope, useQuickCommandStore } from "@/store/quick-command-store";
 import type { ChatReference, ImageAttachment } from "@/types/message";
@@ -18,6 +17,11 @@ interface ChatInputAreaProps {
   status: string;
   activeBookId: string | undefined;
   showToolDetail?: boolean;
+  /** 是否全局对话页实例（影响快捷指令行/作用域缺省/宽版开关显隐）。
+   * 由调用点静态传入（ChatPage=true，阅读/论文侧栏缺省 false）——实例级语义本就恒定；
+   * 曾用 useIsChatPage() 响应式订阅：home↔tab 每次切换 isHomeActive 翻转都把输入区拖入重渲，
+   * 且侧栏隐藏实例在用户坐 /chat 时会算出 true（2026-08-26 切 tab 墙治理） */
+  isChatPage?: boolean;
   /** 快捷指令过滤用的 Agent 作用域；缺省按页面启发式（聊天页=central，其余=reader） */
   agentScope?: AgentScope;
   /** J2/K2：图片附件与输入框注册（光标处插入占位标记） */
@@ -39,6 +43,7 @@ export function ChatInputArea({
   references,
   activeBookId,
   showToolDetail = false,
+  isChatPage = false,
   agentScope: agentScopeProp,
   images = [],
   onRemoveImage,
@@ -59,7 +64,6 @@ export function ChatInputArea({
     onInputEl?.(ta);
     return () => onInputEl?.(null);
   }, [onInputEl]);
-  const isChatPage = useIsChatPage();
   const commands = useQuickCommandStore((s) => s.commands);
   // H3：宽版布局 + 输入区高度（拖拽手柄可调，持久化）
   const wideChatLayout = useChatSettingsStore((s) => s.wideChatLayout);

@@ -123,7 +123,9 @@ export default function BookItem({
     }
   };
 
-  const { openBook } = useLayoutStore();
+  // openBook 必须 selector 订阅：整店订阅会被 activateTab 翻动（tabs/activeTabId 每次必变），
+  // 14 张书卡（含各自 Tooltip/ContextMenu/两个对话框子树）每次切 tab 全量重渲——切 tab 残余墙元凶
+  const openBook = useLayoutStore((s) => s.openBook);
   const [isCloudOnly, setIsCloudOnly] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   // 封面文件缺失（如云端下载后未重建）时回落占位渐变，而不是破图

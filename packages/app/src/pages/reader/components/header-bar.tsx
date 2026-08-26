@@ -26,7 +26,11 @@ const HeaderBar = () => {
   const setOpenDropdown = useReaderStore((state) => state.setOpenDropdown);
   const section = progress?.sectionLabel || "";
 
-  const { isChatVisible, isNotepadVisible, toggleChatSidebar, toggleNotepadSidebar } = useLayoutStore();
+  // selector 订阅（切 tab 墙治理 2026-08-26）：整店订阅会被 activateTab 翻动拖出每次切换的重渲
+  const isChatVisible = useLayoutStore((s) => s.isChatVisible);
+  const isNotepadVisible = useLayoutStore((s) => s.isNotepadVisible);
+  const toggleChatSidebar = useLayoutStore((s) => s.toggleChatSidebar);
+  const toggleNotepadSidebar = useLayoutStore((s) => s.toggleNotepadSidebar);
   const { swapSidebars } = useThemeStore();
 
   const isTocDropdownOpen = openDropdown === "toc";

@@ -57,7 +57,7 @@ import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { Resizable } from "re-resizable";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface PaperReaderViewProps {
@@ -75,14 +75,19 @@ interface PaperReaderViewProps {
  * 字号/字体直接消费 settings.globalViewSettings（与书籍阅读器联动，通用设置开箱即用）。
  * 正文从 {appDataDir}/books/{paperId}/paper.md 读取（appdata 已授权 plugin-fs）。
  */
-export default function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderViewProps) {
-  const { settings, setSettings } = useAppSettingsStore();
+function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderViewProps) {
+  // 订阅面收窄（2026-08-26 切 tab 墙根修配套）：三个保活实例常驻，整店订阅会把无关状态变化
+  // （如设置弹层开合）放大成三次全树重渲；逐字段 selector 后，只有本视图真正消费的值变化才重渲
+  const settings = useAppSettingsStore((s) => s.settings);
+  const setSettings = useAppSettingsStore((s) => s.setSettings);
   const globalViewSettings = settings.globalViewSettings;
   // 论文显示模式（persist；旧持久化数据无此字段时回退原文）
   const viewMode: PaperViewMode = settings.paperViewMode ?? "original";
   // 侧边栏高度与书籍阅读区同一算法（reader-layout）：横向顶栏 36px / 纵向顶条 32px，另加 p-1 与余量
-  const { tabOrientation } = useLayoutStore();
-  const { swapSidebars } = useThemeStore();
+  // tabOrientation 必须 selector 订阅：整店订阅会被 activateTab 翻动（tabs/activeTabId 每次必变）
+  // 拖出 React.memo，三个保活实例全量重 reconcile——切 tab ~2s 长任务的直接元凶
+  const tabOrientation = useLayoutStore((s) => s.tabOrientation);
+  const swapSidebars = useThemeStore((s) => s.swapSidebars);
   const sidebarHeightClass = tabOrientation === "vertical" ? "h-[calc(100dvh-44px)]" : "h-[calc(100dvh-48px)]";
 
   const [paperDir, setPaperDir] = useState<string | null>(null);
@@ -499,11 +504,15 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
     [references],
   );
 
-  // 切走 tab 即关掉悬浮卡片（虚拟锚点指向的条目块已不可见，留着会浮在新 tab 内容上）
-  const activeTabId = useLayoutStore((s) => s.activeTabId);
+  // 切走 tab 即关掉悬浮卡片（虚拟锚点指向的条目块已不可见，留着会浮在新 tab 内容上）。
+  // 不用 useLayoutStore(selector) 订阅 activeTabId：activateTab 每次翻动都把三个保活实例拖出 memo
+  // 全量重渲。改命令式 subscribe——卡片本就关着时 setRefCard(null) 同值短路（React 不重渲），
+  // 只有「卡片开着 + 本 tab 被切走」才真重渲一次（语义与原订阅逐字等价）
   useEffect(() => {
-    if (activeTabId !== `paper-${paperId}`) setRefCard(null);
-  }, [activeTabId, paperId]);
+    return useLayoutStore.subscribe((s) => {
+      if (s.activeTabId !== `paper-${paperId}`) setRefCard(null);
+    });
+  }, [paperId]);
 
   // 元数据补全写回：更新状态 + 落盘 references.json（同一篇不重复请求，P2.2 缓存口径；
   // 包装形态经 serializeReferences 保留 version/source/count 外层字段）
@@ -650,7 +659,9 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       >
         {/* 与书籍 SideChat 同款包装：四周 4px（顶部除外）间隙 + 顶栏对齐高度 */}
         <div
-          className={swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`}
+          className={
+            swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
+          }
         >
           <PaperChatPanel
             paperId={paperId}
@@ -671,134 +682,141 @@ export default function PaperReaderView({ paperId, title, viewSleeping = false }
       {/* 批次 4：侧栏开合冻结编排——动画期间正文钉层宽度钉死（5 万+ 元素大 DOM 不逐帧重排），
           结束帧拆钉一次性 reflow；论文无 foliate，无需 onReflow */}
       <SidebarMotionProvider>
-      {/* E5 补挂：预览面板跟随 swapSidebars 互换（与书籍 tab 同款） */}
-      {swapSidebars && <PreviewPanel />}
-      {swapSidebars ? chatSidebar : notepadSidebar}
+        {/* E5 补挂：预览面板跟随 swapSidebars 互换（与书籍 tab 同款） */}
+        {swapSidebars && <PreviewPanel />}
+        {swapSidebars ? chatSidebar : notepadSidebar}
 
-      {/* 中：PaperHeaderBar + PaperReader（书籍 ReaderViewer 同款容器） */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md border shadow-around">
-        <PaperHeaderBar
-          notesOpen={notesOpen}
-          onToggleNotes={() => setNotesOpen((v) => !v)}
-          chatOpen={chatOpen}
-          onToggleChat={() => setChatOpen((v) => !v)}
-          toc={toc}
-          activeHeadingId={currentHeading?.id ?? null}
-          onTocSelect={(id) => paperReaderRef.current?.scrollToHeading(id)}
-          currentSection={currentHeading?.text ?? ""}
-          searchQuery={searchQuery}
-          onSearchQueryChange={handleSearchQueryChange}
-          searchMatchCount={searchMatchCount}
-          activeMatchIndex={activeMatchIndex}
-          onActiveMatchIndexChange={setActiveMatchIndex}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          hasTranslation={translationMap !== null}
-          translating={translating}
-          onTranslate={handleTranslate}
-          onCancelTranslate={handleCancelTranslate}
-          alignInfo={alignInfo}
-          aligning={aligning}
-          onRebuildAlign={handleRebuildAlign}
-          onOpenExport={() => setExportOpen(true)}
-        />
+        {/* 中：PaperHeaderBar + PaperReader（书籍 ReaderViewer 同款容器） */}
+        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md border shadow-around">
+          <PaperHeaderBar
+            notesOpen={notesOpen}
+            onToggleNotes={() => setNotesOpen((v) => !v)}
+            chatOpen={chatOpen}
+            onToggleChat={() => setChatOpen((v) => !v)}
+            toc={toc}
+            activeHeadingId={currentHeading?.id ?? null}
+            onTocSelect={(id) => paperReaderRef.current?.scrollToHeading(id)}
+            currentSection={currentHeading?.text ?? ""}
+            searchQuery={searchQuery}
+            onSearchQueryChange={handleSearchQueryChange}
+            searchMatchCount={searchMatchCount}
+            activeMatchIndex={activeMatchIndex}
+            onActiveMatchIndexChange={setActiveMatchIndex}
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+            hasTranslation={translationMap !== null}
+            translating={translating}
+            onTranslate={handleTranslate}
+            onCancelTranslate={handleCancelTranslate}
+            alignInfo={alignInfo}
+            aligning={aligning}
+            onRebuildAlign={handleRebuildAlign}
+            onOpenExport={() => setExportOpen(true)}
+          />
 
-        {/* 重解析完成横幅（该篇标签页开着时队列写了完成标记）：不自动刷新，由用户点「重新加载」 */}
-        {reparsedAt !== null && (
-          <div className="flex items-center justify-between gap-3 border-amber-200 border-b bg-amber-50 px-4 py-1.5 text-amber-800 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-            <span>本文已重新解析，当前显示为旧版本</span>
-            <button
-              type="button"
-              className="rounded-full border border-amber-300 px-2.5 py-0.5 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/50"
-              onClick={() => {
-                ackPaperReparsed(paperId);
-                setReloadNonce((v) => v + 1);
-              }}
-            >
-              重新加载
-            </button>
-          </div>
+          {/* 重解析完成横幅（该篇标签页开着时队列写了完成标记）：不自动刷新，由用户点「重新加载」 */}
+          {reparsedAt !== null && (
+            <div className="flex items-center justify-between gap-3 border-amber-200 border-b bg-amber-50 px-4 py-1.5 text-amber-800 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+              <span>本文已重新解析，当前显示为旧版本</span>
+              <button
+                type="button"
+                className="rounded-full border border-amber-300 px-2.5 py-0.5 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/50"
+                onClick={() => {
+                  ackPaperReparsed(paperId);
+                  setReloadNonce((v) => v + 1);
+                }}
+              >
+                重新加载
+              </button>
+            </div>
+          )}
+
+          {loadError ? (
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-neutral-500 text-sm dark:text-neutral-400">论文文件读取失败：{loadError}</p>
+            </div>
+          ) : markdown === null || paperDir === null ? (
+            <div className="flex flex-1 items-center justify-center">
+              <div className="text-neutral-600 dark:text-neutral-400">加载中...</div>
+            </div>
+          ) : viewSleeping ? (
+            /* P2 休眠态：卸载重型正文 DOM（公式/译文数万元素），切回时重挂载；滚动位置由 PaperReader 记忆还原 */
+            <div className="flex flex-1 items-center justify-center">
+              <div className="text-neutral-500 text-xs dark:text-neutral-500">视图已休眠，切回自动恢复</div>
+            </div>
+          ) : (
+            /* 内容钉层（批次 4 冻结目标）：正常态 min-h-0 flex-1 纯透传；冻结态钉宽+锚定由编排器内联控制 */
+            <SidebarMotionPin className="min-h-0 flex-1" ref={paperContentHostRef}>
+              {/* T4：正文图片右键主题菜单（点击预览由 per-img 自带，勿重复启用） */}
+              <ImageInteractions containerRef={paperContentHostRef} onQuote={(img) => handleQuoteImageToChat(img)} />
+              <PaperReader
+                ref={paperReaderRef}
+                paperDir={paperDir}
+                markdown={displayMarkdown ?? markdown}
+                onActiveHeadingChange={setCurrentHeading}
+                onTocChange={setToc}
+                fontSize={globalViewSettings.defaultFontSize}
+                fontFamily={buildPaperFontFamily(globalViewSettings.serifFont, globalViewSettings.defaultCJKFont)}
+                searchTerm={searchQuery}
+                activeMatchIndex={activeMatchIndex}
+                onSearchMatchesChange={handleSearchMatchesChange}
+                annotations={annotations}
+                onCreateAnnotation={createAnnotation}
+                onUpdateAnnotation={updateAnnotation}
+                onDeleteAnnotation={deleteAnnotation}
+                onQuoteToChat={handleQuoteToChat}
+                onQuoteImageToChat={handleQuoteImageToChat}
+                focusAnnotationId={focusAnnotationId}
+                onAnnotationFocused={() => setFocusAnnotationId(null)}
+                viewMode={viewMode}
+                translatedMeta={translatedMeta}
+                translation={readerTranslation}
+                sourceBlocks={sourceBlocks}
+                onReferenceClick={handleReferenceClick}
+              />
+            </SidebarMotionPin>
+          )}
+        </div>
+
+        {swapSidebars ? notepadSidebar : chatSidebar}
+
+        {/* E5 补挂：论文 tab 的预览面板（与书籍 tab 同款，跟随 swapSidebars 互换；未打开时自动隐藏） */}
+        {!swapSidebars && <PreviewPanel />}
+
+        {/* 论文导出对话框（markdown 加载完成才渲染，保证拿到原文） */}
+        {markdown !== null && (
+          <PaperExportDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            paperId={paperId}
+            title={title}
+            markdown={markdown}
+            translationMap={translationMap}
+            footnoteMap={footnoteTranslationMap}
+            translationFile={translationFile}
+            translatedMeta={translatedMeta}
+            annotations={annotations}
+            currentViewMode={viewMode}
+          />
         )}
 
-        {loadError ? (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-neutral-500 text-sm dark:text-neutral-400">论文文件读取失败：{loadError}</p>
-          </div>
-        ) : markdown === null || paperDir === null ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-neutral-600 dark:text-neutral-400">加载中...</div>
-          </div>
-        ) : viewSleeping ? (
-          /* P2 休眠态：卸载重型正文 DOM（公式/译文数万元素），切回时重挂载；滚动位置由 PaperReader 记忆还原 */
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-neutral-500 text-xs dark:text-neutral-500">视图已休眠，切回自动恢复</div>
-          </div>
-        ) : (
-          /* 内容钉层（批次 4 冻结目标）：正常态 min-h-0 flex-1 纯透传；冻结态钉宽+锚定由编排器内联控制 */
-          <SidebarMotionPin className="min-h-0 flex-1" ref={paperContentHostRef}>
-            {/* T4：正文图片右键主题菜单（点击预览由 per-img 自带，勿重复启用） */}
-            <ImageInteractions containerRef={paperContentHostRef} onQuote={(img) => handleQuoteImageToChat(img)} />
-            <PaperReader
-              ref={paperReaderRef}
-              paperDir={paperDir}
-              markdown={displayMarkdown ?? markdown}
-              onActiveHeadingChange={setCurrentHeading}
-              onTocChange={setToc}
-              fontSize={globalViewSettings.defaultFontSize}
-              fontFamily={buildPaperFontFamily(globalViewSettings.serifFont, globalViewSettings.defaultCJKFont)}
-              searchTerm={searchQuery}
-              activeMatchIndex={activeMatchIndex}
-              onSearchMatchesChange={handleSearchMatchesChange}
-              annotations={annotations}
-              onCreateAnnotation={createAnnotation}
-              onUpdateAnnotation={updateAnnotation}
-              onDeleteAnnotation={deleteAnnotation}
-              onQuoteToChat={handleQuoteToChat}
-              onQuoteImageToChat={handleQuoteImageToChat}
-              focusAnnotationId={focusAnnotationId}
-              onAnnotationFocused={() => setFocusAnnotationId(null)}
-              viewMode={viewMode}
-              translatedMeta={translatedMeta}
-              translation={readerTranslation}
-              sourceBlocks={sourceBlocks}
-              onReferenceClick={handleReferenceClick}
-            />
-          </SidebarMotionPin>
-        )}
-      </div>
-
-      {swapSidebars ? notepadSidebar : chatSidebar}
-
-      {/* E5 补挂：论文 tab 的预览面板（与书籍 tab 同款，跟随 swapSidebars 互换；未打开时自动隐藏） */}
-      {!swapSidebars && <PreviewPanel />}
-
-      {/* 论文导出对话框（markdown 加载完成才渲染，保证拿到原文） */}
-      {markdown !== null && (
-        <PaperExportDialog
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-          paperId={paperId}
-          title={title}
-          markdown={markdown}
-          translationMap={translationMap}
-          footnoteMap={footnoteTranslationMap}
-          translationFile={translationFile}
-          translatedMeta={translatedMeta}
-          annotations={annotations}
-          currentViewMode={viewMode}
+        {/* P2 参考文献条目卡片（references.json 存在且点击含锚点条目时打开） */}
+        <PaperReferenceCard
+          reference={refCardEntry}
+          anchorRect={refCard?.rect ?? null}
+          onOpenChange={(open) => {
+            if (!open) setRefCard(null);
+          }}
+          onEnriched={handleReferenceEnriched}
         />
-      )}
-
-      {/* P2 参考文献条目卡片（references.json 存在且点击含锚点条目时打开） */}
-      <PaperReferenceCard
-        reference={refCardEntry}
-        anchorRect={refCard?.rect ?? null}
-        onOpenChange={(open) => {
-          if (!open) setRefCard(null);
-        }}
-        onEnriched={handleReferenceEnriched}
-      />
       </SidebarMotionProvider>
     </div>
   );
 }
+
+// React.memo：三个保活实例常驻（11 万元素级），切 tab 时 ReaderLayout 重渲但 props
+// （paperId/title/viewSleeping 原始值）不变 → 非目标实例整树跳过 reconcile。
+// 生效前提 = 订阅面收窄（本文件 tabOrientation/settings/swapSidebars selector 化 +
+// activeTabId 改命令式 subscribe），否则 store 变化绕过 memo 照样全量重渲。
+const PaperReaderViewMemo = memo(PaperReaderView);
+export default PaperReaderViewMemo;

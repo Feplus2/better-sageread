@@ -370,6 +370,8 @@ function ChatPage() {
                     canRetry={canRetry}
                     onAskSelection={handleAskSelection}
                     onViewToolDetail={handleViewToolDetail}
+                    isChatPage
+                    stickContextRef={scrollContextRef}
                   />
                   <div
                     className={`-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full justify-end px-5 ${wideChatLayout ? "" : "max-w-3xl"}`}
@@ -398,6 +400,7 @@ function ChatPage() {
                       activeBookId={activeBookId}
                       setActiveBookId={setActiveBookId}
                       showToolDetail={showToolDetail}
+                      isChatPage
                     />
                   </div>
                 </div>

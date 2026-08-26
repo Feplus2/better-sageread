@@ -19,6 +19,7 @@ import { useSyncEvents } from "@/hooks/use-sync-events";
 import PaperReaderView from "@/pages/paper-reader/paper-reader-view";
 import ReaderViewer from "@/pages/reader";
 import { ReaderProvider } from "@/pages/reader/components/reader-provider";
+import type { ReaderStore } from "@/pages/reader/store/create-reader-store";
 import { applySyncResult } from "@/services/apply-sync-result";
 import {
   type SyncRunResult,
@@ -38,7 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
 import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
 import { Resizable } from "re-resizable";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import appIconUrl from "../../src-tauri/icons/32x32.png";
 
 /** 全局设置入口（窗口顶栏右侧，横向/纵向两种顶栏模式共用，全页面可点） */
@@ -63,6 +64,155 @@ function TopbarSettingsButton() {
     </Tooltip>
   );
 }
+
+/** 书籍 tab 层内容（React.memo，2026-08-26 切 tab 墙治理）：
+ * 层壳 data-active/inert 翻转留在 ReaderLayout 侧（廉价 div 属性）；
+ * 本组件 props 全为原始值/稳定引用（store 来自 getReaderStore 的 Map 常驻）——
+ * 切 tab 时未被涉及的层整树跳过 reconcile（治理前书籍层每次切换全量重渲 ~350ms，
+ * 含 SideChat/ReaderViewer/foliate 壳与两个 Resizable 侧栏）。isActive 不入 props 是关键：
+ * 涉及切换的两个 tab 也只翻层壳属性，子树不动。 */
+const BookTabLayer = memo(function BookTabLayer({
+  bookId,
+  store,
+  isSlept,
+  isChatVisible,
+  isNotepadVisible,
+  swapSidebars,
+  sidebarHeightClass,
+  showOverlay = false,
+}: {
+  bookId: string;
+  store: ReaderStore;
+  isSlept: boolean;
+  isChatVisible: boolean;
+  isNotepadVisible: boolean;
+  swapSidebars: boolean;
+  sidebarHeightClass: string;
+  /** 窗口 resize 遮罩（ReaderLayout 下发；翻转即重渲属预期——遮罩本就要此时显示） */
+  showOverlay?: boolean;
+}) {
+  // 拖拽遮罩：窗口 resize 由 ReaderLayout 经 showOverlay prop 下发（每窗一次重渲属预期）；
+  // 侧栏拖拽由层内 dragOverlay 自治（原共享态的可见行为逐像素等价）
+  const [dragOverlay, setDragOverlay] = useState(false);
+  // 批次 4 结束帧拆钉一次性 reflow（detail 同拖拽处现有用法）；useCallback 钉死保 memo
+  const handleMotionReflow = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("foliate-resize-update", { detail: { bookId, source: "sidebar-motion" } }));
+  }, [bookId]);
+  const handleResizeStart = useCallback(() => setDragOverlay(true), []);
+  const handleResizeStop = useCallback(() => {
+    setDragOverlay(false);
+    window.dispatchEvent(new CustomEvent("foliate-resize-update", { detail: { bookId, source: "resize-drag" } }));
+  }, [bookId]);
+
+  // 批次 4：侧栏经 MotionSidebar 滑入滑出（冻结式，裁定三口径 2）——触发语义不变，
+  // 壳只加一层 h-full 包裹 div，终态布局/宽度/间距与硬切时代逐像素一致
+  const notepadSidebar = (
+    <MotionSidebar open={isNotepadVisible} side={swapSidebars ? "right" : "left"}>
+      <Resizable
+        defaultSize={{
+          width: 360,
+          height: "100%",
+        }}
+        minWidth={260}
+        maxWidth={800}
+        enable={{
+          top: false,
+          right: !swapSidebars,
+          bottom: false,
+          left: swapSidebars,
+          topRight: false,
+          bottomRight: false,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        handleComponent={
+          swapSidebars
+            ? { left: <div className="custom-resize-handle" /> }
+            : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
+        }
+        // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+        handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+        className="h-full"
+        onResize={handleResizeStart}
+        onResizeStop={handleResizeStop}
+      >
+        <div
+          data-region="notepad-panel"
+          className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
+        >
+          <NotepadContainer bookId={bookId} />
+        </div>
+      </Resizable>
+    </MotionSidebar>
+  );
+
+  const chatSidebar = (
+    <MotionSidebar open={isChatVisible} side={swapSidebars ? "left" : "right"}>
+      <Resizable
+        defaultSize={{
+          width: 370,
+          height: "100%",
+        }}
+        minWidth={320}
+        maxWidth={800}
+        enable={{
+          top: false,
+          right: swapSidebars,
+          bottom: false,
+          left: !swapSidebars,
+          topRight: false,
+          bottomRight: false,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        handleComponent={
+          swapSidebars
+            ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
+            : { left: <div className="custom-resize-handle" /> }
+        }
+        // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
+        handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
+        className="h-full"
+        onResize={handleResizeStart}
+        onResizeStop={handleResizeStop}
+      >
+        <div
+          className={
+            swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
+          }
+        >
+          <SideChat key={`chat-${bookId}`} bookId={bookId} />
+        </div>
+      </Resizable>
+    </MotionSidebar>
+  );
+
+  return (
+    <ReaderProvider store={store}>
+      {/* 批次 4：侧栏开合冻结编排——动画期间内容钉层宽度钉死（EPUB 不逐帧重分页），
+          结束帧拆钉一次性 reflow，此时才发一次 foliate-resize-update（detail 同拖拽处现有用法） */}
+      <SidebarMotionProvider onReflow={handleMotionReflow}>
+        {swapSidebars && <PreviewPanel />}
+        {swapSidebars ? chatSidebar : notepadSidebar}
+
+        <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
+          {/* 内容钉层：正常态纯透传（h-full 无样式差异）；冻结态钉宽+裁剪由编排器内联控制 */}
+          <SidebarMotionPin className="h-full">
+            {/* P2 休眠态：卸载 foliate 视图（阅读位置由 reader store 恢复），侧栏/聊天保活 */}
+            {!isSlept && <ReaderViewer />}
+          </SidebarMotionPin>
+
+          {showOverlay || dragOverlay ? (
+            <div className="absolute inset-0 z-50 flex items-center justify-center rounded-md bg-background/80 backdrop-blur-sm dark:bg-neutral-900/60" />
+          ) : null}
+        </div>
+
+        {swapSidebars ? notepadSidebar : chatSidebar}
+        {!swapSidebars && <PreviewPanel />}
+      </SidebarMotionProvider>
+    </ReaderProvider>
+  );
+});
 
 export default function ReaderLayout() {
   useFontEvents();
@@ -479,7 +629,12 @@ export default function ReaderLayout() {
               硬切 → 交叉淡入 + 位移归位；zIndex 语义不变（active=1 否则 0），休眠/保活逻辑不动。
               非活跃层 inert + aria-hidden：opacity 隐藏模型下无 visibility 遮挡，
               焦点/键盘/无障碍树隔离由这两个属性兜底（visibility 模型下同属 belt+braces） */}
-          <div className="tab-layer absolute inset-0" data-active={isHomeActive} inert={!isHomeActive} aria-hidden={!isHomeActive || undefined}>
+          <div
+            className="tab-layer absolute inset-0"
+            data-active={isHomeActive}
+            inert={!isHomeActive}
+            aria-hidden={!isHomeActive || undefined}
+          >
             <HomeLayout />
           </div>
 
@@ -500,155 +655,30 @@ export default function ReaderLayout() {
               );
             }
 
-            // P2：休眠态仅渲染外壳（侧栏保活，foliate 视图由 isSlept 分支控制卸载）
-            const isSlept = sleptTabs.has(tab.id);
+            // 书籍 tab：层壳（data-active/inert 翻转）留在本层，内容树抽成 memo 的 BookTabLayer——
+            // 切 tab 只翻层壳属性，子树（侧栏/聊天/foliate 壳）整树跳过 reconcile（2026-08-26 切 tab 墙治理）
             const store = getReaderStore(tab.id);
             if (!store) return null;
 
-            // 批次 4：侧栏经 MotionSidebar 滑入滑出（冻结式，裁定三口径 2）——触发语义不变，
-            // 壳只加一层 h-full 包裹 div，终态布局/宽度/间距与硬切时代逐像素一致
-            const notepadSidebar = (
-              <MotionSidebar open={isNotepadVisible} side={swapSidebars ? "right" : "left"}>
-                <Resizable
-                  defaultSize={{
-                    width: 360,
-                    height: "100%",
-                  }}
-                  minWidth={260}
-                  maxWidth={800}
-                  enable={{
-                    top: false,
-                    right: !swapSidebars,
-                    bottom: false,
-                    left: swapSidebars,
-                    topRight: false,
-                    bottomRight: false,
-                    bottomLeft: false,
-                    topLeft: false,
-                  }}
-                  handleComponent={
-                    swapSidebars
-                      ? { left: <div className="custom-resize-handle" /> }
-                      : { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-                  }
-                  // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
-                  handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
-                  className="h-full"
-                  onResize={() => {
-                    if (!showOverlay) {
-                      setShowOverlay(true);
-                    }
-                  }}
-                  onResizeStop={() => {
-                    setShowOverlay(false);
-                    window.dispatchEvent(
-                      new CustomEvent("foliate-resize-update", {
-                        detail: { bookId: tab.bookId, source: "resize-drag" },
-                      }),
-                    );
-                  }}
-                >
-                  <div
-                    data-region="notepad-panel"
-                    className={swapSidebars ? `ml-1 ${sidebarHeightClass}` : `mr-1 ${sidebarHeightClass}`}
-                  >
-                    <NotepadContainer bookId={tab.bookId} />
-                  </div>
-                </Resizable>
-              </MotionSidebar>
-            );
-
-            const chatSidebar = (
-              <MotionSidebar open={isChatVisible} side={swapSidebars ? "left" : "right"}>
-                <Resizable
-                  defaultSize={{
-                    width: 370,
-                    height: "100%",
-                  }}
-                  minWidth={320}
-                  maxWidth={800}
-                  enable={{
-                    top: false,
-                    right: swapSidebars,
-                    bottom: false,
-                    left: !swapSidebars,
-                    topRight: false,
-                    bottomRight: false,
-                    bottomLeft: false,
-                    topLeft: false,
-                  }}
-                  handleComponent={
-                    swapSidebars
-                      ? { right: <div className="custom-resize-handle custom-resize-handle-left" /> }
-                      : { left: <div className="custom-resize-handle" /> }
-                  }
-                  // 手柄感应区收回面板内（默认跨界 10px 会盖住邻居阅读区右缘的滚动条）
-                  handleStyles={{ left: { left: "0px" }, right: { right: "0px" } }}
-                  className="h-full"
-                  onResize={() => {
-                    if (!showOverlay) {
-                      setShowOverlay(true);
-                    }
-                  }}
-                  onResizeStop={() => {
-                    setShowOverlay(false);
-                    window.dispatchEvent(
-                      new CustomEvent("foliate-resize-update", {
-                        detail: { bookId: tab.bookId, source: "resize-drag" },
-                      }),
-                    );
-                  }}
-                >
-                  <div
-                    className={
-                      swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
-                    }
-                  >
-                    <SideChat key={`chat-${tab.id}`} bookId={tab.bookId} />
-                  </div>
-                </Resizable>
-              </MotionSidebar>
-            );
-
             return (
-              <ReaderProvider store={store} key={tab.id}>
-                <div
-                  className="tab-layer absolute inset-0 flex bg-background p-1"
-                  data-active={tab.id === activeTabId}
-                  inert={tab.id !== activeTabId}
-                  aria-hidden={tab.id !== activeTabId || undefined}
-                >
-                  {/* 批次 4：侧栏开合冻结编排——动画期间内容钉层宽度钉死（EPUB 不逐帧重分页），
-                      结束帧拆钉一次性 reflow，此时才发一次 foliate-resize-update（detail 同拖拽处现有用法） */}
-                  <SidebarMotionProvider
-                    onReflow={() => {
-                      window.dispatchEvent(
-                        new CustomEvent("foliate-resize-update", {
-                          detail: { bookId: tab.bookId, source: "sidebar-motion" },
-                        }),
-                      );
-                    }}
-                  >
-                    {swapSidebars && <PreviewPanel />}
-                    {swapSidebars ? chatSidebar : notepadSidebar}
-
-                    <div className="relative min-w-0 flex-1 rounded-md border shadow-around">
-                      {/* 内容钉层：正常态纯透传（h-full 无样式差异）；冻结态钉宽+裁剪由编排器内联控制 */}
-                      <SidebarMotionPin className="h-full">
-                        {/* P2 休眠态：卸载 foliate 视图（阅读位置由 reader store 恢复），侧栏/聊天保活 */}
-                        {!isSlept && <ReaderViewer />}
-                      </SidebarMotionPin>
-
-                      {showOverlay && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-md bg-background/80 backdrop-blur-sm dark:bg-neutral-900/60" />
-                      )}
-                    </div>
-
-                    {swapSidebars ? notepadSidebar : chatSidebar}
-                    {!swapSidebars && <PreviewPanel />}
-                  </SidebarMotionProvider>
-                </div>
-              </ReaderProvider>
+              <div
+                key={tab.id}
+                className="tab-layer absolute inset-0 flex bg-background p-1"
+                data-active={tab.id === activeTabId}
+                inert={tab.id !== activeTabId}
+                aria-hidden={tab.id !== activeTabId || undefined}
+              >
+                <BookTabLayer
+                  bookId={tab.bookId}
+                  store={store}
+                  isSlept={sleptTabs.has(tab.id)}
+                  isChatVisible={isChatVisible}
+                  isNotepadVisible={isNotepadVisible}
+                  swapSidebars={swapSidebars}
+                  sidebarHeightClass={sidebarHeightClass}
+                  showOverlay={showOverlay}
+                />
+              </div>
             );
           })}
         </main>

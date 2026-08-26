@@ -66,7 +66,11 @@ const pollUntil = async (fn, timeout = 3000, step = 200) => {
   return null;
 };
 const storeCall = async (body) =>
-  evalJs(`(async () => { const S = (await import("/src/store/layout-store.ts")).useLayoutStore; ${body} })()`);
+  evalJs(`(async () => {
+    const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.includes("/src/store/layout-store.ts")) ?? "/src/store/layout-store.ts";
+    const S = (await import(url)).useLayoutStore;
+    ${body}
+  })()`);
 const storeState = async () =>
   JSON.parse(
     await storeCall(`const s = S.getState(); return JSON.stringify({
@@ -128,7 +132,8 @@ check("0 前置：最重论文层 ≥ 5 万元素（墙才有分辨度）", heav
 const probeSwitch = async (targetId) =>
   JSON.parse(
     await evalJs(`(async () => {
-    const S = (await import("/src/store/layout-store.ts")).useLayoutStore;
+    const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.includes("/src/store/layout-store.ts")) ?? "/src/store/layout-store.ts";
+    const S = (await import(url)).useLayoutStore;
     const main = document.querySelector("main.overflow-clip");
     const loafs = [];
     let po = null;

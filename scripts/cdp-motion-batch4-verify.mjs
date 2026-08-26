@@ -63,8 +63,13 @@ const pollUntil = async (fn, timeout = 3000, step = 150) => {
 };
 
 // ---------- 通用探针 ----------
+// 模块 URL 从 resource 条目解析：vite HMR 给改过的模块挂 ?t= 版本串，裸路径会静默命中旧实例
 const storeCall = async (body) =>
-  evalJs(`(async () => { const S = (await import("/src/store/layout-store.ts")).useLayoutStore; ${body} })()`);
+  evalJs(`(async () => {
+    const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.includes("/src/store/layout-store.ts")) ?? "/src/store/layout-store.ts";
+    const S = (await import(url)).useLayoutStore;
+    ${body}
+  })()`);
 const themeCall = async (body) =>
   evalJs(`(async () => { const T = (await import("/src/store/theme-store.ts")).useThemeStore; ${body} })()`);
 const storeState = async () =>
@@ -550,9 +555,19 @@ if (paperTabId) {
   );
   await sleep(1500); // 大 DOM 正文渲染沉降
   const domCount = await evalJs(`document.querySelectorAll("*").length`);
-  // 论文聊天侧栏是本地状态：记录初始开/合，现场最后还原
-  const paperChatInitiallyOpen = sbCount(await paperRow()) > 0;
-  console.log(`F 大 DOM(${domCount} 元素) chatInitiallyOpen=${paperChatInitiallyOpen}`, (await paperRow()).join(" "));
+  // 论文聊天侧栏是本地状态：记录初始开/合，现场最后还原。
+  // 期望用相对增量（sbBefore±1），且「聊天是否开着」不能用 sb 总数判——笔记面板同记 sb（batch3 D3 会遗留其开启），
+  // 用 [data-region="notepad-panel"] 反推：chatOpen = sbBefore - (notepadOpen ? 1 : 0) > 0（2026-08-26 复跑实证）
+  const notepadOpen =
+    (await evalJs(
+      `!!document.querySelector('main.overflow-clip > .tab-layer[data-active="true"] [data-region="notepad-panel"]')`,
+    )) === true;
+  const sbBefore = sbCount(await paperRow());
+  const paperChatInitiallyOpen = sbBefore - (notepadOpen ? 1 : 0) > 0;
+  console.log(
+    `F 大 DOM(${domCount} 元素) chatInitiallyOpen=${paperChatInitiallyOpen} sbBefore=${sbBefore} notepadOpen=${notepadOpen}`,
+    (await paperRow()).join(" "),
+  );
   // 聊天开关 = header-bar 最后一个 .cursor-pointer（右侧 AI 面板开关）
   const clickPaperChat = () =>
     evalJs(`(() => {
@@ -570,7 +585,7 @@ if (paperTabId) {
   await shot("b4-10-paper-chat-mid");
   const paperToggled = await pollUntil(async () => {
     const r = await paperRow();
-    const expect = paperChatInitiallyOpen ? 0 : 1;
+    const expect = paperChatInitiallyOpen ? sbBefore - 1 : sbBefore + 1;
     return sbCount(r) === expect && pinInline(r) === "-" ? r.join(" ") : null;
   }, 6000);
   await shot("b4-11-paper-chat-settled");
@@ -583,12 +598,12 @@ if (paperTabId) {
     `before=${wBefore} after=${wAfter} :: ${paperToggled ?? "timeout"}`,
   );
   check("F 动画帧率可接受（maxGap < 400ms，负载机宽限）", fs.maxGap < 400, `frames=${fs.frames} maxGap=${fs.maxGap}ms`);
-  // 开回（还原初始）
-  if (paperChatInitiallyOpen !== (sbCount(await paperRow()) > 0)) {
+  // 开回（还原初始：sb 计数回到 sbBefore）
+  if (sbCount(await paperRow()) !== sbBefore) {
     await clickPaperChat();
     await pollUntil(async () => {
       const r = await paperRow();
-      return sbCount(r) === (paperChatInitiallyOpen ? 1 : 0) && pinInline(r) === "-" ? r.join(" ") : null;
+      return sbCount(r) === sbBefore && pinInline(r) === "-" ? r.join(" ") : null;
     }, 6000);
   }
 } else {

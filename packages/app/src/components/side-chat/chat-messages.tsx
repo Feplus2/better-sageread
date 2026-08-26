@@ -4,7 +4,6 @@ import { Message, MessageAction, MessageActions, MessageContent } from "@/compon
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import { Tool } from "@/components/prompt-kit/tool";
 import { Button } from "@/components/ui/button";
-import { useIsChatPage } from "@/hooks/use-is-chat-page";
 import { type ReasoningTimes, useReasoningTimer } from "@/hooks/use-reasoning-timer";
 import { useTextSelection } from "@/hooks/use-text-selection";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
@@ -35,7 +34,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useStickToBottomContext } from "use-stick-to-bottom";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { ChatSelectionPopup } from "./chat-selection-popup";
 
 export const TOOL_NAME_MAP: Record<string, string> = {
@@ -133,6 +132,14 @@ interface ChatMessagesProps {
   selectionMode?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (messageId: string) => void;
+  /** 是否全局对话页实例（宽度类名/工具卡引用语义）。由调用点静态传入（ChatPage=true，
+   * 阅读/论文侧栏缺省 false）——实例级语义本就恒定；曾用 useIsChatPage() 响应式订阅，
+   * home↔tab 每次切换 isHomeActive 翻转都把整条消息列表拖入重渲（2026-08-26 切 tab 墙治理） */
+  isChatPage?: boolean;
+  /** StickToBottom 上下文 ref（由 ChatContainerRoot contextRef 下发）：命令式读 scrollToBottom。
+   * 不用 useStickToBottomContext 订阅——lib 内部状态冲刷会重建 context 值对象（布尔语义不变），
+   * 每次切 tab 引发的容器重排都把整条消息列表（数百未 memo 叶组件）拖入重渲（2026-08-26 切 tab 墙溯源） */
+  stickContextRef?: React.RefObject<StickToBottomContext | null>;
 }
 
 export function reorderTextAndReasoning(message: UIMessage): UIMessage {
@@ -289,7 +296,7 @@ const ToolCallGroup = memo(function ToolCallGroup({
   );
 });
 
-export function ChatMessages({
+function ChatMessagesComponent({
   messages,
   status,
   error,
@@ -303,9 +310,9 @@ export function ChatMessages({
   selectionMode = false,
   selectedIds,
   onToggleSelect,
+  isChatPage = false,
+  stickContextRef,
 }: ChatMessagesProps) {
-  const { scrollToBottom } = useStickToBottomContext();
-  const isChatPage = useIsChatPage();
   // 「存为笔记」的目标书/论文：优先侧栏绑定的 bookId（reader/paper scope 经 props 下发），
   // 全局对话页回退全局 currentThread 的 book_id；两者皆空则按钮不渲染
   const globalThreadBookId = useThreadStore((s) => s.currentThread?.book_id);
@@ -499,18 +506,18 @@ export function ChatMessages({
   useEffect(() => {
     if (messages.length === 0) return;
     if (!hasInitialScrolled.current && messages.length > 0) {
-      scrollToBottom("instant");
+      stickContextRef?.current?.scrollToBottom("instant");
       hasInitialScrolled.current = true;
     }
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length, stickContextRef]);
 
   useEffect(() => {
     if (scrollKey !== undefined && prevScrollKey.current !== scrollKey) {
-      scrollToBottom("instant");
+      stickContextRef?.current?.scrollToBottom("instant");
       prevScrollKey.current = scrollKey;
       hasInitialScrolled.current = true;
     }
-  }, [scrollKey, scrollToBottom]);
+  }, [scrollKey, stickContextRef]);
 
   const renderMessageParts = (parts: any[], isLastMessage: boolean, isAssistant = true, messageId?: string) => {
     const elements: any[] = [];
@@ -1040,3 +1047,9 @@ export function ChatMessages({
     </ChatContainerContent>
   );
 }
+
+// React.memo：切 tab 时 StickToBottom 内部状态冲刷会重渲 ChatContainerRoot（provider），
+// 未 memo 的 ChatMessages 会被父级重渲连带整棵消息树（数百 PaperLink/Tooltip 叶组件）；
+// 此时三个面板父组件并不重渲（props 引用全稳定），memo 即跳过——流式/操作等父组件真重渲路径
+// 的 props 必变（messages 引用/回调重建），语义逐字等价。（2026-08-26 切 tab 墙溯源根修）
+export const ChatMessages = memo(ChatMessagesComponent);

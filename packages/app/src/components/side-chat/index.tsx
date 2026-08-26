@@ -17,7 +17,7 @@ import {
   Search,
   UserSearch,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
@@ -37,6 +37,8 @@ function ChatContent({ bookId }: ChatContentProps) {
   const { autoScroll } = useThemeStore();
   const [toolDetail, setToolDetail] = useState<any>(null);
   const [showMindmapDialog, setShowMindmapDialog] = useState(false);
+  // StickToBottom 上下文 ref（同 paper-chat-panel）：命令式读 scrollToBottom，免 context 订阅级联重渲
+  const stickContextRef = useRef<any>(null);
 
   const progress = useReaderStore((state) => state.progress);
   const currentThread = useReaderStore((state) => state.currentThread);
@@ -217,7 +219,7 @@ function ChatContent({ bookId }: ChatContentProps) {
       ) : messages.length === 0 && isInit.current ? (
         <EmptyState />
       ) : (
-        <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll}>
+        <ChatContainerRoot className="relative flex-1" autoScroll={autoScroll} contextRef={stickContextRef}>
           <ChatMessages
             messages={messages}
             status={status}
@@ -233,6 +235,7 @@ function ChatContent({ bookId }: ChatContentProps) {
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
+            stickContextRef={stickContextRef}
           />
           <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
             <div className="pointer-events-auto">

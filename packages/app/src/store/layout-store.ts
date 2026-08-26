@@ -184,7 +184,10 @@ export const useLayoutStore = create<LayoutStore>()(
       },
 
       activateTab: (tabId: string) => {
-        const { tabs } = get();
+        const { tabs, activeTabId, isHomeActive } = get();
+        // 同值切换短路：目标 tab 已激活且不在主页时，set 只会重建 tabs 数组触发全 ReaderLayout
+        // 空转 reconcile（~260ms/次，2026-08-26 实测）；activeTabId 不变，唤醒/计时效应本就不重跑
+        if (activeTabId === tabId && !isHomeActive) return;
         set({
           tabs: tabs.map((t) => ({ ...t, active: t.id === tabId })),
           activeTabId: tabId,
@@ -193,7 +196,9 @@ export const useLayoutStore = create<LayoutStore>()(
       },
 
       navigateToHome: () => {
-        const { tabs } = get();
+        const { tabs, isHomeActive } = get();
+        // 同值短路（同 activateTab）：已在主页时空转 set 没有语义效果
+        if (isHomeActive) return;
         set({
           tabs: tabs.map((t) => ({ ...t, active: false })),
           activeTabId: null,
