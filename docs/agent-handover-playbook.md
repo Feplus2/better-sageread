@@ -66,6 +66,15 @@
 
 ## 任务卡 1：memo 拆墙（切 tab 的 ~2s React render 墙 → ms 级）
 
+**状态**：✅ 已完成并提交（commit `0f4b793`，2026-08-26）。paper↔paper 中位
+1726→107ms（验收 <200ms PASS）；home↔重论文 1187→216ms、book↔paper 335→290ms
+（残余 = 涉及 tab 自身必要重渲 + DEV 插装税，生产构建无此税）；批次 3 回归 22 项全绿。
+**遗留（另立项，见挂账记录）**：MessageItem 级 memo（chat-messages.tsx 1042 行中型重构）；
+批次 4 F 节首挂载聊天面板 maxGap≈1.2s（一次性，非切换路径）；foliate paginator.js:208
+异步竞赛错误（vendored 渲染器既有，间歇，与 React 改动无交集）。
+
+<details><summary>原任务卡（存档）</summary>
+
 **状态**：主 Agent 的子代理（agent-92）在跑/可能已将改动落工作区未提交。
 **接手方法**（先按「中断交接通则」盘点，再用本清单判完成度）：
 2026-08-26 08:32 快照（`.tmp-e2e/wip/`）显示在制改动已覆盖——`home-layout.tsx`、
@@ -96,6 +105,8 @@ tsc 零错。
 回归脚本输出留档。
 **报告格式**：tWall 对比表 + memo 清单（包了谁/没包谁及理由）+ 订阅面审计 + 回归证据 +
 改动文件清单。
+
+</details>
 
 ---
 
