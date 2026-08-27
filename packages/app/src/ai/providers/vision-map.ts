@@ -31,10 +31,13 @@ export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
 const MODEL_VISION: Readonly<Record<string, boolean>> = {
   // ---- OpenAI（官方 Models 页 "All latest OpenAI models support text and image input"）----
   "gpt-5.6-sol": true, "gpt-5.6-sol-ultra": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
+  "gpt-5.6-luna-mini": true, "gpt-5.6-terra-mini": true, // 天体系可能存在的 mini 变体（OpenAI 官方未明确排除；未收录→放行恰好正确）
   // ↑ 2026-07-09 全面上线，三档全支持图片（Roboflow 独立实测全档过检测/计数/OCR；
   //   Sol 被评为"OpenAI 最强视觉型号"）。另有 ultra 变体（DeepLearning.AI The Batch）
   "gpt-5.5": true, "gpt-5.4": true, "gpt-5.3-codex": true,
   "gpt-5.2": true, "gpt-5.1": true, "gpt-5.1-mini": true, "gpt-5.1-codex": true,
+  "gpt-5.2-mini": true, "gpt-5.2-codex": true, "gpt-5.3-codex-mini": true, "gpt-5.4-mini": true,
+  "gpt-5.5-mini": true, "gpt-5.5-codex": true, // 5.x 系 mini/codex 变体（官方 Models 页全系 same-modality）
   "gpt-5": true, "gpt-5-pro": true, "gpt-5-mini": true, "gpt-5-nano": true, // 5 基础系 2026-12-11 停服
   "gpt-4.1": true, "gpt-4.1-mini": true, "gpt-4.1-nano": true,
   "gpt-4o": true, "gpt-4o-mini": true,
@@ -67,8 +70,9 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
 
   // ---- xAI Grok（现役目录聊天型号全部 text+image；Oracle 合作页 + OpenRouter 目录交叉核实）----
   "grok-4.6": true, "grok-4.5": true, "grok-4.3": true, "grok-4": true,
+  "grok-4.20": true, // 2026 系列新旗舰（reasoning map 注释提及走 reasoning.enabled 开关，视觉口径同族）
   "grok-4-fast": true, "grok-4-1-fast": true, // 遗留 ID 已重定向到多模态 4.3
-  "grok-3": true,
+  "grok-3": true, "grok-3-mini": true, // 3-mini 历史纯文本但已退役重定向到多模态（OpenRouter 口径）
   "grok-build-0.1": true, "grok-code-fast-1": true, // 连代码专用型也吃图
 
   // ---- DeepSeek（官方 "Only vision models accept images; others return a 400 error"）----
@@ -137,6 +141,64 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "agnes-2.5-pro-alpha": true, // 多模态推理模型（Artificial Analysis 2026-07-24 上线，Apache 2.0）
   "agnes-2.5-flash": true, // 免费编程模型，平台口径全模态
   "agnes-seallm-8b": false, // 东南亚语言优化开源 8B，纯文本（Hugging Face 描述）
+
+  // ---- MiniMax（platform.minimax.io/docs/release-notes/models；OpenRouter 排行头部常客）----
+  "minimax-m3": true, // 428B MoE，原生多模态（text+image+video→text），2026-05/06 上线
+  "minimax-m2.5": true, // OpenRouter 排行 #1 常客（2.45T tokens），多模态
+  "minimax-h3": true, // 全模态视频理解（text+image+video+audio），新旗舰
+  "abab6.5s-chat": false, "abab5.5-chat": false, // 旧文本系列（逐步淘汰中，防御存量）
+
+  // ---- 百度文心 ERNIE（千帆平台 cloud.baidu.com/doc/qianfan；2026-08-20 更新）----
+  "ernie-5.0": true, "ernie-5.1": true, // 原生全模态（文本/图像/音频/视频统一建模），旗舰
+  "ernie-x1.1": true, // 推理增强，多模态能力进一步增强
+  "ernie-4.5-turbo-128k": false, // 128K 纯文本 Turbo
+  "ernie-4.5-vl-28b-a3b": true, // 多模态 MoE（28B 总/3B 激活），思考/非思考双模
+  "ernie-4.5-vl-28b-a3b-thinking": true, // 多模态推理（视觉思维链），2025-11 开源
+  "ernie-4.5-21b-a3b": false, "ernie-4.5-300b-a47b": false, // 开源 4.5 文本系
+
+  // ---- 昆仑万维 天工 Skywork（开源为主；经 OpenRouter/SiliconFlow 等第三方 API 调用）----
+  "skywork-r1v": true, // 38B 多模态思维链推理（MMMU 69.0 逼近 GPT-4o），图像+视频理解
+  "skywork-r1v-3": true, // 跨模态推理（视觉推理迁移融合）
+  "skywork-13b-mm": true, // 旧多模态版
+  "skywork-13b-base": false, "skywork-13b-math": false, // 开源文本系
+
+  // ---- TII Falcon（阿布扎比技术创新研究院；falconllm.tii.ae）----
+  "falcon-h1-34b": true, "falcon-h1-14b": true, "falcon-h1-9b": true, // Hybrid 混合架构，长推理
+  "falcon-h1-7b": true, "falcon-h1-3b": true, "falcon-h1-1b": true, "falcon-h1-0.5b": true,
+  "falcon-h1-arabic": true, // 阿拉伯语旗舰，混合推理
+  "falcon-perception": true, // 多模态感知（OCR/图表/视觉理解）
+  "falcon-3-10b": false, "falcon-3-7b": false, "falcon-3-2b": false, "falcon-3-1b": false, // Falcon 3 文本系
+
+  // ---- 零一万物 01.AI Yi（01.ai / api.lingyiwanwu.com；OpenRouter 上 01-ai/ 前缀）----
+  "yi-vision-v2": true, // 多模态理解（多图分析）
+  "yi-vision": true, // 原始视觉版
+  "yi-lightning": false, // 100B MoE 旗舰，纯文本（LMSYS 全球第六/中国第一）
+  "yi-1.5-34b": false, "yi-1.5-9b": false, // 开源文本系
+
+  // ---- Cohere（docs.cohere.com/docs/models；企业场景导向）----
+  "command-a-plus": true, // 首个多模态推理模型（图片理解+推理），旗舰
+  "command-a-vision": true, // 企业多模态（文档/幻灯/图表/图像）
+  "command-a-reasoning": true, // 首个推理模型（Cohere 口径含视觉推理能力）
+  "command-a": true, // 主力（文档说明含图片输入）
+  "command-r-plus": false, "command-r": false, // RAG 优化，纯文本
+  "command-r7b": false, // 小型 RAG
+
+  // ---- Perplexity Sonar（docs.perplexity.ai；联网搜索型 API）----
+  "sonar-pro": true, // 旗舰，支持图片上传
+  "sonar-reasoning-pro": true, // 推理+搜索，支持图（think 段后 JSON 输出）
+  "sonar-reasoning": true, // 推理+搜索
+  "sonar-deep-research": true, // 深度研究
+  "sonar": true, // 基础版（2026-09-27 停服，同样支持图）
+
+  // ---- 腾讯混元 Hunyuan（OpenRouter 排行头部出现过；主要经第三方平台调用）----
+  "hunyuan-hy3-preview": true, // 多模态（OpenRouter 排行曾 #1）
+  "hunyuan-turbo": false, // 纯文本（千帆/混元开放平台在售）
+  "hunyuan-pro": false, "hunyuan-standard": false, // 文本系
+
+  // ---- Meta Llama（开源；OpenRouter 上 meta-llama/ 前缀）----
+  "llama-4-maverick": true, "llama-4-scout": true, // Llama 4 多模态（MoE）
+  "llama-3.3-70b-instruct": false, "llama-3.1-70b-instruct": false,
+  "llama-3.1-8b-instruct": false, "llama-3-70b-instruct": false, // Llama 3 系纯文本
 };
 
 /** 身份归一（非能力推断）：OpenRouter "作者/" 前缀剥离 + 日期快照别名剥离（厂商口径：日期 ID 是基名快照） */
