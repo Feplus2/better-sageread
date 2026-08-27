@@ -53,6 +53,9 @@ function knownFamilyVision(slug: string): boolean | undefined {
   // ---- 智谱 GLM 族：版本号后紧跟 v = 视觉理解（Flash/FlashX/AirX 只是档位标记，与模态无关） ----
   if (/^(glm-|autoglm|chatglm|cogview|cogvideox)/.test(slug)) {
     if (/^glm-5v-/.test(slug)) return true; // glm-5v-turbo（2026-04 上线，多模态 Coding 基座）
+    if (/^glm-5\.3-flash/.test(slug)) return true; // 2026-08 末上线：GLM-5 系首个原生多模态（官方 docs
+    // vlm/glm-5.3-flash，320B-A18B，图片/视频/设计稿理解）——命名不带 v，家族默认会误杀，显式放行；
+    // 注意旗舰 glm-5.3（无 flash 后缀）仍是纯文本，维持 false
     if (/^glm-4\.\d+v|^glm-4v-/.test(slug)) return true; // 4.6v/4.5v/4.1v-thinking 全系、glm-4v-flash
     if (VISION_NAME_RE.test(slug)) return true; // 兜底未来新视觉命名
     return false; // 其余 glm 文本系各详情页明确"仅文本"（GLM-5.3 原文"目前仅支持处理文本模态信息"）、
@@ -65,7 +68,9 @@ function knownFamilyVision(slug: string): boolean | undefined {
     if (/-ocr|^gui-/.test(slug)) return true; // OCR / GUI 截图专用视觉型号
     if (/^qwen3\.[56]-(plus|flash|\d+b)/.test(slug)) return true; // 3.5/3.6 原生视觉主线（plus/flash/开源尺寸）
     if (/^qwen3\.7-(plus|flash)/.test(slug)) return true; // 3.7 原生视觉主线
-    if (/^qwen3\.8-(max|27b)/.test(slug)) return true; // 3.8 原生视觉主线
+    if (/^qwen3\.8-(max|27b|flash-next)/.test(slug)) return true; // 3.8 原生视觉主线；
+    // flash-next（2026-08 末上线）为 Qwen4 架构实验预览、原生多模态 MoE（ModelScope 官方页，
+    // 图片/视频联合理解）——next 后缀历史是纯文本预览，此处例外，显式入列
     // max 线按快照逐步开放视觉：qwen3.7-max 自 2026-06-08 快照起带视觉（ISO 日期可按字符串比较）；
     // 无日期/更早快照落入下方 false（官方文本生成页警示"仅支持文本接口"）
     const maxSnap = /^qwen3\.7-max-(\d{4}-\d{2}-\d{2})$/.exec(slug);

@@ -1626,8 +1626,8 @@ export default function PapersPage() {
     try {
       confirmed = await ask(
         paper
-          ? `将用最新解析引擎重新解析《${paper.title}》的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`
-          : `将用最新解析引擎重新解析选中的 ${targets.length} 篇论文的源 PDF 并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
+          ? `将用最新解析引擎重新解析《${paper.title}》的源文件（PDF/XML，XML 论文会重新处理并重试图下载）并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`
+          : `将用最新解析引擎重新解析选中的 ${targets.length} 篇论文的源文件（PDF/XML）并替换现有解析产物。\n\n文件夹归属、对话与标注保留，但文内高亮可能因正文变化漂移。`,
         { title: !paper && targets.length > 1 ? `重新解析（${targets.length} 篇）` : "重新解析", kind: "warning" },
       );
     } catch (error) {
