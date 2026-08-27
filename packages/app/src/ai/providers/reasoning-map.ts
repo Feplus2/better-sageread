@@ -194,7 +194,8 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "ernie-4.5-vl-28b-a3b-thinking": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
   "ernie-4.5-turbo-128k": { alwaysOn: false, offParam: "enable_thinking:false", levels: [], transport: "switch" },
 
-  // ---- 腾讯混元 Hunyuan（腾讯云 TokenHub；thinking 开关 + reasoning_content 回传）----
+  // ---- 腾讯混元 Hunyuan（TokenHub 文档；Hy3 正式版 2026-07-06 发布，快慢思考融合）----
+  "hunyuan-hy3": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
   "hunyuan-hy3-preview": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
   "hunyuan-turbo": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
   "hunyuan-pro": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },

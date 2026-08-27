@@ -191,8 +191,9 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "sonar": true, // 基础版（2026-09-27 停服，同样支持图）
 
   // ---- 腾讯混元 Hunyuan（OpenRouter 排行头部出现过；主要经第三方平台调用）----
-  "hunyuan-hy3-preview": true, // 多模态（OpenRouter 排行曾 #1）
-  "hunyuan-turbo": false, // 纯文本（千帆/混元开放平台在售）
+  "hunyuan-hy3": true, // 正式版（2026-07-06 发布，295B MoE 多模态），同 preview 能力
+  "hunyuan-hy3-preview": true, // 预览版（存量 ID 防御）
+  "hunyuan-turbo": false, // 纯文本（2026-06-22 旧模型下线后仍可通过 TokenHub 调用）
   "hunyuan-pro": false, "hunyuan-standard": false, // 文本系
 
   // ---- Meta Llama（开源；OpenRouter 上 meta-llama/ 前缀）----
