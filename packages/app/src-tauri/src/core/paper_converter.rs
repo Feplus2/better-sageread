@@ -178,6 +178,10 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
         .sidecar("papers_converter")
         .map_err(|e| format!("无法创建论文解析命令: {}", e))?
         .args(args)
+        // 代理 env 注入（与 MCP spawn 同源，F3-2）：custom 直配 / follow-env 补 Windows
+        // 系统代理回退——converter 侧网络（SN 媒体图/CrossRef 兜底/引擎 API）在无 env
+        // 代理的 GUI 进程下曾裸连被墙（2026-08-27 SN 媒体 SSL EOF 实测）
+        .envs(crate::core::mcp::proxy_spawn_env(&app))
         .env("MINERU_TOKEN", params.mineru_token.as_deref().unwrap_or(""))
         .env("PADDLEOCR_TOKEN", params.paddleocr_token.as_deref().unwrap_or(""))
         .env("GLM_OCR_API_KEY", params.glm_api_key.as_deref().unwrap_or(""))

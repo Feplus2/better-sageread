@@ -110,7 +110,7 @@ fn audit_line(app: &AppHandle, server: &str, kind: &str, text: &str) {
 
 // ---- F3-2：代理 env 注入（配置由批次 F3-1 设置页写入 {config_dir}/proxy.json） ----
 
-fn proxy_spawn_env(app: &AppHandle) -> Vec<(String, String)> {
+pub(crate) fn proxy_spawn_env(app: &AppHandle) -> Vec<(String, String)> {
     let Ok(dir) = app.path().app_config_dir() else {
         return vec![];
     };
