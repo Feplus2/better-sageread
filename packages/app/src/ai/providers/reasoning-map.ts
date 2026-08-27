@@ -112,6 +112,8 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "qwen3.6-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qwen3.7-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qwen3.7-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.7-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.7-max-2026-06-08": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qwen3.8-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qwen3.8-27b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qwen3.8-flash-next": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
@@ -311,7 +313,10 @@ export function chatReasoningBodyPatch(
 // ---------------------------------------------------------------------------
 
 function lookupCap(modelId: string): ReasoningCapability | undefined {
-  const slug = modelId.toLowerCase();
+  let slug = modelId.toLowerCase();
+  // OpenRouter/中转站的 "作者/" 前缀剥离（与 vision-map canonicalSlug 同源）：
+  // openai/gpt-5.6-luna → gpt-5.6-luna
+  if (slug.includes("/")) slug = slug.slice(slug.indexOf("/") + 1);
   const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, "");
   return MODEL_REASONING[slug] ?? MODEL_REASONING[stripped] ?? findLongestPrefix(slug);
 }
