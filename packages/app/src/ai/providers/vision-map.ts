@@ -30,7 +30,10 @@ export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
 // ---------------------------------------------------------------------------
 const MODEL_VISION: Readonly<Record<string, boolean>> = {
   // ---- OpenAI（官方 Models 页 "All latest OpenAI models support text and image input"）----
-  "gpt-5.6": true, "gpt-5.5": true, "gpt-5.4": true, "gpt-5.3-codex": true,
+  "gpt-5.6-sol": true, "gpt-5.6-sol-ultra": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
+  // ↑ 2026-07-09 全面上线，三档全支持图片（Roboflow 独立实测全档过检测/计数/OCR；
+  //   Sol 被评为"OpenAI 最强视觉型号"）。另有 ultra 变体（DeepLearning.AI The Batch）
+  "gpt-5.5": true, "gpt-5.4": true, "gpt-5.3-codex": true,
   "gpt-5.2": true, "gpt-5.1": true, "gpt-5.1-mini": true, "gpt-5.1-codex": true,
   "gpt-5": true, "gpt-5-pro": true, "gpt-5-mini": true, "gpt-5-nano": true, // 5 基础系 2026-12-11 停服
   "gpt-4.1": true, "gpt-4.1-mini": true, "gpt-4.1-nano": true,
@@ -109,6 +112,31 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "moonshot-v1-128k-vision-preview": true, // 2026-08-31 下线
   "kimi-k2": false, "kimi-k2-thinking": false, "kimi-k2-turbo": false, // 已下线纯文本
   "moonshot-v1-8k": false, "moonshot-v1-32k": false, "moonshot-v1-128k": false,
+
+  // ---- Mistral（docs.mistral.ai/models；Mistral 3 系全线多模态）----
+  "mistral-large-3": true, // 675B MoE（41B 激活），官方定位 "general-purpose multimodal model"
+  "mistral-medium-3": true, "mistral-medium-3.1": true, "mistral-medium-3.5": true, // 3.x 系全线 text+image
+  "mistral-small-3.1": true, "mistral-small-3.2": true, // 3.x 小型系，同上
+  "pixtral-large": true, "pixtral-12b": true, // 视觉专用线
+  "mistral-7b": false, "mistral-nemo": false, "mixtral-8x7b": false, "mixtral-8x22b": false, // 旧代纯文本（已退役）
+  "codestral": false, "codestral-latest": false, // 代码专用，纯文本
+
+  // ---- Meta Muse（Meta Superintelligence Labs 2026 自研旗舰；ai.meta.com 官方博客）----
+  "muse-spark-1.1": true, // 多模态推理（工具调用/计算机操控/代码/截图 UI 理解）
+  "muse-spark": true, // 原始版本（2026-04 首发），同基座
+  "muse-glimmer": true, // 30B 开源本地智能体，多模态（截图/截图调试）
+
+  // ---- 小米 MiMo（mimo.mi.com 模型页；V2.5 系 2026-06-30 起全面替代 V2）----
+  "mimo-v2.5": true, // 310B MoE，原生全模态（图像/视频/音频/文本）
+  "mimo-v2.5-pro": true, // 旗舰推理，同基座多模态
+  "mimo-v2-omni": true, // 全模态基座（文本+视觉+语音），256K
+  "mimo-vl": true, // 视觉语言版（V2 系，已切换到 V2.5 但存量可能存在）
+  "mimo-7b": false, // 纯文本推理（数学/代码强化训练，开源 2025）
+
+  // ---- 新加坡 Agnes（Sapiens AI 实验室；agnes-ai.com 自称 "full-modality"）----
+  "agnes-2.5-pro-alpha": true, // 多模态推理模型（Artificial Analysis 2026-07-24 上线，Apache 2.0）
+  "agnes-2.5-flash": true, // 免费编程模型，平台口径全模态
+  "agnes-seallm-8b": false, // 东南亚语言优化开源 8B，纯文本（Hugging Face 描述）
 };
 
 /** 身份归一（非能力推断）：OpenRouter "作者/" 前缀剥离 + 日期快照别名剥离（厂商口径：日期 ID 是基名快照） */

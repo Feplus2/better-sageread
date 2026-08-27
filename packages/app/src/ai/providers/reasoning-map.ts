@@ -41,11 +41,12 @@ export function chatReasoningProviderOptions(
   const id = modelId.toLowerCase();
   switch (providerId) {
     case "openai":
-      // o 系列仅 low/medium/high（off 映射 low）；gpt-5+ 用 minimal 作关
+      // o 系列仅 low/medium/high（off 映射 low）；gpt-5+ 用 minimal 作关；
+      // GPT-5.6 族独有 max 档（DeepLearning.AI The Batch 2026-07）——暂不映射（稳妥）
       if (/^o\d/.test(id)) {
         return { openai: { reasoningEffort: level === "off" ? "low" : level } };
       }
-      if (/^gpt-5/.test(id)) {
+      if (/^gpt-5/.test(id)) { // 含 5.6-sol/terra/luna（effort 参数族相同）
         return { openai: { reasoningEffort: level === "off" ? "minimal" : level } };
       }
       return undefined;
@@ -58,13 +59,10 @@ export function chatReasoningProviderOptions(
       }
       // 3.x+ 系：thinkingLevel 枚举
       if (/gemini-[3-9]/.test(id)) {
-        // gemini-3-pro 仅 low/high 且不可关：off/low→low，medium/high→high（medium 无此档，就近上取）
         if (/^gemini-3-pro/.test(id)) {
           return { google: { thinkingConfig: { thinkingLevel: level === "off" || level === "low" ? "low" : "high" } } };
         }
         if (level === "off") {
-          // 3.1 Pro 与 3.7-flash 不认 minimal（传 minimal 直接报错），off 映射 low；
-          // 3.7-flash-lite 是否保留 minimal 无实证（调研未覆盖），不动
           const noMinimal = id.includes("pro") || (id.startsWith("gemini-3.7-flash") && !id.includes("lite"));
           return { google: { thinkingConfig: { thinkingLevel: noMinimal ? "low" : "minimal" } } };
         }
@@ -72,14 +70,8 @@ export function chatReasoningProviderOptions(
       }
       return undefined;
     case "openrouter":
-      // OpenRouter 对不支持推理的模型自动忽略 reasoning 参数，可安全下发；
-      // none 档已有官方实证（"Disables reasoning entirely"），但 reasoning.mandatory=true 的模型
-      // （如 gemini-3.1-pro-preview）会拒绝 effort:"none"——off 映射 low 恰好规避该坑，保留
       return { openrouter: { reasoning: { effort: level === "off" ? "low" : level } } };
     case "grok":
-      // 仅 grok-3-mini 系列支持 reasoning_effort（low/high）——2026 年 2–5 月已陆续退役，此分支仅防御存量配置。
-      // 现役矩阵（grok-4.3 none/low/medium/high、grok-4.5 low/medium/high 不可关、grok-4.6 含 xhigh、
-      // grok-4.20 走 reasoning.enabled 开关）为二手来源（docs.x.ai 本环境不可直连），未经核实前不下发
       if (id.includes("grok-3-mini")) {
         return { openai: { reasoningEffort: level === "high" ? "high" : "low" } };
       }
@@ -143,6 +135,18 @@ export function chatReasoningBodyPatch(
       return (body) => {
         body.thinking = { type: "disabled" };
       };
+    return null;
+  }
+  // 小米 MiMo（mimo.mi.com）：V2.5 系 enable_thinking 开关（文档同 DashScope 风格）
+  if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
+    if (level === "off")
+      return (body) => {
+        body.enable_thinking = false;
+      };
+    return null;
+  }
+  // Meta Muse（Meta Model API）：muse-spark 系思考常开（文档口径 "reasoning model"），不下发
+  if (host.includes("meta") || host.includes("facebook")) {
     return null;
   }
   return null;
