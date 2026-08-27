@@ -53,9 +53,14 @@ type ConvertOutcome =
   | { ok: true; paperDir?: string; degenerate?: boolean; incomplete?: boolean }
   | { ok: false; error: string };
 
-/** 解析某篇论文的源 PDF 路径：zotero_pdf_path（存在才用）→ 书库目录 source.pdf → null。
+/** 解析某篇论文的源文件路径（PDF 或 XML）：
+ * source.xml（XML 导入论文自带，优先——蓝本"有 XML 时优先 XML"，重解析重走 XML 管线
+ * 并重试远端图下载，converter exe 按扩展名自动分派）→ zotero_pdf_path（存在才用）→
+ * 书库目录 source.pdf → null。
  * 存在性检查走 Rust path_exists：plugin-fs 的 exists 有作用域限制，看不到 Zotero storage 等库外路径 */
 export async function resolvePaperSourcePdf(paperId: string, meta?: PaperMetadata | null): Promise<string | null> {
+  const sourceXml = await join(await appDataDir(), "books", paperId, "source.xml");
+  if (await invoke<boolean>("path_exists", { path: sourceXml }).catch(() => false)) return sourceXml;
   const zoteroPdf = meta?.zotero_pdf_path?.trim();
   if (zoteroPdf && (await invoke<boolean>("path_exists", { path: zoteroPdf }).catch(() => false))) return zoteroPdf;
   const sourcePdf = await join(await appDataDir(), "books", paperId, "source.pdf");
@@ -205,6 +210,19 @@ async function replaceWithConverted(item: ReparseItem, paperDir: string, oldMeta
     }
   } catch (error) {
     console.warn(`同步 references.json 失败（不影响重解析）: ${item.id}`, error);
+  }
+
+  // source.xml 随产物同步（XML 论文重解析的源文件自我更新：replace_paper_content
+  // 不覆盖它，新产物带着最新 source.xml——幂等拷贝，链路自包含不依赖外部 XML 存活）
+  try {
+    const xmlSrc = await join(paperDir, "source.xml");
+    if (await invoke<boolean>("path_exists", { path: xmlSrc }).catch(() => false)) {
+      const { readFile, writeFile } = await import("@tauri-apps/plugin-fs");
+      const xmlDst = await join(await appDataDir(), "books", item.id, "source.xml");
+      await writeFile(xmlDst, await readFile(xmlSrc));
+    }
+  } catch (error) {
+    console.warn(`同步 source.xml 失败（不影响重解析）: ${item.id}`, error);
   }
 
   // 退化循环检测（引擎换了仍可能失控，提示用户再换引擎）

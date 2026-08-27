@@ -57,7 +57,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 • manageMcp: 管理 MCP 服务器配置（list/create/update/toggle/delete；用户说"装/配某个 MCP"时用）
 • mcp_* 前缀工具：由已启用 MCP 服务器注入的外部工具（前缀后为 server 名与工具名），按需直接调用
 • managePaperFolders: 文献库文件夹管理（查看树/论文清单、创建、重命名、删除、移动、归档论文）
-• processPaper: 文献库论文翻译、句词对齐与重新解析（action=status 查状态，含译本/向量是否因重解析而陈旧 / translate 翻译（完成后自动带句词对齐）/ align 仅对齐 / reparse 用源PDF重新解析替换正文（破坏性，会弹确认）；论文专属，书籍翻译走 convertPdf；「把重解析过但翻译/向量化还是旧版本的都重做一遍」这类需求：先 status 查 stale 再逐个 translate / vectorizeBook）
+• processPaper: 文献库论文翻译、句词对齐与重新解析（action=status 查状态，含译本/向量是否因重解析而陈旧 / translate 翻译（完成后自动带句词对齐）/ align 仅对齐 / reparse 用源文件（PDF/XML）重新解析替换正文（破坏性，会弹确认）；论文专属，书籍翻译走 convertPdf；「把重解析过但翻译/向量化还是旧版本的都重做一遍」这类需求：先 status 查 stale 再逐个 translate / vectorizeBook）
 • paperSearch: 文献库语义检索（需已配置向量模型；跨论文主题调研、按主题/方法找论文用它——英文术语构造 query 命中率更高；结果自带论文标题，引用须注明出自哪篇）
 • mindmap: 生成思维导图
 • webSearch: 网络搜索

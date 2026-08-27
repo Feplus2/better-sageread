@@ -1382,12 +1382,19 @@ pub async fn save_paper(
     }
 
     // 源 PDF 留存（重解析用）：Zotero 导入走 zotero_pdf_path 回链不拷贝（用户偏好轻便），
-    // 其余导入把 source.pdf 拷进书库目录自包含；拷贝失败仅告警不阻断入库
+    // 其余导入把 source.pdf 拷进书库目录自包含；拷贝失败仅告警不阻断入库。
+    // source.xml 同理（XML 导入论文：重解析据此重走 XML 管线并重试远端图下载）
     if retain_source_pdf.unwrap_or(true) {
         let source_pdf = source.join("source.pdf");
         if source_pdf.is_file() {
             if let Err(e) = fs::copy(&source_pdf, book_dir.join("source.pdf")) {
                 log::warn!("拷贝 source.pdf 失败（{}）: {}", source_pdf.display(), e);
+            }
+        }
+        let source_xml = source.join("source.xml");
+        if source_xml.is_file() {
+            if let Err(e) = fs::copy(&source_xml, book_dir.join("source.xml")) {
+                log::warn!("拷贝 source.xml 失败（{}）: {}", source_xml.display(), e);
             }
         }
     }
