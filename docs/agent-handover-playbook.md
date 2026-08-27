@@ -303,8 +303,13 @@ CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）�
   `event-manager.ts:63` 读 `{bookIds}` 数组——全死；重分页实际靠 paginator 自身
   ResizeObserver 兜底。建议维持现状（修活会双重重分页）；要清理另立任务。
 - **多模态/思考映射表例行维护**（`vision-map.ts`/`reasoning-map.ts`）：新型号上线
-  时人工补枚举；OpenRouter 目录 API 可作校验源（TODO 在 `vision-map.ts:17-20`，
-  不做运行时依赖）。
+  时人工补枚举；OpenRouter 目录 API 可作校验源（TODO 在 `vision-map.ts` 头注，
+  不做运行时依赖）。**2026-08-27 vision-map 已重构为枚举制**（用户裁定：家族命名
+  启发式不可靠——glm-5.3-flash 不带 v 差点误杀）：显式前缀枚举表（ALLOW 55 条/
+  DENY 40 条产品线，每条带官方依据，最长前缀胜出）+ 快照日期归一 + 明文文档规则
+  （-vl/omni/qvq/ocr vs -coder-/-mt-）+ qwen3.7-max 快照日期规则 + 文本为主七家
+  兜底拦截；研究底稿 `docs/vision-map-research.md`（2026-08-24 逐家官方引用）。
+  维护 = 查官方文档往表里加一行。
 - **AI 用量统计面板**（想法池 `docs/next-round-backlog.md` 末节）：不排期。
 - **opacity 隐藏模型试验与回退**（2026-08-27）：raster 墙/pe 继承税两项归因实测成立，
   但 opacity 默认上线后被用户实测否决——常驻栅格化把合成开销扩散到原丝滑路由。
