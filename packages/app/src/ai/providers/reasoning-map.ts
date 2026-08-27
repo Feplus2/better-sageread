@@ -1,24 +1,21 @@
 /**
- * 聊天思考强度映射表（P3，2026-08-05 调研落地；2026-08-24 复核修订，见 docs/vision-map-research.md 第四节）。
+ * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，对齐 vision-map 纯静态表方案）。
  *
- * 用户可见四档：off / low / medium / high → 各端参数面。两个下发通道：
- * A. providerOptions（AI SDK 原生参数族）：openai / google / openrouter / grok
- * B. 请求体补丁（自定义端点参数）：deepseek / GLM(bigmodel) / Qwen(dashscope) / Kimi(moonshot)，
- *    经 factory 的动态 fetch 包装注入，400 报思考参数相关错误时去补丁重放（兜底端点变更）。
+ * 用户可见四档：off / low / medium / high → 各端参数面。
  *
- * 维护原则：只下发核实过的 provider+model 组合；不认识的一律返回 undefined/null（不下发防 400）。
- * 2026-08 复核关键事实（源自各厂文档；Google/xAI 为二手交叉，待有网环境复核）：
- * - Anthropic 4.6 代 budget_tokens 为 deprecated-but-functional，硬 400 从 4.7 起（含全部 5 代）；
- *   effort 枚举 low/medium/high/xhigh/max，位置在顶层 output_config.effort；但本应用 anthropic 走
- *   OpenAI 兼容通道，官方兼容页明示 reasoning_effort: Ignored → 不下发（另注意 4.7+ 连
- *   temperature/top_p/top_k 非默认值都 400）
- * - Gemini 3.x 起废弃 thinkingBudget 整数改 thinkingLevel 枚举；3.1 Pro 与 3.7-flash 不认 minimal，
- *   gemini-3-pro 仅 low/high 且不可关
- * - OpenAI 按模型子集支持 none/minimal/low/medium/high（minimal 仅初代 gpt-5 族，none 是 5.1 起的
- *   "不推理"档，xhigh 从 5.2/5.3-codex 起，max 仅 GPT-5.6 族；稳妥起见不映射 xhigh/max）
- * - DeepSeek：thinking 开关 + reasoning_effort low/high/max 三档（2026-08-13 起支持 low 档）
- * - Kimi K3：reasoning_effort low/high/max 且思考始终开启（off 映射 low）；思考常开型号
- *   （kimi-k3、kimi-k2.7-code(-highspeed)，传 disabled 直接 400）关不掉；kimi-k2-thinking 已下线
+ * 形态：MODEL_REASONING 精确型号 → 能力行，每个型号独立核实官方文档。
+ * 属性行含义：
+ *   alwaysOn：思考不可关闭（GLM-5.3 传 disabled 直接 400、Kimi-K3 无 thinking 参数）
+ *   canOff：是否支持 off 档（off = 真正关掉思考或映射到最低档）
+ *   levels：该型号支持的 effort 值（provider 原生口径，按档位从低到高）
+ *   offParam：off 档下发的参数值（"none"/"minimal"/"disabled"/"low" 等）
+ *
+ * 两个下发通道（按 provider 分派，与型号能力表正交）：
+ * A. providerOptions（AI SDK 原生）：openai / google / openrouter / grok
+ * B. 请求体补丁（自定义端点）：deepseek / GLM(bigmodel) / Qwen(dashscope) / Kimi(moonshot) / MiMo
+ *
+ * 维护：新型号上线 → 查官方文档 → 表里加一行。
+ * 调研底稿：本文件头注 + 2026-08-28 逐家搜索（OpenAI/Gemini/Claude/Grok/DeepSeek/GLM/Qwen/Kimi）。
  */
 
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
@@ -30,60 +27,179 @@ export const REASONING_LEVEL_LABELS: Record<ReasoningLevel, string> = {
   high: "高",
 };
 
-/** 通道 A：AI SDK 原生 providerOptions（streamText 直接可传）。
- * 返回值为 JSON 兼容字面量（string/number），v7 的 SharedV4ProviderOptions 要求 JSON 值域，
- * 故标 any 而非 unknown（unknown 不可赋给 JSONValue）。 */
+/** 型号思考能力行 */
+interface ReasoningCapability {
+  /** 思考始终开启，不可关闭（传 disabled/off 参数会 400 或被忽略） */
+  alwaysOn: boolean;
+  /** off 档的 provider 参数值（alwaysOn=true 时无意义）；null = 不下发任何参数 */
+  offParam: string | null;
+  /** 支持的 effort 值（provider 原生，从低到高排列）；用户 low/medium/high 向此序列映射 */
+  levels: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 精确型号枚举表（每行独立对照官方文档核实）
+// ---------------------------------------------------------------------------
+const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
+  // ---- OpenAI（developers.openai.com/api/docs/guides/reasoning）----
+  // o 系列：仅 low/medium/high；GPT-5.x：minimal 作关；GPT-5.1+ 有 none；GPT-5.6 独有 max
+  "o1": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "o1-pro": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "o1-mini": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "o3": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "o3-pro": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "o4-mini": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"] },
+  "gpt-5": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gpt-5-pro": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gpt-5-mini": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gpt-5-nano": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gpt-5.1": { alwaysOn: false, offParam: "none", levels: ["none", "minimal", "low", "medium", "high"] },
+  "gpt-5.1-mini": { alwaysOn: false, offParam: "none", levels: ["none", "minimal", "low", "medium", "high"] },
+  "gpt-5.2": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high", "xhigh"] },
+  "gpt-5.3-codex": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high", "xhigh"] },
+  "gpt-5.4": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+  "gpt-5.5": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+  "gpt-5.6-sol": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high", "max"] },
+  "gpt-5.6-terra": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+  "gpt-5.6-luna": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+
+  // ---- Google Gemini（ai.google.dev/gemini-api/docs/thinking + /gemini-3）----
+  // 2.5 系走 thinkingBudget 整数；3.x 走 thinkingLevel 枚举；Pro 与 Flash 档位集不同
+  "gemini-2.5-pro": { alwaysOn: false, offParam: "budget:0", levels: ["budget:0", "budget:1024", "budget:8192", "budget:-1"] },
+  "gemini-2.5-flash": { alwaysOn: false, offParam: "budget:0", levels: ["budget:0", "budget:1024", "budget:8192", "budget:-1"] },
+  "gemini-2.5-flash-lite": { alwaysOn: false, offParam: "budget:0", levels: ["budget:0", "budget:1024", "budget:8192", "budget:-1"] },
+  "gemini-3-pro": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"] }, // 官方 "cannot be turned off"
+  "gemini-3-flash": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gemini-3.1-pro": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"] },
+  "gemini-3.1-flash": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gemini-3.5-flash": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gemini-3.5-flash-lite": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gemini-3.6-flash": { alwaysOn: false, offParam: "minimal", levels: ["minimal", "low", "medium", "high"] },
+  "gemini-3.7-flash": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"] }, // minimal 已移除（Reddit/eesel 实证）
+
+  // ---- xAI Grok（docs.x.ai/developers/model-capabilities/text/reasoning）----
+  // Grok 4.3+ 均支持 reasoning_effort（none/low/medium/high）；4.5 思考常开但 effort 可调
+  "grok-4": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+  "grok-4.3": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] },
+  "grok-4.5": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"] }, // 思考常开
+  "grok-4.6": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high", "xhigh"] }, // 含 xhigh
+  "grok-4.20": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"] }, // 走 reasoning.enabled
+
+  // ---- DeepSeek（api-docs.deepseek.com/guides/thinking_mode + updates）----
+  // V4：thinking 开关 + reasoning_effort low/high/max（无 medium）；2026-08-13 changelog
+  "deepseek-v4-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: ["low", "high", "max"] },
+  "deepseek-v4-pro": { alwaysOn: false, offParam: "thinking:disabled", levels: ["low", "high", "max"] },
+  "deepseek-v4-flash-vision-exp": { alwaysOn: false, offParam: "thinking:disabled", levels: ["low", "high", "max"] },
+
+  // ---- 智谱 GLM（docs.bigmodel.cn/cn/guide/capabilities/thinking）----
+  // GLM-5.3/5.3-Flash：思考不可关闭（传 disabled 直接 400）；reasoning_effort low/high/max
+  // GLM-5.2 及以下：thinking 开关；GLM-4.6 及以下仅开关无 effort
+  "glm-5.3": { alwaysOn: true, offParam: null, levels: ["low", "high", "max"] },
+  "glm-5.3-flash": { alwaysOn: true, offParam: null, levels: ["low", "high", "max"] },
+  "glm-5.2": { alwaysOn: false, offParam: "thinking:disabled", levels: ["low", "high", "max"] },
+  "glm-5.1": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "glm-5": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "glm-4.7": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "glm-4.6": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "glm-4.6-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "glm-5v-turbo": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+
+  // ---- 阿里 Qwen/DashScope（help.aliyun.com/zh/model-studio/deep-thinking）----
+  // enable_thinking 开关 + thinking_budget 整数（1-32768，默认 4000）
+  // 3.5-3.8 全系支持；部分开源型号（3.8-2.4t）强制开启
+  "qwen3.5-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.5-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.6-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.6-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.7-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.7-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.8-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.8-27b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.8-flash-next": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qwen3.8-2.4t": { alwaysOn: true, offParam: null, levels: ["budget"] }, // 开源 2.4T 强制开启
+  "qwen3-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "qvq-max": { alwaysOn: true, offParam: null, levels: [] }, // 视觉推理"仅思考"系
+
+  // ---- 月之暗面 Kimi（platform.kimi.ai/docs/guide/use-thinking-models）----
+  // K3：思考始终开启，无 thinking 参数，用顶层 reasoning_effort low/high/max（默认 max）
+  // K2.7-code：思考常开；K2.x：thinking 开关
+  "kimi-k3": { alwaysOn: true, offParam: null, levels: ["low", "high", "max"] },
+  "kimi-k2.7-code": { alwaysOn: true, offParam: null, levels: [] },
+  "kimi-k2.7-code-highspeed": { alwaysOn: true, offParam: null, levels: [] },
+  "kimi-k2.6": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+  "kimi-k2.5": { alwaysOn: false, offParam: "thinking:disabled", levels: [] },
+
+  // ---- Cohere（docs.cohere.com/docs/models）----
+  // Command A Reasoning / A+：推理模型；无标准 effort 参数
+  "command-a-reasoning": { alwaysOn: true, offParam: null, levels: [] },
+  "command-a-plus": { alwaysOn: true, offParam: null, levels: [] },
+
+  // ---- 小米 MiMo（mimo.mi.com/docs）----
+  "mimo-v2.5": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+  "mimo-v2.5-pro": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["budget"] },
+};
+
+// ---------------------------------------------------------------------------
+// 通道 A：AI SDK 原生 providerOptions（streamText 直接可传）
+// ---------------------------------------------------------------------------
 export function chatReasoningProviderOptions(
   providerId: string,
   modelId: string,
   level: ReasoningLevel,
 ): Record<string, Record<string, any>> | undefined {
   const id = modelId.toLowerCase();
+
   switch (providerId) {
-    case "openai":
-      // o 系列仅 low/medium/high（off 映射 low）；gpt-5+ 用 minimal 作关；
-      // GPT-5.6 族独有 max 档（DeepLearning.AI The Batch 2026-07）——暂不映射（稳妥）
-      if (/^o\d/.test(id)) {
-        return { openai: { reasoningEffort: level === "off" ? "low" : level } };
+    case "openai": {
+      const cap = lookupCap(id);
+      if (!cap) return undefined;
+      if (cap.alwaysOn || level === "off") {
+        // alwaysOn：off/low 都映射到最低档；可关的 off 用 offParam
+        const offVal = cap.alwaysOn ? cap.levels[0] : cap.offParam;
+        if (offVal === null) return undefined;
+        return { openai: { reasoningEffort: offVal } };
       }
-      if (/^gpt-5/.test(id)) { // 含 5.6-sol/terra/luna（effort 参数族相同）
-        return { openai: { reasoningEffort: level === "off" ? "minimal" : level } };
-      }
-      return undefined;
+      return { openai: { reasoningEffort: mapLevel(level, cap.levels) } };
+    }
     case "google":
-    case "gemini":
-      // 2.5 系：thinkingBudget 整数（0=关，-1=动态）
-      if (/gemini-2\.5/.test(id)) {
+    case "gemini": {
+      const cap = lookupCap(id);
+      if (!cap) return undefined;
+      // 2.5 系走 budget
+      if (cap.levels[0]?.startsWith("budget:")) {
         const budget = level === "off" ? 0 : level === "low" ? 1024 : level === "medium" ? 8192 : -1;
         return { google: { thinkingConfig: { thinkingBudget: budget } } };
       }
-      // 3.x+ 系：thinkingLevel 枚举
-      if (/gemini-[3-9]/.test(id)) {
-        if (/^gemini-3-pro/.test(id)) {
-          return { google: { thinkingConfig: { thinkingLevel: level === "off" || level === "low" ? "low" : "high" } } };
-        }
-        if (level === "off") {
-          const noMinimal = id.includes("pro") || (id.startsWith("gemini-3.7-flash") && !id.includes("lite"));
-          return { google: { thinkingConfig: { thinkingLevel: noMinimal ? "low" : "minimal" } } };
-        }
-        return { google: { thinkingConfig: { thinkingLevel: level } } };
+      // 3.x 走 level 枚举
+      if (cap.alwaysOn || level === "off") {
+        const offVal = cap.alwaysOn ? cap.levels[0] : cap.offParam;
+        if (offVal === null) return undefined;
+        return { google: { thinkingConfig: { thinkingLevel: offVal } } };
       }
-      return undefined;
+      return { google: { thinkingConfig: { thinkingLevel: mapLevel(level, cap.levels) } } };
+    }
     case "openrouter":
       return { openrouter: { reasoning: { effort: level === "off" ? "low" : level } } };
-    case "grok":
-      if (id.includes("grok-3-mini")) {
-        return { openai: { reasoningEffort: level === "high" ? "high" : "low" } };
+    case "grok": {
+      const cap = lookupCap(id);
+      if (!cap) return undefined;
+      if (cap.alwaysOn || level === "off") {
+        const offVal = cap.alwaysOn ? cap.levels[0] : cap.offParam;
+        if (offVal === null) return undefined;
+        return { openai: { reasoningEffort: offVal } };
       }
-      return undefined;
+      return { openai: { reasoningEffort: mapLevel(level, cap.levels) } };
+    }
     default:
       return undefined;
   }
 }
 
+// ---------------------------------------------------------------------------
+// 通道 B：自定义端点请求体补丁
+// ---------------------------------------------------------------------------
 export type ReasoningBodyPatch = (body: Record<string, unknown>) => void;
 
-/** 通道 B：自定义端点请求体补丁；不认识或关不掉的返回 null（不乱发防 400） */
 export function chatReasoningBodyPatch(
   providerId: string,
   baseUrl: string | undefined,
@@ -93,61 +209,92 @@ export function chatReasoningBodyPatch(
   const id = (modelId ?? "").toLowerCase();
   const host = (baseUrl ?? "").toLowerCase();
 
-  // DeepSeek：thinking 开关 + reasoning_effort low/high/max 三档
-  // （2026-08-13 官方 Change Log：V4-Pro/V4-Flash 支持 low/high/max；off 走 thinking disabled）
+  // DeepSeek：thinking 开关 + reasoning_effort low/high/max
   if (providerId === "deepseek") {
     if (level === "off")
-      return (body) => {
-        body.thinking = { type: "disabled" };
-      };
+      return (body) => { body.thinking = { type: "disabled" }; };
     return (body) => {
       body.reasoning_effort = level === "low" ? "low" : level === "high" ? "max" : "high";
     };
   }
-  // GLM（智谱 bigmodel）：仅开关有实证
+  // GLM（bigmodel）：5.3 系 alwaysOn 不下发 disabled；5.2 及以下走开关
   if (host.includes("bigmodel.cn")) {
-    if (level === "off")
+    const cap = lookupCap(id);
+    if (cap?.alwaysOn) {
+      // 5.3/5.3-flash：思考不可关，仅调 effort
       return (body) => {
-        body.thinking = { type: "disabled" };
-      };
-    return null;
-  }
-  // Qwen（阿里 dashscope）：仅开关有实证（enable_thinking）
-  if (host.includes("dashscope")) {
-    if (level === "off")
-      return (body) => {
-        body.enable_thinking = false;
-      };
-    return null;
-  }
-  // Kimi（Moonshot）：K3 系 reasoning_effort low/high/max（K3 思考始终开启无 off，off/low 映射 low）；
-  // K2.x 混合模型仅开关；思考常开型号（kimi-k2.7-code(-highspeed)；kimi-k2-thinking 已下线）关不掉，
-  // 传 disabled 直接 400 → 不下发
-  if (host.includes("moonshot") || host.includes("kimi.com") || host.includes("kimi.ai")) {
-    if (/^(kimi-)?k3/.test(id)) {
-      const effort = level === "off" || level === "low" ? "low" : level === "high" ? "max" : "high";
-      return (body) => {
-        body.reasoning_effort = effort;
+        body.reasoning_effort = level === "low" ? "low" : level === "high" ? "max" : "high";
       };
     }
-    if (/^(kimi-)?k2\.7-code/.test(id) || id.includes("thinking")) return null;
     if (level === "off")
+      return (body) => { body.thinking = { type: "disabled" }; };
+    // 5.2 支持 effort；4.x 及以下仅开关
+    if (cap && cap.levels.length > 0) {
       return (body) => {
-        body.thinking = { type: "disabled" };
+        body.reasoning_effort = level === "low" ? "low" : level === "high" ? "max" : "high";
       };
+    }
     return null;
   }
-  // 小米 MiMo（mimo.mi.com）：V2.5 系 enable_thinking 开关（文档同 DashScope 风格）
+  // Qwen（dashscope）：enable_thinking 开关 + thinking_budget
+  if (host.includes("dashscope")) {
+    if (level === "off")
+      return (body) => { body.enable_thinking = false; };
+    // 开启时调 budget（1024/8192/16384/32768 映射 low/medium/high/max）
+    const budget = level === "low" ? 1024 : level === "medium" ? 8192 : 32768;
+    return (body) => {
+      body.enable_thinking = true;
+      body.thinking_budget = budget;
+    };
+  }
+  // Kimi（moonshot）：K3 alwaysOn + reasoning_effort；K2.7-code alwaysOn 不下发；K2.x 走开关
+  if (host.includes("moonshot") || host.includes("kimi.com") || host.includes("kimi.ai")) {
+    const cap = lookupCap(id);
+    if (cap?.alwaysOn) {
+      if (cap.levels.length === 0) return null; // K2.7-code：常开无参数
+      // K3：reasoning_effort low/high/max
+      const effort = level === "off" || level === "low" ? "low" : level === "high" ? "max" : "high";
+      return (body) => { body.reasoning_effort = effort; };
+    }
+    if (level === "off")
+      return (body) => { body.thinking = { type: "disabled" }; };
+    return null;
+  }
+  // MiMo（mimo）
   if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
     if (level === "off")
-      return (body) => {
-        body.enable_thinking = false;
-      };
-    return null;
-  }
-  // Meta Muse（Meta Model API）：muse-spark 系思考常开（文档口径 "reasoning model"），不下发
-  if (host.includes("meta") || host.includes("facebook")) {
+      return (body) => { body.enable_thinking = false; };
     return null;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// 工具函数
+// ---------------------------------------------------------------------------
+
+/** 精确查表（含前缀剥离：日期快照别名） */
+function lookupCap(modelId: string): ReasoningCapability | undefined {
+  const slug = modelId.toLowerCase();
+  const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, "");
+  return MODEL_REASONING[slug] ?? MODEL_REASONING[stripped] ?? findLongestPrefix(slug);
+}
+
+/** 无精确命中时按最长前缀找（gpt-5.1-codex → gpt-5.1；gemini-3.1-flash-lite → gemini-3.1-flash） */
+function findLongestPrefix(slug: string): ReasoningCapability | undefined {
+  let best = "";
+  let cap: ReasoningCapability | undefined;
+  for (const [key, val] of Object.entries(MODEL_REASONING)) {
+    if (slug.startsWith(key) && key.length > best.length) {
+      best = key;
+      cap = val;
+    }
+  }
+  return cap;
+}
+
+/** 用户档位 → provider 档位（就近映射到 levels 序列中最近的值） */
+function mapLevel(level: ReasoningLevel, levels: string[]): string {
+  const idx = level === "low" ? 0 : level === "medium" ? Math.floor(levels.length / 2) : levels.length - 1;
+  return levels[Math.min(idx, levels.length - 1)] ?? levels[0];
 }
