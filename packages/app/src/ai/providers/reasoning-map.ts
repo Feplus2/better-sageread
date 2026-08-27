@@ -127,14 +127,86 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "kimi-k2.7-code-highspeed": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
   "kimi-k2.6": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
   "kimi-k2.5": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "kimi-k2-thinking": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "kimi-k2-turbo": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "kimi-k2": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
 
   // ---- Cohere（docs.cohere.com/docs/models）----
   "command-a-reasoning": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
   "command-a-plus": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "command-a": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+  "command-a-vision": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+  "command-r-plus": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+  "command-r": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
 
   // ---- 小米 MiMo（mimo.mi.com/docs）----
   "mimo-v2.5": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "mimo-v2.5-pro": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "mimo-v2-omni": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+
+  // ---- OpenAI 旧系（仍在售，官方 Models 页全系 same-modality）----
+  "gpt-4o": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+  "gpt-4o-mini": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+  "gpt-4.1": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+  "gpt-4.1-mini": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+  "gpt-4.1-nano": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+  "o3-mini": { alwaysOn: false, offParam: "low", levels: ["low", "medium", "high"], transport: "effort" },
+
+  // ---- Qwen 3.5+ 变体（DashScope 官方文档确认全系支持 enable_thinking + thinking_budget）----
+  "qwen3.5-32b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.5-72b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.5-omni": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.5-ocr": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3-vl-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3-vl-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3-coder-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3-coder-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+
+  // ---- GLM 4.x 变体（bigmodel 文档全系 thinking 开关；v 系视觉同基座）----
+  "glm-4.5": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4.5-air": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4.5-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4.5v": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4.1v": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4.1v-thinking": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "glm-4v-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4v-plus": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4-plus": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4-air": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "glm-4-long": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+
+  // ---- DeepSeek 旧系（已退役，防御存量配置）----
+  "deepseek-reasoner": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "deepseek-chat": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+  "deepseek-coder": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+
+  // ---- MiniMax（platform.minimax.io；thinking 开关，无 effort 档位，预算自适应）----
+  "minimax-m3": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "minimax-m2.5": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "minimax-h3": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+
+  // ---- 百度文心 ERNIE（千帆平台 cloud.baidu.com/doc/qianfan；enable_thinking 开关）----
+  "ernie-5.0": { alwaysOn: false, offParam: "enable_thinking:false", levels: [], transport: "switch" },
+  "ernie-5.1": { alwaysOn: false, offParam: "enable_thinking:false", levels: [], transport: "switch" },
+  "ernie-x1.1": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "ernie-4.5-vl-28b-a3b": { alwaysOn: false, offParam: "enable_thinking:false", levels: [], transport: "switch" },
+  "ernie-4.5-vl-28b-a3b-thinking": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "ernie-4.5-turbo-128k": { alwaysOn: false, offParam: "enable_thinking:false", levels: [], transport: "switch" },
+
+  // ---- 腾讯混元 Hunyuan（腾讯云 TokenHub；thinking 开关 + reasoning_content 回传）----
+  "hunyuan-hy3-preview": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "hunyuan-turbo": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+  "hunyuan-pro": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
+
+  // ---- Grok 旧系/专用（docs.x.ai；3-mini 退役前支持 effort）----
+  "grok-3": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
+  "grok-build-0.1": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
+  "grok-code-fast-1": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
+
+  // ---- Skywork R1V（视觉思维链推理模型 → alwaysOn）----
+  "skywork-r1v": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "skywork-r1v-3": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
 };
 
 // ---------------------------------------------------------------------------
