@@ -18,6 +18,8 @@ export type ReasoningLevel = string;
 export const REASONING_LEVEL_DISPLAY: Record<string, string> = {
   off: "关闭",
   none: "关闭",
+  on: "开启",
+  auto: "自动",
   minimal: "极低",
   low: "低",
   medium: "中",
@@ -34,8 +36,10 @@ interface ReasoningCapability {
   offParam: string | null;
   /** 该型号支持的 effort 值（provider 原生，从低到高 = UI 渲染顺序） */
   levels: string[];
-  /** 传输格式：effort（reasoning_effort/thinkingLevel 直传）| budget（Qwen thinking_budget）| switch（仅开关） */
+  /** 传输格式：effort（reasoning_effort/thinkingLevel 直传）| budget（Qwen thinking_budget 滑块）| switch（仅开关） */
   transport: "effort" | "budget" | "switch";
+  /** budget 型的滑块上限（Qwen 默认 32768）；budget 型必填 */
+  maxBudget?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,17 +106,17 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   // ---- 阿里 Qwen/DashScope（help.aliyun.com/zh/model-studio/deep-thinking）----
   // enable_thinking 开关 + thinking_budget 整数（1-32768，默认 4000）
   // UI 呈现 off/low/medium/high 四档，内部映射 budget 数值
-  "qwen3.5-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.5-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.6-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.6-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.7-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.7-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.8-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.8-27b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.8-flash-next": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3.8-2.4t": { alwaysOn: true, offParam: null, levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "qwen3-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
+  "qwen3.5-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.5-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.6-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.6-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.7-plus": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.7-flash": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.8-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.8-27b": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.8-flash-next": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3.8-2.4t": { alwaysOn: true, offParam: null, levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "qwen3-max": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
   "qvq-max": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
 
   // ---- 月之暗面 Kimi（platform.kimi.ai/docs/guide/use-thinking-models）----
@@ -127,22 +131,34 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "command-a-plus": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
 
   // ---- 小米 MiMo（mimo.mi.com/docs）----
-  "mimo-v2.5": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
-  "mimo-v2.5-pro": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget" },
+  "mimo-v2.5": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
+  "mimo-v2.5-pro": { alwaysOn: false, offParam: "enable_thinking:false", levels: ["off", "low", "medium", "high"], transport: "budget", maxBudget: 32768 },
 };
 
 // ---------------------------------------------------------------------------
-// 公共接口：UI 动态渲染选项
+// 公共接口：UI 动态渲染
 // ---------------------------------------------------------------------------
 
-/** 获取模型支持的思考档位（UI 渲染用）；不认识或无档位返回空数组 */
+/** 模型的思考传输类型（UI 选择控件形态的依据） */
+export type ReasoningTransport = "effort" | "budget" | "switch" | "auto";
+export function getReasoningTransport(modelId: string | undefined): ReasoningTransport {
+  const cap = lookupCap(modelId ?? "");
+  if (!cap) return "auto"; // 不在表内 → 自动（不下发参数，模型自行决定）
+  return cap.transport;
+}
+
+/** 获取模型支持的思考档位（effort 型 UI 渲染用）；switch 型返回 ["off","on"] */
 export function getReasoningOptions(modelId: string | undefined): string[] {
   const cap = lookupCap(modelId ?? "");
-  if (!cap) return [];
-  // switch 型只有 off/on（levels 为空）→ 呈现 off；alwaysOn 无选项
-  if (cap.transport === "switch") return cap.alwaysOn ? [] : ["off"];
-  // budget 型的 levels 就是 UI 档位（off/low/medium/high）
+  if (!cap) return []; // auto 型无选项
+  if (cap.transport === "switch") return cap.alwaysOn ? [] : ["off", "on"];
   return cap.levels;
+}
+
+/** budget 型的滑块上限（默认 32768） */
+export function getMaxBudget(modelId: string | undefined): number {
+  const cap = lookupCap(modelId ?? "");
+  return cap?.maxBudget ?? 32768;
 }
 
 /** 获取档位显示名 */
@@ -210,6 +226,9 @@ export function chatReasoningBodyPatch(
   const host = (baseUrl ?? "").toLowerCase();
   const cap = lookupCap(id);
 
+  // auto / on 特殊值处理
+  if (level === "auto") return null; // 不下发任何参数
+
   // DeepSeek
   if (providerId === "deepseek") {
     if (level === "off" || level === "none")
@@ -225,20 +244,31 @@ export function chatReasoningBodyPatch(
     if (level === "off" || level === "none") {
       return (body) => { body.thinking = { type: "disabled" }; };
     }
+    if (level === "on") {
+      return (body) => { body.thinking = { type: "enabled" }; };
+    }
     if (cap.levels.length > 0) {
       return (body) => { body.reasoning_effort = level; };
     }
-    return null; // 仅开关的旧型号，非 off 不下发
+    return null;
   }
-  // Qwen（dashscope）
+  // Qwen（dashscope）— budget 型：level 是数字字符串（0 = off）
   if (host.includes("dashscope")) {
-    if (level === "off" || level === "none") {
+    const budget = Number.parseInt(level, 10);
+    if (budget === 0 || level === "off" || level === "none") {
       return (body) => { body.enable_thinking = false; };
     }
-    const budget = level === "low" ? 1024 : level === "medium" ? 8192 : 32768;
+    if (Number.isFinite(budget) && budget > 0) {
+      return (body) => {
+        body.enable_thinking = true;
+        body.thinking_budget = budget;
+      };
+    }
+    // 兼容旧的枚举值（低/中/高 → budget 数值）
+    const legacy = level === "low" ? 1024 : level === "medium" ? 8192 : 32768;
     return (body) => {
       body.enable_thinking = true;
-      body.thinking_budget = budget;
+      body.thinking_budget = legacy;
     };
   }
   // Kimi（moonshot）
@@ -251,12 +281,25 @@ export function chatReasoningBodyPatch(
     if (level === "off" || level === "none") {
       return (body) => { body.thinking = { type: "disabled" }; };
     }
+    if (level === "on") {
+      return (body) => { body.thinking = { type: "enabled" }; };
+    }
     return null;
   }
-  // MiMo
+  // MiMo — budget 型同 Qwen
   if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
-    if (level === "off" || level === "none") {
+    const budget = Number.parseInt(level, 10);
+    if (budget === 0 || level === "off" || level === "none") {
       return (body) => { body.enable_thinking = false; };
+    }
+    if (Number.isFinite(budget) && budget > 0) {
+      return (body) => {
+        body.enable_thinking = true;
+        body.thinking_budget = budget;
+      };
+    }
+    if (level === "on") {
+      return (body) => { body.enable_thinking = true; };
     }
     return null;
   }
