@@ -29,8 +29,6 @@ const UNIT_OPTIONS: { value: StatUnit; label: string }[] = [
   { value: "all", label: "全部" },
 ];
 
-const unitLabel = (u: StatUnit) => UNIT_OPTIONS.find((o) => o.value === u)?.label ?? "";
-
 /** 窗口起点：今日 0 点 / 本周周一 / 本月 1 日 / 今年 1 月 1 日；全部 = null 不过滤 */
 function windowStartMs(unit: StatUnit): number | null {
   const now = dayjs();
@@ -175,57 +173,25 @@ const StatisticsPage = () => {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="阅读会话"
-          value={totalSessions.toString()}
-          icon={<BookIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}阅读次数`}
-        />
-        <StatCard
-          title="阅读时长"
-          value={formatDuration(totalDuration)}
-          icon={<ClockIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}累计阅读时长`}
-        />
-        <StatCard
-          title="活跃天数"
-          value={activeDays.toString()}
-          icon={<CalendarIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}有阅读记录的天数`}
-        />
+        <StatCard title="阅读会话" value={totalSessions.toString()} icon={<BookIcon className="h-4 w-4" />} />
+        <StatCard title="阅读时长" value={formatDuration(totalDuration)} icon={<ClockIcon className="h-4 w-4" />} />
+        <StatCard title="活跃天数" value={activeDays.toString()} icon={<CalendarIcon className="h-4 w-4" />} />
         <StatCard
           title="平均每日会话"
           value={averageSessionsPerDay.toFixed(1)}
           icon={<TrendingUpIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}活跃日平均会话数`}
         />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="输入 Token"
-          value={formatTokens(inputTokens)}
-          icon={<ArrowDownToLine className="h-4 w-4" />}
-          description={`${unitLabel(unit)}累计输入用量`}
-        />
+        <StatCard title="输入 Token" value={formatTokens(inputTokens)} icon={<ArrowDownToLine className="h-4 w-4" />} />
         <StatCard
           title="输出 Token"
           value={formatTokens(outputTokens)}
           icon={<ArrowUpFromLine className="h-4 w-4" />}
-          description={`${unitLabel(unit)}累计输出用量`}
         />
-        <StatCard
-          title="AI 请求数"
-          value={winUsage.length.toString()}
-          icon={<BotIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}AI 回复次数`}
-        />
-        <StatCard
-          title="使用模型数"
-          value={modelCount.toString()}
-          icon={<LayersIcon className="h-4 w-4" />}
-          description={`${unitLabel(unit)}参与对话的模型`}
-        />
+        <StatCard title="AI 请求数" value={winUsage.length.toString()} icon={<BotIcon className="h-4 w-4" />} />
+        <StatCard title="使用模型数" value={modelCount.toString()} icon={<LayersIcon className="h-4 w-4" />} />
       </div>
 
       <div className="rounded-lg border border-neutral-150 p-4 dark:border-neutral-800">

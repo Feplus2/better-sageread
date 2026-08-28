@@ -24,7 +24,14 @@
 **验证**：单测不受影响（纯文案）；CDP 实盘让全局助手执行「向量化那篇讲 XXX 的论文」，
 观察是否正确走 getBooks → vectorizeBook 链路（审计日志复盘）。
 
-## 2. getBooks / status 发现能力增强（小量）
+## 2. getBooks / status 发现能力增强（小量）—— ✅ 已落地（2026-08-28，随 AI 用量面板同日）
+
+**落地口径（用户拍板：文献库大几百篇常见，limit 提高 + 可再加翻页）**：getBooks 新增
+`fields: "minimal"`（仅 id/标题/类型，走轻量 `get_books` 免 status join）+ `offset` 翻页
+（SQL 级，updatedAt 降序）；limit 分层上限——minimal 1000 / full 200（原 50）。
+kind/status 为查询后过滤的既有语义保持（筛选态翻页可能跳条，工具描述已注明）。
+
+**原方案记录**：
 
 **背景**：`getBooks` limit 上限 50（库 130+ 篇不够列）；`vectorizeBook action=status` 的 items
 本就返回全量 id+title（`:172-198`）——零代码可用，只是描述没点明。

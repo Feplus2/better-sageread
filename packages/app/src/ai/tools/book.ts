@@ -35,6 +35,47 @@ async function loadBookList(options: BookQueryOptions): Promise<BookWithStatus[]
   return await invoke<BookWithStatus[]>("get_books_with_status", { options });
 }
 
+async function loadBookBriefList(options: BookQueryOptions): Promise<SimpleBook[]> {
+  return await invoke<SimpleBook[]>("get_books", { options });
+}
+
+/** 统一格式化：brief=仅 id/标题/类型（minimal 模式）；full=完整状态信息 */
+function formatBookResult(book: BookWithStatus | SimpleBook, briefOnly: boolean) {
+  const { status: statusInfo, ...rest } = book as BookWithStatus;
+  const basic = rest as SimpleBook;
+  const kindLabel = isPaperFormat(basic.format) ? "paper" : "book";
+  if (briefOnly) {
+    return { id: basic.id, title: basic.title, kind: kindLabel };
+  }
+  const progressPercent =
+    statusInfo && statusInfo.progressTotal > 0
+      ? Number(((statusInfo.progressCurrent / statusInfo.progressTotal) * 100).toFixed(1))
+      : null;
+  return {
+    id: basic.id,
+    title: basic.title,
+    author: basic.author,
+    format: basic.format,
+    kind: kindLabel,
+    language: basic.language,
+    tags: basic.tags ?? [],
+    createdAt: basic.createdAt,
+    updatedAt: basic.updatedAt,
+    status: statusInfo
+      ? {
+          state: statusInfo.status,
+          label: STATUS_LABELS[statusInfo.status],
+          progressCurrent: statusInfo.progressCurrent,
+          progressTotal: statusInfo.progressTotal,
+          progressPercent,
+          lastReadAt: statusInfo.lastReadAt ?? null,
+          startedAt: statusInfo.startedAt ?? null,
+          completedAt: statusInfo.completedAt ?? null,
+        }
+      : null,
+  };
+}
+
 export const getBooksTool = tool({
   description: `查询书库书籍/文献库论文的列表和基本信息，支持按类型、状态和关键词筛选。
 
@@ -47,6 +88,8 @@ export const getBooksTool = tool({
 • 支持按条目 ID 精确查询（不受 kind 过滤）
 • 支持按书名/作者模糊搜索
 • 支持按阅读状态筛选
+• 列表按 updatedAt 降序；fields=minimal 配大 limit（上限 1000）可全量清点大文献库，
+  超出再配 offset 翻页；kind/status 为查询后过滤，筛选态下翻页可能跳条
 
 📊 **返回内容**：
 条目列表，包含标题、作者、格式、类型（书籍/论文）、阅读状态和进度等信息`,
@@ -62,7 +105,18 @@ export const getBooksTool = tool({
         "条目类型：book=仅书籍（书库）, paper=仅论文（文献库）, all=全部（默认）。用户提到书/论文时务必传对应值",
       ),
     status: z.enum(["unread", "reading", "completed"]).optional().describe("筛选阅读状态"),
-    limit: z.number().int().min(1).max(50).default(10).describe("最多返回条数，默认10"),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .default(10)
+      .describe("最多返回条数，默认10。fields=minimal 上限 1000（文献库大几百篇全量清点够用）；full 上限 200"),
+    offset: z.number().int().min(0).optional().describe("翻页偏移（配合 limit；列表按 updatedAt 降序）"),
+    fields: z
+      .enum(["full", "minimal"])
+      .optional()
+      .describe("minimal=仅 id/标题/类型，轻量适合全量清点或挑 ID（配大 limit）；full=完整信息（默认）"),
   }),
 
   execute: async ({
@@ -72,6 +126,8 @@ export const getBooksTool = tool({
     kind,
     status,
     limit,
+    offset,
+    fields,
   }: {
     reasoning: string;
     bookId?: string;
@@ -79,73 +135,64 @@ export const getBooksTool = tool({
     kind?: LibraryKind;
     status?: BookStatusState;
     limit?: number;
+    offset?: number;
+    fields?: "full" | "minimal";
   }) => {
     try {
-      let rawBooks: BookWithStatus[] = [];
+      // limit 分层上限：minimal 轻量行可到 1000，full 完整行封 200（P4-2：文献库大几百篇全量清点）
+      const limitCap = fields === "minimal" ? 1000 : 200;
+      const effLimit = Math.min(limit || 10, limitCap);
+      const brief = fields === "minimal";
+
+      let results: Array<Record<string, unknown>> = [];
 
       // 1. 如果指定了 bookId，精确查询（不受 kind 过滤，返回中标注类型）
       if (bookId?.trim()) {
         const single = await loadSingleBook(bookId.trim());
         if (single) {
-          rawBooks = [single];
+          results = [formatBookResult(single, brief)];
         }
       } else {
-        // 2. 否则查询列表
+        // 2. 否则查询列表（offset 翻页走 SQL；kind/status 为查询后过滤——
+        //    筛选态下翻页可能跳条，全量清点请用 fields=minimal + 大 limit）
         const queryOptions: BookQueryOptions = {
-          limit: limit || 10,
+          limit: effLimit,
+          offset: offset ?? 0,
           sortBy: "updatedAt",
           sortOrder: "desc",
           ...(search ? { searchQuery: search.trim() } : {}),
         };
-        rawBooks = await loadBookList(queryOptions);
-        // 3. 按类型过滤（书籍/论文区分）
-        rawBooks = filterByKind(rawBooks, kind);
+        if (brief) {
+          const list = filterByKind(await loadBookBriefList(queryOptions), kind);
+          if (status) {
+            // brief 行无 status：状态筛选须完整数据，这里升格为 full 语义不可行——直接提示
+            return {
+              results: [],
+              meta: {
+                reasoning,
+                total: 0,
+                note: "fields=minimal 不支持 status 筛选（无状态数据），请去掉 status 或改用 full",
+                filters: {
+                  bookId: null,
+                  search: search ?? null,
+                  kind: kind ?? "all",
+                  status,
+                  limit: effLimit,
+                  offset: offset ?? 0,
+                  fields: "minimal",
+                },
+              },
+            };
+          }
+          results = list.slice(0, effLimit).map((b) => formatBookResult(b, true));
+        } else {
+          let rawBooks = filterByKind(await loadBookList(queryOptions), kind);
+          if (status) {
+            rawBooks = rawBooks.filter((book) => book.status?.status === status);
+          }
+          results = rawBooks.slice(0, effLimit).map((b) => formatBookResult(b, false));
+        }
       }
-
-      // 4. 按状态筛选
-      if (status) {
-        rawBooks = rawBooks.filter((book) => book.status?.status === status);
-      }
-
-      // 5. 限制返回数量
-      if (!bookId) {
-        rawBooks = rawBooks.slice(0, limit || 10);
-      }
-
-      // 6. 格式化返回数据（统一使用 results 字段）
-      const results = rawBooks.map((book) => {
-        const { status: statusInfo, ...rest } = book;
-        const basic = rest as SimpleBook;
-
-        const progressPercent =
-          statusInfo && statusInfo.progressTotal > 0
-            ? Number(((statusInfo.progressCurrent / statusInfo.progressTotal) * 100).toFixed(1))
-            : null;
-
-        return {
-          id: basic.id,
-          title: basic.title,
-          author: basic.author,
-          format: basic.format,
-          kind: isPaperFormat(basic.format) ? "paper" : "book",
-          language: basic.language,
-          tags: basic.tags ?? [],
-          createdAt: basic.createdAt,
-          updatedAt: basic.updatedAt,
-          status: statusInfo
-            ? {
-                state: statusInfo.status,
-                label: STATUS_LABELS[statusInfo.status],
-                progressCurrent: statusInfo.progressCurrent,
-                progressTotal: statusInfo.progressTotal,
-                progressPercent,
-                lastReadAt: statusInfo.lastReadAt ?? null,
-                startedAt: statusInfo.startedAt ?? null,
-                completedAt: statusInfo.completedAt ?? null,
-              }
-            : null,
-        };
-      });
 
       return {
         results,
@@ -157,7 +204,9 @@ export const getBooksTool = tool({
             search: search ?? null,
             kind: kind ?? "all",
             status: status ?? null,
-            limit: limit || 10,
+            limit: effLimit,
+            offset: offset ?? 0,
+            fields: brief ? "minimal" : "full",
           },
         },
       };
