@@ -2,6 +2,7 @@ import { createModelInstance, getUtilityModel } from "@/ai/providers/factory";
 import { type ParsedPaperSections, parsePaperSections } from "@/pages/paper-reader/markdown-sections";
 import type { PaperHighlightLocation } from "@/pages/paper-reader/paper-highlight-locator";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { recordAuxUsage } from "@/services/ai-usage-service";
 import type { HighlightColor } from "@/types/book";
 import { generateText } from "ai";
 
@@ -127,7 +128,8 @@ async function callUtilityModel(prompt: string, temperature: number): Promise<st
   try {
     const model = requireUtilityModel();
     const modelInstance = createModelInstance(model.providerId, model.modelId);
-    const { text } = await generateText({ model: modelInstance, prompt, temperature });
+    const { text, usage } = await generateText({ model: modelInstance, prompt, temperature });
+    recordAuxUsage(model.providerId, model.modelId, usage, "highlight");
     return text;
   } catch (error) {
     console.error("AI 重点标注调用失败:", error);

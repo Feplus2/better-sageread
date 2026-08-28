@@ -11,6 +11,9 @@ pub struct VectorizerConfig {
     pub embeddings_url: String,
     pub model_name: String,
     pub api_key: Option<String>,
+    /// app.db 路径（Some 时每次 embed 落一行 ai_usage 流水，kind='embed' 单独立账；
+    /// 统计失败绝不影响向量化本身）
+    pub usage_db: Option<std::path::PathBuf>,
 }
 
 /// API相关的DTO结构

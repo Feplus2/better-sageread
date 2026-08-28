@@ -1,4 +1,5 @@
 import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
+import { recordAuxUsage } from "@/services/ai-usage-service";
 import { type UIMessage, generateText } from "ai";
 
 // 防御性长度上限，prompt 中要求的是 10 字以内
@@ -55,7 +56,7 @@ export async function generateThreadTitleWithAI(
 
     const modelInstance = createUtilityModelInstance(modelConfig.providerId, modelConfig.modelId);
 
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
       model: modelInstance,
       prompt: buildTitlePrompt(userText, assistantText, latestUserText, latestAssistantText),
       maxOutputTokens: 500,
@@ -63,6 +64,7 @@ export async function generateThreadTitleWithAI(
       // 简单任务压思考强度（混合推理模型思考占满 maxOutputTokens 会导致空输出）
       providerOptions: utilityTaskProviderOptions(modelConfig.providerId, modelConfig.modelId),
     });
+    recordAuxUsage(modelConfig.providerId, modelConfig.modelId, usage, "title");
 
     return sanitizeTitle(text);
   } catch (error) {

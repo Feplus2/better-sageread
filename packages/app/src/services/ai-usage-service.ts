@@ -7,7 +7,10 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface AiUsageRecordInput {
   threadId: string | null;
-  scope: string; // reader | paper | central
+  /** chat: reader|paper|central；aux: 任务名（title/tag/summary/translate/highlight）；embed: 'embed' */
+  scope: string;
+  /** 用量分账：chat（聊天回复，默认）/ aux（辅助任务）/ embed（向量化，Rust 侧直写） */
+  kind?: "chat" | "aux" | "embed";
   providerId: string;
   modelId: string;
   inputTokens: number;
@@ -18,6 +21,7 @@ export interface AiUsageEntry {
   id: number;
   threadId: string | null;
   scope: string;
+  kind: string;
   providerId: string;
   modelId: string;
   inputTokens: number;
@@ -27,6 +31,28 @@ export interface AiUsageEntry {
 
 export async function recordAiUsage(input: AiUsageRecordInput): Promise<void> {
   await invoke("record_ai_usage", { entry: input });
+}
+
+/**
+ * 辅助任务用量（kind='aux'）：各 service 的 generateText 拿到 result.usage 后调用，
+ * scope=任务名（title/tag/summary/translate/highlight）。fire-and-forget，失败仅告警
+ */
+export function recordAuxUsage(
+  providerId: string,
+  modelId: string,
+  usage: { inputTokens?: number; outputTokens?: number } | undefined,
+  task: string,
+): void {
+  if (!usage || ((usage.inputTokens ?? 0) <= 0 && (usage.outputTokens ?? 0) <= 0)) return;
+  void recordAiUsage({
+    threadId: null,
+    scope: task,
+    kind: "aux",
+    providerId: providerId || "",
+    modelId: modelId || "",
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+  }).catch((e) => console.warn("辅助任务用量落库失败:", e));
 }
 
 export async function getAiUsageEntries(startDate?: number, endDate?: number): Promise<AiUsageEntry[]> {

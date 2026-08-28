@@ -483,6 +483,20 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     }
     println!("Migration applied: sync triggers.");
 
+    // ai_usage.kind（用量分账：chat=聊天回复 / aux=辅助任务 / embed=向量化——与 LLM 用量分开统计）
+    let result = sqlx::query("ALTER TABLE ai_usage ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => println!("Migration applied: ai_usage.kind added."),
+        Err(e) if e.to_string().contains("duplicate column name") => {}
+        Err(e) if e.to_string().contains("no such table") => {
+            // ai_usage 表本批新建（schema.sql 含 kind），老库无表也无需迁移
+        }
+        Err(e) => return Err(e.into()),
+    }
+
     Ok(())
 }
 

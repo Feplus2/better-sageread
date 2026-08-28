@@ -44,6 +44,9 @@ pub struct TextVectorizer {
     tokenizer: tiktoken_rs::CoreBPE,
     /// 缓存检测到的维度（set-once：P3 起 vectorize_text 取 &self 供多路并发 embed，改内部可变性）
     embedding_dimension: std::sync::OnceLock<usize>,
+    /// app.db 路径：每次 embed 落一行 ai_usage 流水（kind='embed'，与 LLM 用量分开统计）。
+    /// None = 不记账。统计失败只记日志，绝不影响向量化
+    usage_db: Option<std::path::PathBuf>,
 }
 
 
@@ -68,6 +71,7 @@ impl TextVectorizer {
             embeddings_url: config.embeddings_url,
             tokenizer,
             embedding_dimension: std::sync::OnceLock::new(), // 初始化时未知，首次调用时检测
+            usage_db: config.usage_db,
         })
     }
 
@@ -94,6 +98,9 @@ impl TextVectorizer {
 
         const MAX_RETRIES: u32 = 3;
         let mut attempt: u32 = 0;
+        // 实际发送的 token 数（截断后）：嵌入用量的记账口径（本地 tokenizer 计数，
+        // 免解析各家响应的 usage 字段——Ollama 本地与 OpenAI 兼容端点通吃）
+        let sent_tokens = tokens.len().min(MAX_CHUNK_TOKENS) as i64;
         loop {
             match self.embed_once(&processed_text).await {
                 Ok(embedding) => {
@@ -103,6 +110,7 @@ impl TextVectorizer {
                         log::info!("检测到向量维度: {}", detected_dimension);
                         let _ = self.embedding_dimension.set(detected_dimension);
                     }
+                    self.record_embed_usage(sent_tokens);
                     return Ok(embedding);
                 }
                 Err(e) => {
@@ -203,4 +211,45 @@ impl TextVectorizer {
         let test_embedding = self.vectorize_text("test").await?;
         Ok(test_embedding.len())
     }
+
+    /// 嵌入用量落账（best-effort）：一行 ai_usage（kind='embed'，scope 同值；output 恒 0）。
+    /// provider_id 取 embeddings_url 的 host（区分 dashscope/openai/本地等端点）。
+    /// 打不开库/表不存在/锁忙一律只记日志——统计绝不能反过来影响向量化
+    fn record_embed_usage(&self, sent_tokens: i64) {
+        let Some(db_path) = &self.usage_db else { return };
+        if sent_tokens <= 0 {
+            return;
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let host = host_of(&self.embeddings_url);
+        let conn = rusqlite::Connection::open_with_flags(
+            db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        );
+        let Ok(conn) = conn else {
+            log::debug!("[embed-usage] 打开 app.db 失败，跳过记账");
+            return;
+        };
+        let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+        let res = conn.execute(
+            "INSERT INTO ai_usage (thread_id, scope, kind, provider_id, model_id, input_tokens, output_tokens, created_at)
+             VALUES (NULL, 'embed', 'embed', ?1, ?2, ?3, 0, ?4)",
+            rusqlite::params![host, self.model_name, sent_tokens, now_ms],
+        );
+        if let Err(e) = res {
+            log::debug!("[embed-usage] 记账失败（不影响向量化）: {}", e);
+        }
+    }
+}
+
+/// 从 URL 粗取 host（统计分组用，不求精确解析）：https://a.b.com/x → a.b.com
+fn host_of(url: &str) -> String {
+    let s = url
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    s.split(['/']).next().unwrap_or("").to_string()
 }

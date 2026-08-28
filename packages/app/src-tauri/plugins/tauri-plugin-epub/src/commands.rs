@@ -97,6 +97,7 @@ pub async fn index_epub<R: Runtime>(
                 embeddings_url,
                 model_name: model,
                 api_key,
+                usage_db: usage_db_path(&app),
             },
         },
         Some(move |u: ProgressUpdate| {
@@ -249,6 +250,7 @@ pub async fn search_db<R: Runtime>(
             embeddings_url,
             model_name: model,
             api_key,
+            usage_db: usage_db_path(&app),
         },
         mode,
         vector_weight,
@@ -430,6 +432,7 @@ pub async fn index_wiki<R: Runtime>(
                 embeddings_url,
                 model_name: model,
                 api_key,
+                usage_db: usage_db_path(&app),
             },
         },
     )
@@ -499,6 +502,7 @@ pub async fn index_manual<R: Runtime>(
                 embeddings_url,
                 model_name: model,
                 api_key,
+                usage_db: usage_db_path(&app),
             },
         },
     )
@@ -564,6 +568,7 @@ pub async fn index_paper<R: Runtime>(
                 embeddings_url,
                 model_name: model,
                 api_key,
+                usage_db: usage_db_path(&app),
             },
         },
         Some(move |u: ProgressUpdate| {
@@ -633,6 +638,15 @@ pub struct PaperSearchItemDto {
 }
 
 /// 检索全局论文向量库：hybrid 融合（提供嵌入配置时）或 BM25 降级，
+
+/// ai_usage 记账库路径（app.db）：向量化/检索嵌入的用量流水落这里，kind='embed'
+fn usage_db_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("database").join("app.db"))
+}
+
 /// paper_ids 为 Some 时按论文集合过滤（Some(空集) 返回空，None 不过滤）
 #[tauri::command]
 pub async fn search_papers_db<R: Runtime>(
@@ -659,6 +673,7 @@ pub async fn search_papers_db<R: Runtime>(
             embeddings_url: url,
             model_name: model.unwrap_or_default(),
             api_key,
+            usage_db: usage_db_path(&app),
         });
 
     let results = crate::pipeline::search_papers_global(

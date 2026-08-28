@@ -18,6 +18,7 @@ import {
 import { cutPaperBlocks, extractPaperFootnotes } from "@/pages/paper-reader/paper-blocks";
 import type { PaperAlignPair } from "@/pages/paper-reader/paper-cross-anchor";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
+import { recordAuxUsage } from "@/services/ai-usage-service";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -224,6 +225,7 @@ async function extractGlossary(
   model: ReturnType<typeof createModelInstance>,
   signal?: AbortSignal,
   providerOptions?: Record<string, Record<string, any>>,
+  aux?: { providerId: string; modelId: string },
 ): Promise<PaperGlossaryItem[] | null> {
   const { metadata } = parsePaperMarkdown(markdown.replace(/\r\n?/g, "\n"));
   const parts: string[] = [];
@@ -247,7 +249,8 @@ async function extractGlossary(
 论文内容：
 ${parts.join("\n\n")}`;
 
-  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
+  const { text, usage } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
+  if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate");
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -346,6 +349,7 @@ async function translateMetadata(
   signal?: AbortSignal,
   glossary?: PaperGlossaryItem[] | null,
   providerOptions?: Record<string, Record<string, any>>,
+  aux?: { providerId: string; modelId: string },
 ): Promise<void> {
   const metaPath = await join(await paperDirOf(paperId), "metadata.json");
   if (!(await exists(metaPath))) return;
@@ -367,7 +371,8 @@ async function translateMetadata(
   const prompt = `你是专业的学术论文翻译引擎。把给定论文的标题和摘要翻译为简体中文（术语与正文译法一致，人名不译，$...$ 数学与化学式原样保留）。${glossaryNote}
 只输出 JSON 对象 {"title_zh":"...","abstract_zh":"..."}，缺省字段输出空字符串，不要输出任何其他文字。
 输入：${JSON.stringify({ title: source.title ?? "", abstract: source.abstract ?? "" })}`;
-  const { text } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
+  const { text, usage } = await generateText({ model, prompt, temperature: 0.2, abortSignal: signal, providerOptions });
+  if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate");
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -462,7 +467,10 @@ export async function translatePaper(options: {
   let glossary = existing?.glossary ?? null;
   if (pending.length > 0 && (!glossary || force)) {
     try {
-      const extracted = await extractGlossary(markdown, model, signal, taskOptions);
+      const extracted = await extractGlossary(markdown, model, signal, taskOptions, {
+        providerId: utilityModel.providerId,
+        modelId: utilityModel.modelId,
+      });
       if (extracted) glossary = extracted;
     } catch (error) {
       if (signal?.aborted) throw error; // 取消优先
@@ -609,6 +617,7 @@ export async function translatePaper(options: {
       signal,
       glossary,
       taskOptions,
+      { providerId: utilityModel.providerId, modelId: utilityModel.modelId },
     );
   } catch (error) {
     if (signal?.aborted) {

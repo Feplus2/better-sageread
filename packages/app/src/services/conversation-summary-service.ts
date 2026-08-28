@@ -1,5 +1,6 @@
 import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
 import { type SummaryScope, buildScopedSummaryPrompt } from "@/ai/utils/summary-templates";
+import { recordAuxUsage } from "@/services/ai-usage-service";
 import { editThread, getThreadById } from "@/services/thread-service";
 import type { Thread } from "@/types/thread";
 import { type UIMessage, generateText } from "ai";
@@ -149,6 +150,7 @@ export async function compressDroppedIntoSummary(params: {
         providerOptions: utilityTaskProviderOptions(utilityModel.providerId, utilityModel.modelId),
       });
       text = result.text;
+      recordAuxUsage(utilityModel.providerId, utilityModel.modelId, result.usage, "summary");
     } catch (error) {
       // AI 调用失败：沿用既有摘要（下轮有新 dropped 时会重试）
       console.warn("[滚动压缩] 辅助模型调用失败，沿用既有摘要:", error);

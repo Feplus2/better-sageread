@@ -151,7 +151,8 @@ CREATE INDEX IF NOT EXISTS idx_skills_updated_at ON skills(updated_at DESC);
 CREATE TABLE IF NOT EXISTS ai_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id TEXT,
-    scope TEXT NOT NULL DEFAULT 'reader',     -- reader | paper | central
+    scope TEXT NOT NULL DEFAULT 'reader',     -- chat: reader|paper|central；aux: 任务名(title/tag/summary/translate/highlight)；embed: 'embed'
+    kind TEXT NOT NULL DEFAULT 'chat',        -- chat（聊天回复）| aux（辅助任务）| embed（向量化——单独立账不混 LLM 口径）
     provider_id TEXT NOT NULL DEFAULT '',
     model_id TEXT NOT NULL DEFAULT '',
     input_tokens INTEGER NOT NULL DEFAULT 0,

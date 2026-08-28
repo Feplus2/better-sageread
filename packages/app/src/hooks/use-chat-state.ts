@@ -233,6 +233,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             void recordAiUsage({
               threadId: currentThread?.id ?? null,
               scope: chatContext?.agentScope ?? "reader",
+              kind: "chat",
               providerId: selectedModel?.providerId ?? "",
               modelId: selectedModel?.modelId ?? "",
               inputTokens: totalUsage.inputTokens ?? 0,

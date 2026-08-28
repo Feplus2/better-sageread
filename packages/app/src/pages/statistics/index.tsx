@@ -96,7 +96,7 @@ const StatisticsPage = () => {
   const averageSessionsPerDay = activeDays > 0 ? totalSessions / activeDays : 0;
 
   const winUsage = useMemo(
-    () => (startMs == null ? usage : usage.filter((u) => u.createdAt >= startMs)),
+    () => usage.filter((u) => u.kind !== "embed" && (startMs == null || u.createdAt >= startMs)),
     [usage, startMs],
   );
   const inputTokens = winUsage.reduce((s, u) => s + u.inputTokens, 0);

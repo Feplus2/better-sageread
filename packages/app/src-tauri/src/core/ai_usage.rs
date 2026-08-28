@@ -10,10 +10,17 @@ use tauri::{AppHandle, Manager};
 pub struct AiUsageEntryData {
     pub thread_id: Option<String>,
     pub scope: String,
+    /// 用量分账：chat（聊天回复）/ aux（辅助任务）/ embed（向量化，Rust 侧直写）
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub provider_id: String,
     pub model_id: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
+}
+
+fn default_kind() -> String {
+    "chat".to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -22,6 +29,7 @@ pub struct AiUsageEntry {
     pub id: i64,
     pub thread_id: Option<String>,
     pub scope: String,
+    pub kind: String,
     pub provider_id: String,
     pub model_id: String,
     pub input_tokens: i64,
@@ -54,12 +62,13 @@ pub async fn record_ai_usage(
     sqlx::query(
         r#"
         INSERT INTO ai_usage (
-            thread_id, scope, provider_id, model_id, input_tokens, output_tokens, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            thread_id, scope, kind, provider_id, model_id, input_tokens, output_tokens, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&entry.thread_id)
     .bind(&entry.scope)
+    .bind(&entry.kind)
     .bind(&entry.provider_id)
     .bind(&entry.model_id)
     .bind(entry.input_tokens)
@@ -82,7 +91,7 @@ pub async fn get_ai_usage_entries(
 
     let rows = sqlx::query(
         r#"
-        SELECT id, thread_id, scope, provider_id, model_id, input_tokens, output_tokens, created_at
+        SELECT id, thread_id, scope, kind, provider_id, model_id, input_tokens, output_tokens, created_at
         FROM ai_usage
         WHERE (?1 IS NULL OR created_at >= ?1) AND (?2 IS NULL OR created_at <= ?2)
         ORDER BY created_at ASC
@@ -100,6 +109,7 @@ pub async fn get_ai_usage_entries(
             id: row.try_get("id").unwrap_or(0),
             thread_id: row.try_get("thread_id").unwrap_or(None),
             scope: row.try_get("scope").unwrap_or_default(),
+            kind: row.try_get("kind").unwrap_or_else(|_| "chat".to_string()),
             provider_id: row.try_get("provider_id").unwrap_or_default(),
             model_id: row.try_get("model_id").unwrap_or_default(),
             input_tokens: row.try_get("input_tokens").unwrap_or(0),
