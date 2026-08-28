@@ -21,6 +21,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 - `books`（`schema.sql:13`）— **书籍与论文共用主表**。`title/author/format/file_path/cover_path/file_size/language/tags(JSON)`。论文即 `format='MARKDOWN'` 的行，`paper_folders.paper_id` 直接引用 `books(id)`（`database.rs:190`）；`trashed_at`（回收站）由迁移后补（`database.rs:70`）
 - `book_status`（`schema.sql:30`）— 阅读状态 1:1。`status`（unread/reading/completed）、`progress_current/total`、`location`（CFI）、`rating`（0-3）、`last_read_at/started_at/completed_at`、`metadata`；迁移后补 `position_changed_at`（同步 LWW 用，`database.rs:81`）、`dwell_seconds`（:92）
 - `reading_sessions`（`schema.sql:47`）— 阅读会话流水（`duration_seconds` 等），统计页数据源
+- `ai_usage`（`schema.sql:150`）— AI 用量流水（2026-08 增）：每条 AI 回复 finish 落一行（`thread_id`（首轮可空）/`scope`/`provider_id`/`model_id`/`input_tokens`/`output_tokens`/`created_at`），统计页 AI 用量数据源；**不参与 L2 同步**（与 reading_sessions 同级的地方性统计数据）
 - `tags`（`schema.sql:78`）— 标签字典（`name` UNIQUE、`color`）
 - `book_notes`（`schema.sql:90`）— 标注/书签/摘录。`type`（bookmark|annotation|excerpt）、`cfi`、`text`、`style`、`color`、`note`、`context_before/after`；迁移后补 `category`（AI 重点标注类别，`database.rs:364`）、`source`（user/ai，:375）、`starred`（:386）
 - `notes`（`schema.sql:116`）— 笔记面板的**长文 Markdown 笔记**，与 book_notes 是两套概念。三列定位：`location_cfi`（论文=heading slug，书籍=CFI）、`location_tag`（文本兜底）、`location_block`（排序键）。注意此表在 schema.sql:116 与 `database.rs:154` **各建了一遍**（刻意幂等）；`database.rs:150-152` 注释警告**不可再加 `DROP TABLE IF EXISTS notes` 迁移**（首轮"notes 概念废弃"迁移曾 DROP 旧表导致数据丢失）
@@ -82,7 +83,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 - `agent-audit/*.jsonl` — Agent 审计日志（mcp-stdio、local-api，写盘前脱敏）
 - `mcp-local.json` — 本地 API 通道的 `{port, token}`（`core/local_api/mod.rs:300-310`）
 
-`reading_sessions` 表是统计页（`pages/statistics/`，年度热力图）的数据源：每次阅读会话记一行流水（`duration_seconds` 等），配合 `book_status.dwell_seconds`（迁移后补，`database.rs:92`）做停留时长统计。
+`reading_sessions` 表是统计页（`pages/statistics/`，年度热力图）的数据源：每次阅读会话记一行流水（`duration_seconds` 等），配合 `book_status.dwell_seconds`（迁移后补，`database.rs:92`）做停留时长统计。2026-08 起统计页并入 `ai_usage` 流水（AI 用量四卡 + 模型占比图表），且改为**一次性取全量行级数据、前端按时间单位切片聚合**（日/周/月/年/全部 + 热力图年份过滤零请求）。
 
 ## 3. 论文统一向量库 `{appData}/papers/vectors.sqlite`
 

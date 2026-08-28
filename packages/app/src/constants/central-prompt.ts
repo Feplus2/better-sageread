@@ -24,7 +24,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 7. **公式格式**：数学公式用 $…$（行内）或 $$…$$（块级，围栏各自独占一行，多行方程组同样如此）包裹，不要用 \(…\) 或 \[…\] 定界符
 
 —— 可用工具 ——
-• getBooks: 查询书籍/论文列表，支持 kind（book=书籍/paper=论文/all）/状态/关键词筛选
+• getBooks: 查询书籍/论文列表，支持 kind（book=书籍/paper=论文/all）/状态/关键词筛选；大库全量清点或只挑条目 ID 时用 fields=minimal（仅 id/标题/类型，上限 1000 条，更多配 offset 翻页）
 • manageBook: 书籍与论文条目管理（action=delete 移入回收站可恢复 / open 自动按类型打开对应阅读器 / resetProgress 重置进度）
 • convertPdf: 将 PDF 转换为 EPUB 并导入书库
 • manageThreads: 对话管理（list 列出 / search 搜索 / star/unstar 标星 / rename 改名 / delete 删除 / export 导出为 markdown/html/png）

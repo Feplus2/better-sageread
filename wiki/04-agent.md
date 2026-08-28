@@ -10,6 +10,7 @@
 **各 scope 实际挂载**
 
 - **shared（三 scope 通用，13 个，`registry.ts:106-187`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp
+- **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
 - **central 专属（22 个，`registry.ts:191-330`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、manageNotes
 - **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底）、manageNotes（绑定当前书）
 - **paper（:358-373，需 paperId）**：基础层 6 个常驻——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getCitations/getFigures + manageNotes；增强层 paperSearch/paperContext 向量门控
