@@ -37,12 +37,21 @@ export function formatTokens(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-/** 紧凑缩写（k/M，用户口径），用于窄位：明细表列与 Y 轴刻度——精确逗号值此处放不下 */
+/** 紧凑缩写（k/M/G，SI 阶梯；G 封顶——个人 token 用量到 T 属理论值），用于窄位：
+ *  明细表列与 Y 轴刻度——精确逗号值此处放不下 */
 function formatTokensCompact(n: number): string {
-  const unit = n >= 1e6 ? "M" : n >= 1e3 ? "k" : "";
-  if (!unit) return String(n);
-  const v = n / (unit === "M" ? 1e6 : 1e3);
-  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)}${unit}`;
+  const UNITS: Array<[number, string]> = [
+    [1e9, "G"],
+    [1e6, "M"],
+    [1e3, "k"],
+  ];
+  for (const [size, unit] of UNITS) {
+    if (n >= size) {
+      const v = n / size;
+      return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)}${unit}`;
+    }
+  }
+  return String(n);
 }
 
 interface AiUsageChartsProps {
