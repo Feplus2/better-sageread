@@ -32,16 +32,17 @@ const MODEL_COLORS = [
   "#eab308",
 ];
 
-/** 精确数值（用户口径：每 3 位一个逗号），用于卡片/明细/悬浮 */
+/** 精确数值（每 3 位一个逗号），用于宽位：卡片/悬浮提示 */
 export function formatTokens(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-/** 紧凑缩写（万/亿），仅用于 Y 轴刻度——轴宽有限，逗号精确值会挤爆 */
+/** 紧凑缩写（k/M，用户口径），用于窄位：明细表列与 Y 轴刻度——精确逗号值此处放不下 */
 function formatTokensCompact(n: number): string {
-  if (n >= 1e8) return `${(n / 1e8).toFixed(2)} 亿`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 万`;
-  return n.toLocaleString("en-US");
+  const unit = n >= 1e6 ? "M" : n >= 1e3 ? "k" : "";
+  if (!unit) return String(n);
+  const v = n / (unit === "M" ? 1e6 : 1e3);
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)}${unit}`;
 }
 
 interface AiUsageChartsProps {
@@ -240,9 +241,11 @@ const AiUsageCharts = ({ usage, unit }: AiUsageChartsProps) => {
                   <td className="max-w-40 truncate py-1.5 pr-2" title={m.name}>
                     {m.name}
                   </td>
-                  <td className="pr-2">{formatTokens(m.input)}</td>
-                  <td className="pr-2">{formatTokens(m.output)}</td>
-                  <td className="pr-2 font-medium text-neutral-900 dark:text-neutral-100">{formatTokens(m.total)}</td>
+                  <td className="pr-2">{formatTokensCompact(m.input)}</td>
+                  <td className="pr-2">{formatTokensCompact(m.output)}</td>
+                  <td className="pr-2 font-medium text-neutral-900 dark:text-neutral-100">
+                    {formatTokensCompact(m.total)}
+                  </td>
                   <td>{grandTotal > 0 ? `${((m.total / grandTotal) * 100).toFixed(1)}%` : "-"}</td>
                 </tr>
               ))}
