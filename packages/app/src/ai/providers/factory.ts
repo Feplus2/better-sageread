@@ -55,6 +55,13 @@ function thinkingOffPatch(
       body.thinking = { type: "disabled" };
     };
   }
+  // 腾讯 TokenHub 混元（tokenhub.tencentmaas.com）：hy4 系思考不可关（不下发防 400）；hy3 等可关
+  if (host.includes("tencentmaas")) {
+    if (/^(hunyuan-)?hy4/.test(id)) return null;
+    return (body) => {
+      body.thinking = { type: "disabled" };
+    };
+  }
   return null;
 }
 
