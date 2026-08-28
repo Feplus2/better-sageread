@@ -13,7 +13,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
-  LayersIcon,
+  DatabaseIcon,
   TrendingUpIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -95,13 +95,17 @@ const StatisticsPage = () => {
   const activeDays = new Set(winSessions.map((s) => dayjs(s.startedAt).format("YYYY-MM-DD"))).size;
   const averageSessionsPerDay = activeDays > 0 ? totalSessions / activeDays : 0;
 
+  // LLM 口径 = chat + aux（辅助任务已计入）；embed（向量化）单独立账，第四卡展示
   const winUsage = useMemo(
     () => usage.filter((u) => u.kind !== "embed" && (startMs == null || u.createdAt >= startMs)),
     [usage, startMs],
   );
   const inputTokens = winUsage.reduce((s, u) => s + u.inputTokens, 0);
   const outputTokens = winUsage.reduce((s, u) => s + u.outputTokens, 0);
-  const modelCount = new Set(winUsage.map((u) => `${u.providerId}::${u.modelId}`)).size;
+  // 向量化用量：嵌入 token（本地 tokenizer 口径），随时间单位同窗统计
+  const embedTokens = usage
+    .filter((u) => u.kind === "embed" && (startMs == null || u.createdAt >= startMs))
+    .reduce((s, u) => s + u.inputTokens, 0);
 
   const heatStats = useMemo(() => {
     const map = new Map<string, { count: number; totalDuration: number }>();
@@ -191,7 +195,7 @@ const StatisticsPage = () => {
           icon={<ArrowUpFromLine className="h-4 w-4" />}
         />
         <StatCard title="AI 请求数" value={winUsage.length.toString()} icon={<BotIcon className="h-4 w-4" />} />
-        <StatCard title="使用模型数" value={modelCount.toString()} icon={<LayersIcon className="h-4 w-4" />} />
+        <StatCard title="向量化用量" value={formatTokens(embedTokens)} icon={<DatabaseIcon className="h-4 w-4" />} />
       </div>
 
       <div className="rounded-lg border border-neutral-150 p-4 dark:border-neutral-800">
