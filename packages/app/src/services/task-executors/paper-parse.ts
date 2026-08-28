@@ -438,19 +438,24 @@ async function downloadReferencePdf(
         done = true;
         signal.removeEventListener("abort", onAbort);
         const result = parseMcpToolJson(raw);
-        if (result?.success && typeof result?.pdf_path === "string" && result.pdf_path) {
-          resolve({ pdfPath: result.pdf_path });
+        // ZBS 双格式瀑布（XML 优先）：xml_path 优先采用（JATS 天生精细），pdf_path 为兼容键
+        const filePath: string | undefined =
+          (typeof result?.xml_path === "string" && result.xml_path) ||
+          (typeof result?.pdf_path === "string" && result.pdf_path) ||
+          undefined;
+        if (result?.success && filePath) {
+          resolve({ pdfPath: filePath });
         } else {
           // 兼容 no_pdf 结构化返回（reason/tried/landing_page）与旧版 {message}
           const reason = result?.reason ?? result?.message ?? "全部下载源失败";
-          resolve({ message: `未能获取 PDF：${reason}${result?.landing_page ? "，可经「访问页面」人工下载" : ""}` });
+          resolve({ message: `未能获取全文：${reason}${result?.landing_page ? "，可经「访问页面」人工下载" : ""}` });
         }
       },
       (error) => {
         if (done) return;
         done = true;
         signal.removeEventListener("abort", onAbort);
-        resolve({ message: `获取 PDF 失败：${errMsg(error)}` });
+        resolve({ message: `获取全文失败：${errMsg(error)}` });
       },
     );
   });
@@ -531,11 +536,11 @@ async function executePaperParse(task: TaskItem, ctx: TaskContext): Promise<void
     // 初始阶段行：下载段 + 解析四阶段（阶段号偏移 1）
     ctx.reportExtra({
       stages: [
-        { n: 1, name: "Zotero Brain 下载 PDF", status: "active" as PdfStageStatus },
+        { n: 1, name: "Zotero Brain 下载全文", status: "active" as PdfStageStatus },
         ...buildPdfStages().map((s) => ({ ...s, n: s.n + 1 })),
       ],
     });
-    ctx.report(0, "经 Zotero Brain 下载 PDF…");
+    ctx.report(0, "经 Zotero Brain 下载全文（XML 优先）…");
     const dl = await downloadReferencePdf(payload, ctx.signal);
     if (dl.cancelled) throw new Error("任务已取消");
     if (!dl.pdfPath) {
@@ -546,7 +551,7 @@ async function executePaperParse(task: TaskItem, ctx: TaskContext): Promise<void
       throw new Error(message);
     }
     ctx.reportExtra({ stages: markStages(stagesOf(task.taskId), 1, "done") });
-    ctx.report(0, "PDF 下载完成，开始解析…");
+    ctx.report(0, "全文下载完成，开始解析…");
     const fileName = payload.title?.trim() || payload.displayName || payload.doi || payload.arxivId || "参考文献";
     const outcome = await runParseInner(task, ctx, {
       pdfPath: dl.pdfPath,

@@ -335,7 +335,7 @@ export async function startPaperImportBatch(incomingPaths: string[], folderId?: 
   }
 }
 
-/** P2 参考文献卡片「获取 PDF」入口：Zotero Brain 下载 → 解析 → 入库，随全局队列串行接续 */
+/** P2 参考文献卡片「获取全文」入口：Zotero Brain 双格式下载（XML 优先）→ 解析 → 入库，随全局队列串行接续 */
 export function startPaperAcquireImport(input: {
   doi?: string;
   title?: string;
@@ -374,7 +374,7 @@ export function startPaperAcquireImport(input: {
   if (wasActive) {
     toast.info(`已加入队列（待处理 ${paperParseAgg().queuedCount} 篇），轮到后自动下载解析`);
   } else {
-    toast.info("已开始获取 PDF（Zotero Brain 下载中），完成后自动解析入库");
+    toast.info("已开始获取全文（Zotero Brain 下载中，XML 优先），完成后自动解析入库");
   }
 }
 

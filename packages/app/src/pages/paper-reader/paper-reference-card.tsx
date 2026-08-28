@@ -5,7 +5,7 @@ import { requestPaperQuoteLocate } from "@/services/paper-locate-service";
 /**
  * 参考文献条目卡片（P2.2/P2.3 前端）：点击参考文献区条目弹出。
  * 展示 references.json 结构化字段 + 懒补全元数据（Crossref/OpenAlex，写回缓存）+ 在库状态；
- * 动作：在库 [打开]（openPaper + quote 定位总线）/ 不在库 [获取 PDF]（全链路沉全局转换进度层）
+ * 动作：在库 [打开]（openPaper + quote 定位总线）/ 不在库 [获取全文]（ZBS 双格式瀑布：XML 优先，PDF 兜底；全链路沉全局转换进度层）
  * + [访问页面]（landing_page → doi.org → Scholar 兜底，永远可用）。
  */
 import {
@@ -224,7 +224,7 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
             </p>
           </div>
 
-          {/* 动作行：在库 [打开]；不在库 [获取 PDF] + [访问页面]（后者永远可用） */}
+          {/* 动作行：在库 [打开]；不在库 [获取全文] + [访问页面]（后者永远可用） */}
           <div className="flex items-center justify-end gap-1.5 border-t px-3 py-2">
             {inLibrary ? (
               <Button size="sm" variant="soft" className="h-7 text-xs" onClick={handleOpenInLibrary}>
@@ -244,12 +244,12 @@ export function PaperReferenceCard({ reference, anchorRect, onOpenChange, onEnri
                       onClick={handleAcquirePdf}
                     >
                       <Download className="size-3.5" />
-                      获取 PDF
+                      获取全文
                     </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  {zoteroAvailable ? "经 Zotero Brain 下载并解析入库" : "未配置 Zotero Brain：请到 AI 中心 → MCP 配置"}
+                  {zoteroAvailable ? "经 Zotero Brain 下载并解析入库（XML 优先，PDF 兜底）" : "未配置 Zotero Brain：请到 AI 中心 → MCP 配置"}
                 </TooltipContent>
               </Tooltip>
             )}
