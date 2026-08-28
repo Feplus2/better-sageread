@@ -264,7 +264,9 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 - 数据源：聊天侧 AI SDK 的 usage 回调（streamText onFinish usage / providerMetadata），
   按 thread/message 落库一张 usage 流水表即可支撑全部图表。
 
-## Agent 召回本次对话（readThread 工具）——2026-08-27 立项，未排期
+## Agent 召回本次对话（readThread 工具）—— ✅ 已落地（2026-08-28，c46d3b7，用户验收「非常顺，比我想象的还要丝滑」）
+
+（原 2026-08-27 立项记录，留档备查）
 
 **场景**：上下文自动截断后，用户让 Agent"整理本次对话存到笔记"——Agent 看不到早期
 消息。用户口径：这类任务不需要工具调用返回结果，只要用户提问 + AI 答复（与导出对话
