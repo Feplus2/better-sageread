@@ -9,6 +9,7 @@ import { resolveLlmParams } from "@/services/converter-service";
 import { notifyPaperListChanged, notifyPaperStatusChanged } from "@/services/paper-events";
 import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import type { PaperParseResult } from "@/services/task-executors/paper-parse";
+import { type PaperDedupKeys, normalizeDoi } from "@/services/zotero-import-service";
 import { useConverterStore } from "@/store/converter-store";
 import type { BookWithStatus, SimpleBook } from "@/types/simple-book";
 import { getCurrentVectorModelConfig } from "@/utils/model";
@@ -30,6 +31,8 @@ export interface ScannedPaper {
 export interface ImportPapersResult {
   imported: number;
   skipped: number;
+  /** 其中因 DOI 撞库跳过的篇数（跨格式重复；其余 skipped = 内容 id 相同） */
+  skippedByDoi: number;
   failed: { dir: string; error: string }[];
 }
 
@@ -129,8 +132,19 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
  */
 export async function importPapers(dir: string, folderId?: string): Promise<ImportPapersResult> {
   const scanned = await invoke<ScannedPaper[]>("scan_papers_dir", { dir });
-  const result: ImportPapersResult = { imported: 0, skipped: 0, failed: [] };
+  const result: ImportPapersResult = { imported: 0, skipped: 0, skippedByDoi: 0, failed: [] };
   const importedIds: string[] = [];
+
+  // DOI 判重（2026-08-28 用户裁定加上）：内容 hash id 不感知 DOI——同篇 PDF+XML 跨格式
+  // 双导会成两条。数据源/归一化与 Zotero 导入同款（list_paper_dedup_keys 读 metadata.json），
+  // 读取失败时退回仅按内容 id 查重（不阻塞导入）
+  let dedupKeys: PaperDedupKeys[] = [];
+  try {
+    dedupKeys = await invoke<PaperDedupKeys[]>("list_paper_dedup_keys");
+  } catch (error) {
+    console.warn("读取论文判重键失败（DOI 判重降级为仅内容 id）:", error);
+  }
+  const seenDois = new Set<string>();
 
   for (const paper of scanned) {
     try {
@@ -138,6 +152,13 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
       const authors = normalizeAuthors(metadata.author);
       // 多位作者只存第一位 + " et al."（完整列表在 metadata.json 里，列表页自行展示）
       const author = authors.length > 1 ? `${authors[0]} et al.` : (authors[0] ?? "");
+      // DOI 撞库（跨格式重复）：计 skipped，与内容 id 撞车同口径同提示
+      const paperDoi = normalizeDoi(typeof metadata.doi === "string" ? metadata.doi : null);
+      if (paperDoi && (seenDois.has(paperDoi) || dedupKeys.some((p) => normalizeDoi(p.doi) === paperDoi))) {
+        result.skipped += 1;
+        result.skippedByDoi += 1;
+        continue;
+      }
       await invoke<SimpleBook>("save_paper", {
         sourceDir: paper.dir,
         id: paper.id,
@@ -146,6 +167,7 @@ export async function importPapers(dir: string, folderId?: string): Promise<Impo
         author,
         language: metadata.lang ?? "en",
       });
+      if (paperDoi) seenDois.add(paperDoi);
       // P2.1 产物随入库：references.json（转换器产出过才有）拷进书目录，参考文献卡片依赖它；
       // 拷贝失败仅告警不阻断入库（与 source.pdf 留存同语义）
       try {
@@ -418,7 +440,10 @@ export async function importPaperPdf(
   //    converter CLI 按扩展名分派（.xml 走 XML 管线，见 paper-format-contract 同构产物）
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   if (ext !== "pdf" && ext !== "xml") {
-    return { success: false, message: `仅支持 PDF / XML 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。` };
+    return {
+      success: false,
+      message: `仅支持 PDF / XML 论文解析，收到 ".${ext}"。普通电子书请用 importBook 导入书库。`,
+    };
   }
   const exists = await invoke<boolean>("path_exists", { path: filePath }).catch(() => false);
   if (!exists) {

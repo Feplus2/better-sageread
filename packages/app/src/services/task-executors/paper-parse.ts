@@ -331,7 +331,8 @@ async function runParseInner(
           } satisfies PaperParseResult);
           if (outcome === "skipped") {
             if (!silent) {
-              toast.info(batchTotal > 1 ? `「${fileName}」已入库过（内容未变化）` : "该论文已入库过（内容未变化）");
+              const reason = result.skippedByDoi > 0 ? "同 DOI 判重" : "内容未变化";
+              toast.info(batchTotal > 1 ? `「${fileName}」已入库过（${reason}）` : `该论文已入库过（${reason}）`);
             }
             settleSuccess("skipped");
           } else {

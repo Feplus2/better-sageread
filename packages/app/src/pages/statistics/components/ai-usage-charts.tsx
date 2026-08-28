@@ -32,10 +32,16 @@ const MODEL_COLORS = [
   "#eab308",
 ];
 
+/** 精确数值（用户口径：每 3 位一个逗号），用于卡片/明细/悬浮 */
 export function formatTokens(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+/** 紧凑缩写（万/亿），仅用于 Y 轴刻度——轴宽有限，逗号精确值会挤爆 */
+function formatTokensCompact(n: number): string {
   if (n >= 1e8) return `${(n / 1e8).toFixed(2)} 亿`;
   if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 万`;
-  return n.toLocaleString();
+  return n.toLocaleString("en-US");
 }
 
 interface AiUsageChartsProps {
@@ -178,7 +184,7 @@ const AiUsageCharts = ({ usage, unit }: AiUsageChartsProps) => {
               tickLine={false}
               axisLine={false}
               width={56}
-              tickFormatter={(v: number) => formatTokens(v)}
+              tickFormatter={(v: number) => formatTokensCompact(v)}
             />
             <Tooltip
               contentStyle={tooltipStyle}
