@@ -20,8 +20,13 @@ import { estimateTokens } from "./token-estimator";
  * 两层都只改副本/写盘内容，永不改动内存中的原消息（请求期副本语义）。
  */
 
-/** L1：预览正文上限（与展示层 4000 截断同哲学、更紧；坐标在头部天然保留） */
-export const TOOL_RESULT_PREVIEW_CHARS = 2000;
+/**
+ * L1 预览正文上限（2026-08-28 用户裁定 2000→1000：存档预览的唯一消费者是人——
+ * "点开工具卡瞄一眼 Agent 读了啥"；AI 当轮走内存全量、跨轮按参数重取，均不读预览。
+ * 引用转跳（buildCitationMap）读结构化 output 不读预览文本，预览长短不在功能链路上）。
+ * 坐标在头部天然保留。
+ */
+export const TOOL_RESULT_PREVIEW_CHARS = 1000;
 
 /** L1 纳入截断的内容承载型工具（UI 消费输出的工具不纳入，如 mindmap）；
  * useTool 是目录牌转发入口：按 input.tool 还原原始工具名再判定（见 truncateToolResultsForStorage） */
@@ -31,6 +36,7 @@ const L1_CONTENT_TOOLS = new Set([
   "ragSearch",
   "ragContext",
   "ragRange",
+  "readThread",
   "readBookSection",
   "readPaperSection",
   "readPaperFull",
@@ -204,7 +210,7 @@ export function compactAgedRagResults(messages: UIMessage[]): UIMessage[] {
       .filter((p: any) => p?.type === "text")
       .map((p: any) => p?.text ?? "")
       .join("\n");
-    turnTexts.set(t, (turnTexts.get(t) ?? "") + "\n" + text);
+    turnTexts.set(t, `${turnTexts.get(t) ?? ""}\n${text}`);
   }
 
   // 3) 候选降级：user 轮号 ≤ boundary 的 RAG 结果；同时估算清除量（clear_at_least）

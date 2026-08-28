@@ -3,9 +3,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { readPaperMarkdown } from "./shared";
 
-/** 单次返回的小节正文默认上限（字符），可用 maxChars/offset 参数续读 */
-const DEFAULT_SECTION_CHARS = 16000;
-const MAX_SECTION_CHARS = 40000;
+/** 单次返回的小节正文默认上限（字符），可用 maxChars/offset 参数续读（2026-08-28 16k/40k 实测经常截断，翻倍） */
+const DEFAULT_SECTION_CHARS = 32000;
+const MAX_SECTION_CHARS = 80000;
 
 /** 按标题读取当前论文某个小节的正文（基础层工具，无需向量能力，直接读 paper.md） */
 export const createPaperSectionTool = (paperId: string | undefined) =>
@@ -18,7 +18,7 @@ export const createPaperSectionTool = (paperId: string | undefined) =>
 
 💡 **使用建议**：
 • 标题参数先用 getPaperToc 获取准确文本；支持标题文本或锚点 id，容错大小写与部分匹配
-• 默认返回 16000 字符；超长小节标注 total_length 与 truncated，可调大 maxChars 或用 offset 续读后半截`,
+• 默认返回 32000 字符；超长小节标注 total_length 与 truncated，可调大 maxChars 或用 offset 续读后半截`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想深入了解实验部分的设置'"),
       heading: z.string().min(1).describe("小节标题文本（如 '3.2 实验设置'）或锚点 id"),

@@ -62,6 +62,7 @@ import {
   webSearchTool,
 } from "./index";
 import { createManageNotesTool } from "./manage-notes";
+import { createReadThreadTool } from "./read-thread";
 
 // ==================== 类型定义 ====================
 
@@ -82,6 +83,8 @@ export interface ToolContext {
   paperId?: string;
   /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合） */
   paperScopeIds?: string[] | null;
+  /** 当前对话 id（useChatState 每轮注入；readThread 的缺省锚点。新对话首条消息时为空） */
+  threadId?: string;
 }
 
 // ==================== 注册表 ====================
@@ -353,6 +356,12 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     }
   }
 
+  // 2.5 对话召回（上下文工厂，三 scope 通用）：有当前对话才注入——新对话首条消息时
+  // currentThread 尚未建立，"本次对话"不存在，工具无意义（此时上下文里也没有可召回的早期内容）
+  if (context?.threadId) {
+    tools.readThread = createReadThreadTool(context.threadId) as Tool;
+  }
+
   // 3. 阅读助手专属：RAG 工具（需要 bookId + 向量能力）+ 章节直读兜底（常驻；
   // 全局有向量能力 ≠ 本书已建索引——未建索引时 ragSearch 无结果，直读是唯一的正文通道）
   if (agentScope === "reader" && context?.bookId) {
@@ -434,6 +443,11 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
     descriptions.push("- paperSearch: 文献库语义检索（全库范围，跨论文主题检索/按主题找论文）");
     descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
   }
+
+  // 对话召回（readThread 为工厂创建，注入条件=context.threadId，聊天场景下除新对话首条外恒注入）
+  descriptions.push(
+    "- readThread: 召回对话完整问答（仅用户/AI 消息；缺省当前对话；整理对话笔记或回顾被压缩截断的早期内容前必用）",
+  );
 
   return descriptions;
 }

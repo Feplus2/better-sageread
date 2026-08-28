@@ -184,6 +184,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           bookId: activeBookId,
           paperId: activeBookId,
           paperScopeIds: chatContext?.paperScopeIds,
+          threadId: chatContext?.threadId,
         }),
         ...mcp.tools,
       },
