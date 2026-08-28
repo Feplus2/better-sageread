@@ -140,6 +140,16 @@ iOS 连贯感可解构为四条，Web 全有对应物（类比：硬切是 PPT �
 
 位移/缩放类动画在 fade-only 下退化为纯 fade（对齐 iOS"减弱动态效果"口径）。实现口径：位移距离变量化（`--motion-slide: 8px`，fade-only 下 `0px`；scale 同理 `--motion-scale: 0.98` → `1`），或对位移类动画统一走一个工具类族，fade-only 下改写为 fade-only 变体。实施时二选一，倾向前者（仍是纯变量规则）。
 
+### 5.4 动态壁纸冻结（2026-08-28 补，用户裁定）
+
+生效档位 ≠ full 时（fade-only，或 system 档命中减弱动效折算为 reduced），`ThemeBackgroundVideo` 将 `--bg-video` 视频层 **pause 冻结在当前帧**（静态壁纸化），播放控制全部命令式（不用 autoPlay 属性，规避 autoplay 算法与显式 pause 的竞态）。动机：全屏 loop 视频的持续解码+逐帧合成与 keepalive 大层 visibility 翻转的 raster 突发抢 GPU（图书馆↔文献库切换卡顿的加重因子）。
+
+两条实现红线：
+- **冻结而非卸载**：视频壁纸主题的全局画布 `--background` 是半透明遮罩（怜烟 14%/22% alpha），阅读区纯色背景也走 translucentSolid——整层卸掉会透出 html 白底，暗色模式视觉必破。冻结既拿走解码/合成开销，又让半透明栈原样成立。
+- **首帧未解码不得先 pause**：preload=metadata 下未解码帧渲染为透明，须等 `loadeddata` 再停（readyState ≥ HAVE_CURRENT_DATA 直接停）。
+
+普适性：判定只看 `useEffectiveMotionMode() !== "full"`，不感知具体主题——任何声明 `--bg-video` 的自定义视频壁纸自动受控。切回 full 档从冻结位置无缝续播。
+
 ## 六、风险清单
 
 1. **越线动画**（动 layout 属性）→ 论文页复现 6.3s 重排惨案。对策：第一宪法 + code review 口径 + 性能模式兜底退化。

@@ -265,7 +265,7 @@ export default function GeneralSettings() {
             <div>
               <span className="text dark:text-neutral-200">动效模式</span>
               <p className="mt-2 text-neutral-600 text-xs dark:text-neutral-400">
-                低配设备可选「仅淡入淡出」，位移/缩放动效退化为淡入淡出
+                低配设备可选「仅淡入淡出」，位移/缩放动效退化为淡入淡出；生效档位非完整动效时，动态视频壁纸自动冻结为静态帧
               </p>
             </div>
             <DropdownMenu>

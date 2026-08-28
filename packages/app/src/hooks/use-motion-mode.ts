@@ -1,7 +1,31 @@
 import { useAppSettingsStore } from "@/store/app-settings-store";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+export type EffectiveMotionMode = "full" | "fade-only" | "reduced";
+
+/**
+ * 解析后的生效档位："system" 已按 prefers-reduced-motion 折算成 full/reduced，其余原样。
+ * data-motion 写入（useMotionMode）与运行期消费者（动态壁纸冻结等 JS 侧判断）共用此口径，
+ * 避免 system 档折算逻辑散落多处。
+ */
+export function useEffectiveMotionMode(): EffectiveMotionMode {
+  const motionMode = useAppSettingsStore((s) => s.settings.motionMode ?? "full");
+  const [systemReduced, setSystemReduced] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(REDUCED_MOTION_QUERY).matches,
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
+    const onChange = () => setSystemReduced(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+  }, []);
+
+  if (motionMode === "system") return systemReduced ? "reduced" : "full";
+  return motionMode;
+}
 
 /**
  * 动效三档生效链（docs/motion-system-plan.md §五）：
@@ -10,19 +34,9 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
  * 挂载点：ReaderLayout 顶层（全局唯一，HMR 重挂载幂等）。
  */
 export function useMotionMode() {
-  const motionMode = useAppSettingsStore((s) => s.settings.motionMode ?? "full");
+  const effectiveMode = useEffectiveMotionMode();
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (motionMode === "system") {
-      const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
-      const applySystem = () => {
-        root.dataset.motion = mediaQuery.matches ? "reduced" : "full";
-      };
-      applySystem();
-      mediaQuery.addEventListener("change", applySystem);
-      return () => mediaQuery.removeEventListener("change", applySystem);
-    }
-    root.dataset.motion = motionMode;
-  }, [motionMode]);
+    document.documentElement.dataset.motion = effectiveMode;
+  }, [effectiveMode]);
 }
