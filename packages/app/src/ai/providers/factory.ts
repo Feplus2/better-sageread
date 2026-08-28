@@ -5,7 +5,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
-import { type ReasoningLevel, chatReasoningBodyPatch } from "./reasoning-map";
+import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
 import { VISION_NAME_RE } from "./vision-map";
 
 export interface ProviderConfig {
@@ -33,11 +33,22 @@ function thinkingOffPatch(
       body.thinking = { type: "disabled" };
     };
   const host = (baseUrl ?? "").toLowerCase();
-  // GLM（智谱 bigmodel）：thinking:{type:"disabled"}
-  if (host.includes("bigmodel.cn"))
+  // GLM（智谱 bigmodel）：可关的 thinking:{type:"disabled"}；GLM-5.3 系恒思考
+  // （disabled 必 400）→ 降表内最低档（能禁则禁，不能禁取最低——用户口径）
+  if (host.includes("bigmodel.cn")) {
+    const cap = lookupCap(id);
+    if (cap?.alwaysOn) {
+      const low = auxThinkingLevel(cap);
+      if (low)
+        return (body) => {
+          body.reasoning_effort = low;
+        };
+      return null;
+    }
     return (body) => {
       body.thinking = { type: "disabled" };
     };
+  }
   // Qwen（阿里 dashscope）：enable_thinking:false
   if (host.includes("dashscope"))
     return (body) => {
@@ -55,13 +66,26 @@ function thinkingOffPatch(
       body.thinking = { type: "disabled" };
     };
   }
-  // 腾讯 TokenHub 混元（tokenhub.tencentmaas.com）：hy4 系思考不可关（不下发防 400）；hy3 等可关
+  // 腾讯 TokenHub 混元（tokenhub.tencentmaas.com）：hy4 系思考不可关 → 降最低档；hy3 等可关
   if (host.includes("tencentmaas")) {
-    if (/^(hunyuan-)?hy4/.test(id)) return null;
+    const cap = lookupCap(id);
+    if (cap?.alwaysOn) {
+      const low = auxThinkingLevel(cap);
+      if (low)
+        return (body) => {
+          body.reasoning_effort = low;
+        };
+      return null;
+    }
     return (body) => {
       body.thinking = { type: "disabled" };
     };
   }
+  // MiMo（小米）：enable_thinking:false（与 chatReasoningBodyPatch 的 off 分支同口径）
+  if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi"))
+    return (body) => {
+      body.enable_thinking = false;
+    };
   return null;
 }
 
@@ -274,33 +298,33 @@ export function getUtilityModel(_task?: string): SelectedModel | null {
 
 /**
  * 轻量任务（翻译/标题/标签等辅助模型调用）的思考强度控制：混合推理模型在简单任务上
- * 先思考数十秒再输出，是辅助任务慢的主因。按 provider+model 返回"低档/关闭思考"的 providerOptions。
- * 只下发对端明确兼容的参数（OpenAI 对不支持的模型会 400，故按模型前缀门控）；不支持的一律不下发。
- * DeepSeek：deepseek-chat 默认非思考、deepseek-reasoner 恒思考（建议辅助模型选 chat 版），无可下开关；
- * anthropic 走 OpenAI 兼容通道无思考开关；GLM/Qwen 自定义端点参数不统一，不下发防 400。
+ * 先思考数十秒再输出，是辅助任务慢的主因。**表驱动（用户口径：能禁则禁，不能禁取最低档，
+ * 表外默认不下发）**：effort 型取 offParam（模型地板档，如 gpt-5 的 minimal）或恒思考模型
+ * 的 levels[0]；budget 型（gemini-2.5）发 thinkingBudget 0；switch/表外模型不发
+ * （OpenAI 对不支持的模型会 400，OpenRouter 例外——自动忽略 reasoning，表外也安全下发）。
+ * 自定义端点（DeepSeek/GLM/Qwen/Kimi/腾讯/MiMo）的请求体补丁走 thinkingOffPatch 同规则。
  */
 export function utilityTaskProviderOptions(
   providerId: string,
   modelId: string,
 ): Record<string, Record<string, any>> | undefined {
-  const id = modelId.toLowerCase();
+  const cap = lookupCap(modelId);
+  const lowEffort = cap ? auxThinkingLevel(cap) : undefined;
   switch (providerId) {
     case "openai":
-      // reasoning_effort 仅 o 系列 / gpt-5 系列支持
-      if (/^(o\d|gpt-5)/.test(id)) return { openai: { reasoningEffort: "low" } };
-      return undefined;
+      return lowEffort ? { openai: { reasoningEffort: lowEffort } } : undefined;
     case "google":
-    case "gemini":
-      // thinkingConfig 仅 Gemini 2.5+ 支持
-      if (/gemini-(2\.5|3)/.test(id)) return { google: { thinkingConfig: { thinkingBudget: 0 } } };
-      return undefined;
+    case "gemini": {
+      if (!cap) return undefined;
+      if (cap.transport === "budget") return { google: { thinkingConfig: { thinkingBudget: 0 } } };
+      // gemini-3 系思考不可关（旧版发 budget:0 必 400）→ thinkingLevel 最低档
+      return lowEffort ? { google: { thinkingConfig: { thinkingLevel: lowEffort } } } : undefined;
+    }
     case "openrouter":
-      // OpenRouter 对不支持推理的模型自动忽略 reasoning 参数，可安全下发
-      return { openrouter: { reasoning: { effort: "low" } } };
+      // OpenRouter 对不支持推理的模型自动忽略 reasoning 参数，表外也安全下发
+      return { openrouter: { reasoning: { effort: lowEffort ?? "low" } } };
     case "grok":
-      // 仅 grok-3-mini 系列支持 reasoning_effort（grok-4 恒思考）
-      if (id.includes("grok-3-mini")) return { openai: { reasoningEffort: "low" } };
-      return undefined;
+      return lowEffort ? { openai: { reasoningEffort: lowEffort } } : undefined;
     default:
       return undefined;
   }

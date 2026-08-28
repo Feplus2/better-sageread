@@ -682,7 +682,17 @@ export function chatReasoningBodyPatch(
 // 工具函数
 // ---------------------------------------------------------------------------
 
-function lookupCap(modelId: string): ReasoningCapability | undefined {
+/** 轻量任务（标题/标签/摘要）的思考档位（用户口径：能禁则禁，不能禁取最低档）：
+ *  effort 型返回 offParam（模型的地板档，如 gpt-5 的 minimal）或恒思考模型的 levels[0]；
+ *  budget/switch 型与无行模型返回 undefined（由各通道的既有分支处理） */
+export function auxThinkingLevel(cap: ReasoningCapability): string | undefined {
+  if (cap.transport !== "effort") return undefined;
+  if (cap.alwaysOn) return cap.levels[0];
+  return cap.offParam ?? cap.levels[0];
+}
+
+/** 型号能力查询（factory 轻量任务分派共用；含作者前缀/日期快照归一） */
+export function lookupCap(modelId: string): ReasoningCapability | undefined {
   let slug = modelId.toLowerCase();
   // OpenRouter/中转站的 "作者/" 前缀剥离（与 vision-map canonicalSlug 同源）：
   // openai/gpt-5.6-luna → gpt-5.6-luna
