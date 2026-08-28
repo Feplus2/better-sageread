@@ -145,3 +145,19 @@ CREATE TABLE IF NOT EXISTS skills (
 CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
 CREATE INDEX IF NOT EXISTS idx_skills_is_active ON skills(is_active);
 CREATE INDEX IF NOT EXISTS idx_skills_updated_at ON skills(updated_at DESC);
+
+-- AI 用量流水表（2026-08-28 统计面板）：每条 AI 回复 finish 落一行，聚合在前端做
+-- 纯统计数据，不参与 L2 同步（与 reading_sessions 同级的地方性数据）
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id TEXT,
+    scope TEXT NOT NULL DEFAULT 'reader',     -- reader | paper | central
+    provider_id TEXT NOT NULL DEFAULT '',
+    model_id TEXT NOT NULL DEFAULT '',
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL               -- ms epoch，统计聚合锚点
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_model ON ai_usage(model_id);

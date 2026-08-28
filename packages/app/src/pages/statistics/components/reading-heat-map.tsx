@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 interface ReadingHeatMapProps {
   data: ReadingSessionStats[];
+  /** 热力图年份（父级年份选择器控制；data 须为该年切片） */
+  year: number;
 }
 
 interface HeatMapValue {
@@ -37,20 +39,17 @@ function useResizeObserver<T extends HTMLElement>() {
   return { ref, width };
 }
 
-const ReadingHeatMap = ({ data }: ReadingHeatMapProps) => {
+const ReadingHeatMap = ({ data, year }: ReadingHeatMapProps) => {
   const { ref, width } = useResizeObserver<HTMLDivElement>();
 
   const today = useMemo(() => dayjs().format("YYYY-MM-DD"), []);
 
   const { startDate, endDate } = useMemo(() => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-
-    const start = new Date(currentYear, 0, 1);
-    const end = new Date(currentYear, 11, 31);
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
 
     return { startDate: start, endDate: end };
-  }, []);
+  }, [year]);
 
   const cols = useMemo(() => {
     return 53;

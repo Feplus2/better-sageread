@@ -6,6 +6,7 @@ use crate::core::{
         agent_edit_file, agent_list_dir, agent_read_file, agent_resolve_path, agent_run_command,
         agent_search_files, agent_write_file,
     },
+    ai_usage::{get_ai_usage_entries, record_ai_usage},
     books::commands::{
         create_book_note,
         create_note,
@@ -170,6 +171,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            record_ai_usage,
+            get_ai_usage_entries,
             create_thread,
             edit_thread,
             delete_thread,

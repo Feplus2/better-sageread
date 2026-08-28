@@ -1,4 +1,5 @@
 pub mod agent_ws;
+pub mod ai_usage;
 pub mod books;
 pub mod converter;
 pub mod database;

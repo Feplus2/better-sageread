@@ -6,6 +6,7 @@ import { useForceUpdate } from "@/hooks/use-force-update";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
+import { recordAiUsage } from "@/services/ai-usage-service";
 import { saveImageAttachment } from "@/services/attachment-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
@@ -222,6 +223,23 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             }
           }
         } else if (message) {
+          // AI 用量流水（统计面板数据源）：transport 的 messageMetadata 把 finish part 的
+          // totalUsage 带到 UI 消息 metadata（顺随消息落库持久化），此处补一行流水即可。
+          // 首轮 finish 时线程尚未建立，threadId 记 null（统计聚合不需要线程归属）
+          const totalUsage = (
+            message.metadata as { totalUsage?: { inputTokens?: number; outputTokens?: number } } | undefined
+          )?.totalUsage;
+          if (totalUsage && ((totalUsage.inputTokens ?? 0) > 0 || (totalUsage.outputTokens ?? 0) > 0)) {
+            void recordAiUsage({
+              threadId: currentThread?.id ?? null,
+              scope: chatContext?.agentScope ?? "reader",
+              providerId: selectedModel?.providerId ?? "",
+              modelId: selectedModel?.modelId ?? "",
+              inputTokens: totalUsage.inputTokens ?? 0,
+              outputTokens: totalUsage.outputTokens ?? 0,
+            }).catch((e) => console.warn("AI 用量落库失败:", e));
+          }
+
           const reasoningTimes = reasoningTimesRef.current[message.id] || {};
           const messageIndex = resolvedMessages.findIndex((item: any) => item.id === message.id);
 
