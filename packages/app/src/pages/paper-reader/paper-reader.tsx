@@ -679,7 +679,12 @@ function MetadataBlock({
   return (
     <header data-paper-metadata className="not-prose mb-8 border-b pb-6">
       {displayTitle && (
-        <h1 className="font-bold text-2xl text-neutral-900 leading-snug dark:text-neutral-100">
+        /* 钉死 id：TOC 收集容器内全部 heading（含本标题），转跳按 id 锚——无 id 时该条目
+           是死链（scrollToHeading 查不到元素）。有 id 后走既有平滑滚动路径回到文档顶 */
+        <h1
+          id="paper-metadata-title"
+          className="font-bold text-2xl text-neutral-900 leading-snug dark:text-neutral-100"
+        >
           <InlineMathText text={displayTitle} />
         </h1>
       )}

@@ -46,6 +46,7 @@ interface LayoutStore {
   openBook: (bookId: string, title: string) => void;
   openPaper: (paperId: string, title: string) => void;
   removeTab: (tabId: string) => void;
+  closeAllTabs: () => void;
   activateTab: (tabId: string) => void;
   navigateToHome: () => void;
   updateTab: (tabId: string, updates: Partial<Tab>) => void;
@@ -183,6 +184,14 @@ export const useLayoutStore = create<LayoutStore>()(
         }
       },
 
+      /** 关闭全部阅读 tab（书+论文）并回主页：单关 removeTab 语义的原子版——
+       *  阅读视图/侧栏的销毁由 React 卸载兜底（与单关一致），本处只清注册表与清单 */
+      closeAllTabs: () => {
+        get().readerStores.clear();
+        wokenTabIds.clear();
+        set({ tabs: [], activeTabId: null, isHomeActive: true, sleptTabIds: [] });
+      },
+
       activateTab: (tabId: string) => {
         const { tabs, activeTabId, isHomeActive } = get();
         // 同值切换短路：目标 tab 已激活且不在主页时，set 只会重建 tabs 数组触发全 ReaderLayout
@@ -295,6 +304,11 @@ export const useLayoutStore = create<LayoutStore>()(
           tabOrientation: persisted?.tabOrientation === "vertical" ? "vertical" : "horizontal",
           isVerticalTabCollapsed: persisted?.isVerticalTabCollapsed ?? false,
           readerStores,
+          // 刷新/启动只醒当前 tab，其余全部入休眠（2026-08-30 性能口径）：
+          // 此刻各 tab 的重视图本就全部未挂载，入 slept 只是把挂载推迟到首次激活
+          // （切回走既有唤醒路径自动恢复），无阅读位置损失——PDF tab 同理
+          // （整页重载后 iframe 本就要重载，不存在可丢的运行期位置）。
+          sleptTabIds: tabs.filter((t) => t.id !== (persisted?.activeTabId || null)).map((t) => t.id),
         } as LayoutStore;
       },
     },

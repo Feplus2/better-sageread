@@ -1,6 +1,16 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type Tab, useLayoutStore } from "@/store/layout-store";
-import { BookOpen, FileText, X } from "lucide-react";
+import { BookOpen, FileText, SquareX, X } from "lucide-react";
 import { Fragment, useState } from "react";
 
 /** 标签类型图标：论文 FileText、书籍 BookOpen */
@@ -16,10 +26,11 @@ function TabTypeIcon({ tab, className }: { tab: Tab; className: string }) {
  * - 标签列表可滚动、可拖拽排序、中键关闭，按类型分组（书籍在前、论文在后）
  */
 export default function VerticalTabBar() {
-  const { tabs, activeTabId, activateTab, removeTab, reorderTab, sleptTabIds } = useLayoutStore();
+  const { tabs, activeTabId, activateTab, removeTab, reorderTab, sleptTabIds, closeAllTabs } = useLayoutStore();
 
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
+  const [closeAllOpen, setCloseAllOpen] = useState(false);
 
   // 分组（携带原始索引，拖拽排序直接作用于 store 的 tabs 数组）
   const indexed = tabs.map((tab, index) => ({ tab, index }));
@@ -152,6 +163,25 @@ export default function VerticalTabBar() {
           {collapsedGroup(bookItems, "书籍")}
           {collapsedGroup(paperItems, "论文")}
         </div>
+        {/* 栏末：关闭所有标签页（窄条为视觉锚——悬停展开浮层后由浮层页脚承接点击，两处同一入口） */}
+        {tabs.length > 0 && (
+          <div className="flex w-full shrink-0 flex-col items-center gap-1 pt-1">
+            <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="关闭所有标签页"
+                  onClick={() => setCloseAllOpen(true)}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-200 hover:text-red-600 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-red-400"
+                >
+                  <SquareX className="size-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">关闭所有标签页</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </div>
 
       {/* 详细信息浮层（absolute，不推挤布局；隐藏时 pointer-events-none 不挡交互） */}
@@ -161,11 +191,42 @@ export default function VerticalTabBar() {
         }`}
         style={{ borderRightWidth: 1 }}
       >
-        <div className="flex h-full flex-col gap-0.5 overflow-y-auto px-2 py-1">
-          {expandedGroup(bookItems, "书籍")}
-          {expandedGroup(paperItems, "论文")}
+        <div className="flex h-full flex-col">
+          <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1">
+            {expandedGroup(bookItems, "书籍")}
+            {expandedGroup(paperItems, "论文")}
+          </div>
+          {/* 页脚：关闭所有标签页（浮层覆盖窄条，此处是可点入口；行样式沿用标签行视觉语言） */}
+          {tabs.length > 0 && (
+            <div className="shrink-0 border-neutral-200 border-t px-2 py-1 dark:border-neutral-700">
+              <button
+                type="button"
+                onClick={() => setCloseAllOpen(true)}
+                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-red-600 dark:text-neutral-400 dark:hover:bg-neutral-700/60 dark:hover:text-red-400"
+              >
+                <SquareX className="size-4 shrink-0" />
+                <span className="flex-1 truncate text-left">关闭所有标签页</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* 轻确认（阅读进度已持久化，无数据损失；确认只为防误点） */}
+      <AlertDialog open={closeAllOpen} onOpenChange={setCloseAllOpen}>
+        <AlertDialogContent className="sm:max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>关闭所有标签页</AlertDialogTitle>
+            <AlertDialogDescription>
+              将关闭全部 {tabs.length} 个阅读标签页（书籍与论文）并回到主页。阅读进度已自动保存，不会丢失。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={closeAllTabs}>全部关闭</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
