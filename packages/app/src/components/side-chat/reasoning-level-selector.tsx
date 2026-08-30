@@ -1,4 +1,5 @@
 import {
+  clampReasoningLevel,
   getMaxBudget,
   getReasoningOptions,
   getReasoningTransport,
@@ -104,6 +105,10 @@ export function ReasoningLevelSelector() {
   // effort / switch：下拉菜单
   if (options.length === 0) return null;
 
+  // 存量档位显示钳制（审计 P2-5）：persist 值不在当前型号原生档位时，显示与勾选跟随钳制后的
+  // 最近合法档（发送路径在 reasoning-map 已同样钳制，两端一致）；用户点选即写回合法值
+  const displayLevel = clampReasoningLevel(options, reasoningLevel);
+
   return (
     <DropdownMenu>
       <Tooltip>
@@ -114,7 +119,7 @@ export function ReasoningLevelSelector() {
               className="flex h-8 cursor-pointer items-center gap-1 rounded-full border border-neutral-200 px-2 text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700"
             >
               <Gauge className="size-4" />
-              <span className="text-xs">思考·{reasoningLevelLabel(reasoningLevel)}</span>
+              <span className="text-xs">思考·{reasoningLevelLabel(displayLevel)}</span>
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -124,7 +129,7 @@ export function ReasoningLevelSelector() {
         {options.map((level) => (
           <DropdownMenuItem key={level} onClick={() => setReasoningLevel(level)}>
             <span className="flex-1">{reasoningLevelLabel(level)}</span>
-            {reasoningLevel === level && <Check className="size-4" />}
+            {displayLevel === level && <Check className="size-4" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -517,25 +517,27 @@ export async function translateBook(options: {
       if (!job) return;
       let translated: { index: number; text: string }[] | null = null;
       try {
-        const { text } = await generateText({
+        const { text, usage } = await generateText({
           model,
           prompt: buildBatchPrompt(job.batch, false, glossary),
           temperature: 0.2,
           abortSignal: signal,
           providerOptions: taskOptions,
         });
+        if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate"); // 审计 P2-6
         translated = validateBatchResponse(job.batch, parseBatchResponse(text));
       } catch (error) {
         if (signal?.aborted) throw error; // 取消优先：保持整体中止语义（调用方按取消处理）
         console.warn("书籍翻译批次失败，以严格 JSON 措辞重试一次:", error);
         try {
-          const { text } = await generateText({
+          const { text, usage } = await generateText({
             model,
             prompt: buildBatchPrompt(job.batch, true, glossary),
             temperature: 0.2,
             abortSignal: signal,
             providerOptions: taskOptions,
           });
+          if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate"); // 审计 P2-6（重试也耗 token）
           translated = validateBatchResponse(job.batch, parseBatchResponse(text));
         } catch (retryError) {
           if (signal?.aborted) throw retryError;

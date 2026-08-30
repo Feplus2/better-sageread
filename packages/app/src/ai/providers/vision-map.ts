@@ -181,8 +181,8 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "qwen3-vl-flash": true, // 旧 VL 系在售（"不再首选推荐"）；更多尺寸变体未收录→放行恰好正确
   "qvq-max": true,
   "qvq-plus": true, // 视觉推理"仅思考"系
-  "qwen3.7-max": false,
-  "qwen3.7-max-2026-05-20": false, // 无日期/更早快照：官方警示"仅支持文本接口"
+  "qwen3.7-max": true, // 基名=当前生产别名，跟随最新快照（2026-06-08 起带视觉）；更早的退役快照见下行显式拦截
+  "qwen3.7-max-2026-05-20": false, // 更早快照：官方警示"仅支持文本接口"（显式行先于归一命中）
   "qwen3.8-2.4t": false, // 2.4t 档为纯文本（官方文本生成页）
   "qwen3-max": false,
   "qwen3-max-preview": false,

@@ -428,6 +428,8 @@ export async function translatePaper(options: {
   const model = createUtilityModelInstance(utilityModel.providerId, utilityModel.modelId);
   // 简单任务压思考强度（混合推理模型先想几十秒再输出，是翻译慢的主因之一）
   const taskOptions = utilityTaskProviderOptions(utilityModel.providerId, utilityModel.modelId);
+  // 用量记账身份（审计 P2-6）：与 extractGlossary/translateMetadata 调用点同一构造
+  const aux = { providerId: utilityModel.providerId, modelId: utilityModel.modelId };
 
   const dir = await paperDirOf(paperId);
   const blocks = cutPaperBlocks(markdown);
@@ -492,13 +494,15 @@ export async function translatePaper(options: {
 
   /** 单批生成+解析；strict=true 时附加"严格 JSON"措辞（重试用） */
   const generateBatch = async (batch: { index: number; text: string }[], strict: boolean) => {
-    const { text } = await generateText({
+    // 用量记账（2026-08-30 审计 P2-6：正文批次是 translate token 主体，此前漏计）
+    const { text, usage } = await generateText({
       model,
       prompt: buildBatchPrompt(batch, strict, glossary),
       temperature: 0.2,
       abortSignal: signal,
       providerOptions: taskOptions,
     });
+    if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate");
     return parseBatchResponse(text);
   };
 
@@ -561,25 +565,27 @@ export async function translatePaper(options: {
     if (signal?.aborted) break;
     let translated: { fn: string; text: string }[] | null = null;
     try {
-      const { text } = await generateText({
+      const { text, usage } = await generateText({
         model,
         prompt: buildFootnoteBatchPrompt(batch, false, glossary),
         temperature: 0.2,
         abortSignal: signal,
         providerOptions: taskOptions,
       });
+      if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate"); // 审计 P2-6
       translated = parseFootnoteBatchResponse(text);
     } catch (error) {
       if (signal?.aborted) throw error; // 取消优先
       console.warn("论文脚注翻译批次失败，以严格 JSON 措辞重试一次:", error);
       try {
-        const { text } = await generateText({
+        const { text, usage } = await generateText({
           model,
           prompt: buildFootnoteBatchPrompt(batch, true, glossary),
           temperature: 0.2,
           abortSignal: signal,
           providerOptions: taskOptions,
         });
+        if (aux) recordAuxUsage(aux.providerId, aux.modelId, usage, "translate"); // 审计 P2-6（重试也耗 token）
         translated = parseFootnoteBatchResponse(text);
       } catch (retryError) {
         if (signal?.aborted) throw retryError;

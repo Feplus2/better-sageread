@@ -526,32 +526,49 @@ export function chatReasoningProviderOptions(
   const id = modelId.toLowerCase();
   const cap = lookupCap(id);
   if (!cap) return undefined;
+  // 存量档位钳制（审计 P2-5）：persist 值不在型号原生档位内时钳到最近合法档，防直接下发 400
+  const lv = clampReasoningLevel(cap.levels, level);
 
   switch (providerId) {
     case "openai": {
       if (cap.transport === "effort") {
-        return { openai: { reasoningEffort: level } };
+        return { openai: { reasoningEffort: lv } };
       }
       return undefined;
     }
     case "google":
     case "gemini": {
       if (cap.transport === "budget") {
-        // 2.5 系走 budget 整数
-        const budget = level === "off" ? 0 : level === "low" ? 1024 : level === "medium" ? 8192 : -1;
+        // 数字档（滑块，UI 存数字字符串）直接下发（审计 P2-2：此前只认预设词，
+        // 用户拖到 4096 等值全部落空成 -1 动态预算）；预设词走映射；off=0、high=-1 动态
+        const n = Number.parseInt(lv, 10);
+        const budget = Number.isFinite(n) ? n : lv === "off" ? 0 : lv === "low" ? 1024 : lv === "medium" ? 8192 : -1;
         return { google: { thinkingConfig: { thinkingBudget: budget } } };
       }
       if (cap.transport === "effort") {
-        return { google: { thinkingConfig: { thinkingLevel: level } } };
+        return { google: { thinkingConfig: { thinkingLevel: lv } } };
       }
       return undefined;
     }
     case "openrouter": {
-      return { openrouter: { reasoning: { effort: level === "off" ? "low" : level } } };
+      // 按 transport 分派（审计 P2-4：此前一律 effort 直传，switch 的 "on" 与 budget 的
+      // 数字串会被当成 effort 非法值下发）
+      if (cap.transport === "effort") {
+        return { openrouter: { reasoning: { effort: lv === "off" ? "low" : lv } } };
+      }
+      if (cap.transport === "switch") {
+        return { openrouter: { reasoning: { enabled: lv !== "off" && lv !== "none" } } };
+      }
+      if (cap.transport === "budget") {
+        const n = Number.parseInt(lv, 10);
+        if (Number.isFinite(n)) return { openrouter: { reasoning: { max_tokens: n } } };
+        return undefined; // 预设词无法映射 max_tokens，不下发
+      }
+      return undefined;
     }
     case "grok": {
       if (cap.transport === "effort") {
-        return { openai: { reasoningEffort: level } };
+        return { openai: { reasoningEffort: lv } };
       }
       return undefined;
     }
@@ -577,6 +594,10 @@ export function chatReasoningBodyPatch(
 
   // auto / on 特殊值处理
   if (level === "auto") return null; // 不下发任何参数
+
+  // 存量档位钳制（审计 P2-5）：deepseek 等无 medium 档型号上 persist 的 "medium" 必 400；
+  // 控制词（off/none/on）与数字串（budget 滑块）由 clamp 内部放行
+  level = cap ? (clampReasoningLevel(cap.levels, level) as ReasoningLevel) : level;
 
   // DeepSeek
   if (providerId === "deepseek") {
@@ -727,7 +748,31 @@ export function chatReasoningBodyPatch(
 export function auxThinkingLevel(cap: ReasoningCapability): string | undefined {
   if (cap.transport !== "effort") return undefined;
   if (cap.alwaysOn) return cap.levels[0];
-  return cap.offParam ?? cap.levels[0];
+  // offParam 含冒号者（"thinking:disabled"/"budget:0"）是请求体指令而非 effort 值——
+  // 原样返回会经 OpenRouter 辅助通道下发非法 effort（2026-08-30 审计 P2-3）
+  const off = cap.offParam;
+  if (off && !off.includes(":")) return off;
+  return cap.levels[0];
+}
+
+/** 档位强度序（钳制用）：off/none < low < medium < high < max/xhigh */
+const LEVEL_RANK: Record<string, number> = { off: 0, none: 0, low: 1, medium: 2, high: 3, max: 4, xhigh: 4 };
+
+/** 存量档位钳制（2026-08-30 审计 P2-5）：persist/历史值不在型号原生 levels 内时，钳到
+ * 「不超过原档的最高可用档，没有更低则取最低档」——防换型号后 UI 显示无效档并直接下发 400。
+ * 控制词（off/none/on/auto）与数字串（budget 滑块）原样放行；levels 为空（switch 型）原样放行。 */
+export function clampReasoningLevel(levels: readonly string[], level: string): string {
+  if (levels.length === 0 || levels.includes(level)) return level;
+  if (level === "off" || level === "none" || level === "on" || level === "auto") return level;
+  const rank = LEVEL_RANK[level];
+  if (rank === undefined) return level;
+  let best: string | undefined;
+  for (const l of levels) {
+    const r = LEVEL_RANK[l];
+    if (r === undefined || r > rank) continue;
+    if (best === undefined || (LEVEL_RANK[best] as number) < r) best = l;
+  }
+  return best ?? levels[0];
 }
 
 /** 型号能力查询（factory 轻量任务分派共用；含作者前缀/日期快照归一，\d{6} 为豆包式六位日期） */
