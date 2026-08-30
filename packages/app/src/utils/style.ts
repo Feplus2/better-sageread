@@ -367,7 +367,7 @@ export function resolveBookViewMode(viewSettings: ViewSettings): BookViewModeTyp
 // 显示模式编译进 CSS（经 StyleManager 注入 iframe 的总样式表）：original=只藏译文、
 // translated=只藏原文（translation-source 类由 injectSectionTranslations 标注）、
 // bilingual=双显——切换走 setSettings → renderer.setStyles 链即时生效，无需重载章节。
-const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean) => `
+const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean, primary: string) => `
   .translation-source {
     ${mode === "translated" ? "display: none !important;" : ""}
   }
@@ -394,8 +394,11 @@ const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean) => `
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* hover 联动高亮：跟随全局主题主色（论文侧 .paper-sentence-hover-rect 同浓度口径；
+     iframe 内 var(--primary) 不可达——主题变量不过 iframe 边界，必须由调用方注入真值；
+     ::highlight 不支持 box-shadow，仅背景 tint） */
   ::highlight(book-align-hover) {
-    background-color: color-mix(in oklab, var(--primary, oklch(0.55 0.14 260)) 18%, transparent);
+    background-color: color-mix(in oklab, ${primary} ${isDarkMode ? 20 : 14}%, transparent);
   }
 `;
 
@@ -403,6 +406,9 @@ export interface ThemeCode {
   bg: string;
   fg: string;
   primary: string;
+  /** 全局主题主色（document root --primary 真值）：iframe 内样式需要全局主题色时用此
+   * （reader palette 是阅读器主题体系，与全局主题不同源） */
+  globalPrimary: string;
   palette: Palette;
   isDarkMode: boolean;
   texture?: string;
@@ -490,6 +496,9 @@ export const getThemeCode = () => {
     bg: defaultPalette["base-100"],
     fg,
     primary: defaultPalette.primary,
+    // 全局主题主色（hover 联动等需与全局主题对齐的场景）：读 document root --primary 真值，
+    // 取不到回落 reader palette 主色
+    globalPrimary: docRootStyles?.getPropertyValue("--primary").trim() || defaultPalette.primary,
     palette: defaultPalette,
     isDarkMode,
     texture: currentTheme!.texture,
@@ -577,7 +586,7 @@ export const getStyles = (viewSettings: ViewSettings, themeCode?: ThemeCode) => 
     viewSettings.overrideFont!,
   );
   const colorStyles = getColorStyles(viewSettings.overrideColor!, viewSettings.invertImgColorInDark!, themeCode);
-  const translationStyles = getTranslationStyles(resolveBookViewMode(viewSettings), themeCode.isDarkMode);
+  const translationStyles = getTranslationStyles(resolveBookViewMode(viewSettings), themeCode.isDarkMode, themeCode.globalPrimary);
   const scrollbarStyles = getScrollbarStyles(themeCode);
   const userStylesheet = viewSettings.userStylesheet!;
   return `${layoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${scrollbarStyles}\n${userStylesheet}`;
@@ -593,7 +602,8 @@ export const applyTranslationStyle = (viewSettings: ViewSettings) => {
 
   const styleElement = document.createElement("style");
   styleElement.id = styleId;
-  styleElement.textContent = getTranslationStyles(resolveBookViewMode(viewSettings), getThemeCode().isDarkMode);
+  const theme = getThemeCode();
+  styleElement.textContent = getTranslationStyles(resolveBookViewMode(viewSettings), theme.isDarkMode, theme.globalPrimary);
 
   document.head.appendChild(styleElement);
 };
