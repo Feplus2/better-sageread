@@ -335,7 +335,10 @@ export class FoliateViewerManager {
               bookId: this.config.bookId,
               viewSettings: this.config.globalViewSettings,
               content: data,
-              transformers: ["rawmath", "punctuation", "footnote"],
+              transformers: ["rawmath", "punctuation", "footnote", "translation"],
+              // data 事件 detail.name 与 sections[].id 同源（均为 manifest item.href），
+              // 非 spine 的 XHTML 资源 findIndex 为 -1，translation transformer 自行跳过
+              sectionIndex: (this.config.bookDoc.sections ?? []).findIndex((section) => section.id === detail.name),
             };
             return Promise.resolve(transformContent(ctx));
           }

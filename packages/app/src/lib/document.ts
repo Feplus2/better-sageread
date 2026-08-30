@@ -57,6 +57,8 @@ export interface SectionItem {
   size: number;
   linear: string;
   location?: Location;
+  /** foliate-js 运行时另有 load/unload/createDocument（直接读原文、不经 transformTarget）；翻译管线使用 */
+  createDocument?: () => Promise<Document>;
 }
 
 export type BookMetadata = {

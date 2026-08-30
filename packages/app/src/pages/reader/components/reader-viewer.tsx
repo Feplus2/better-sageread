@@ -7,10 +7,11 @@ import { useLibraryStore } from "@/store/library-store";
 import { useThemeStore } from "@/store/theme-store";
 import { getInsetEdges } from "@/utils/grid";
 import { getViewInsets } from "@/utils/insets";
-import { getReaderBackgroundLayers } from "@/utils/style";
+import { getReaderBackgroundLayers, resolveBookViewMode } from "@/utils/style";
 import { useCallback, useEffect, useMemo } from "react";
 import useBookShortcuts from "../hooks/use-book-shortcuts";
 import { useFoliateViewer } from "../hooks/use-foliate-viewer";
+import { useTranslationLink } from "../hooks/use-translation-link";
 import Annotator from "./annotator";
 import FooterBar from "./footer-bar";
 import HeaderBar from "./header-bar";
@@ -58,6 +59,11 @@ const ReaderViewerContent: React.FC = () => {
   }
 
   const foliateViewer = useFoliateViewer(bookId, bookData.bookDoc, config, contentInsets);
+
+  // 二期批次 4b：对照翻译交互层——hover 句词联动（非原文模式启用：译文在屏时才有联动意义；
+  // 划词对照卡 08-29 用户裁定撤销，hover 已覆盖该需求）
+  const viewMode = resolveBookViewMode(globalViewSettings);
+  useTranslationLink(viewMode !== "original");
 
   // T3+T4：书籍图片交互——点击大图预览 + 右键主题菜单（复制/另存为/引用）。
   // 引用走 imageToChat 事件（reader 侧输入区接收，与划词引用同链路）；面板未展开先展开再派发

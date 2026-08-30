@@ -1,6 +1,6 @@
 import { type ReaderBackground, getReaderScene } from "@/styles/reader-scenes";
 import { type CustomTheme, type Palette, generateDarkPalette, generateLightPalette, themes } from "@/styles/themes";
-import type { ViewSettings } from "@/types/book";
+import type { BookViewModeType, ViewSettings } from "@/types/book";
 import tinycolor from "tinycolor2";
 import { getOSPlatform } from "./misc";
 
@@ -355,8 +355,21 @@ export const getFootnoteStyles = () => `
   }
 `;
 
-const getTranslationStyles = (showSource: boolean) => `
+/** 书籍翻译显示模式三态（批次 2）：bookViewMode 为准；旧数据仅有 translationEnabled 布尔时
+ *  派生（true→bilingual / false→original），UI 写入时两字段同步，无迁移代码 */
+export function resolveBookViewMode(viewSettings: ViewSettings): BookViewModeType {
+  return viewSettings.bookViewMode ?? (viewSettings.translationEnabled ? "bilingual" : "original");
+}
+
+// 对照翻译块样式（二期批次 1+2）：视觉语言照论文侧 .paper-translation——左竖线 + 弱化色 +
+// 0.92em 字号 + 1.75 行距的"引文式"形态，明暗主题各一套 oklch 色；!important 防原书
+// 样式覆盖（译文是 div，原书 CSS 大多只打 p，天然逃逸大部分污染）。
+// 显示模式编译进 CSS（经 StyleManager 注入 iframe 的总样式表）：original=只藏译文、
+// translated=只藏原文（translation-source 类由 injectSectionTranslations 标注）、
+// bilingual=双显——切换走 setSettings → renderer.setStyles 链即时生效，无需重载章节。
+const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean) => `
   .translation-source {
+    ${mode === "translated" ? "display: none !important;" : ""}
   }
   .translation-target {
   }
@@ -364,13 +377,25 @@ const getTranslationStyles = (showSource: boolean) => `
     display: none !important;
   }
   .translation-target-block {
-    display: block !important;
-    ${showSource ? "margin: 0.5em 0 !important;" : ""}
+    display: ${mode !== "original" ? "block" : "none"} !important;
+    ${
+      mode === "bilingual"
+        ? `font-size: 0.92em !important;
+    line-height: 1.75 !important;
+    margin: 0.35em 0 1em !important;
+    padding-left: 0.75em !important;
+    border-left: 2px solid ${isDarkMode ? "oklch(0.35 0.02 260)" : "oklch(0.87 0.01 260)"} !important;
+    color: ${isDarkMode ? "oklch(0.72 0.02 260)" : "oklch(0.45 0.02 260)"} !important;`
+        : "margin: 0 0 0.75em !important;"
+    }
   }
   .translation-target-toc {
     display: block !important;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  ::highlight(book-align-hover) {
+    background-color: color-mix(in oklab, var(--primary, oklch(0.55 0.14 260)) 18%, transparent);
   }
 `;
 
@@ -552,7 +577,7 @@ export const getStyles = (viewSettings: ViewSettings, themeCode?: ThemeCode) => 
     viewSettings.overrideFont!,
   );
   const colorStyles = getColorStyles(viewSettings.overrideColor!, viewSettings.invertImgColorInDark!, themeCode);
-  const translationStyles = getTranslationStyles(viewSettings.showTranslateSource!);
+  const translationStyles = getTranslationStyles(resolveBookViewMode(viewSettings), themeCode.isDarkMode);
   const scrollbarStyles = getScrollbarStyles(themeCode);
   const userStylesheet = viewSettings.userStylesheet!;
   return `${layoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${scrollbarStyles}\n${userStylesheet}`;
@@ -568,7 +593,7 @@ export const applyTranslationStyle = (viewSettings: ViewSettings) => {
 
   const styleElement = document.createElement("style");
   styleElement.id = styleId;
-  styleElement.textContent = getTranslationStyles(viewSettings.showTranslateSource);
+  styleElement.textContent = getTranslationStyles(resolveBookViewMode(viewSettings), getThemeCode().isDarkMode);
 
   document.head.appendChild(styleElement);
 };

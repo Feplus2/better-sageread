@@ -40,21 +40,21 @@ import {
 import { tokenizeZhBatch } from "./zh-tokenizer";
 
 /** 词级缓存版本：分词器变更（单字 → jieba）时旧 alignW 自动失效重算（拼入 alignWHash） */
-const ALIGN_W_CACHE_VERSION = "jieba1";
-const wordCacheKey = (tgtHash: string) => `${tgtHash}#${ALIGN_W_CACHE_VERSION}`;
+export const ALIGN_W_CACHE_VERSION = "jieba1";
+export const wordCacheKey = (tgtHash: string) => `${tgtHash}#${ALIGN_W_CACHE_VERSION}`;
 
 /** 句对平均相似度低于该阈值标 low: true（UI 可降级） */
 export const ALIGN_LOW_CONFIDENCE = 0.5;
 /** 词对平均相似度低于该阈值标 low: true（词/字向量噪声大于句向量，阈值略低于句级） */
 export const ALIGN_W_LOW_CONFIDENCE = 0.45;
 /** 单次 embed HTTP 调用的最大句数（一次或少量调用，避免逐句请求） */
-const EMBED_BATCH_SIZE = 64;
+export const EMBED_BATCH_SIZE = 64;
 /** 嵌入前截断的句长上限（字符）：嵌入模型上下文有限（jina/bge 约 512 token），长句截断保底 */
 const EMBED_MAX_CHARS = 1200;
 /** 词级 embed 分片上限：单批最大 token 条数 / 单批最大总字符（token 短，双上限防超大请求）。
  *  条数取 64：智谱等供应商硬性限制单请求 ≤64 条（超限 HTTP 400），256 会导致整片失败 */
-const EMBED_W_BATCH_SIZE = 64;
-const EMBED_W_BATCH_CHARS = 6000;
+export const EMBED_W_BATCH_SIZE = 64;
+export const EMBED_W_BATCH_CHARS = 6000;
 
 export interface AlignProgress {
   /** 已处理（含复用/失败）的块数 */
@@ -103,10 +103,14 @@ export interface PaperAlignmentInfo {
   alignedW: number;
 }
 
-const clipSentence = (text: string) => (text.length > EMBED_MAX_CHARS ? text.slice(0, EMBED_MAX_CHARS) : text);
+export const clipSentence = (text: string) => (text.length > EMBED_MAX_CHARS ? text.slice(0, EMBED_MAX_CHARS) : text);
 
 /** 批量 embed：OpenAI 格式（input 数组）；URL 以 /api/embed 结尾按 Ollama 协议（响应 embeddings 数组） */
-async function embedBatch(texts: string[], config: VectorModelConfig, signal?: AbortSignal): Promise<number[][]> {
+export async function embedBatch(
+  texts: string[],
+  config: VectorModelConfig,
+  signal?: AbortSignal,
+): Promise<number[][]> {
   const isOllama = config.embeddingsUrl.endsWith("/api/embed");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
@@ -143,7 +147,7 @@ async function embedBatch(texts: string[], config: VectorModelConfig, signal?: A
  * 并把收敛后的上限记入 state.limit（本次运行内后续分片直接使用，不再试错）。
  * 非批量类错误（401/500 等）直接上抛，走既有分片失败降级。
  */
-async function embedBatchAdaptive(
+export async function embedBatchAdaptive(
   texts: string[],
   config: VectorModelConfig,
   state: { limit: number },
@@ -166,7 +170,7 @@ async function embedBatchAdaptive(
 }
 
 /** 余弦相似度矩阵（行=源句，列=译文句） */
-function cosineMatrix(srcVecs: number[][], tgtVecs: number[][]): number[][] {
+export function cosineMatrix(srcVecs: number[][], tgtVecs: number[][]): number[][] {
   const norm = (v: number[]) => Math.sqrt(v.reduce((sum, x) => sum + x * x, 0)) || 1;
   const srcNorms = srcVecs.map(norm);
   const tgtNorms = tgtVecs.map(norm);

@@ -172,6 +172,7 @@ export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
   translationProvider: "deepl",
   translateTargetLang: "",
   showTranslateSource: true,
+  bookViewMode: "original",
 };
 
 export const DEFAULT_SCREEN_CONFIG: ScreenConfig = {

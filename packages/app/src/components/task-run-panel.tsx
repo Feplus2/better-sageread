@@ -27,6 +27,7 @@ const CHANNEL_LABELS: Record<TaskChannel, string> = {
   "paper-translate": "批量翻译",
   "book-convert": "图书转换",
   "book-vectorize": "图书向量化",
+  "book-translate": "图书翻译",
 };
 
 function TaskStatusIcon({ status }: { status: TaskStatus }) {

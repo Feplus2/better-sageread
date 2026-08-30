@@ -170,11 +170,16 @@ export interface TTSConfig {
   ttsLocation: string;
 }
 
+/** 书籍翻译显示模式三态（二期批次 2，语义对齐论文侧 paperViewMode） */
+export type BookViewModeType = "original" | "translated" | "bilingual";
+
 export interface TranslatorConfig {
   translationEnabled: boolean;
   translationProvider: string;
   translateTargetLang: string;
   showTranslateSource: boolean;
+  /** 显示模式三态；缺省时由 resolveBookViewMode 从旧布尔字段派生 */
+  bookViewMode?: BookViewModeType;
 }
 
 export interface ScreenConfig {

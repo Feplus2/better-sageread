@@ -15,6 +15,7 @@ import { useReaderStore } from "./reader-provider";
 import SearchDropdown from "./search-dropdown";
 import SettingsDropdown from "./settings-dropdown";
 import TOCView from "./toc-view";
+import TranslateDropdown from "./translate-dropdown";
 
 const HeaderBar = () => {
   const headerRef = useRef<HTMLDivElement>(null);
@@ -135,6 +136,7 @@ const HeaderBar = () => {
           }`}
         >
           <SearchDropdown />
+          <TranslateDropdown />
           <SettingsDropdown />
           <Tooltip>
             <TooltipTrigger asChild>

@@ -23,7 +23,13 @@ import {
 // 执行器模块加载自注册的通道在 store HMR 后不丢。此处 re-export 保持既有调用方 API 不变。
 export { registerTaskChannel, setTaskConflictChecker };
 
-export type TaskChannel = "paper-parse" | "paper-vectorize" | "paper-translate" | "book-convert" | "book-vectorize";
+export type TaskChannel =
+  | "paper-parse"
+  | "paper-vectorize"
+  | "paper-translate"
+  | "book-convert"
+  | "book-vectorize"
+  | "book-translate";
 export type TaskStatus = "queued" | "running" | "success" | "error" | "cancelled";
 
 export interface TaskItem {

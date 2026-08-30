@@ -3,6 +3,7 @@ import type {
   BookQueryOptions,
   BookStatus,
   BookStatusUpdateData,
+  BookTranslationMeta,
   BookUpdateData,
   BookUploadData,
   BookVectorizationMeta,
@@ -383,6 +384,31 @@ export async function updateBookVectorizationMeta(
   const newMetadata = {
     ...(current?.metadata ?? {}),
     vectorization: nextVec,
+  } as BookStatus["metadata"];
+
+  return updateBookStatus(bookId, { metadata: newMetadata });
+}
+
+// Merge-update translation metadata without clobbering other metadata fields（vectorization 同款模式）
+export async function updateBookTranslationMeta(
+  bookId: string,
+  patch: Partial<BookTranslationMeta>,
+): Promise<BookStatus> {
+  const current = await getBookStatus(bookId);
+  const prev = current?.metadata?.translation ?? {};
+  const next: BookTranslationMeta = {
+    status: "idle",
+    totalBlocks: 0,
+    doneBlocks: 0,
+    sectionCount: 0,
+    ...prev,
+    ...patch,
+    updatedAt: Date.now(),
+  } as BookTranslationMeta;
+
+  const newMetadata = {
+    ...(current?.metadata ?? {}),
+    translation: next,
   } as BookStatus["metadata"];
 
   return updateBookStatus(bookId, { metadata: newMetadata });

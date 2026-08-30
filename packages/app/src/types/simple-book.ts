@@ -62,6 +62,7 @@ export interface BookStatus {
   rating?: number;
   metadata?: {
     vectorization?: BookVectorizationMeta;
+    translation?: BookTranslationMeta;
     [k: string]: any;
   };
   createdAt: number;
@@ -81,6 +82,7 @@ export interface BookStatusUpdateData {
   rating?: number;
   metadata?: {
     vectorization?: BookVectorizationMeta;
+    translation?: BookTranslationMeta;
     [k: string]: any;
   };
 }
@@ -110,6 +112,24 @@ export interface BookVectorizationMeta {
   dimension: number;
   chunkCount: number;
   version: number;
+  startedAt?: number;
+  finishedAt?: number;
+  updatedAt: number;
+}
+
+// ---- Translation metadata (stored under book_status.metadata.translation) ----
+export type BookTranslationStatus = "idle" | "processing" | "complete" | "partial" | "failed";
+
+export interface BookTranslationMeta {
+  status: BookTranslationStatus;
+  /** 全书可翻译段总数（最近一次运行） */
+  totalBlocks: number;
+  /** 已有译文的段数（含历史续翻累计） */
+  doneBlocks: number;
+  /** 有译本的章数 */
+  sectionCount: number;
+  /** 重试后仍失败的批次数（这些段未落盘，续翻可补齐） */
+  failedBatches?: number;
   startedAt?: number;
   finishedAt?: number;
   updatedAt: number;

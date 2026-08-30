@@ -21,7 +21,7 @@ export interface BookDataState {
   nativeFileUrl?: string;
 }
 
-export type OpenDropdown = "toc" | "search" | "settings" | null;
+export type OpenDropdown = "toc" | "search" | "settings" | "translate" | null;
 
 export interface ReaderState {
   bookId: string;
