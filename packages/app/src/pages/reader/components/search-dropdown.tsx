@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { BookSearchResult } from "@/types/book";
 import { Search } from "lucide-react";
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useReaderStore, useReaderStoreApi } from "./reader-provider";
 import SearchBar from "./search-bar";
 import SearchResults from "./search-results";
@@ -23,6 +23,19 @@ const SearchDropdown: React.FC<SearchDropdownProps> = ({ onNavigate }) => {
   const [hasSearched, setHasSearched] = useState(false);
 
   const isSearchDropdownOpen = openDropdown === "search";
+
+  // 关即清空（与 radix 外点关闭走 handleToggleSearchDropdown 的清场语义对齐）：
+  // iframe 外点修复（header-bar.tsx）直接置 openDropdown=null，不经 onOpenChange，
+  // 这里按 open→closed 跳变补同样的重置，避免重开时残留上次搜索词/结果。
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (wasOpenRef.current && !isSearchDropdownOpen) {
+      setSearchResults(null);
+      setSearchTerm("");
+      setHasSearched(false);
+    }
+    wasOpenRef.current = isSearchDropdownOpen;
+  }, [isSearchDropdownOpen]);
 
   if (!bookData) {
     return null;

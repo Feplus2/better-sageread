@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import { TableOfContents } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   TbLayoutSidebarLeftCollapse,
   TbLayoutSidebarLeftCollapseFilled,
@@ -35,6 +35,24 @@ const HeaderBar = () => {
   const { swapSidebars } = useThemeStore();
 
   const isTocDropdownOpen = openDropdown === "toc";
+
+  // 外点修复：正文是 foliate iframe（closed shadow root），iframe 内的 pointerdown 不过文档边界，
+  // radix 的 onPointerDownOutside 永远收不到 → 点空白不收起。订阅 iframe 事件桥的中继消息
+  // （mousedown/touchstart 即时上抛，无双击阈值延迟，语义对齐 radix 的 pointerdown-outside），
+  // 有关闭中的下拉时置 null。不动事件桥与既有消费方（标注弹窗/搜索清理等）。
+  useEffect(() => {
+    if (!openDropdown || !bookId) return;
+    const handleIframePointer = (event: MessageEvent) => {
+      if (
+        (event.data?.type === "iframe-mousedown" || event.data?.type === "iframe-touchstart") &&
+        event.data?.bookId === bookId
+      ) {
+        setOpenDropdown?.(null);
+      }
+    };
+    window.addEventListener("message", handleIframePointer);
+    return () => window.removeEventListener("message", handleIframePointer);
+  }, [openDropdown, bookId, setOpenDropdown]);
 
   const {
     isVisible: showControls,
