@@ -61,11 +61,12 @@ const ReaderViewerContent: React.FC = () => {
 
   const foliateViewer = useFoliateViewer(bookId, bookData.bookDoc, config, contentInsets);
 
-  // 二期批次 4b：对照翻译交互层——hover 句词联动（非原文模式启用：译文在屏时才有联动意义；
-  // 划词对照卡 08-29 用户裁定撤销，hover 已覆盖该需求）
+  // 二期批次 4b+：对照翻译交互层——hover 句词联动 + 右键句选。常驻启用（2026-08-30 用户裁定）：
+  // 有对齐数据时双侧联动；未翻译书/未对齐段落单侧句级高亮与右键句选——句子级交互是
+  // 通用阅读增强，不依赖翻译（划词对照卡 08-29 用户裁定撤销，hover 已覆盖该需求）
   const viewMode = resolveBookViewMode(globalViewSettings);
-  useTranslationLink(viewMode !== "original");
-  // 二期批次 4d：标注镜像——原文标注 ↔ 译文常驻镜像高亮（与 hover 联动同启停口径）
+  useTranslationLink(true);
+  // 二期批次 4d：标注镜像——原文标注 ↔ 译文常驻镜像高亮（需要译本存在，仍按模式启停）
   useAnnotationMirror(viewMode !== "original");
 
   // T3+T4：书籍图片交互——点击大图预览 + 右键主题菜单（复制/另存为/引用）。

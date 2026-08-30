@@ -151,6 +151,10 @@ export function useTranslationLink(enabled: boolean) {
       /** mousemove 的 rAF 节流状态（每帧最多处理一次，取最新坐标，论文侧 handleMouseMove 同款） */
       let rafId = 0;
       let lastMouse: { x: number; y: number; target: EventTarget | null } | null = null;
+      /** 未翻译书的块表（无 data-block-index 时的枚举契约回退）：惰性枚举一次并缓存，
+       *  章文档生命周期内稳定（foliate 重建文档则 attachDoc 重跑重建） */
+      let allBlocksCache: ReturnType<typeof enumerateSectionBlocks> | null = null;
+      const allBlocks = () => (allBlocksCache ??= enumerateSectionBlocks(wrapSectionDocument(doc)));
 
       const removeLayer = () => {
         layer?.remove();
@@ -211,45 +215,61 @@ export function useTranslationLink(enabled: boolean) {
       };
 
       const processHover = (x: number, y: number, target: EventTarget | null) => {
-        if (!file) return;
         // 有非折叠选区 / 悬在图片、代码块、链接上时不联动（论文侧 processHover 同款守卫）
         const sel = doc.getSelection();
         if (sel && !sel.isCollapsed) return clearHover();
         const el = target as Element | null;
         if (el?.closest?.("img, pre, a")) return clearHover();
-        const blockEl = el?.closest?.("[data-block-index]") ?? null;
-        if (!blockEl) return clearHover();
-        const entry = file.blocks[blockEl.getAttribute("data-block-index") ?? ""];
-        if (!entry?.text || !entry.align) return clearHover();
         const caret = caretOffset(doc, x, y);
         if (!caret) return clearHover();
+        // 块定位：data-block-index（有译文注入的书）优先；未翻译书没有该属性，回退枚举契约
+        // （块表按文档惰性枚举一次并缓存，章文档生命周期内稳定）
+        let blockEl = el?.closest?.("[data-block-index]") ?? null;
+        if (!blockEl) blockEl = allBlocks().find((b) => b.el.contains(caret.node))?.el ?? null;
+        if (!blockEl) return clearHover();
         const rawOff = rawOffsetOf(blockEl, caret.node, caret.offset);
         if (rawOff === null) return clearHover();
         const map = buildBlockTextMap(blockEl);
         const normOff = rawToNormOffset(map, rawOff);
         const tgtSide = Boolean(blockEl.closest(`[${TRANSLATION_ATTR}]`));
-        // 词级优先，句级吸附（论文侧 mapSrcRangeToTgt 同款取舍）
+        const idx = blockEl.getAttribute("data-block-index");
+        const entry = idx !== null ? file?.blocks[idx] : undefined;
+        // 词级优先，句级吸附（论文侧 mapSrcRangeToTgt 同款取舍）；有对齐数据 → 双侧联动
         const pair =
-          (entry.alignW && findPair(entry.alignW, normOff, tgtSide)) || findPair(entry.align, normOff, tgtSide);
-        if (!pair) return clearHover();
-        const key = `${index}:${blockEl.getAttribute("data-block-index")}:${tgtSide ? "t" : "s"}:${pair.ss}:${pair.ts}`;
-        if (key === lastKey.current) return; // 同句内移动不重绘
-        lastKey.current = key;
+          (entry?.alignW && findPair(entry.alignW, normOff, tgtSide)) ||
+          (entry?.align ? findPair(entry.align, normOff, tgtSide) : undefined);
+        if (pair) {
+          const key = `${index}:${idx}:${tgtSide ? "t" : "s"}:${pair.ss}:${pair.ts}`;
+          if (key === lastKey.current) return; // 同句内移动不重绘
+          lastKey.current = key;
 
-        const counterpart = counterpartOf(blockEl, !tgtSide);
-        const ranges: Range[] = [];
-        // 先解构再显式传参（条件数组字面量推断为 number[]，直接 spread 进固定参数签名会 TS2556）
-        const [ownS, ownE] = tgtSide ? [pair.ts, pair.te] : [pair.ss, pair.se];
-        const ownRange = normToRange(blockEl, map, ownS, ownE);
-        if (ownRange) ranges.push(ownRange);
-        if (counterpart) {
-          const cMap = buildBlockTextMap(counterpart);
-          const [cS, cE] = tgtSide ? [pair.ss, pair.se] : [pair.ts, pair.te];
-          const cRange = normToRange(counterpart, cMap, cS, cE);
-          if (cRange) ranges.push(cRange);
+          const counterpart = counterpartOf(blockEl, !tgtSide);
+          const ranges: Range[] = [];
+          // 先解构再显式传参（条件数组字面量推断为 number[]，直接 spread 进固定参数签名会 TS2556）
+          const [ownS, ownE] = tgtSide ? [pair.ts, pair.te] : [pair.ss, pair.se];
+          const ownRange = normToRange(blockEl, map, ownS, ownE);
+          if (ownRange) ranges.push(ownRange);
+          if (counterpart) {
+            const cMap = buildBlockTextMap(counterpart);
+            const [cS, cE] = tgtSide ? [pair.ss, pair.se] : [pair.ts, pair.te];
+            const cRange = normToRange(counterpart, cMap, cS, cE);
+            if (cRange) ranges.push(cRange);
+          }
+          if (ranges.length === 0) return removeLayer();
+          renderOverlay(ranges);
+          return;
         }
-        if (ranges.length === 0) return removeLayer();
-        renderOverlay(ranges);
+        // 无对齐回退（未翻译书/未对齐段）：单侧句级高亮——句界走缓存切句器，
+        // hover 全句即「这句是什么」的通用阅读增强，不依赖翻译
+        const span = findSentenceAt(sentenceSpansOf(blockEl, map.norm), normOff);
+        if (!span) return clearHover();
+        const blockKey = idx ?? `enum${allBlocks().findIndex((b) => b.el === blockEl)}`;
+        const key = `${index}:${blockKey}:${span.start}:${span.end}`;
+        if (key === lastKey.current) return;
+        lastKey.current = key;
+        const range = normToRange(blockEl, map, span.start, span.end);
+        if (!range) return clearHover();
+        renderOverlay([range]);
       };
 
       const onMove = (ev: MouseEvent) => {
@@ -319,16 +339,28 @@ export function useTranslationLink(enabled: boolean) {
         const sel = doc.getSelection();
         sel?.removeAllRanges();
         sel?.addRange(range);
+        // 同一手势内浮起弹窗（与论文侧 handleContextMenu 单手势选中+弹窗对齐）：annotator 的
+        // 弹窗由 doc 的 mouseup 监听驱动（annotator/index.tsx onLoad 挂载），真实右键 gesture
+        // 里该 mouseup 与 foliate/宿主事件桥存在时序竞争（用户实测第一次右键只选中不弹窗）——
+        // 补一发合成 mouseup 走同一路径；真实 mouseup 若随后也触发，只是同选区的幂等重放
+        doc.dispatchEvent(
+          new win.MouseEvent("mouseup", {
+            bubbles: true,
+            cancelable: true,
+            clientX: ev.clientX,
+            clientY: ev.clientY,
+            view: win,
+          }),
+        );
       };
 
-      // hover 监听只在有对齐数据时挂（右键句选不依赖对齐，常驻）；signal 随 effect 卸载一并摘除
-      if (file && Object.keys(file.blocks).length > 0) {
-        doc.addEventListener("mousemove", onMove, { signal: ac.signal });
-        doc.addEventListener("mouseleave", clearHover, { signal: ac.signal });
-        // scrolled 模式的文档内滚动 / 窗口重排：覆盖层即态清除（分栏翻页走宿主 scroll，在 effect 层清）
-        doc.addEventListener("scroll", clearHover, { capture: true, signal: ac.signal });
-        win.addEventListener("resize", clearHover, { signal: ac.signal });
-      }
+      // hover/右键监听常驻挂载（hover 有对齐数据时双侧联动、无对齐单侧句级高亮——
+      // 未翻译书也生效；signal 随 effect 卸载一并摘除）
+      doc.addEventListener("mousemove", onMove, { signal: ac.signal });
+      doc.addEventListener("mouseleave", clearHover, { signal: ac.signal });
+      // scrolled 模式的文档内滚动 / 窗口重排：覆盖层即态清除（分栏翻页走宿主 scroll，在 effect 层清）
+      doc.addEventListener("scroll", clearHover, { capture: true, signal: ac.signal });
+      win.addEventListener("resize", clearHover, { signal: ac.signal });
       doc.addEventListener("contextmenu", onContextMenu, { signal: ac.signal });
     };
 
