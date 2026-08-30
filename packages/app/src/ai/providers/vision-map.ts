@@ -16,7 +16,7 @@
  *
  * 仅存的两条"身份归一"不是能力推断：① OpenRouter 的 "作者/" 前缀剥离（同一型号的
  * 聚合写法）；② 日期后缀剥离（厂商文档口径：日期 ID 是基名型号的快照别名，
- * gpt-4o-2024-11-20 就是 gpt-4o）——归一后仍查同一张表。
+ * gpt-4o-2024-11-20 就是 gpt-4o；豆包用六位式 -260628，同理）——归一后仍查同一张表。
  *
  * 维护：新型号上线 → 查官方文档 → 表里加一行（DENY 侧优先级高：用户真在用的
  * 文本聊天型号收全，报错才少）。调研底稿与各家官方链接：docs/vision-map-research.md。
@@ -317,6 +317,32 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "hunyuan-pro": false,
   "hunyuan-standard": false, // 文本系
 
+  // ---- 字节豆包 Doubao（火山方舟模型列表 volcengine.com/docs/82379/1554680；2026-08-30 核实）----
+  // API ID 用连字符（doubao-seed-1-6，控制台展示名才是点号 doubao-seed-1.6）；带六位日期
+  // 快照后缀（如 -260628）由 canonicalSlug 归一剥离。Seed 系 2025-06 起全线多模态。
+  "doubao-seed-2-1-pro": true, // 2026-06-23 旗舰：多模态理解+视觉定位（图片 detail 三档/小时级长视频）
+  "doubao-seed-2-1-turbo": true, // 同日发布的规模化生产版，效果比肩 pro，支持图片输入
+  "doubao-seed-2-0-pro": true, // 2026-02-14：多模态理解+视觉定位，256K
+  "doubao-seed-2-0-lite": true, // 2026-05-06 升级为豆包家族首款全模态（视频/图像/音频/文本统一理解）
+  "doubao-seed-2-0-mini": true, // 低成本低延迟版，具备多模态理解（360 智脑转售页）
+  "doubao-seed-1-8": true, // 2025-12：多模态 Agent（单次视频理解 640→1280 帧）
+  "doubao-seed-1-6": true, // 2025-06：多模态深度思考，256K
+  "doubao-seed-1-6-thinking": true, // 思考强化变体，同基座多模态
+  "doubao-seed-1-6-flash": true, // 极速版（TPOT 10ms），视觉理解比肩友商 Pro（百科/51CTO 实测）
+  "doubao-seed-1-6-vision": true, // 视觉专用版（视频理解/Grounding/GUI Agent）
+  "doubao-1.5-thinking-pro-vision": true, // 视觉版思考型号
+  "doubao-1.5-vision-pro": true,
+  "doubao-1.5-vision-lite": true,
+  "doubao-1.5-ui-tars": true, // GUI Agent（截图驱动）
+  "doubao-1.5-thinking-pro": false, // 文本思考型号（视觉另有 -vision 变体）
+  "doubao-1.5-pro-32k": false,
+  "doubao-1.5-pro-256k": false, // 1.5 商业文本系
+  "doubao-1.5-lite-32k": false,
+  "doubao-pro-32k": false, // 官方单页能力标注：输入仅 Text（Image 划除，2026-08-30 渲染核实）
+  "doubao-pro-256k": false,
+  "doubao-lite-32k": false, // 旧文本系（防御存量）
+  // doubao-seed-evolving（2026-06-27 深度思考/Agent/Coding 型）视觉口径未核实 → 未收录默认放行
+
   // ---- Meta Llama（开源；OpenRouter 上 meta-llama/ 前缀）----
   "llama-4-maverick": true,
   "llama-4-scout": true, // Llama 4 多模态（MoE）
@@ -326,11 +352,11 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "llama-3-70b-instruct": false, // Llama 3 系纯文本
 };
 
-/** 身份归一（非能力推断）：OpenRouter "作者/" 前缀剥离 + 日期快照别名剥离（厂商口径：日期 ID 是基名快照） */
+/** 身份归一（非能力推断）：OpenRouter "作者/" 前缀剥离 + 日期快照别名剥离（厂商口径：日期 ID 是基名快照；\d{6} 为豆包式 -260628） */
 function canonicalSlug(modelId: string): string[] {
   let slug = modelId.toLowerCase();
   if (slug.includes("/")) slug = slug.slice(slug.indexOf("/") + 1);
-  const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, "");
+  const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{6})$/, "");
   return stripped === slug ? [slug] : [slug, stripped];
 }
 

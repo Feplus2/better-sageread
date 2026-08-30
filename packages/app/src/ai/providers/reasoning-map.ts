@@ -7,7 +7,8 @@
  *
  * 两个下发通道按 provider 分派（与型号能力表正交）：
  * A. providerOptions（AI SDK 原生）：openai / google / openrouter / grok
- * B. 请求体补丁（自定义端点）：deepseek / GLM(bigmodel) / Qwen(dashscope) / Kimi(moonshot) / MiMo
+ * B. 请求体补丁（自定义端点）：deepseek / GLM(bigmodel) / Qwen(dashscope) / Kimi(moonshot)
+ *    / 混元(tencentmaas) / 豆包(volces) / MiMo
  *
  * 维护：新型号上线 → 查官方文档 → MODEL_REASONING 加一行 → UI 自动适配。
  */
@@ -441,6 +442,28 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "hunyuan-turbo": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
   "hunyuan-pro": { alwaysOn: false, offParam: null, levels: [], transport: "switch" },
 
+  // ---- 字节豆包 Doubao（火山方舟深度思考 docs.volcengine.com/docs/82379/1956279；2026-08-30 核实）----
+  // thinking:{type: enabled|disabled|auto} 三态开关（与 GLM/Moonshot/混元同形），无 effort 档位。
+  // API ID 连字符式（doubao-seed-1-6），六位日期快照（-260628）由 lookupCap 归一剥离
+  "doubao-seed-2-1-pro": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-2-1-turbo": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-2-0-pro": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-2-0-lite": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-2-0-mini": {
+    // 官方称四种推理强度（极简/低/中/高），但 API 参数面未核实 → 先按已核实的开关基线
+    alwaysOn: false,
+    offParam: "thinking:disabled",
+    levels: [],
+    transport: "switch",
+  },
+  "doubao-seed-1-8": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-1-6": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" }, // 三模式 auto/thinking/non-thinking
+  "doubao-seed-1-6-flash": { alwaysOn: false, offParam: "thinking:disabled", levels: [], transport: "switch" },
+  "doubao-seed-1-6-thinking": { alwaysOn: true, offParam: null, levels: [], transport: "switch" }, // 思考专用变体
+  "doubao-1.5-thinking-pro": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "doubao-1.5-thinking-pro-vision": { alwaysOn: true, offParam: null, levels: [], transport: "switch" },
+  "doubao-seed-evolving": { alwaysOn: true, offParam: null, levels: [], transport: "switch" }, // 深度思考/Agent/Coding 专用，未见可关口径
+
   // ---- Grok 旧系/专用（docs.x.ai；3-mini 退役前支持 effort）----
   "grok-3": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
   "grok-build-0.1": {
@@ -654,6 +677,22 @@ export function chatReasoningBodyPatch(
     }
     return null;
   }
+  // 豆包（火山方舟 ark.*.volces.com）——thinking:{type} 三态开关（深度思考文档 1956279）。
+  // 补此分支前表里的 doubao 行是死条目：预置 provider 走 openai-compatible 通道，无 volces
+  // 分派则思考参数从未真正下发（与混元 132252 同款缺口）
+  if (host.includes("volces.com")) {
+    if (!cap) return null;
+    if (cap.alwaysOn) return null; // 思考专用型（-thinking/evolving）不下发
+    if (level === "off" || level === "none")
+      return (body) => {
+        body.thinking = { type: "disabled" };
+      };
+    if (level === "on")
+      return (body) => {
+        body.thinking = { type: "enabled" };
+      };
+    return null;
+  }
   // MiMo — budget 型同 Qwen
   if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
     const budget = Number.parseInt(level, 10);
@@ -691,13 +730,13 @@ export function auxThinkingLevel(cap: ReasoningCapability): string | undefined {
   return cap.offParam ?? cap.levels[0];
 }
 
-/** 型号能力查询（factory 轻量任务分派共用；含作者前缀/日期快照归一） */
+/** 型号能力查询（factory 轻量任务分派共用；含作者前缀/日期快照归一，\d{6} 为豆包式六位日期） */
 export function lookupCap(modelId: string): ReasoningCapability | undefined {
   let slug = modelId.toLowerCase();
   // OpenRouter/中转站的 "作者/" 前缀剥离（与 vision-map canonicalSlug 同源）：
   // openai/gpt-5.6-luna → gpt-5.6-luna
   if (slug.includes("/")) slug = slug.slice(slug.indexOf("/") + 1);
-  const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, "");
+  const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{6})$/, "");
   return MODEL_REASONING[slug] ?? MODEL_REASONING[stripped] ?? findLongestPrefix(slug);
 }
 

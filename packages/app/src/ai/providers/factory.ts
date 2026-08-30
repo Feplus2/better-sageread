@@ -81,6 +81,15 @@ function thinkingOffPatch(
       body.thinking = { type: "disabled" };
     };
   }
+  // 豆包（火山方舟 ark.*.volces.com）：thinking:{type:"disabled"}；思考专用型（表内
+  // alwaysOn 行：-thinking/evolving 等）关不掉不下发（与 reasoning-map volces 分支同口径）
+  if (host.includes("volces.com")) {
+    const cap = lookupCap(id);
+    if (cap?.alwaysOn) return null;
+    return (body) => {
+      body.thinking = { type: "disabled" };
+    };
+  }
   // MiMo（小米）：enable_thinking:false（与 chatReasoningBodyPatch 的 off 分支同口径）
   if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi"))
     return (body) => {
