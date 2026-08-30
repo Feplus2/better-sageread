@@ -125,7 +125,7 @@ export async function reparsePapers(
         }
       }
       if (!pdfPath) {
-        report.failed.push({ ...item, error: "找不到源 PDF" });
+        report.failed.push({ ...item, error: "找不到源文件（PDF 或 XML）" });
         continue;
       }
 
