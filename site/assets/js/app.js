@@ -63,35 +63,7 @@
     }
   }
 
-  /* ---------- 下载计数上报 ---------- */
-  function initCounter() {
-    if (!CFG.counterEndpoint) return;
-    document.addEventListener("click", function (e) {
-      var a = e.target.closest ? e.target.closest("[data-dl]") : null;
-      if (!a) return;
-      var url = CFG.counterEndpoint + "?id=" + encodeURIComponent(a.getAttribute("data-dl"));
-      if (navigator.sendBeacon) navigator.sendBeacon(url);
-      else fetch(url, { mode: "no-cors", keepalive: true }).catch(function () {});
-    });
-    fetch(CFG.counterEndpoint + "?stats=1")
-      .then(function (r) { return r.json(); })
-      .then(function (stats) { mergeCounterStats(stats); })
-      .catch(function () {});
-  }
-
-  function mergeCounterStats(stats) {
-    $all("[data-gh-count]").forEach(function (el) {
-      var gh = parseInt(el.textContent, 10) || 0;
-      var extra = 0;
-      Object.keys(stats).forEach(function (id) {
-        if (id.indexOf(el.getAttribute("data-gh-count")) === 0) extra += stats[id] || 0;
-      });
-      if (extra > 0) {
-        el.textContent = gh + extra;
-        el.title = "GitHub " + gh + " 次 + 高速通道 " + extra + " 次";
-      }
-    });
-  }
+  /* ---------- 下载计数：仅 GitHub 口径（2026-08-30 用户裁定；KV 边缘函数方案已退役） ---------- */
 
   /* ---------- GitHub Release 同步 ---------- */
   function cached(key) {
@@ -217,6 +189,5 @@
     initLightbox();
     initOsNote();
     initDownloads();
-    initCounter();
   });
 })();

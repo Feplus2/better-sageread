@@ -7,13 +7,9 @@ window.SITE_CONFIG = {
    * 部署好 COS 后把整段引号填成类似：
    *   "https://sageread-1250000000.cos.ap-guangzhou.myqcloud.com"
    * 留空（默认）时，页面只显示 GitHub 直连按钮，网站照常可用。
-   * 详细步骤见 DEPLOY.md 第 2 步。 */
+   * 详细步骤见 DEPLOY.md 第 2 步。若配置了防烧流量（DEPLOY.md 第 6 步），
+   * 此处应换成 EdgeOne 加速域名（如 https://dl.bettersageread.cn）让防护规则生效。 */
   cosBase: "https://sageread-dl-1444623537.cos.ap-guangzhou.myqcloud.com",
-
-  /* 下载计数边缘函数地址（可选）。部署 edge-functions/dl.js 后填，
-   * 如 "https://xxx.edgeone.app/api/dl"。留空则不统计「高速下载」点击，
-   * 页面仍会显示 GitHub 的真实下载数。见 DEPLOY.md 第 5 步。 */
-  counterEndpoint: "",
 
   /* 各产品的发布信息。repo 有值时会自动拉取 GitHub 最新版本号、
    * 文件大小与下载次数，并自动更新下载链接（无需改 HTML）。
