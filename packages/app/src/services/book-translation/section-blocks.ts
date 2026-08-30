@@ -128,7 +128,9 @@ export interface BlockTextMap {
 }
 
 /** 收集元素下的文本节点（文档序，排除 [data-book-translation] 子树——td 场景译文是子元素；
- *  手写递归而非 TreeWalker：文本节点须属于所在 iframe 文档的 Node 常量域，跨 doc 安全） */
+ *  手写递归而非 TreeWalker：文本节点须属于所在 iframe 文档的 Node 常量域，跨 doc 安全）。
+ *  排除只针对后代子树，不排除根元素自身——译文块（自身带 data-book-translation）作为 hover
+ *  目标传入时也要能建映射（08-29 hover 对译文侧恒 null 的根因，2026-08-30 CDP 实证） */
 function collectTextNodes(el: Element): Text[] {
   const out: Text[] = [];
   const isText = (node: Node) => node.nodeType === 3; // TEXT_NODE
@@ -138,7 +140,7 @@ function collectTextNodes(el: Element): Text[] {
       out.push(node as Text);
       return;
     }
-    if (isElement(node) && (node as Element).hasAttribute(TRANSLATION_ATTR)) return; // 译文块子树不参与
+    if (isElement(node) && node !== el && (node as Element).hasAttribute(TRANSLATION_ATTR)) return; // 译文子树不参与
     for (const child of Array.from(node.childNodes)) walk(child);
   };
   walk(el);

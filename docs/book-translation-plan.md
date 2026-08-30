@@ -163,7 +163,7 @@
 - **08-29 用户裁定补充**：译文模式（translated）下原文不在屏，无对照即无区分——竖线/弱化色/
   字号行距全部回归正常正文样式（仅保留段距），对照视觉语言只在逐段对照模式生效。
 
-### 批次 2：译文模式（显示模式三态补全）⚠️ 2026-08-29 落地但有阻断性缺陷挂账（见下）
+### 批次 2：译文模式（显示模式三态补全）✅ 2026-08-29 落地；翻页卡顿挂账 2026-08-30 修复（见下）
 
 下拉区 1 从两态补成三态（原文/译文/逐段对照，对齐论文侧 radio 形态，第三项图标已预留语义）。
 
@@ -197,7 +197,7 @@ UI 形态与语义（08-29 与用户讨论裁定，与论文侧"句词合一行+
 - 验收：两模块独立触发/重建互不误伤；词对齐在句级缺失时点一次自动补句；重建句对齐后
   词计数归零；词级分片失败标 partial 可重建。
 
-### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c，4d 标注镜像挂账
+### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c；4b hover 失效挂账 2026-08-30 修复验收（见下）；4d 标注镜像挂账
 
 已落地（4a/4b；**4c 划词对照卡 08-29 用户裁定撤销**——hover 联动已覆盖"看某个短语对应译文"的需求，
 保留属冗余入口，代码已删）：
@@ -210,37 +210,48 @@ UI 形态与语义（08-29 与用户讨论裁定，与论文侧"句词合一行+
   改动不污染标注坐标系；同句移动不重绘）。
 - ~~4c 划词对照卡~~（撤销，见上）。
 - **hover 冷启动（08-29 验收轮修复）**：hook 生效时当前章多半已加载完（load 事件早已错过），
-  必须对 renderer.getContents() 的现有章节立即补挂——否则停留在已加载章节时 hover 永不生效
-  （用户实测"完全没生效"的根因）；WeakSet 防双路径重复挂载。
+  必须对 renderer.getContents() 的现有章节立即补挂——否则停留在已加载章节时 hover 永不生效；
+  WeakSet 防双路径重复挂载。（2026-08-30 补正：冷启动补挂只是必要条件，"完全没生效"的主因是
+  hook 未订阅 view——开书时 view 未就绪 effect 空跑后永不重跑；译文侧映射另有 collectTextNodes
+  根元素误排除 bug。两者均已修复，详见下方挂账节验收记录。）
 
 挂账项（均为单独批次，勿捎带）：
 
-**译文模式翻页/章节跳转极度卡顿（08-29 用户实测报告，阻断性，挂账勿再硬修）**：译文模式
-（translated）下翻页与章节跳转几乎不可用；**对照模式（bilingual）翻页正常**——这一对比是
-关键线索：两种模式的 DOM 量相同（原文+译文都在文档里），差别只在原文段是否
-`display:none`（.translation-source 类）。嫌疑按序：
-① foliate paginator 的列布局/分页计算对 display:none 原文段的处理路径（隐藏元素参与
-   高度/位置计算的方式与移除不同，可能触发反复强制重排）；
-② useTranslationLink 在非 original 模式挂载的 mousemove 高频路径（caret+偏移映射+查表）——
-   若卡顿伴随鼠标移动加剧则指向此项；翻页本身不涉鼠标，可能性次之；
-③ .translation-source 的 display:none !important 与原书 CSS/foliate 内部样式计算冲突。
-排查起点：DevTools Performance 面板录一次译文模式翻页，看重排/长任务归属；再临时禁用
-hover 监听复测（隔离②）。备选方案（若①成立）：译文模式改为 transformer 不注入原文
-（或注入时跳过原文段而非 CSS 隐藏）——分页计算只见译文，代价是切模式需重载章节。
+**译文模式翻页/章节跳转卡顿（08-29 挂账 → 2026-08-30 修复验收）**。CDP 实证推翻了
+原嫌疑清单（与 foliate 分页/display:none 无关；useTranslationLink 当时根本未挂载，亦非肇因）：
+- 根因：每次章节加载 `handleLoad` 无条件 `onViewSettingsUpdate` → `setSettings` 产生新
+  settings 对象（值不变、引用变）→ 所有整店订阅者重渲——后台保活论文 tab 的
+  `PaperReaderView`（`paper-reader-view.tsx:81` 整店订阅）Markdown 重渲实测单次 ~0.8s（dev），
+  每次章节跳转是一个 ~1.1-1.4s 长任务（goTo 内 load 事件 40ms 即完成，其余全是这次扇出渲染）。
+  对照实验证明：休眠全部论文 tab 后 goTo 1.4s→0.46s，唤醒复现。模式无关、两模式同病；
+  译文模式的真实差异只是**每章页数减半 → 章节跳转频次 ×2.3**（如 spine 11：对照 57 页/译
+  文 25 页），单位时间撞上长任务的频率翻倍，体感"译文模式极度卡顿"。
+- 修法：`foliate-viewer-manager.ts` handleLoad 同值守卫——updatedSettings 与当前设置逐键
+  浅比较，无变化不回调（vertical/rtl 真变化照常透传）。未动 foliate、未动注入/隐藏方案。
+- 验证（全 tab 唤醒、分页模式、CDP 计时）：章节跳转对照 131-179ms / 译文 89-127ms（修复前
+  两模式均 1100-1400ms）；连续翻页 20 页两模式均 ~140-150ms 同量级；进度 CFI 随翻页正常更
+  新；UI 下拉三态切换即时生效（译文 src=none/tgt=block、原文反之、对照双显）。
+- 遗留（记入此账不扩大范围）：①后台论文 tab 的整店订阅+dev React 渲染墙是 pre-existing 架
+  构问题（本修复只断了章节加载这一触发点，其它 setSettings 写路径仍会扇出）；
+  ②译文模式章节跳转频次 2.3 倍是"内容减半"的固有结果。
 
-**4b hover 联动失效排查（08-29 验收轮实测仍无效，用户裁定挂账不硬修）**。已修过一个
-确定的时机 bug（冷启动：hook 只听 load 事件、停在已加载章节时监听永不挂——已加
-getContents() 现有章节立即补挂），但用户实测仍无效。剩余疑点按优先级：
-① iframe 文档的 mousemove 是否真的到达宿主闭包挂的 listener（foliate paginator 有自己的
-iframe 事件桥 iframeEventHandlers，可能存在事件消费/时序冲突——对照其挂载方式核对）；
-② `::highlight(book-align-hover)` 规则是否真的随 StyleManager 进了 iframe（foliate 的
-setStyles 通道是否会丢弃未知规则；可在 DevTools 里查 iframe 文档的样式表实证）；
-③ 当前渲染章节的原文块上有没有 `data-block-index` 属性（transformer 注入路径从未实证——
-冷启动章节走 reload 后的 transform，应在；需 DevTools 查 DOM）；
-④ `entry.align` 数据链（章 index 对位：getContents 的 index 与 translation/{spineIndex}.json
-是否同一坐标——版权页是 spine 2，实测点它最方便）。
-下次开工的实证入口：用户 DevTools 直接查 iframe 文档（项目有 closed-shadow 穿透配方，
-见 docs/context-token-optimization-plan.md 相关记录）。
+**4b hover 联动失效（08-29 挂账 → 2026-08-30 修复验收）**。CDP 实证四嫌疑中 ③②排除
+（渲染章节原文块 data-block-index/译文块注入齐全；::highlight(book-align-hover) 规则确随
+StyleManager 进 iframe），①部分成立（事件通道本身可达，但监听器从未挂上），坐实两根因：
+1. **hook 挂载时序（主因，解释"完全没生效"）**：useTranslationLink 的 effect 只在
+   `[bookId, enabled, store]` 变化时运行，而 useFoliateViewer 的 view 是异步创建——开书时
+   effect 首跑 `store.getState().view` 必为 null 直接 return，此后依赖不再变化，监听永不挂。
+   修法：hook 改为 `useReaderStore((s) => s.view)` 订阅并入 deps，view 到达即重跑挂载
+   （休眠唤醒重建视图同路径受益）。
+2. **译文侧偏移映射恒 null**：collectTextNodes 的 `[data-book-translation]` 子树排除误伤根元
+   素自身——hover 译文块时 buildBlockTextMap 得空表 → rawOffsetOf null → clearHover。
+   修法：排除仅限后代子树（`node !== el`），td 场景译文子树隔离语义不变（契约测试 13/13 绿）。
+- 验证（合成 mousemove 探针）：hover 原文句 → 原文+译文双句高亮（双向；译文侧 hover 同）；
+  同句内移动 set 计数 0（不重绘）；翻章后新文档 CSS.highlights 注册表空（无残留）且新章
+  hover 照常生效（load 路径挂载）；::highlight 视觉实锤（临时洋红化规则后截图可见双侧高亮块）。
+- 顺手修的残留 bug（验收标准"开关切换无残留高亮"实测抓出）：hover 高亮后切回 original 模式，
+  高亮滞留在当前文档注册表（原文在屏可见残留）——effect cleanup 现对全部已挂载 window
+  补 `CSS.highlights.delete`（实证：切换后注册表清空）。
 
 **4d 标注镜像**（用户定调对照翻译核心功能之一）：与 foliate overlayer 标注系统耦合
 （book_notes CFI→Range 反解、镜像高亮与 hover Highlight 共存、标注增删时机），单独批次做。

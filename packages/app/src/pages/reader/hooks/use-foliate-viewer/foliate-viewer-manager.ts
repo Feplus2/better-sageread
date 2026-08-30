@@ -183,7 +183,13 @@ export class FoliateViewerManager {
         writingDir?.rtl || getDirFromUILanguage() === "rtl" || globalViewSettings.writingMode?.includes("rl") || false,
     };
 
-    this.onViewSettingsUpdate?.(updatedSettings);
+    // 同值不写回：每次章节加载都会走到这里，若无条件 setSettings 会产生新 settings 对象，
+    // 扇出重渲所有整店订阅者（后台保活论文 tab 的 Markdown 重渲实测 ~0.8s/次，译文模式
+    // 页少章跳转频次翻倍，表现为"译文模式翻页卡顿"——2026-08-30 CDP 实证）
+    const settingsChanged = (Object.keys(updatedSettings) as (keyof ViewSettings)[]).some(
+      (key) => updatedSettings[key] !== globalViewSettings[key],
+    );
+    if (settingsChanged) this.onViewSettingsUpdate?.(updatedSettings);
 
     // Apply document-specific styles
     const language = Array.isArray(bookDoc.metadata.language)

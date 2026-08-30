@@ -52,6 +52,9 @@ function caretOffset(doc: Document, x: number, y: number): { node: Node; offset:
 export function useTranslationLink(enabled: boolean) {
   const store = useReaderStoreApi();
   const bookId = useReaderStore((state) => state.bookId);
+  // 订阅 view：useFoliateViewer 的视图是异步创建的，hook 首次 effect 时 view 必为 null——
+  // 不订阅则挂载监听永不执行（08-29 用户实测"hover 完全没生效"的根因，2026-08-30 CDP 实证）
+  const view = useReaderStore((state) => state.view);
   const sectionCache = useRef(new Map<number, BookTranslationSectionFile | null>());
   const lastKey = useRef("");
 
@@ -70,19 +73,22 @@ export function useTranslationLink(enabled: boolean) {
     return () => window.removeEventListener("book-translation-updated", handler);
   }, [bookId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: store 仅作稳定标识入 deps（zustand api 引用不变）；view 订阅是视图就绪后重挂载的触发源
   useEffect(() => {
     if (!bookId || !enabled) return;
-    const view = store.getState().view;
-    if (!view) return;
+    if (!view) return; // 视图未就绪：等 view 状态到达后 effect 重跑（见上方订阅注释）
 
     /** 已挂监听的文档（load 事件与冷启动双路径防重复挂载） */
     const attached = new WeakSet<Document>();
+    /** 已挂载的 window 集合：effect 卸载（切回 original/换书/视图重建）时清残留高亮 */
+    const attachedWins = new Set<Window & typeof globalThis>();
 
     const attachDoc = (doc: Document, index: number, file: BookTranslationSectionFile) => {
       if (attached.has(doc)) return;
       const win = doc.defaultView;
       if (!win || !("Highlight" in win) || !win.CSS?.highlights) return; // WebView2 支持；异常环境静默跳过
       attached.add(doc);
+      attachedWins.add(win);
       const clearHover = () => {
         lastKey.current = "";
         try {
@@ -193,6 +199,14 @@ export function useTranslationLink(enabled: boolean) {
     }
     return () => {
       view.removeEventListener("load", handleLoad);
+      // 卸载时清掉所有已挂载文档的 hover 高亮（切回 original 后原文在屏，残留高亮可见）
+      for (const win of attachedWins) {
+        try {
+          win.CSS.highlights.delete(HOVER_HIGHLIGHT);
+        } catch {
+          /* 文档已销毁时无害 */
+        }
+      }
     };
-  }, [bookId, enabled, store]);
+  }, [bookId, enabled, store, view]);
 }
