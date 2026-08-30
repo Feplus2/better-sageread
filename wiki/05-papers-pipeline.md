@@ -64,7 +64,15 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 
 ## 5. 翻译管线
 
-- **书籍全书翻译在转换阶段完成**：Books_Converter `--translate LANG`（hybrid 链内用辅助模型整书翻译后产出译版 EPUB），SageRead 侧只是传参（`converter.rs:70-75`）。**书内没有运行时翻译管线**
+- **书籍转换期烘焙翻译**：Books_Converter `--translate LANG`（hybrid 链内用辅助模型整书翻译后产出译版 EPUB），SageRead 侧只是传参（`converter.rs:70-75`）——产新文件、一次性，与阅读期对照翻译正交
+- **书籍对照翻译（2026-08-29 起，前端 service 实现，仅 EPUB）**：`services/book-translation/book-translation-service.ts`（方案与验收全档见 `docs/book-translation-plan.md`）
+  - 粒度：段级平行译本，**按章分文件** sidecar `books/{id}/translation/{spineIndex}.json`；定位键 = 章序号 + 段序号 + 段文本 sha256-16 三重，章 `sourceHash` 判陈旧（EPUB 入库后不变，锚为防御性）
+  - 幂等/断点：批级落盘、取消保留、段 hash + 章 sourceHash 双层幂等续翻；失败批次记数可续翻补齐；首轮跨章采样抽术语表注入全部批次（全书术语一致）
+  - 注入：transformer 链末位 `translation` 在章节 XHTML 进 iframe 前插译文块（见 `01-architecture.md` 第 4 节）；任务收尾另广播 `book-translation-updated` 对当前章 DOM 直注（foliate blob 缓存下同章不重流 transform）
+  - 守卫：仅 EPUB；fixed-layout（`rendition.layout === "pre-paginated"`）与中文书（primaryLanguage 判定）禁用；EPUB 弹出脚注不翻译
+  - 对齐：句级随翻译自动跑（无嵌入配置跳过不阻塞，`alignStatus:"skipped"`）；词级（alignW）量贵、下拉手动触发，依赖规则=触发词级自动补句级、重建句级作废旧词缓存（`book-alignment.ts`）
+  - 任务通道 `book-translate`（并发 1）；运行状态回写 `book_status.metadata.translation`
+  - 交互层（二期）：hover 句词联动（`pages/reader/hooks/use-translation-link.ts`，iframe 覆盖层呈现）、右键选中全句（复用既有标注弹窗链路）、标注镜像（`use-annotation-mirror.ts`，原文标注↔译文同色弱镜像，CSS Custom Highlight 常驻层）
 - **论文翻译（前端 service 实现，非 Rust）**：`services/paper-translation-service.ts`
   - 粒度：**块级平行译本**——切块器 `cutPaperBlocks` 与渲染器 DOM 块枚举严格一致（工程不变量），块索引即对齐键；批次 ≤12 块且 ≤6k 字符（:88-89,248）
   - 缓存/幂等：产物 `{appData}/books/{paperId}/translation-zh.json`，每块键 = 源文本 sha256 前 16 hex，hash 匹配跳过重翻（续翻/崩溃恢复），每批落盘一次；`force` 重翻才全量重算（:91-98,120-124）。**不产出翻译版 markdown**，原文是唯一事实源
@@ -138,7 +146,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 | --- | --- | --- |
 | 产物 | EPUB（进书库，foliate-js 渲染） | paper.md + images/ + source.pdf（进 books/{id}，format=MARKDOWN） |
 | stage1 引擎 | MinerU 云 API（hybrid 含结构重建） | MinerU-VLM / PaddleOCR-VL **强制 OCR**（pipeline 后端已否决） |
-| 翻译 | 转换阶段 `--translate LANG` 整书出译版 EPUB | 阅读期前端块级平行译本（translation-zh.json），原文不落译版 |
+| 翻译 | 转换阶段 `--translate LANG` 整书出译版 EPUB；阅读期另有对照翻译 sidecar（`translation/` 按章分文件，见第 5 节） | 阅读期前端块级平行译本（translation-zh.json），原文不落译版 |
 | 向量库 | 每书一库 `books/{id}/vectors.sqlite`（重建删库） | 全局单库 `papers/vectors.sqlite`（按 paper_id 幂等重索引） |
 | 质量闸 | 无独立 QC（依赖 MinerU 云侧） | 三层：退化检测 / 结构边界 / 完整性闸（QC 打标随 done 上行） |
 | 进度事件 | `convert://progress` | `paper-convert://progress`（注入 pdf_path 防串台） |

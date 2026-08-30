@@ -43,24 +43,29 @@ pub const MANUAL_FILES: &[ManualFile] = &[
         content: include_str!("../resources/manual/04-ai.md"),
     },
     ManualFile {
-        filename: "05-sync.md",
+        filename: "05-translation.md",
+        title: "书籍对照翻译",
+        content: include_str!("../resources/manual/05-translation.md"),
+    },
+    ManualFile {
+        filename: "06-sync.md",
         title: "备份与同步",
-        content: include_str!("../resources/manual/05-sync.md"),
+        content: include_str!("../resources/manual/06-sync.md"),
     },
     ManualFile {
-        filename: "06-appearance.md",
+        filename: "07-appearance.md",
         title: "外观、主题与个性化",
-        content: include_str!("../resources/manual/06-appearance.md"),
+        content: include_str!("../resources/manual/07-appearance.md"),
     },
     ManualFile {
-        filename: "07-converter.md",
+        filename: "08-converter.md",
         title: "PDF 转换与 Zotero 导入",
-        content: include_str!("../resources/manual/07-converter.md"),
+        content: include_str!("../resources/manual/08-converter.md"),
     },
     ManualFile {
-        filename: "08-faq.md",
+        filename: "09-faq.md",
         title: "常见问题与故障排查",
-        content: include_str!("../resources/manual/08-faq.md"),
+        content: include_str!("../resources/manual/09-faq.md"),
     },
 ];
 

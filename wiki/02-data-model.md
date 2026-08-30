@@ -52,6 +52,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 - `metadata.json` — 元数据（:40-43；论文导入/重解析/Zotero 也写它）
 - 论文（MARKDOWN）专有：`paper.md`（正文）、`images/`（插图）、`source.pdf`（原始 PDF）（`:1334-1461`）
 - EPUB 管线产物（tauri-plugin-epub）：`mdbook/`、`chapters/`（`pipeline.rs:110`）、`metadata.md`（`pipeline.rs:561`）、`vectors.sqlite`（每书向量库，`pipeline.rs:26`）
+- `translation/{spineIndex}.json` — 书籍对照翻译 sidecar（仅 EPUB，每章一个文件）：段级平行译本（键=段文本 sha256-16）+ 章 `sourceHash` 锚 + 句/词对齐表（`align`/`alignW`）+ 全书术语表副本；运行状态（`complete`/`partial`、段数、失败批数）回写 `book_status.metadata.translation`（`types/simple-book.ts` 的 `BookTranslationMeta`，模式同 `metadata.vectorization` 先例）
 - `view-settings.json` — 前端按书写的视图设置（`src/lib/tauri-storage.ts:166-168`）
 
 各文件的生产者一览：
@@ -66,6 +67,7 @@ WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）�
 | `vectors.sqlite` | 索引管线（每书一库） | `pipeline.rs:26` |
 | `view-settings.json` | 前端按书写的视图设置 | `src/lib/tauri-storage.ts:166-168` |
 | `translation-zh.json` | 论文翻译产物（仅 MARKDOWN，块级平行译本；`fn:<id>` 键 = 脚注译文，不占块序号） | `services/paper-translation-service.ts:24-25,123` |
+| `translation/` | 书籍对照翻译产物（仅 EPUB，按章分文件 sidecar） | `services/book-translation/book-translation-service.ts` |
 
 版本锚与状态戳记（2026-08-24，重解析/翻译/向量化的版本对齐基座）：
 

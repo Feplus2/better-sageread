@@ -116,6 +116,7 @@ book_dir → 定位 book.epub → epub/reader.rs 解析 → epub2mdbook 转 mdbo
 - 开书在 `foliate-viewer-manager.ts:128` `view.open(bookDoc)`（BookDoc 由 `lib/document.ts` DocumentLoader 加载）
 - 内核内部：`foliate-js/view.js:273-276` 按书籍类型选 `foliate-paginator`（流式）或 `foliate-fxl`（定版）；paginator 内部才用 iframe 渲染各 section（`paginator.js:215,248`，沙箱 `allow-same-origin allow-scripts`）
 - 滚动/分页切换：内核侧 `paginator.js:295-300`（`flow !== "scrolled"` 走 CSS 分栏分页）；应用侧 setAttribute 切换（`pages/reader/components/settings-dropdown.tsx:248`、`style-manager.ts:48-49`），快捷键在 `use-book-shortcuts.ts:45-48`，页码/滚动事件在 `use-pagination.ts:16,71-113`
+- XHTML 进 iframe 前走 `transformContent`（`services/transform-service.ts`）transformer 链：rawmath → punctuation → footnote → **translation**（`foliate-viewer-manager.ts:344`）——末位 translation 按章注入段级译文块（书籍对照翻译，枚举与注入同一段代码保证不错位，管线见 `05-papers-pipeline.md` 第 5 节）
 
 ## 5. 标签页与休眠机制
 

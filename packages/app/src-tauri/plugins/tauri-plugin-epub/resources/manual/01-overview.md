@@ -6,7 +6,7 @@ Better SageRead 是一款本地优先的桌面阅读器（Windows / macOS），�
 
 两条内容主线：
 
-- **图书馆（书籍）**：EPUB 为核心格式；PDF 书籍可经内置「PDF 转 EPUB」转换器入库
+- **图书馆（书籍）**：EPUB 为核心格式；PDF 书籍可经内置「PDF 转 EPUB」转换器入库；外文 EPUB 可一键全书对照翻译（详见「书籍对照翻译」章）
 - **文献库（论文）**：论文全文（PDF，或 JATS/Elsevier XML）经解析管线转成 Markdown 阅读，支持文件夹树、向量化检索、全文翻译
 
 ## 主界面地图
