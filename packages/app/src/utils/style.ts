@@ -1,6 +1,7 @@
+import { HIGHLIGHT_COLOR_HEX, bookMirrorHighlightName } from "@/services/constants";
 import { type ReaderBackground, getReaderScene } from "@/styles/reader-scenes";
 import { type CustomTheme, type Palette, generateDarkPalette, generateLightPalette, themes } from "@/styles/themes";
-import type { BookViewModeType, ViewSettings } from "@/types/book";
+import type { BookViewModeType, HighlightColor, HighlightStyle, ViewSettings } from "@/types/book";
 import tinycolor from "tinycolor2";
 import { getOSPlatform } from "./misc";
 
@@ -361,6 +362,26 @@ export function resolveBookViewMode(viewSettings: ViewSettings): BookViewModeTyp
   return viewSettings.bookViewMode ?? (viewSettings.translationEnabled ? "bilingual" : "original");
 }
 
+/** 批次 4d 标注镜像的 ::highlight 规则（15 个注册名，见 constants.bookMirrorHighlightName）：
+ *  与标注本体同色但透明度更弱（镜像是映射侧不是本体——本体 overlayer highlight 为 0.3 透明度，
+ *  镜像取 0.15/0.2；underline/squiggly 线色 55%，论文侧 paper-anno-*-tgt 同款口径）。
+ *  iframe 内样式须带真值色（主题变量不过 iframe 边界），故由这里随总样式表注入。 */
+const getMirrorHighlightStyles = (isDarkMode: boolean) =>
+  (Object.keys(HIGHLIGHT_COLOR_HEX) as HighlightColor[])
+    .map((color) => {
+      const hex = HIGHLIGHT_COLOR_HEX[color];
+      const bg = tinycolor(hex)
+        .setAlpha(isDarkMode ? 0.2 : 0.15)
+        .toRgbString();
+      const line = tinycolor(hex).setAlpha(0.55).toRgbString();
+      const stroke = (style: HighlightStyle, extra: string) =>
+        `::highlight(${bookMirrorHighlightName(style, color)}) { text-decoration-line: underline; text-decoration-thickness: 2px; text-decoration-color: ${line}; ${extra} }`;
+      return `::highlight(${bookMirrorHighlightName("highlight", color)}) { background-color: ${bg}; }
+  ${stroke("underline", "")}
+  ${stroke("squiggly", "text-decoration-style: wavy;")}`;
+    })
+    .join("\n  ");
+
 // 对照翻译块样式（二期批次 1+2）：视觉语言照论文侧 .paper-translation——左竖线 + 弱化色 +
 // 0.92em 字号 + 1.75 行距的"引文式"形态，明暗主题各一套 oklch 色；!important 防原书
 // 样式覆盖（译文是 div，原书 CSS 大多只打 p，天然逃逸大部分污染）。
@@ -400,6 +421,7 @@ const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean, prima
   ::highlight(book-align-hover) {
     background-color: color-mix(in oklab, ${primary} ${isDarkMode ? 20 : 14}%, transparent);
   }
+  ${getMirrorHighlightStyles(isDarkMode)}
 `;
 
 export interface ThemeCode {

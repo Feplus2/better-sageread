@@ -209,6 +209,20 @@ export function rawToNormOffset(map: BlockTextMap, rawOffset: number): number {
   return Math.min(normIdx, map.norm.length - 1);
 }
 
+/** raw 边界位置 → norm 边界位置（批次 4d：Range 起止端点换算）。
+ *  rawToNormOffset 是"字符位"语义（末尾字符吸附到最后一格，丢失 +1 边界），
+ *  区间端点需要边界语义：raw 偏移 p = 字符 p-1 与 p 之间的缝。
+ *  保留字符的缝 → 对应 norm 字符前的缝；折叠空白的缝 → 吸附到前一保留字符之后；
+ *  越右界（含 raw 全长，即段尾）→ norm.length。start/end 端点同用（end 为半开区间不含端）。 */
+export function rawBoundaryToNorm(map: BlockTextMap, rawOffset: number): number {
+  if (rawOffset <= 0) return 0;
+  if (rawOffset >= map.rawToNorm.length) return map.norm.length;
+  const normIdx = map.rawToNorm[rawOffset];
+  if (normIdx === -1) return 0;
+  // 该 raw 字符被保留（normToRaw 回指自身）→ 缝在对应 norm 字符前；被折叠/尾部 trim → 归前一保留字符之后
+  return Math.min(map.normToRaw[normIdx] === rawOffset ? normIdx : normIdx + 1, map.norm.length);
+}
+
 /** norm 半开区间 [start, end) → 反侧文本节点坐标系中的 Range；区间退化返回 null */
 export function normToRange(el: Element, map: BlockTextMap, start: number, end: number): Range | null {
   if (end <= start || map.nodes.length === 0) return null;

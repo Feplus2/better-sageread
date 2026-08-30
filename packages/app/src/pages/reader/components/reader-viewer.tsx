@@ -10,6 +10,7 @@ import { getViewInsets } from "@/utils/insets";
 import { getReaderBackgroundLayers, resolveBookViewMode } from "@/utils/style";
 import { useCallback, useEffect, useMemo } from "react";
 import useBookShortcuts from "../hooks/use-book-shortcuts";
+import { useAnnotationMirror } from "../hooks/use-annotation-mirror";
 import { useFoliateViewer } from "../hooks/use-foliate-viewer";
 import { useTranslationLink } from "../hooks/use-translation-link";
 import Annotator from "./annotator";
@@ -64,6 +65,8 @@ const ReaderViewerContent: React.FC = () => {
   // 划词对照卡 08-29 用户裁定撤销，hover 已覆盖该需求）
   const viewMode = resolveBookViewMode(globalViewSettings);
   useTranslationLink(viewMode !== "original");
+  // 二期批次 4d：标注镜像——原文标注 ↔ 译文常驻镜像高亮（与 hover 联动同启停口径）
+  useAnnotationMirror(viewMode !== "original");
 
   // T3+T4：书籍图片交互——点击大图预览 + 右键主题菜单（复制/另存为/引用）。
   // 引用走 imageToChat 事件（reader 侧输入区接收，与划词引用同链路）；面板未展开先展开再派发

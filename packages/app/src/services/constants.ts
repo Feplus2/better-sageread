@@ -4,6 +4,7 @@ import type {
   BookSearchConfig,
   BookStyle,
   HighlightColor,
+  HighlightStyle,
   ScreenConfig,
   TTSConfig,
   TranslatorConfig,
@@ -610,6 +611,24 @@ export const HIGHLIGHT_COLOR_RGBA: Record<HighlightColor, string> = {
   blue: "rgba(96, 165, 250, 0.3)", // blue-400 with 30% opacity
   violet: "rgba(167, 139, 250, 0.3)", // violet-400 with 30% opacity
 };
+
+// ─── 批次 4d 标注镜像：CSS Custom Highlight 注册名（docs/book-translation-plan.md） ───
+// 与 hover 联动层（book-align-hover）分开注册；命名对齐论文侧 paper-anno[-{style}]-{color}-tgt。
+// style.ts 注入 ::highlight 规则与 use-annotation-mirror.ts 的 set/delete 共用同一套命名。
+
+export const BOOK_MIRROR_HIGHLIGHT_PREFIX = "book-align-mirror";
+
+/** 镜像高亮注册名：highlight 笔触省略 style 段（book-align-mirror-{color}），其余带 style 段 */
+export const bookMirrorHighlightName = (style: HighlightStyle, color: HighlightColor): string =>
+  style === "highlight"
+    ? `${BOOK_MIRROR_HIGHLIGHT_PREFIX}-${color}`
+    : `${BOOK_MIRROR_HIGHLIGHT_PREFIX}-${style}-${color}`;
+
+/** 全部镜像注册名（3 笔触 × 5 色）：iframe 样式注入与卸载清理共用 */
+export const BOOK_MIRROR_HIGHLIGHT_NAMES: string[] = (Object.keys(HIGHLIGHT_COLOR_HEX) as HighlightColor[]).flatMap(
+  (color) =>
+    (["highlight", "underline", "squiggly"] as HighlightStyle[]).map((style) => bookMirrorHighlightName(style, color)),
+);
 
 export const CUSTOM_THEME_TEMPLATES = [
   {

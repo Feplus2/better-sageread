@@ -43,6 +43,7 @@ try {
     buildBlockTextMap,
     rawOffsetOf,
     rawToNormOffset,
+    rawBoundaryToNorm,
     normToRange,
     TRANSLATION_ATTR,
   } = mod;
@@ -248,6 +249,38 @@ try {
     const tail = blocks.find((b) => b.el.getAttribute("id") === "h");
     const map = buildBlockTextMap(tail.el);
     assert(map.norm === tail.sourceText, "注入后 norm 混入译文");
+  });
+
+  // ─── 批次 4d：Range 端点边界换算（rawBoundaryToNorm，标注镜像锚定链用） ───
+  check("边界换算：保留字符缝/折叠空白缝/段尾/越界", () => {
+    const parsed = parseSectionDocument(
+      `<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="multi">Alpha <span>beta  gamma</span>   delta.</p></body></html>`,
+    );
+    const [block] = enumerateSectionBlocks(parsed);
+    const map = buildBlockTextMap(block.el);
+    assert(map.norm === "Alpha beta gamma delta.", `norm 异常: ${JSON.stringify(map.norm)}`);
+    // 边界语义验证：norm 区间 [s, e) 经边界换算取 Range，文本规范化后必须恒等 norm 切片
+    for (let start = 0; start < map.norm.length; start += 2) {
+      const end = Math.min(start + 5, map.norm.length);
+      const rawS = map.normToRaw[start];
+      const rawE = end === map.norm.length ? Number.POSITIVE_INFINITY : map.normToRaw[end];
+      // 正变换后的边界再经 normToRange 取回（rawE 越界时走段尾分支）
+      const s = rawBoundaryToNorm(map, rawS);
+      const e = rawBoundaryToNorm(map, Math.min(rawE, map.rawToNorm.length + 1));
+      assert(s === start, `start 边界断裂: [${start}) → ${s}`);
+      assert(e === end, `end 边界断裂: (${end}] → ${e} (rawE=${rawE})`);
+    }
+    // 折叠空白缝：raw 侧第二个空格的缝 → norm 侧 "beta " 之后（g 之前）
+    const spanText = block.el.querySelector("span").firstChild; // "beta  gamma"
+    const rawSpanStart = rawOffsetOf(block.el, spanText, 0);
+    const rawFoldedGap = rawSpanStart + 5; // 第二个空格字符前的缝
+    const normGap = rawBoundaryToNorm(map, rawFoldedGap);
+    assert(map.norm.slice(0, normGap).endsWith("beta "), `折叠空白缝吸附异常: ${normGap}`);
+    assert(map.norm[normGap] === "g", `折叠空白缝后字符异常: ${JSON.stringify(map.norm[normGap])}`);
+    // 段尾（raw 全长）→ norm.length；越界钳制
+    assert(rawBoundaryToNorm(map, map.rawToNorm.length) === map.norm.length, "段尾边界异常");
+    assert(rawBoundaryToNorm(map, 9999) === map.norm.length, "越界钳制异常");
+    assert(rawBoundaryToNorm(map, 0) === 0, "段首边界异常");
   });
 
   console.log(`\n${passed} passed, ${failures.length} failed`);

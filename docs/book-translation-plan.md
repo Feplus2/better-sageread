@@ -197,7 +197,7 @@ UI 形态与语义（08-29 与用户讨论裁定，与论文侧"句词合一行+
 - 验收：两模块独立触发/重建互不误伤；词对齐在句级缺失时点一次自动补句；重建句对齐后
   词计数归零；词级分片失败标 partial 可重建。
 
-### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c；4b hover 失效挂账 2026-08-30 修复验收（见下）；4d 标注镜像挂账
+### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c；4b hover 失效挂账 2026-08-30 修复验收（见下）；**4d 标注镜像 2026-08-30 落地验收（见下）**
 
 已落地（4a/4b；**4c 划词对照卡 08-29 用户裁定撤销**——hover 联动已覆盖"看某个短语对应译文"的需求，
 保留属冗余入口，代码已删）：
@@ -253,13 +253,45 @@ StyleManager 进 iframe），①部分成立（事件通道本身可达，但监
   高亮滞留在当前文档注册表（原文在屏可见残留）——effect cleanup 现对全部已挂载 window
   补 `CSS.highlights.delete`（实证：切换后注册表清空）。
 
-**4d 标注镜像**（用户定调对照翻译核心功能之一）：与 foliate overlayer 标注系统耦合
-（book_notes CFI→Range 反解、镜像高亮与 hover Highlight 共存、标注增删时机），单独批次做。
-论文侧实现差异与难点分析已与用户对齐（08-29）：论文侧同文档文本层高亮可直接叠类；书籍侧
-overlayer 是 SVG 绘制层且只认 CFI（镜像区间无 CFI），定位链多两跳（CFI→Range→norm 偏移），
-且镜像是常驻状态需挂钩章节加载/翻页/重排/标注增删全部时机——侵入式增强，伤到的是已验收
-的标注本体，故须专注批+即时验收。实现路径已定：CFI 反解 + 复用论文侧 mapSrcRangeToTgt +
-CSS Highlight 常驻层（与 hover 层分开注册名）。
+**4d 标注镜像**（用户定调对照翻译核心功能之一；~~挂账~~ → **2026-08-30 落地验收**）：
+原文标注 ↔ 译文常驻镜像高亮，双向同效，效果对齐论文侧标注镜像。
+
+- **锚定链**：标注 CFI → `view.resolveCFI` 反解（与 foliate `addAnnotation` 同一入口，同步
+  `{index, anchor}`）→ 本章 Range → 按 `[data-block-index]` 段拆分（跨段标注逐段钳制，
+  `intersectsNode` + `comparePoint` 双向钳到段界）→ section-blocks 偏移映射得 norm 偏移
+  （**新增 `rawBoundaryToNorm` 边界语义换算**：rawToNormOffset 是字符位语义、丢 +1 边界，
+  Range 端点须按"缝"换算；契约测试 13→14 用例覆盖）→ 查对齐表（词级优先/句级吸附回退，
+  直接复用论文侧 `mapSrcRangeToTgt`/`mapTgtRangeToSrc`）→ 镜像区间 norm → 对侧段
+  `normToRange` → 对侧 Range。
+- **呈现**：CSS Custom Highlight 常驻层，注册名 `book-align-mirror[-{style}]-{color}`
+  （3 笔触 × 5 色共 15 名，命名 helpers 在 `services/constants.ts`，与 hover 层
+  `book-align-hover` 完全分开）；规则随 `getTranslationStyles` 注入 iframe（真值色，
+  iframe 内主题变量不可达）。镜像与本体同色同笔触、透明度更弱（highlight 0.15/0.2 vs
+  本体 overlayer 0.3；underline/squiggly 线色 55%，论文侧 `-tgt` 同款口径）。
+- **时机挂钩（常驻全生命周期）**：章节 `load` 事件 + `getContents()` 冷启动补算（4b 同款
+  教训，双路径）；`config.booknotes` 订阅（增/删/换色/评论全走 updateBooknotes 换新数组 →
+  effect 重跑全量重算）；`book-translation-updated`（翻译/对齐收尾 → 章缓存失效 + 重算，
+  含阅读器 DOM 直注入通道）；显示模式切换（`enabled` 变化即卸载清理/重挂）；视图休眠重建
+  （`view` 订阅，重建后 effect 重跑）。翻页/resize 重排零挂钩：Range 是活引用、文档不重建，
+  CSS Highlight 随布局自动重绘（resize 实测 rect 正确迁移）。attachedWins 卸载清理 +
+  死 iframe window 剔除（长会话翻章不累积引用）。
+- **落地文件**：新增 `pages/reader/hooks/use-annotation-mirror.ts`（hook + 纯函数锚定链）；
+  `section-blocks.ts` +`rawBoundaryToNorm`；`constants.ts` +命名 helpers；`style.ts`
+  +15 条镜像规则；`reader-viewer.tsx` 挂载（与 hover 联动同启停口径：非 original 启用）。
+- **验收（CDP 实测，探针/截图存证 .tmp-bt-verify/40–46）**：原文划线 → 译文同色镜像
+  （`biopolitics` → `生命政治，243-45，276`，逐跳核对锚定链数据）；译文侧划线 → 原文镜像
+  （`节育实践…` → `birth control practices, in 18th cen`，本书无 alignW，句级吸附路径）；
+  跨段标注按段拆分镜像（3 区间）；删除标注镜像同步消失；切 original 清场、切回恢复；
+  翻章往返无残留、load 路径重注册；`setView(null)` 注册表实证清空、恢复后重注册（休眠
+  重建同路径）；resize 后镜像存活且 rect 随重排迁移；hover 层与镜像层并立互不干扰
+  （mouseleave 只清 hover）；无译本章节零镜像零报错（静默跳过）。译文模式（原文隐藏）
+  镜像照常落在译文侧——核心场景截图实锤。UI 级本体回归：选区→弹窗→创建/换色
+  （镜像名 squiggly-blue→squiggly-red 同步换名）/overlayer hitTest 回显/删除全链路无回归，
+  标注面板列表同步。契约测试 14/14 绿，`pnpm tsc -b` 零错。
+- **已知边界（与论文侧同款取舍）**：词级精确路径未实测（本书 alignW 未构建，全部走句级
+  吸附；词级分支复用论文侧已验收的 mapSrcRangeToTgt，构建词对齐后自动升级精确区间）；
+  无对齐数据的段（entry 无 align/alignW）结构性跳过（guard 为早退一行，live 覆盖了
+  "整章无译本"分支）；译文模式下译文侧标注的镜像落在隐藏原文上不可见（本体同款预期）。
 
 **顶栏下拉交互优化（08-29 用户提出，通用 UI 待办）**：
 - 点开动效：顶栏各下拉（目录/搜索/设置/翻译）展开与收起均无动画——按动效体系规范
