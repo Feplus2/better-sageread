@@ -5,7 +5,7 @@
 ## 1. 三个 scope 与工具注册表
 
 - 角色类型 `AgentScope = "central" | "reader" | "paper"` 定义在 `ai/tools/registry.ts:75`；工具归属维度 `ToolScope = "central" | "reader" | "shared" | "mcp"` 在 :66（注意：`"reader"` 是合法 ToolScope 但**没有任何工具静态注册到它**——reader 的专属工具全是工厂函数动态创建）
-- 静态注册表是模块级数组 `registry`（:87），组装入口 `getToolsForScope(agentScope, context)`（:325）；提示词里的工具清单由 `getToolDescriptions()` 生成（:385）
+- 静态注册表是模块级数组 `registry`（:92），组装入口 `getToolsForScope(agentScope, context)`（:342）；提示词里的工具清单**不走生成器**——central/paper 硬编码在 `constants/central-prompt.ts` / `paper-prompt.ts` 常量，reader 在 DB 系统技能基词（`default-skills.json` 种子）+ `constants/prompt.ts` 的静态追加段，工具的参数级说明走各工具 schema 的 describe；`getToolDescriptions()`（:415）只是注册表描述的文本汇总，**当前无调用方**
 
 **各 scope 实际挂载**
 
@@ -20,7 +20,7 @@
 
 两个维护要点：
 
-- `getToolDescriptions()` 里 paper 的工厂工具描述是**手动同步**的（`registry.ts:396-408`）——增删 paper 工具时两边都要改，漏改则模型看不到/叫不到新工具
+- 增删工具时真正的同步点是**提示词硬编码清单**（`central-prompt.ts` / `paper-prompt.ts` / reader 的 `default-skills.json` 基词或 `prompt.ts` 追加段）与各工具 schema 的 describe——漏改提示词则模型不知道新工具存在；`getToolDescriptions()` 里也手动同步了一份 paper 工厂工具描述（`registry.ts:424-445`），但该函数无调用方，改它不影响模型所见
 - reader/paper 的专属工具是**工厂函数**（闭包捕获 bookId/paperId），不是静态注册——所以 `ToolScope` 里的 `"reader"` 分支恒为空，排查"工具没挂"先看组装时的 context 是否传了 id
 
 ## 2. 写操作安全三档与确认卡

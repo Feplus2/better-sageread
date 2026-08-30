@@ -28,6 +28,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 • manageBook: 书籍与论文条目管理（action=delete 移入回收站可恢复 / open 自动按类型打开对应阅读器 / resetProgress 重置进度）
 • convertPdf: 将 PDF 转换为 EPUB 并导入书库
 • manageThreads: 对话管理（list 列出 / search 搜索 / star/unstar 标星 / rename 改名 / delete 删除 / export 导出为 markdown/html/png）
+• readThread: 召回对话的完整问答记录（仅用户/AI 问答，不含工具过程；缺省读当前对话；整理本次对话为笔记或回顾被压缩截断的早期内容前必用，不能只凭残存上下文；读其他对话先用 manageThreads 的 list/search 拿 threadId。仅在有进行中的对话时注入——新对话首条消息时此工具不可用）
 • exportNotes: 导出某本书的划线、想法与关联笔记为 Markdown 文件
 • manageNotes: 笔记面板管理（某本书/某篇论文的长文 Markdown 笔记：list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇；bookId 先用 getBooks 按书名/论文名查得。与划线标注是两套概念——查划线用 notes，导划线用 exportNotes）
 • importBook: 从本地文件路径导入书籍

@@ -1,11 +1,14 @@
 # 动效体系：平滑转场 + 性能模式 实施计划（2026-08-24 讨论定稿）
 
-> **状态：批次 1、3、4 已实施（批次 1：2026-08-25，commit c6e2a44，地基三档 + 管理态 + 进度卡离场编排；
+> **状态：批次 1、3、4、5 已实施（批次 1：2026-08-25，commit c6e2a44，地基三档 + 管理态 + 进度卡离场编排；
 > 批次 3：2026-08-26，tab/路由交叉淡入 + /chat 常驻层淡入淡出 + Tabs 滑动气泡指示器，
-> CDP 实盘验证 21 项全过（scripts/cdp-motion-batch3-verify.mjs 可复跑）；
+> CDP 实盘验证 46 项全过（scripts/cdp-motion-batch3-verify.mjs 可复跑；批次 5 落地后回归断言已适配 keepalive 语义）；
 > 批次 4：2026-08-26，阅读器侧栏冻结式滑入滑出（书籍+论文共用 SidebarMotionProvider/MotionSidebar，
 > 动画期内容钉宽、结束帧一次性 reflow + foliate-resize-update）+ 书库标签列表宽度推移（MotionSidebarCollapse，
-> width 过渡为第一宪法受控例外），CDP 实盘验证 21 项全过（scripts/cdp-motion-batch4-verify.mjs 可复跑）。
+> width 过渡为第一宪法受控例外），CDP 实盘验证 21 项全过（scripts/cdp-motion-batch4-verify.mjs 可复跑）；
+> 批次 5：2026-08-26，commit 5b50c51，主页路由 keepalive 化（AnimatedRouteLayers visited 集合常驻、
+> 二次切换零重挂载）+ 全 TabsContent 面进场动画（motion-enter-slide-up，token 驱动三档退化），
+> CDP 实盘验证 17 项全过（scripts/cdp-motion-batch5-verify.mjs 可复跑）。
 > 批次 2 内容已并入批次 1。二期（共享元素/手势）立项见 docs/motion-phase2-plan.md。**
 > 来源：用户提出——应用内大量"动作"（卡片弹出、侧边栏、进入管理状态、划线等）帧间硬切无过渡，想要 iOS 式连贯丝滑；同时接受动效有卡顿风险，须在设置页提供性能模式开关，用户说了算。
 > 结论：**能实现，且本项目底子好于一般 Web 应用**。90% 丝滑感来自纯 CSS 即可覆盖的部分；framer-motion 仅在三个 CSS 干不了的场合启用；性能模式是"降级三档"而非"全关"。
@@ -146,7 +149,7 @@ iOS 连贯感可解构为四条，Web 全有对应物（类比：硬切是 PPT �
 
 两条实现红线：
 - **冻结而非卸载**：视频壁纸主题的全局画布 `--background` 是半透明遮罩（怜烟 14%/22% alpha），阅读区纯色背景也走 translucentSolid——整层卸掉会透出 html 白底，暗色模式视觉必破。冻结既拿走解码/合成开销，又让半透明栈原样成立。
-- **首帧未解码不得先 pause**：preload=metadata 下未解码帧渲染为透明，须等 `loadeddata` 再停（readyState ≥ HAVE_CURRENT_DATA 直接停）。
+- **首帧未解码不得先 pause**：首帧尚未解码时（preload 策略未取到数据的情况下）视频帧渲染为透明，须等 `loadeddata` 再停（readyState ≥ HAVE_CURRENT_DATA 直接停）。
 
 普适性：判定只看 `useEffectiveMotionMode() !== "full"`，不感知具体主题——任何声明 `--bg-video` 的自定义视频壁纸自动受控。切回 full 档从冻结位置无缝续播。
 

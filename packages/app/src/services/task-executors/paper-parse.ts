@@ -481,7 +481,7 @@ async function runReparseTask(
       ? explicit
       : await resolvePaperSourcePdf(payload.paperId, meta);
   if (!pdfPath) {
-    const message = `《${payload.title}》找不到源 PDF，无法重新解析`;
+    const message = `《${payload.title}》找不到源文件（PDF 或 XML），无法重新解析`;
     toast.error(message);
     ctx.setResult({ outcome: "failed", stage: "parse", error: message } satisfies PaperParseResult);
     throw new Error(message);
@@ -544,7 +544,7 @@ async function executePaperParse(task: TaskItem, ctx: TaskContext): Promise<void
     const dl = await downloadReferencePdf(payload, ctx.signal);
     if (dl.cancelled) throw new Error("任务已取消");
     if (!dl.pdfPath) {
-      const message = dl.message ?? "未能获取 PDF";
+      const message = dl.message ?? "未能获取全文（PDF 或 XML）";
       ctx.reportExtra({ stages: activeToErrorStages(stagesOf(task.taskId)) });
       ctx.setResult({ outcome: "failed", stage: "download", error: message } satisfies PaperParseResult);
       toast.error(message);

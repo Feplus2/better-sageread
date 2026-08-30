@@ -53,9 +53,9 @@ export const processPaperTool = tool({
 • action=translate：翻译论文（force=false 续翻跳过已翻，force=true 全部重翻）；
   翻译完成后**自动顺带执行句级+词级对齐**（与阅读器界面行为一致）
 • action=align：仅执行/重建对齐（force=false 幂等补齐，force=true 全量重算）
-• action=reparse：用源 PDF 重新解析并替换正文（解析器升级/解析质量差时）；
+• action=reparse：用源文件（PDF 或 XML）重新解析并替换正文（解析器升级/解析质量差时）；
   **入统一解析队列异步执行，调用立即返回**（进度见应用右下角进度卡，完成后自动生成产物）；
-  默认自动定位源 PDF，找不到时可用 filePath 显式指定
+  默认自动定位源文件（source.xml → Zotero 回链 PDF → 书库 source.pdf），找不到时可用 filePath 显式指定
 
 ⚠️ **注意**：
 • 翻译耗时较长（取决于论文长度与辅助模型速度），translate/align 会阻塞等待直到完成；reparse 不入队阻塞、立即返回
@@ -72,7 +72,7 @@ export const processPaperTool = tool({
     action: z
       .enum(["status", "translate", "align", "reparse"])
       .describe(
-        "status=查询状态, translate=翻译（自动带对齐）, align=仅对齐/重建对齐, reparse=用源PDF重新解析替换正文",
+        "status=查询状态, translate=翻译（自动带对齐）, align=仅对齐/重建对齐, reparse=用源文件（PDF/XML）重新解析替换正文",
       ),
     paperId: z.string().min(1).describe("论文 ID（用 getBooks(kind=paper) 查询）"),
     force: z
@@ -82,7 +82,7 @@ export const processPaperTool = tool({
     filePath: z
       .string()
       .optional()
-      .describe("仅 reparse 用：源 PDF 的完整本地路径（默认自动定位，找不到时才需显式指定）"),
+      .describe("仅 reparse 用：源文件（PDF 或 XML）的完整本地路径（默认自动定位，找不到时才需显式指定）"),
   }),
 
   execute: async ({
@@ -200,12 +200,12 @@ export const processPaperTool = tool({
         const markdown = await readPaperMarkdown(paperId);
         const { metadata } = parsePaperMarkdown(markdown);
         const title = metadata.title || paperId;
-        // 源 PDF 预检（保持引导性：显式路径不存在 / 自动定位失败都在入队前早报错）；
+        // 源文件（PDF/XML）预检（保持引导性：显式路径不存在 / 自动定位失败都在入队前早报错）；
         // 存在性走 Rust path_exists——plugin-fs 的 exists 有作用域限制，看不到 Zotero storage 等库外路径
         const explicit = filePath?.trim();
         if (explicit && !(await invoke<boolean>("path_exists", { path: explicit }).catch(() => false))) {
           return {
-            results: { success: false, message: `指定的源 PDF 不存在：${explicit}` },
+            results: { success: false, message: `指定的源文件（PDF 或 XML）不存在：${explicit}` },
             meta,
           };
         }
@@ -213,7 +213,7 @@ export const processPaperTool = tool({
           return {
             results: {
               success: false,
-              message: "找不到源 PDF，无法重新解析（可用 filePath 参数显式指定源 PDF 路径）",
+              message: "找不到源文件（PDF 或 XML），无法重新解析（可用 filePath 参数显式指定源文件路径）",
             },
             meta,
           };

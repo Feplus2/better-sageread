@@ -1,6 +1,6 @@
 # 05 · 转换与解析管线
 
-> 两条转换管线：**Books_Converter**（书籍 PDF→EPUB）与 **Papers_Converter**（论文 PDF→paper.md），都是外置 Python 工具打包成的 sidecar exe，由 Rust spawn、stdout JSON 报进度。本章还包括论文格式契约、向量化管线与翻译管线。
+> 两条转换管线：**Books_Converter**（书籍 PDF→EPUB）与 **Papers_Converter**（论文 PDF/XML→paper.md），都是外置 Python 工具打包成的 sidecar exe，由 Rust spawn、stdout JSON 报进度。本章还包括论文格式契约、向量化管线与翻译管线。
 >
 > 注意：转换器的实现主体在独立仓库（随 sidecar exe 分发，实体在 `packages/app/src-tauri/binaries/`，gitignored）。本章标注"converter 侧"的小节以外部仓为准；SageRead 仓内的接线与消费均有行号出处。
 
@@ -12,7 +12,7 @@
 - **产物入库**：done 后前端 `importConvertedEpub` 用 plugin-fs 读 epub 字节 → 包成 `File` → 复用书籍既有 `uploadBook()` 链路（`save_book` 落 `books/{id}/` + 入库）。出处：`services/converter-service.ts:94-100`；辅助模型参数解析 `resolveLlmParams`（:39-57）
 - **设置**：MinerU/PaddleOCR Token 存 **keyring**（`converter-store.json` 的 token 字段已随密钥迁移置空，`converter-store.ts:32-35,56-64`；注意该 JSON 本身会被收进 L1 备份小包——备份是"顶层 *.json 全收减 `CONFIG_JSON_EXCLUDES` 排除清单"而非白名单，但包里已无密钥）；书籍引擎 `engine` 默认 `"mineru"`（表格密集更稳，`store/converter-store.ts:6-7,43`）
 
-## 2. Papers_Converter（论文 PDF→paper.md）
+## 2. Papers_Converter（论文 PDF/XML→paper.md）
 
 - **架构同构**：独立 sidecar `papers_converter`（`--headless --output-dir {appData}/papers-converter [--provider E] [--model M] [--no-ocr]`），同构 JSON 进度协议，事件名 `paper-convert://progress`（Rust 给每条注入 `pdf_path` 防并发串台）。出处：`core/paper_converter.rs:43-93,104-157`。产物落 `{appData}/papers-converter/{slug}/{paper.md,images/,source.pdf}`，入库复用 `importPapers → scan_papers_dir → save_paper`
 
@@ -112,7 +112,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 **论文导入三条路**（汇入 `save_paper`）：
 
 - Papers_Converter 转换：`paper-convert://progress` 事件跟进度（每条注入 `pdf_path` 防并发串台，`paper_converter.rs:104-157`）→ `importPapers → scan_papers_dir → save_paper`
-- 直接拖放 PDF 进论文库（有 `cdp-test-pdf-drag-import` 冒烟覆盖）
+- 直接拖放 PDF / XML 进论文库（有 `cdp-test-pdf-drag-import` 冒烟覆盖）
 - Zotero 批量导入（第 6 节）
 - **重解析不换 id**：`replace_paper_content` 整体替换内容但保留论文 id，文件夹/线程/标注全部存活（`books/commands.rs:1473-1527`）；前端 `services/paper-reparse-service.ts:153-190` 在重解析后本地复检退化
 

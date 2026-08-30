@@ -87,6 +87,11 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   base +=
     "\n\n—— 笔记面板 ——\nmanageNotes：当前书的笔记面板管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。笔记是长文 Markdown 产出（章节总结/读书灵感/人话版解读），与划线标注（notes 工具查询的是后者）是两套概念，不要混写。讨论产出值得留存时，先把整理稿展示给用户讨论，再用 create/update 落笔（会自动弹确认卡由用户过目）；可按当前章节名填 locationTag。";
 
+  // 对话召回（readThread 条件注册：仅当前有进行中的对话线程时注入，新对话首条消息时不可用；
+  // 静态追加说明，不动 DB 基词/预设）
+  base +=
+    "\n\n—— 对话召回 ——\nreadThread：读回本对话的完整问答记录（仅用户提问与 AI 回答，不含工具过程）。对话被上下文压缩截断后，整理本次对话为笔记或回顾早期内容前，先用它读回全量，不要只凭残存上下文。仅在有进行中的对话时可用（新对话首条消息时尚未注入）。";
+
   // 公式格式（静态追加）：渲染管线吃 $…$ / $$…$$，模型用 \(…\) 会源码外泄（实测 deepseek 解释公式时如此）
   base +=
     "\n\n—— 公式格式 ——\n输出数学公式时，行内用 $…$ 包裹，块级用 $$…$$ 包裹（围栏各自独占一行，多行方程组如 \\begin{cases} 也一样）；不要用 \\(…\\) 或 \\[…\\] 定界符。";

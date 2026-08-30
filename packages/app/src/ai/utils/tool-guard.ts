@@ -319,7 +319,7 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
               {
                 toolName: name,
                 title: "重新解析论文（替换正文）",
-                detail: `论文 ${paperId} 将用源 PDF 重新解析并替换现有正文；已有译文转陈旧（续翻自动更新），句词对齐需重建`,
+                detail: `论文 ${paperId} 将用源文件（PDF 或 XML）重新解析并替换现有正文；已有译文转陈旧（续翻自动更新），句词对齐需重建`,
                 dontAskKey: `processPaper:reparse:${crypto.randomUUID()}`,
               },
               options?.abortSignal as AbortSignal | undefined,

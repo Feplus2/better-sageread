@@ -4,7 +4,7 @@
 
 ## 一、定位
 
-- **papers converter 是独立专用工具**（books_converter 同级 sidecar）：PDF → Pandoc MD + images + frontmatter 元数据。
+- **papers converter 是独立专用工具**（books_converter 同级 sidecar）：PDF / XML（JATS、Elsevier 变体）→ Pandoc MD + images + frontmatter 元数据。
 - 它不是 Books_Converter 换个输出格式。图书面向章节/目录/阅读流；论文的元数据（作者/期刊/DOI/摘要）、无目录但有明确层级、引文与参考文献结构，都必须针对性设计。
 - **管线独立**：不依赖 zotero-brain 运行时，不读它的 `parsed/` 缓存。论文搜索/下载由 zotero-brain 以 MCP 外挂提供，装不装都不影响本管线。
 
@@ -12,12 +12,32 @@
 
 ```
 {paper-slug}/
-├── paper.md        # 唯一文本产物，Pandoc-flavored Markdown，UTF-8，LF
-├── images/         # 图片（png/jpeg），正文以相对路径引用
-└── source.pdf      # 可选：原 PDF 拷贝（供未来 PDF 对照面板）
+├── paper.md         # 唯一文本产物，Pandoc-flavored Markdown，UTF-8，LF
+├── images/          # 图片（png/jpeg），正文以相对路径引用
+├── source.pdf       # 可选：原 PDF 拷贝（供未来 PDF 对照面板）
+├── source.xml       # 可选：原 XML 拷贝（XML 导入论文自带；重解析链硬依赖——重解析优先据它重走 XML 管线并重试远端图下载）
+└── references.json  # 可选：结构化参考文献条目（纯增量产物，不触碰 paper.md；无参考文献区不产文件）
 ```
 
 slug 规则：citekey 优先（Better BibTeX 风格 `author2024keyword`），否则 `姓氏-年份-标题首词`，全小写、连字符分隔。
+
+references.json 的对象包装形态（schema 与 converter `stage1_xml.py`/`reference_parser.py` 的 payload 一致）：
+
+```json
+{
+  "version": 1,
+  "source": "llm | rule | xml",
+  "count": 26,
+  "references": [
+    { "n": 1, "raw": "[1] ...", "title": "...", "authors": ["..."], "year": "2024", "venue": "...", "doi": "...", "arxiv_id": "..." }
+  ]
+}
+```
+
+- `source` 标记提取通道：`llm`=辅助模型提取成功，`rule`=降级规则切分（title=raw，其余尽力而为），`xml`=XML `<ref-list>` 结构化提取（比 PDF 路径的正则+LLM 重建可靠）。
+- 条目的 `n` 与 paper.md 的 `#ref-N` 锚点编号同源，阅读器据此把引用卡片对上条目；仅 `n`/`raw` 必填，其余字段尽力而为。
+- `enrichment`（Crossref/OpenAlex/Semantic Scholar 补全缓存）由阅读器运行时写回，不是 converter 产物字段。
+- 早期产物存在裸数组形态（无外层包装），解析方须兼容两种形态。
 
 ## 三、Frontmatter（YAML）：对齐 Pandoc/CSL，不自创 schema
 
