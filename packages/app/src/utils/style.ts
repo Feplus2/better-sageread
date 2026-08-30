@@ -415,11 +415,22 @@ const getTranslationStyles = (mode: BookViewModeType, isDarkMode: boolean, prima
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* hover 联动高亮：跟随全局主题主色（论文侧 .paper-sentence-hover-rect 同浓度口径；
-     iframe 内 var(--primary) 不可达——主题变量不过 iframe 边界，必须由调用方注入真值；
-     ::highlight 不支持 box-shadow，仅背景 tint） */
-  ::highlight(book-align-hover) {
+  /* hover 联动覆盖层（批次 5：::highlight(book-align-hover) 退役——CSS Custom Highlight 不支持
+     圆角/box-shadow，hover 层改为 iframe 内覆盖层 div，视觉对齐论文侧 .paper-sentence-hover-rect；
+     常驻标注镜像层仍走 ::highlight，见下方 getMirrorHighlightStyles）。
+     颜色 = 全局主题主色真值（iframe 内 var(--primary) 不可达——主题变量不过 iframe 边界，
+     必须由调用方注入真值）；浓度口径与论文侧一致（明 14/28，暗 20/36） */
+  .book-align-hover-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 999;
+  }
+  .book-align-hover-rect {
+    position: absolute;
+    border-radius: 4px;
     background-color: color-mix(in oklab, ${primary} ${isDarkMode ? 20 : 14}%, transparent);
+    box-shadow: 0 1px ${isDarkMode ? 10 : 8}px color-mix(in oklab, ${primary} ${isDarkMode ? 36 : 28}%, transparent);
   }
   ${getMirrorHighlightStyles(isDarkMode)}
 `;
@@ -608,7 +619,11 @@ export const getStyles = (viewSettings: ViewSettings, themeCode?: ThemeCode) => 
     viewSettings.overrideFont!,
   );
   const colorStyles = getColorStyles(viewSettings.overrideColor!, viewSettings.invertImgColorInDark!, themeCode);
-  const translationStyles = getTranslationStyles(resolveBookViewMode(viewSettings), themeCode.isDarkMode, themeCode.globalPrimary);
+  const translationStyles = getTranslationStyles(
+    resolveBookViewMode(viewSettings),
+    themeCode.isDarkMode,
+    themeCode.globalPrimary,
+  );
   const scrollbarStyles = getScrollbarStyles(themeCode);
   const userStylesheet = viewSettings.userStylesheet!;
   return `${layoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${scrollbarStyles}\n${userStylesheet}`;
@@ -625,7 +640,11 @@ export const applyTranslationStyle = (viewSettings: ViewSettings) => {
   const styleElement = document.createElement("style");
   styleElement.id = styleId;
   const theme = getThemeCode();
-  styleElement.textContent = getTranslationStyles(resolveBookViewMode(viewSettings), theme.isDarkMode, theme.globalPrimary);
+  styleElement.textContent = getTranslationStyles(
+    resolveBookViewMode(viewSettings),
+    theme.isDarkMode,
+    theme.globalPrimary,
+  );
 
   document.head.appendChild(styleElement);
 };

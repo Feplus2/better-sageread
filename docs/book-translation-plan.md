@@ -197,7 +197,7 @@ UI 形态与语义（08-29 与用户讨论裁定，与论文侧"句词合一行+
 - 验收：两模块独立触发/重建互不误伤；词对齐在句级缺失时点一次自动补句；重建句对齐后
   词计数归零；词级分片失败标 partial 可重建。
 
-### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c；4b hover 失效挂账 2026-08-30 修复验收（见下）；**4d 标注镜像 2026-08-30 落地验收（见下）**
+### 批次 4：词句对齐交互层（二期主体，最贵批次）🔶 2026-08-29 落地 4a/4b/4c；4b hover 失效挂账 2026-08-30 修复验收（见下）；**4d 标注镜像 2026-08-30 落地验收（见下）**；**批次 5 交互层体验对齐 2026-08-30 落地验收（见下）**
 
 已落地（4a/4b；**4c 划词对照卡 08-29 用户裁定撤销**——hover 联动已覆盖"看某个短语对应译文"的需求，
 保留属冗余入口，代码已删）：
@@ -205,9 +205,10 @@ UI 形态与语义（08-29 与用户讨论裁定，与论文侧"句词合一行+
   normToRange（DOM 文本节点 ↔ 规范化 norm 双向换算，WeakMap 缓存；排除译文子树），
   契约测试新增 5 用例（norm 与枚举一致/双向往返/跨节点 Range/caret 模拟/译文子树隔离）13/13 绿。
 - **4b hover 联动**：`use-translation-link.ts`——宿主监听 foliate load → iframe 文档挂
-  mousemove；caret 定位 → 偏移映射 → **词级优先/句级吸附**查表 → 双侧 CSS Custom Highlight
-  （::highlight(book-align-hover) 常驻规则注入 iframe，Highlight 对象按需 set/delete，零 DOM
-  改动不污染标注坐标系；同句移动不重绘）。
+  mousemove；caret 定位 → 偏移映射 → **词级优先/句级吸附**查表 → 双侧句子 Range。
+  **呈现 2026-08-30 批次 5 改版**：::highlight(book-align-hover) 退役（CSS Custom Highlight
+  不支持圆角/box-shadow），改 iframe 内覆盖层 div（圆角+柔和阴影，论文侧
+  .paper-sentence-hover-rect 同款观感），详见下方批次 5 节；同句移动不重绘（lastKey）。
 - ~~4c 划词对照卡~~（撤销，见上）。
 - **hover 冷启动（08-29 验收轮修复）**：hook 生效时当前章多半已加载完（load 事件早已错过），
   必须对 renderer.getContents() 的现有章节立即补挂——否则停留在已加载章节时 hover 永不生效；
@@ -292,6 +293,56 @@ StyleManager 进 iframe），①部分成立（事件通道本身可达，但监
   吸附；词级分支复用论文侧已验收的 mapSrcRangeToTgt，构建词对齐后自动升级精确区间）；
   无对齐数据的段（entry 无 align/alignW）结构性跳过（guard 为早退一行，live 覆盖了
   "整章无译本"分支）；译文模式下译文侧标注的镜像落在隐藏原文上不可见（本体同款预期）。
+
+**批次 5 交互层体验对齐（08-30 用户实测反馈 → 当日落地验收）**：两件事——
+①hover 联动视觉对齐论文侧（柔和边缘）；②右键快捷选中全句。
+
+- **① hover 视觉覆盖层化**：`::highlight(book-align-hover)` 退役（CSS Custom Highlight
+  不支持圆角/box-shadow，这是换掉的硬原因；常驻标注镜像层 `book-align-mirror-*` 保持
+  ::highlight 不动——它要常驻自动重绘）。新方案照抄论文侧 `.paper-sentence-hover-rect`
+  （paper-reader.tsx updateHoverRects）：命中后取双侧 Range 的 `getClientRects`（iframe
+  视口坐标系），在 iframe body 挂 `position:fixed;inset:0;pointer-events-none` 容器
+  （`.book-align-hover-layer`），逐行渲染圆角 div（`.book-align-hover-rect`：圆角 4px +
+  背景 primary 14% + 阴影 `0 1px 8px 28%`；暗色 20%/36%/10px——浓度口径与论文侧逐项相等，
+  CDP 计算样式实证完全一致）。颜色仍走 `getTranslationStyles` 的 globalPrimary 真值注入
+  （iframe 内 `var(--primary)` 不可达的老坑不回踩）。rect 渲染前做几何求并
+  （复用论文侧 `mergeOverlappingRects`，防半透明叠色）。
+- **foliate 分页几何的实证要点**：本分叉为纵向展开分页——iframe 沿块轴展开到全内容尺寸、
+  宿主容器滚动换页，**iframe 内文档不自滚**，故 `getClientRects` 坐标对翻页稳定、覆盖层与
+  文字天然随宿主滚动同移；翻页/重排/滚动时清掉覆盖层即可（`view.renderer` 的 scroll 重派发
+  + `view` 的 relocate + 文档内 scroll/resize 兜底；hover 是即态，鼠标再动即重算重绘）。
+  mousemove 走 rAF 节流；同句内移动不重绘（lastKey，实证子节点引用零变化）。
+  CSS zoom（阅读缩放）下 `getClientRects` 返回缩放后坐标而覆盖层同在 body 子树，
+  几何属性除回 zoom（默认 100 → 1，无除算影响）。
+- **② 右键句选**：iframe 文档监听 `contextmenu` → caret 定位 → 块 + norm 偏移 → 句边界
+  （有对齐数据用 `align` 句对区间；无对齐数据用论文侧切句器 `segmentSentences` 对块 norm
+  文本现场切）→ `normToRange` 得整句 Range → programmatic selection。**弹窗复用既有链路**：
+  随后的右键 mouseup 由 annotator 既有监听（annotator/index.tsx onLoad 挂的
+  `handleMouseUp`）拾起选区 → `makeSelection` → 标注弹窗，零新弹窗路径（CDP 实证成立）。
+  **已有标注命中**：`overlayer.hitTest`（iframe 视口坐标，命中括除 foliate 搜索结果前缀）
+  → 派发 foliate `show-annotation` 同一 CustomEvent 路径回显既有标注弹窗（含笔触/颜色行，
+  截图实证）。守卫（论文侧同款）：img/a/aside 命中直接放行——img 由宿主
+  `handleImageContextMenu` 接管（实证图片主题菜单消息照发、选区不被句选染指）；
+  非句子区域不 preventDefault（系统菜单保留）。
+- **未翻译书也可用**：无译本注入的文档没有 `data-block-index`——回退
+  `enumerateSectionBlocks(wrapSectionDocument(doc))` 枚举契约找 caret 所在叶子块 +
+  切句器定界（实证《牛津通识读本：福柯（中文版）》右键选句 + 弹窗成立）。
+- **卸载语义修正（顺手修掉的存量 bug）**：切回 original 只重编译 CSS、不重建章节文档，
+  旧实现只清注册表不清监听器——original 模式下 mousemove 仍会重画高亮（4b 验收漏网）。
+  现 effect 用 `AbortController` 统一摘除全部文档监听（含右键），切模式后 hover/右键即死，
+  切回重挂；实证 original 模式 hover 不再产层、回切后恢复、覆盖层容器唯一。
+- **验收（CDP 实测，探针/截图存证 .tmp-bt-verify/50–64）**：hover 覆盖层双侧多行 rect
+  结构与计算样式（bg/shadow/radius 与论文侧逐项相等）；明/暗/怜烟（lianyan 视频壁纸）
+  三主题截图；同句移动零重绘、跨句重绘；翻页清除 → 再动重绘；切 original 清场无残留 +
+  hover 失效 + 切回恢复；切 tab 往返（keepalive 休眠/唤醒路径）hover 照常且层容器唯一；
+  右键原文句/译文句各选中全句并弹标注弹窗（截图）；右键已有标注回显既有弹窗（截图）；
+  链接/图片/页边空白右键不接管；镜像注册表全程不动（4d 不受覆盖层影响）。
+  `scripts/cdp-book-hover-theme-check.mjs` 改验覆盖层规则（ok）；契约测试 14/14 绿；
+  `pnpm tsc -b` 零错；biome 改动文件零告警（顺手清零了该 hook 的存量
+  useExhaustiveDependencies 告警，并给右键句选模块同款式 ignore 注释）。
+- **已知取舍**：对齐句对缺失时切句器按块 norm 文本切（未对齐段/未翻译书），与论文侧
+  locateSentenceAtPoint 同源同边界规则；译文模式原文隐藏时原文侧不可点属自然结果；
+  右键句选仅在非 original 模式启用（hook 启停口径与 hover/镜像一致）。
 
 **顶栏下拉交互优化（08-29 用户提出，通用 UI 待办）**：
 - 点开动效：顶栏各下拉（目录/搜索/设置/翻译）展开与收起均无动画——按动效体系规范
