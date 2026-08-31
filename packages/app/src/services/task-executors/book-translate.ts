@@ -27,6 +27,7 @@ import {
   selectChannelAggregate,
   useTaskCenterStore,
 } from "@/store/task-center-store";
+import { ensureTaskConflictChecker } from "@/utils/task-conflict";
 import { toast } from "sonner";
 
 /** book-translate 通道 payload：force=全量重翻（覆盖既有译文）；
@@ -162,6 +163,7 @@ async function executeBookTranslate(task: TaskItem, ctx: TaskContext): Promise<v
 // ─── 入口薄壳（UI 与 AI 同一入口；模块加载即完成通道注册） ───
 
 registerTaskChannel("book-translate", { executor: executeBookTranslate, concurrency: 1 });
+ensureTaskConflictChecker();
 
 /** 通道空闲时清掉已结算任务（新任务卡片从 0 计起） */
 function dismissBookTranslateIfIdle(): void {
@@ -174,6 +176,23 @@ function dismissBookTranslateIfIdle(): void {
 export function enqueueBookTranslate(input: { id: string; title: string } & BookTranslatePayload): EnqueueResult {
   dismissBookTranslateIfIdle();
   return useTaskCenterStore.getState().enqueue({
+    channel: "book-translate",
+    targetId: input.id,
+    title: input.title,
+    payload: {
+      force: input.force,
+      alignOnly: input.alignOnly,
+      alignPhase: input.alignPhase,
+    } satisfies BookTranslatePayload,
+  });
+}
+
+/** AI translateBook 工具路径：阻塞等结算（保持工具"完成后告知结果"语义），成功 resolve / 失败、取消、拒入队 reject */
+export function enqueueBookTranslateAndWait(
+  input: { id: string; title: string } & BookTranslatePayload,
+): Promise<TaskItem> {
+  dismissBookTranslateIfIdle();
+  return useTaskCenterStore.getState().enqueueAndWait({
     channel: "book-translate",
     targetId: input.id,
     title: input.title,

@@ -109,6 +109,9 @@ interface TaskCenterState {
   cancelChannel: (channel: TaskChannel) => void;
   /** 清掉通道的已结算任务（卡片关闭/下次入队前的视觉复位） */
   dismissSettled: (channel: TaskChannel) => void;
+  /** 移除单个任务（队列行删除 / 图书转换成功后自动出队）：已结算直接移除；
+   *  排队按取消结算 waiter 后移除；运行中拒删（先 cancelTask）。返回是否移除 */
+  removeTask: (taskId: string) => boolean;
   /** 刷新恢复占用（P2-4 paper-parse；P3 起按并发槽计）：以 running 态注入任务并占住一个并发槽
    * （旧 paperDraining 占位等价物）——占用期间新 enqueue 只能填剩余空槽，settleRecoveredTask
    *  释放后自动接续。返回绑定到该任务的 report/reportExtra/setResult 与取消 signal；
@@ -340,6 +343,20 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
       const dropped = new Set(removed);
       return { tasks, order: s.order.filter((id) => !dropped.has(id)) };
     }),
+
+  removeTask: (taskId) => {
+    const task = get().tasks[taskId];
+    if (!task || task.mirror) return false;
+    if (task.status === "running") return false;
+    // 排队中撤下：先按取消结算 waiter（enqueueAndWait 调用方拒「任务已取消」），再从任务表移除
+    if (task.status === "queued") settleWaiter(taskId, "cancelled");
+    set((s) => {
+      const tasks = { ...s.tasks };
+      delete tasks[taskId];
+      return { tasks, order: s.order.filter((id) => id !== taskId) };
+    });
+    return true;
+  },
 
   occupyForRecovery: (input) => {
     // 并发槽已满（在跑任务 + 已有恢复占用达到通道上限）→ 拒绝，调用方按「实时通道健在」处理

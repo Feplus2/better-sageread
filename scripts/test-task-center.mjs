@@ -264,6 +264,38 @@ await check("恢复占用按并发槽计：占满拒占、释放后排队任务�
   assert(log.includes("done:Q"), `Q 应执行完成: ${log.join(",")}`);
 });
 
+await check("单任务移除：已结算任务 removeTask 从聚合消失，同通道其他任务不受影响", async () => {
+  registerTaskChannel("book-convert", { executor: makeExecutor([]), concurrency: 1 });
+  const s = useTaskCenterStore.getState();
+  const a = await s.enqueueAndWait({ channel: "book-convert", targetId: "a.pdf", title: "甲" });
+  const b = await s.enqueueAndWait({ channel: "book-convert", targetId: "b.pdf", title: "乙" });
+  assert(useTaskCenterStore.getState().removeTask(a.taskId) === true, "已结算任务应可移除");
+  const agg = selectChannelAggregate(useTaskCenterStore.getState(), "book-convert");
+  assert(agg.settled.length === 1 && agg.settled[0].taskId === b.taskId, "应只剩乙");
+  assert(useTaskCenterStore.getState().order.includes(a.taskId) === false, "order 应同步移除");
+});
+
+await check("排队移除：queued 任务 removeTask 拒 waiter；运行中拒删", async () => {
+  const log = [];
+  registerTaskChannel("book-convert", { executor: makeExecutor(log, 40), concurrency: 1 });
+  const s = useTaskCenterStore.getState();
+  const first = s.enqueueAndWait({ channel: "book-convert", targetId: "r.pdf", title: "跑" });
+  const second = s.enqueue({ channel: "book-convert", targetId: "q.pdf", title: "排" });
+  assert(second.ok, "第二个应入队成功");
+  const waiter = useTaskCenterStore.getState().waitTask(second.taskId);
+  assert(useTaskCenterStore.getState().removeTask(second.taskId) === true, "排队任务应可移除");
+  await waiter.then(
+    () => {
+      throw new Error("被移除的排队任务不应成功");
+    },
+    (e) => assert(e.message === "任务已取消", `拒绝原因异常: ${e.message}`),
+  );
+  assert(!log.includes("start:排"), `被移除任务不应启动: ${log.join(",")}`);
+  const runningId = Object.values(useTaskCenterStore.getState().tasks).find((t) => t.status === "running").taskId;
+  assert(useTaskCenterStore.getState().removeTask(runningId) === false, "运行中应拒删");
+  await first;
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 rmSync(outDir, { recursive: true, force: true });
 process.exit(failures.length > 0 ? 1 : 0);

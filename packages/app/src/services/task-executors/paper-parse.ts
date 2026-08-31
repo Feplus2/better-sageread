@@ -47,7 +47,7 @@ import {
   useTaskCenterStore,
 } from "@/store/task-center-store";
 import { findDegenerateLoop } from "@/utils/degenerate";
-import { ensurePaperTaskConflictChecker } from "@/utils/paper-conflict";
+import { ensureTaskConflictChecker } from "@/utils/task-conflict";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
@@ -619,10 +619,10 @@ useTaskCenterStore.subscribe((s) => {
   parseWasActive = active;
 });
 
-// ─── 通道注册（模块加载即完成；冲突检查器幂等注入，与向量化/翻译通道同一实现） ───
+// ─── 通道注册（模块加载即完成；冲突检查器经统一注入点注入，与其他五通道同一合成实现） ───
 
 registerTaskChannel("paper-parse", { executor: executePaperParse, concurrency: 2 });
-ensurePaperTaskConflictChecker();
+ensureTaskConflictChecker();
 
 /** 通道空闲时清掉已结算任务（新批次卡片从 0 计起，对齐旧 drain 重置进度卡语义）。
  *  UI 入口薄壳（convert-progress-store）与 AI 直发链路（paper-service.importPaperPdf）各自调用。 */

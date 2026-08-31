@@ -1,4 +1,7 @@
+import { ChannelProgressCard, channelCardOf } from "@/components/channel-progress-card";
 import SettingsDialog from "@/components/settings/settings-dialog";
+import { TaskRunPanel } from "@/components/task-run-panel";
+import { BottomRightPortal, MotionStackCard } from "@/components/ui/bottom-right-stack";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import Spinner from "@/components/ui/spinner";
@@ -13,9 +16,10 @@ import { createTag, getTags } from "@/services/tag-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useConvertProgressStore } from "@/store/convert-progress-store";
 import { useLibraryStore } from "@/store/library-store";
+import { selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import clsx from "clsx";
 import { FileDown, ListChecks, Plus, Sparkles, Tags, Trash2, Upload as UploadIcon, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import BatchAITagDialog, { type BatchAITagSelection } from "./components/batch-ai-tag-dialog";
@@ -50,6 +54,41 @@ export default function NewLibraryPage() {
   const converterOpen = useConvertProgressStore((s) => s.bookConvertDialogOpen && !s.bookConvertMinimized);
   const openBookConvertDialog = useConvertProgressStore((s) => s.openBookConvertDialog);
   const closeBookConvertDialog = useConvertProgressStore((s) => s.closeBookConvertDialog);
+
+  // 图书翻译通道卡（卡 2，docs/book-convert-queue-plan.md）：book-translate 通道聚合折算，
+  // 论文批量翻译卡同款样式（共享组件 channel-progress-card），经 BottomRightPortal 入右下角
+  // 共享栈（栈在阅读/聊天页禁区自动隐藏）。selectChannelAggregate 每次返回新对象——
+  // 订阅稳定的 tasks/order 引用再 useMemo 聚合（global-convert-progress 同款写法）
+  const taskCenterTasks = useTaskCenterStore((s) => s.tasks);
+  const taskCenterOrder = useTaskCenterStore((s) => s.order);
+  const taskCenterCancelling = useTaskCenterStore((s) => s.cancelling);
+  const bookTranslateAgg = useMemo(
+    () => selectChannelAggregate({ tasks: taskCenterTasks, order: taskCenterOrder }, "book-translate"),
+    [taskCenterTasks, taskCenterOrder],
+  );
+  const bookTranslateCard = channelCardOf(bookTranslateAgg, taskCenterCancelling["book-translate"] === true, {
+    unit: "本",
+    resumable: true,
+  });
+
+  // 干净成功 6 秒自动消失（papers 页批量卡同款收尾；有失败/取消保留待手动关闭）
+  const bookTranslateCleanSuccess = bookTranslateCard?.status === "success" && bookTranslateCard.failedCount === 0;
+  useEffect(() => {
+    if (!bookTranslateCleanSuccess) return;
+    const timer = setTimeout(() => {
+      // 到期复查聚合仍是干净收尾态（接续间隔可能超过 6s，误杀下一批的坑见 papers 页同款注释）
+      const agg = selectChannelAggregate(useTaskCenterStore.getState(), "book-translate");
+      if (
+        !agg.current &&
+        agg.queuedCount === 0 &&
+        agg.settled.length > 0 &&
+        agg.settled.every((t) => t.status !== "error")
+      ) {
+        useTaskCenterStore.getState().dismissSettled("book-translate");
+      }
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [bookTranslateCleanSuccess]);
   const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(new Set());
   const [batchTagMode, setBatchTagMode] = useState<"add" | "remove" | null>(null);
   const [isBatchOperating, setIsBatchOperating] = useState(false);
@@ -443,6 +482,29 @@ export default function NewLibraryPage() {
       />
 
       <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
+
+      {/* 图书翻译通道卡（卡 2）：进度可见 + 可取消（running 时关闭即取消）；
+          点卡经 TaskRunPanel 弹子任务清单 */}
+      <BottomRightPortal>
+        <MotionStackCard show={!!bookTranslateCard}>
+          {bookTranslateCard && (
+            <TaskRunPanel channel="book-translate">
+              <ChannelProgressCard
+                card={bookTranslateCard}
+                title="图书翻译"
+                onCancel={() => useTaskCenterStore.getState().cancelChannel("book-translate")}
+                onDismiss={() => {
+                  if (bookTranslateCard.status === "running") {
+                    useTaskCenterStore.getState().cancelChannel("book-translate");
+                    return;
+                  }
+                  useTaskCenterStore.getState().dismissSettled("book-translate");
+                }}
+              />
+            </TaskRunPanel>
+          )}
+        </MotionStackCard>
+      </BottomRightPortal>
 
       {/* 点窗外/Esc/关闭按钮统一走 closeBookConvertDialog：转换中或有结果 → 最小化为
           全局右下角小卡（不丢进度）；空闲 → 彻底关闭 */}

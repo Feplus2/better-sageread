@@ -29,3 +29,4 @@ export { manageSecretsTool } from "./manage-secrets";
 export { manageMcpTool } from "./manage-mcp";
 export { managePaperFoldersTool } from "./manage-paper-folders";
 export { processPaperTool } from "./process-paper";
+export { translateBookTool } from "./translate-book";

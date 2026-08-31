@@ -35,6 +35,7 @@ import {
   searchDevDocsTool,
   searchFilesTool,
   switchModelTool,
+  translateBookTool,
   trashManagerTool,
   vectorizeBookTool,
   writeFileTool,
@@ -325,6 +326,12 @@ registerTools([
     scope: "central",
     tool: processPaperTool as Tool,
     description: "文献库论文翻译与句词对齐（status/translate/align；translate 自动带对齐）",
+  },
+  {
+    name: "translateBook",
+    scope: "central",
+    tool: translateBookTool as Tool,
+    description: "书籍（EPUB）全书翻译与译本状态查询（status/translate；默认续翻，force 全量重翻，自动带句对齐）",
   },
   {
     name: "manageNotes",

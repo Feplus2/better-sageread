@@ -26,6 +26,7 @@ import {
   useTaskCenterStore,
 } from "@/store/task-center-store";
 import { getCurrentVectorModelConfig } from "@/utils/model";
+import { ensureTaskConflictChecker } from "@/utils/task-conflict";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
@@ -108,6 +109,7 @@ async function executeBookVectorize(task: TaskItem, ctx: TaskContext): Promise<v
 // ─── 入口薄壳（UI 与 AI 同一入口；模块加载即完成通道注册） ───
 
 registerTaskChannel("book-vectorize", { executor: executeBookVectorize, concurrency: 1 });
+ensureTaskConflictChecker();
 
 /** 通道空闲时清掉已结算任务（卡片/聚合口径从 0 计起，对齐"下次入队前的视觉复位"注释口径） */
 function dismissBookVectorizeIfIdle(): void {

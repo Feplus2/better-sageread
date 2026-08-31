@@ -4,16 +4,29 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import {
+  type BookConvertResult,
+  enqueueBookConvertBatch,
+  retryBookConvertTask,
+} from "@/services/task-executors/book-convert";
 import { useConvertProgressStore } from "@/store/convert-progress-store";
 import { useConverterStore } from "@/store/converter-store";
+import { type TaskItem, selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import { open } from "@tauri-apps/plugin-dialog";
-import { BookUp, Check, FileDown, FileText, Loader2, X } from "lucide-react";
-import { useEffect } from "react";
+import { Ban, CheckCircle2, Clock, FileDown, FileText, Loader2, RotateCcw, X, XCircle } from "lucide-react";
+import { useEffect, useMemo } from "react";
 
-/** 运行状态与事件监听都在 convert-progress-store（视图卸载不中断接收）；
- *  本组件只是表单视图：大页面（/converter）与图书馆弹层共用同一份状态 */
-type StageStatus = "pending" | "active" | "done" | "error";
+/**
+ * 图书转换任务台（卡 1，docs/book-convert-queue-plan.md）：
+ * 窗口内容模型 = book-convert 通道队列——拖入/选入多份 PDF 即逐本入队（通道串行连转，
+ * 完成自动导入书库 + toast + 自动出队）；队列每行 = 文件名 + 状态 + 操作（取消/重试/删除），
+ * 失败行滞留带错误原因。「更换」语义已删除（删除→新拖入替代，用户拍板）。
+ *
+ * 大页面（/converter）与图书馆弹层共用本组件；窗口态 ⇄ 右下角通道卡状态机与
+ * 在跑任务详情数据源在 convert-progress-store，队列现场读 task-center 通道聚合
+ * （窗口开关/最小化不丢现场）。拖放悬停遮罩只盖窗口本体（bookConvertDragOver，
+ * 由 home-layout 的全局 Tauri 拖放监听按窗口可见性写入——不再盖全主页）。
+ */
 
 const TRANSLATE_OPTIONS = [
   { value: "none", label: "不翻译" },
@@ -26,83 +39,159 @@ const TRANSLATE_OPTIONS = [
   { value: "ko", label: "译为韩文" },
 ];
 
-function StageCircle({ status, n }: { status: StageStatus; n: number }) {
-  if (status === "done") {
-    return (
-      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-        <Check className="size-3.5" />
-      </span>
-    );
+/** 队列行状态图标 */
+function RowStatusIcon({ status }: { status: TaskItem["status"] }) {
+  switch (status) {
+    case "running":
+      return <Loader2 className="size-4 animate-spin text-primary" />;
+    case "queued":
+      return <Clock className="size-4 text-muted-foreground" />;
+    case "success":
+      return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />;
+    case "error":
+      return <XCircle className="size-4 text-red-600 dark:text-red-400" />;
+    case "cancelled":
+      return <Ban className="size-4 text-muted-foreground" />;
   }
-  if (status === "active") {
-    return (
-      <span className="relative flex h-6 w-6 flex-shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/30" />
-        <span className="relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary bg-background text-primary text-xs">
-          {n}
-        </span>
-      </span>
-    );
-  }
-  if (status === "error") {
-    return (
-      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
-        <X className="size-3.5" />
-      </span>
-    );
-  }
+}
+
+/** 队列行：文件名 + 状态（排队/转换中带进度/完成/失败/已取消）+ 行操作 */
+function QueueRow({ task }: { task: TaskItem }) {
+  const cancelTask = () => useTaskCenterStore.getState().cancelTask(task.taskId);
+  const removeTask = () => useTaskCenterStore.getState().removeTask(task.taskId);
+  const result = task.result as BookConvertResult | undefined;
+
   return (
-    <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border text-muted-foreground text-xs">
-      {n}
-    </span>
+    <li className="flex items-start gap-3 px-4 py-3">
+      <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <FileText className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <p className="truncate font-medium text-sm dark:text-neutral-100">{task.title}</p>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{task.targetId}</TooltipContent>
+          </Tooltip>
+          <span className="flex flex-shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
+            <RowStatusIcon status={task.status} />
+            {task.status === "queued" && "排队中"}
+            {task.status === "running" && `${task.percent}%`}
+            {task.status === "success" && (result?.imported === false ? "完成（自动导入失败）" : "已导入图书馆")}
+            {task.status === "error" && "失败"}
+            {task.status === "cancelled" && "已取消"}
+          </span>
+        </div>
+
+        {task.status === "running" && (
+          <>
+            <Progress value={task.percent} className="mt-2 h-1.5" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="mt-1 truncate text-muted-foreground text-xs">{task.detail || "处理中…"}</p>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{task.detail}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+        {task.status === "error" && (
+          <p className="mt-1 break-all text-red-600 text-xs dark:text-red-400">{task.error || "转换失败"}</p>
+        )}
+      </div>
+
+      {/* 行操作：运行中=取消；失败/已取消=重试+删除；排队/成功=删除 */}
+      <div className="flex flex-shrink-0 items-center gap-1">
+        {task.status === "running" && (
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={cancelTask}>
+            取消
+          </Button>
+        )}
+        {(task.status === "error" || task.status === "cancelled") && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => retryBookConvertTask(task.taskId)}
+          >
+            <RotateCcw className="size-3.5" />
+            重试
+          </Button>
+        )}
+        {task.status !== "running" && (
+          <button
+            type="button"
+            title="从队列移除"
+            className="rounded p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+            onClick={removeTask}
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 
 export default function ConverterPage() {
-  const bookConvert = useConvertProgressStore((s) => s.bookConvert);
+  const ocr = useConvertProgressStore((s) => s.bookConvert.ocr);
+  const translate = useConvertProgressStore((s) => s.bookConvert.translate);
   const setBookConvertConfig = useConvertProgressStore((s) => s.setBookConvertConfig);
-  const resetBookConvert = useConvertProgressStore((s) => s.resetBookConvert);
-  const startBookConvert = useConvertProgressStore((s) => s.startBookConvert);
-  const cancelBookConvert = useConvertProgressStore((s) => s.cancelBookConvert);
-  const importBookConvertResult = useConvertProgressStore((s) => s.importBookConvertResult);
+  const dragOver = useConvertProgressStore((s) => s.bookConvertDragOver);
   const { mineruToken, paddleocrToken, engine } = useConverterStore();
   const hasEngineToken = engine === "paddleocr" ? !!paddleocrToken : !!mineruToken;
 
-  const { pdfPath, ocr, translate, status, percent, detail, stages, errorMessage, epubPath, importing } = bookConvert;
+  // 队列现场：book-convert 通道聚合（selectChannelAggregate 每次返回新对象，不能直接作
+  // zustand 选择器——订阅稳定的 tasks/order 引用再 useMemo 聚合，global-convert-progress 同款）
+  const taskCenterTasks = useTaskCenterStore((s) => s.tasks);
+  const taskCenterOrder = useTaskCenterStore((s) => s.order);
+  const queueRows = useMemo(() => {
+    const rows: TaskItem[] = [];
+    for (const id of taskCenterOrder) {
+      const task = taskCenterTasks[id];
+      if (task && task.channel === "book-convert" && !task.mirror) rows.push(task);
+    }
+    return rows;
+  }, [taskCenterTasks, taskCenterOrder]);
 
-  // 视图卸载（弹层关闭/路由切走）时若转换仍在进行或有结果未处理 → 最小化为全局右下角小卡
-  // （进度接收在 store 不受影响；小卡点击可回到大窗口，见 global-convert-progress）
+  // 视图卸载兜底（弹层被异常卸载等）：通道还有任务且窗口逻辑上仍开着 → 转通道卡跟踪
+  // （正常关窗走 closeBookConvertDialog 已落定 minimized，这里 dialogOpen 已 false 不会重复写）
   useEffect(() => {
     return () => {
       const s = useConvertProgressStore.getState();
-      if (s.bookConvert.status !== "idle") {
-        useConvertProgressStore.setState({ bookConvertMinimized: true });
-      }
+      if (!s.bookConvertDialogOpen) return;
+      const agg = selectChannelAggregate(useTaskCenterStore.getState(), "book-convert");
+      const hasTasks = agg.current !== null || agg.queuedCount > 0 || agg.settled.some((t) => t.status !== "cancelled");
+      if (hasTasks) useConvertProgressStore.setState({ bookConvertMinimized: true });
     };
   }, []);
 
-  const handleSelectPdf = async () => {
+  const handleSelectPdfs = async () => {
     try {
       const selected = await open({
         filters: [{ name: "PDF", extensions: ["pdf"] }],
-        multiple: false,
+        multiple: true,
       });
-      if (typeof selected === "string") {
-        // 换文件 = 丢弃上一轮结果（含解除旧监听）
-        resetBookConvert();
-        setBookConvertConfig({ pdfPath: selected });
-      }
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      enqueueBookConvertBatch(paths, { ocr, translate });
     } catch (e) {
       console.warn("选择 PDF 失败:", e);
     }
   };
 
-  const pdfName = pdfPath?.split(/[\\/]/).pop() ?? "";
-  const epubName = epubPath?.split(/[\\/]/).pop() ?? "";
-  const converting = status === "converting";
-
   return (
-    <div data-region="converter-page" className="flex h-full flex-col overflow-y-auto">
+    <div data-region="converter-page" className="relative flex h-full flex-col overflow-y-auto">
+      {/* 拖放悬停遮罩：只盖窗口本体（home-layout 判定窗口可见时置旗标；盖全主页是卡 1 修正前的错位） */}
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-primary border-dashed bg-background/90 px-16 py-10 shadow-lg">
+            <FileDown className="size-10 text-primary" />
+            <p className="font-medium text-sm">松开将 PDF 加入转换队列</p>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto w-full max-w-2xl space-y-6 p-6 py-8">
         {/* 页眉 */}
         <header className="space-y-3 border-b pb-6 dark:border-neutral-700">
@@ -111,47 +200,30 @@ export default function ConverterPage() {
           </p>
           <h1 className="font-bold font-serif text-3xl dark:text-neutral-100">PDF 转 EPUB</h1>
           <p className="text-muted-foreground text-sm">
-            MinerU 云端解析 + 辅助模型结构重建，转换为排版精良的 EPUB 并一键入库
+            多份 PDF 拖入即排队，串行连转；完成自动导入书库并出队。窗口可最小化为右下角任务卡，点卡还原
           </p>
         </header>
 
-        {/* 设置卡片 */}
-        <section className="rounded-xl border dark:border-neutral-700">
-          <div className="p-4">
-            {pdfPath ? (
-              <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <FileText className="size-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-sm dark:text-neutral-100">{pdfName}</p>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="truncate text-muted-foreground text-xs">{pdfPath}</p>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{pdfPath}</TooltipContent>
-                  </Tooltip>
-                </div>
-                {!converting && (
-                  <Button variant="ghost" size="sm" onClick={handleSelectPdf}>
-                    更换
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSelectPdf}
-                className="flex w-full flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground dark:border-neutral-700"
-              >
-                <FileText className="size-6" />
-                <span className="text-sm">选择 PDF 文件</span>
-                <span className="text-xs">仅支持 .pdf 格式</span>
-              </button>
-            )}
-          </div>
+        {!hasEngineToken && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-700 text-sm dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
+            尚未配置 {engine === "paddleocr" ? "PaddleOCR" : "MinerU"} Token，请前往 设置 → PDF 转换 填写后再开始转换。
+          </p>
+        )}
 
-          <div className="divide-y border-t dark:divide-neutral-800 dark:border-neutral-700">
+        {/* 拖放/选入区 */}
+        <button
+          type="button"
+          onClick={handleSelectPdfs}
+          className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-8 text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground dark:border-neutral-700"
+        >
+          <FileDown className="size-6" />
+          <span className="text-sm">拖入 PDF 到本窗口，或点击选择（可多选）</span>
+          <span className="text-xs">仅支持 .pdf 格式 · 入队即转，完成自动导入书库</span>
+        </button>
+
+        {/* 配置（作用于此后入队的任务；已入队行持入队时快照） */}
+        <section className="rounded-xl border dark:border-neutral-700">
+          <div className="divide-y dark:divide-neutral-800">
             <div className="flex items-center justify-between gap-4 px-4 py-3.5">
               <div className="space-y-0.5">
                 <Label htmlFor="ocr-switch" className="text-sm">
@@ -163,7 +235,6 @@ export default function ConverterPage() {
                 id="ocr-switch"
                 checked={ocr}
                 onCheckedChange={(checked) => setBookConvertConfig({ ocr: checked })}
-                disabled={converting}
               />
             </div>
 
@@ -172,11 +243,7 @@ export default function ConverterPage() {
                 <Label className="text-sm">全书翻译</Label>
                 <p className="text-muted-foreground text-xs">使用辅助模型分批翻译（显著增加耗时）</p>
               </div>
-              <Select
-                value={translate}
-                onValueChange={(v) => setBookConvertConfig({ translate: v })}
-                disabled={converting}
-              >
+              <Select value={translate} onValueChange={(v) => setBookConvertConfig({ translate: v })}>
                 <SelectTrigger className="w-36">
                   <SelectValue />
                 </SelectTrigger>
@@ -190,119 +257,28 @@ export default function ConverterPage() {
               </Select>
             </div>
           </div>
-
-          <div className="border-t px-4 py-4 dark:border-neutral-700">
-            {!hasEngineToken && (
-              <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-700 text-sm dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
-                尚未配置 {engine === "paddleocr" ? "PaddleOCR" : "MinerU"} Token，请前往 设置 → PDF 转换
-                填写后再开始转换。
-              </p>
-            )}
-            {converting ? (
-              <Button variant="outline" onClick={() => void cancelBookConvert()} className="w-full">
-                取消转换
-              </Button>
-            ) : (
-              <Button onClick={() => void startBookConvert()} disabled={!pdfPath || !hasEngineToken} className="w-full">
-                <FileDown className="size-4" />
-                开始转换
-              </Button>
-            )}
-          </div>
         </section>
 
-        {/* 进度 / 结果 */}
-        {status === "idle" ? (
+        {/* 转换队列 */}
+        {queueRows.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-muted-foreground dark:border-neutral-700">
             <FileDown className="size-5" />
-            <p className="text-sm">转换进度与结果将显示在这里</p>
+            <p className="text-sm">转换队列空——拖入或选入 PDF 即开始</p>
           </div>
         ) : (
           <section className="fade-in slide-in-from-bottom-2 animate-in rounded-xl border duration-300 dark:border-neutral-700">
-            <div className="flex items-baseline justify-between gap-4 px-5 pt-4">
-              <div className="min-w-0">
-                <p className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.25em]">转换进度</p>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <p className="truncate font-medium dark:text-neutral-100">{pdfName}</p>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{pdfName}</TooltipContent>
-                </Tooltip>
-              </div>
-              <span className="flex-shrink-0 font-serif text-3xl tabular-nums dark:text-neutral-100">
-                {Math.round(percent)}
-                <span className="text-base text-muted-foreground">%</span>
+            <div className="flex items-baseline justify-between gap-4 border-b px-4 py-3 dark:border-neutral-700">
+              <p className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.25em]">转换队列</p>
+              <span className="text-muted-foreground text-xs">
+                {queueRows.filter((t) => t.status === "running" || t.status === "queued").length} 项进行中/排队 · 共{" "}
+                {queueRows.length} 行
               </span>
             </div>
-
-            <div className="px-5 pt-3">
-              <Progress value={percent} className="h-1.5" />
-            </div>
-
-            <ol className="px-5 py-5">
-              {stages.map((s, i) => (
-                <li key={s.n} className="relative flex gap-3 pb-5 last:pb-0">
-                  {i < stages.length - 1 && (
-                    <span
-                      className={cn(
-                        "absolute top-6 left-[11px] h-[calc(100%-24px)] w-px",
-                        s.status === "done" ? "bg-primary/40" : "bg-border",
-                      )}
-                    />
-                  )}
-                  <StageCircle status={s.status} n={s.n} />
-                  <div className="min-w-0 flex-1 pt-0.5">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span
-                        className={cn(
-                          "text-sm",
-                          s.status === "pending" ? "text-muted-foreground" : "font-medium dark:text-neutral-100",
-                        )}
-                      >
-                        {s.name}
-                      </span>
-                      {s.status === "done" && s.elapsed !== undefined && (
-                        <span className="text-muted-foreground text-xs tabular-nums">{Math.round(s.elapsed)}s</span>
-                      )}
-                    </div>
-                    {s.status === "active" && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <p className="mt-0.5 truncate text-muted-foreground text-xs">{detail || "处理中..."}</p>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{detail}</TooltipContent>
-                      </Tooltip>
-                    )}
-                  </div>
-                </li>
+            <ul className="divide-y dark:divide-neutral-800">
+              {queueRows.map((task) => (
+                <QueueRow key={task.taskId} task={task} />
               ))}
-            </ol>
-
-            {status === "done" && (
-              <div className="mx-5 mb-5 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/40">
-                <Check className="size-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-emerald-800 text-sm dark:text-emerald-300">转换完成</p>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="truncate text-emerald-600 text-xs dark:text-emerald-500">{epubName}</p>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{epubPath ?? ""}</TooltipContent>
-                  </Tooltip>
-                </div>
-                <Button size="sm" onClick={() => void importBookConvertResult()} disabled={importing}>
-                  {importing ? <Loader2 className="size-4 animate-spin" /> : <BookUp className="size-4" />}
-                  导入图书馆
-                </Button>
-              </div>
-            )}
-
-            {status === "error" && (
-              <div className="mx-5 mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/40">
-                <p className="font-medium text-red-700 text-sm dark:text-red-400">转换失败</p>
-                <p className="mt-0.5 break-all text-red-600 text-xs dark:text-red-500">{errorMessage}</p>
-              </div>
-            )}
+            </ul>
           </section>
         )}
       </div>

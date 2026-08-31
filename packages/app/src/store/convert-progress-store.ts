@@ -9,8 +9,12 @@
  * 仅在全局助手聊天页与书籍/论文阅读器三个视图豁免（避免遮挡正文）。
  *
  * P2-1（统一任务队列）：图书转换的执行（监听注册/阶段推进/结算/自动导入）已迁入
- * services/task-executors/book-convert.ts 并注册为 task-center 的 book-convert 通道；
- * 本 store 的 bookConvert 保留为转换大窗口详情数据源（由执行器回写），入口为 enqueue 薄壳。
+ * services/task-executors/book-convert.ts 并注册为 task-center 的 book-convert 通道。
+ * 卡 1（2026-08-31，docs/book-convert-queue-plan.md）：转换窗口改造为双态任务台——
+ * 内容模型是通道队列（拖入/选入多份 PDF 即逐本入队、串行连转、完成自动导入自动出队），
+ * 窗口态 ⇄ 右下角通道卡由 bookConvertDialogOpen/bookConvertMinimized 状态机承载；
+ * 本 store 的 bookConvert 收窄为「当前在跑任务的详情数据源 + 转换配置 + 窗口状态机 +
+ * 拖放悬停旗标」，队列现场始终在 task-center 通道聚合（点卡还原零状态损失）。
  *
  * P2-4：论文解析通道同样迁入 services/task-executors/paper-parse.ts（task-center 的
  * paper-parse 通道；队列泵/取消/刷新恢复三情形均在执行器侧）。本节只保留入口薄壳
@@ -20,12 +24,10 @@
  */
 
 import { findZoteroBrainServer } from "@/ai/mcp/mcp-manager";
-import { importConvertedEpub } from "@/services/converter-service";
 import { paperEngineTokenError } from "@/services/paper-service";
 import type { PaperParsePayload } from "@/services/task-executors/paper-parse";
 import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
-import { useLibraryStore } from "@/store/library-store";
 import { selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -77,6 +79,7 @@ export interface BookStageState {
 
 export interface BookConvertState {
   status: BookConvertStatus;
+  /** 当前在跑任务的源 PDF（执行器在任务启动时定格；通道卡文件名兜底与调试归属用） */
   pdfPath: string | null;
   ocr: boolean;
   translate: string;
@@ -85,8 +88,7 @@ export interface BookConvertState {
   stages: BookStageState[];
   errorMessage: string;
   epubPath: string | null;
-  importing: boolean;
-  /** AI 工具 convertPdf 的托管转换标记：done 后自动入库（人工大窗口路径缺省 false，等用户点「导入」） */
+  /** done 后自动入库（卡 1 起窗口路径与 AI 托管路径恒 true——转换完成默认自动导入，用户拍板） */
   autoImport?: boolean;
 }
 
@@ -100,7 +102,6 @@ const BOOK_CONVERT_INITIAL: BookConvertState = {
   stages: [],
   errorMessage: "",
   epubPath: null,
-  importing: false,
 };
 
 /** 按是否翻译与引擎构建阶段流水线（编号对齐后端协议：无翻译 1/2/3，有翻译 1/2/3/4）。
@@ -125,24 +126,23 @@ interface ConvertProgressState {
   reparsedPapers: Record<string, number>;
   /** 阅读器「重新加载」后回执清除标记 */
   ackPaperReparsed: (paperId: string) => void;
-  /** 图书转换大窗口（图书馆页弹层）是否打开 */
+  /** 图书转换任务台（图书馆页弹层 / /converter 页）是否打开 */
   bookConvertDialogOpen: boolean;
-  /** 图书转换是否最小化（右下角小卡呈现；点击小卡还原大窗口） */
+  /** 图书转换是否最小化（右下角通道卡呈现；点击卡片还原任务台） */
   bookConvertMinimized: boolean;
+  /** 拖放悬停转换窗口标记（home-layout 的 Tauri 拖放监听判定窗口可见时写入；
+   *  窗口本体渲染局部遮罩——卡 1 遮罩范围修正，不再盖全主页） */
+  bookConvertDragOver: boolean;
 
   setPaperImportDismissed: () => void;
   openBookConvertDialog: () => void;
-  /** 关闭图书转换大窗口：转换中/有结果 → 最小化为右下角小卡；空闲 → 彻底关闭 */
+  /** 关闭图书转换任务台：通道有任务（在跑/排队/未清除的结算行）→ 最小化为右下角通道卡
+   *  （不询问）；空队列 → 彻底关闭 */
   closeBookConvertDialog: () => void;
-  setBookConvertConfig: (
-    patch: Partial<Pick<BookConvertState, "ocr" | "translate"> | { pdfPath: string | null }>,
-  ) => void;
-  /** 大窗口「开始转换」提交：改为 book-convert 通道入队薄壳（P2-1；执行器在 services/task-executors/book-convert） */
-  startBookConvert: () => Promise<void>;
-  cancelBookConvert: () => Promise<void>;
-  /** 导入转换产物 EPUB 入库（大窗口按钮与执行器托管自动导入共用）；返回是否成功 */
-  importBookConvertResult: () => Promise<boolean>;
-  /** 丢弃图书转换状态（小卡 X / 换文件重置）：回 idle（任务监听在执行器内，结算即解除） */
+  setBookConvertDragOver: (on: boolean) => void;
+  /** 转换配置（OCR/翻译目标语言）：作用于此后入队的任务（队列每行在入队时定格配置快照） */
+  setBookConvertConfig: (patch: Partial<Pick<BookConvertState, "ocr" | "translate">>) => void;
+  /** 丢弃图书转换详情数据源（通道卡 X 收尾）：回 idle（任务监听在执行器内，结算即解除） */
   resetBookConvert: () => void;
 }
 
@@ -160,6 +160,7 @@ export const useConvertProgressStore = create<ConvertProgressState>()((set, get)
   },
   bookConvertDialogOpen: false,
   bookConvertMinimized: false,
+  bookConvertDragOver: false,
 
   setPaperImportDismissed: () => {
     dismissPaperImport();
@@ -170,55 +171,23 @@ export const useConvertProgressStore = create<ConvertProgressState>()((set, get)
   },
 
   closeBookConvertDialog: () => {
-    const { status } = get().bookConvert;
+    // 队列口径（卡 1）：是否转通道卡看 book-convert 通道聚合（排队中的任务尚未定格详情态），
+    // 不再看单任务 bookConvert.status；cancelled 结算行不撑卡（对齐通道卡可见性过滤）
+    const agg = selectChannelAggregate(useTaskCenterStore.getState(), "book-convert");
+    const hasTasks = agg.current !== null || agg.queuedCount > 0 || agg.settled.some((t) => t.status !== "cancelled");
     set({
       bookConvertDialogOpen: false,
-      // 空闲态直接关掉（无任务可跟踪）；转换中/有结果/失败 → 缩为小卡持续可见
-      bookConvertMinimized: status !== "idle",
+      bookConvertMinimized: hasTasks,
     });
+  },
+
+  setBookConvertDragOver: (on) => {
+    if (get().bookConvertDragOver === on) return;
+    set({ bookConvertDragOver: on });
   },
 
   setBookConvertConfig: (patch) => {
     set((s) => ({ bookConvert: { ...s.bookConvert, ...patch } }));
-  },
-
-  startBookConvert: async () => {
-    const { pdfPath, ocr, translate } = get().bookConvert;
-    if (!pdfPath) return;
-    // 动态导入打破 store ↔ 执行器模块环（执行器回写本 store）；模块加载即完成通道注册
-    const { enqueueBookConvert } = await import("@/services/task-executors/book-convert");
-    const result = enqueueBookConvert({ pdfPath, ocr, translate, autoImport: false });
-    if (!result.ok) toast.info(result.detail ?? "转换任务入队失败");
-  },
-
-  cancelBookConvert: async () => {
-    // 队列化后取消 = 撤掉 book-convert 通道当前任务：cancelTask 触发 signal，
-    // 执行器内调既有 cancelConvert（Rust kill_tree 树杀）；先落 idle 使迟到的
-    // 状态回写不再被大窗口当作在跑任务展示
-    const { cancelBookConvertTask } = await import("@/services/task-executors/book-convert");
-    if (!cancelBookConvertTask()) return;
-    set((s) => ({ bookConvert: { ...s.bookConvert, status: "idle" } }));
-    toast.info("已取消转换");
-  },
-
-  importBookConvertResult: async () => {
-    const { epubPath } = get().bookConvert;
-    if (!epubPath) return false;
-    set((s) => ({ bookConvert: { ...s.bookConvert, importing: true } }));
-    try {
-      await importConvertedEpub(epubPath);
-      await useLibraryStore.getState().refreshBooks();
-      toast.success("已导入图书馆");
-      // 入库成功即收尾：清掉通道已结算任务（小卡随之消失）并复位大窗口数据源
-      useTaskCenterStore.getState().dismissSettled("book-convert");
-      resetBookConvertState();
-      return true;
-    } catch (e) {
-      toast.error(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    } finally {
-      set((s) => ({ bookConvert: { ...s.bookConvert, importing: false } }));
-    }
   },
 
   resetBookConvert: () => {

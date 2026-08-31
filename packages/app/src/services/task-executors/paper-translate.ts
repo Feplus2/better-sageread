@@ -28,7 +28,7 @@ import {
   selectChannelAggregate,
   useTaskCenterStore,
 } from "@/store/task-center-store";
-import { ensurePaperTaskConflictChecker } from "@/utils/paper-conflict";
+import { ensureTaskConflictChecker } from "@/utils/task-conflict";
 import { appDataDir } from "@tauri-apps/api/path";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
@@ -199,7 +199,7 @@ useTaskCenterStore.subscribe((s) => {
 // ─── 入口薄壳（UI 与 AI 同一入口；模块加载即完成通道注册 + 冲突检查器注入） ───
 
 registerTaskChannel("paper-translate", { executor: executePaperTranslate, concurrency: 1 });
-ensurePaperTaskConflictChecker();
+ensureTaskConflictChecker();
 
 /** 通道空闲时清掉已结算任务（新批次卡片从 0 计起） */
 function dismissPaperTranslateIfIdle(): void {

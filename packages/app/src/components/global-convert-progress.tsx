@@ -3,7 +3,7 @@
  *
  * 卡纵向堆叠（互不重叠）：
  * - 论文解析进度卡（PDF/XML 全文）：P2-4 起数据源是 task-center 的 paper-parse 通道聚合（跨页面持续呈现）；
- * - 图书 PDF→EPUB 转换小卡：转换大窗口被最小化时出现，点击卡片还原详情窗口；
+ * - 图书 PDF→EPUB 转换通道卡：转换任务台最小化（或有任务而窗口未开）时出现，点击卡片还原任务台；
  * - 向量化/翻译通道卡：papers 页经 BottomRightPortal 入同一栈（统一队列后不再区分
  *   单篇/批量卡片——2026-08-26 用户拍板，原「阅读页单篇翻译小卡」与通道卡重复，已退役）。
  *
@@ -16,6 +16,7 @@
 import { TaskRunPanel } from "@/components/task-run-panel";
 import { MotionStackCard } from "@/components/ui/bottom-right-stack";
 import { Progress } from "@/components/ui/progress";
+import type { BookConvertResult } from "@/services/task-executors/book-convert";
 import { paperParseCardOf } from "@/services/task-executors/paper-parse";
 import {
   type BookConvertState,
@@ -117,11 +118,12 @@ function PaperImportCard({ paperImport }: { paperImport: PaperImportState }) {
   );
 }
 
-/** 图书转换小卡（大窗口最小化/未开时呈现；点击卡片直接还原详情窗口——不需要中间面板层，
- *  2026-08-26 用户拍板：图书转换只有卡片态/详情窗口态两种；X 丢弃状态）。
+/** 图书转换通道卡（任务台最小化/未开时呈现；点击卡片直接还原任务台——不需要中间面板层，
+ *  2026-08-26 用户拍板：图书转换只有卡片态/窗口态两种；X 撤通道并丢弃状态）。
  *  P2-1 起可见性与进度读 task-center 的 book-convert 通道聚合（agg 由父组件传入，
  *  离场动画期定格快照）；阶段行/错误文案仍读 convert-progress-store.bookConvert
- *  （执行器回写的大窗口详情数据源） */
+ *  （执行器回写的在跑任务详情数据源）。
+ *  卡 1：完成 = 已自动导入（成功行 2.5s 自动出队，卡片多为在跑/失败滞留态） */
 function BookConvertMiniCard({ agg, bookConvert }: { agg: ChannelAggregate; bookConvert: BookConvertState }) {
   const navigate = useNavigate();
   const displayTask = agg.current ?? agg.settled.at(-1) ?? null;
@@ -134,21 +136,20 @@ function BookConvertMiniCard({ agg, bookConvert }: { agg: ChannelAggregate; book
         : "converting";
   const fileName = displayTask?.title ?? bookConvert.pdfPath?.split(/[\\/]/).pop() ?? "";
   const active = bookConvert.stages.find((s) => s.status === "active");
+  const imported = (displayTask?.result as BookConvertResult | undefined)?.imported;
 
   const restore = () => {
-    // 大窗口挂在图书馆页弹层：不在图书馆页时先回图书馆再开窗
+    // 任务台挂在图书馆页弹层：不在图书馆页时先回图书馆再开窗
     useConvertProgressStore.getState().openBookConvertDialog();
     navigate("/");
   };
 
   const dismiss = () => {
-    void (async () => {
-      // 有在跑/排队任务 → 先撤（cancelTask → 执行器杀进程树；内部 toast）；
-      // await 保证 cancelled 落账后再清已结算，小卡不因迟到的 cancelled 残影复活
-      await useConvertProgressStore.getState().cancelBookConvert();
-      useTaskCenterStore.getState().dismissSettled("book-convert");
-      useConvertProgressStore.getState().resetBookConvert();
-    })();
+    // 通道全撤（cancelChannel：在跑发 abort → 执行器杀进程树；排队直接撤）→ 清已结算 →
+    // 复位详情数据源。在跑任务异步结算 cancelled——卡可见性过滤 cancelled，不留残影
+    useTaskCenterStore.getState().cancelChannel("book-convert");
+    useTaskCenterStore.getState().dismissSettled("book-convert");
+    useConvertProgressStore.getState().resetBookConvert();
   };
 
   return (
@@ -215,7 +216,7 @@ function BookConvertMiniCard({ agg, bookConvert }: { agg: ChannelAggregate; book
       {mode === "done" && (
         <p className="flex items-center gap-1.5 truncate text-green-600 text-xs dark:text-green-400">
           <FileText className="size-3 shrink-0" />
-          转换完成，点击查看并导入图书馆
+          {imported === false ? "转换完成，自动导入失败——点击查看" : "已自动导入图书馆"}
         </p>
       )}
       {mode === "error" && (

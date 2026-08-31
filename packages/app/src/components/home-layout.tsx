@@ -99,18 +99,18 @@ const HomeLayout = () => {
   const { isSettingsDialogOpen, toggleSettingsDialog } = useAppSettingsStore();
   const insets = useSafeAreaInsets();
   const { importBookPaths } = useBookUpload();
-  // 书籍拖入导入只在图书馆相关页生效（其他页面各自接管拖放，如文献库的 PDF 解析导入）
+  // 书籍拖入导入只在图书馆相关页与转换器页生效（其他页面各自接管拖放，如文献库的 PDF 解析导入）
   const location = useLocation();
-  const bookDropEnabled = location.pathname === "/" || location.pathname === "/trash";
-  // 转换器入口：拖入 PDF 时预填文件并打开弹层
-  const setBookConvertConfig = useConvertProgressStore((s) => s.setBookConvertConfig);
+  const bookDropEnabled =
+    location.pathname === "/" || location.pathname === "/trash" || location.pathname === "/converter";
   const openBookConvertDialog = useConvertProgressStore((s) => s.openBookConvertDialog);
 
   const [dragOver, setDragOver] = useState(false);
 
   // 书籍拖入导入（原生拖放事件）：dragDropEnabled=true 时 HTML5 drop 收不到文件，
   // 旧 HTML5 处理对真实系统拖放无效（弹罩出现但放下后无反应）——与文献库页同走
-  // onDragDropEvent。EPUB 直接入库；PDF 引导进转换器（预填文件并打开弹层，不自动烧配额）。
+  // onDragDropEvent。EPUB 直接入库；PDF 入转换队列（卡 1：拖入即逐本入队串行连转，
+  // 完成自动导入；窗口未开且非用户主动选的卡片态时打开任务台展示队列）。
   // 回调经 ref 间接引用：监听只挂一次，路径分发逻辑始终取最新
   const dropHandlerRef = useRef<(paths: string[]) => void>(() => {});
   dropHandlerRef.current = (paths: string[]) => {
@@ -125,20 +125,15 @@ const HomeLayout = () => {
     }
     if (ignored > 0) toast.info(`已忽略 ${ignored} 个不支持的文件`);
     if (pdfs.length > 0) {
-      const { bookConvert, resetBookConvert } = useConvertProgressStore.getState();
-      if (bookConvert.status === "converting") {
-        toast.info("已有转换进行中，请等它结束后再拖入新的 PDF");
-      } else {
-        // 丢弃上一轮结果并预填首个 PDF（转换器一次处理一个文件）
-        resetBookConvert();
-        setBookConvertConfig({ pdfPath: pdfs[0] });
-        openBookConvertDialog();
-        toast.info(
-          pdfs.length > 1
-            ? `已填入「${pdfs[0].split(/[\\/]/).pop()}」（共 ${pdfs.length} 个 PDF，一次转换一个）`
-            : "已填入转换器，点击「开始转换」",
-        );
-      }
+      const { bookConvert, bookConvertDialogOpen, bookConvertMinimized } = useConvertProgressStore.getState();
+      void (async () => {
+        const { enqueueBookConvertBatch } = await import("@/services/task-executors/book-convert");
+        const { queued } = enqueueBookConvertBatch(pdfs, {
+          ocr: bookConvert.ocr,
+          translate: bookConvert.translate,
+        });
+        if (queued > 0 && !bookConvertDialogOpen && !bookConvertMinimized) openBookConvertDialog();
+      })();
     }
     if (epubs.length > 0) {
       void importBookPaths(epubs);
@@ -152,11 +147,28 @@ const HomeLayout = () => {
       .onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === "enter" || payload.type === "over") {
-          if ("paths" in payload && payload.paths.some((p) => /\.(epub|pdf)$/i.test(p))) setDragOver(true);
+          if ("paths" in payload && payload.paths.some((p) => /\.(epub|pdf)$/i.test(p))) {
+            // 卡 1 遮罩范围修正：转换窗口可见（任务台弹层开着且未最小化，或正处 /converter 页）
+            // 且拖入物含 PDF → 只盖窗口本体（ConverterPage 按 bookConvertDragOver 渲染局部遮罩）；
+            // 否则维持全主页遮罩。pathname 读 hash 现值（监听只挂一次，闭包捕获会陈旧）
+            const s = useConvertProgressStore.getState();
+            const onConverterRoute = window.location.hash.replace(/^#/, "").split("?")[0] === "/converter";
+            const converterVisible = (s.bookConvertDialogOpen && !s.bookConvertMinimized) || onConverterRoute;
+            const hasPdf = payload.paths.some((p) => /\.pdf$/i.test(p));
+            if (converterVisible && hasPdf) {
+              setDragOver(false);
+              s.setBookConvertDragOver(true);
+            } else {
+              s.setBookConvertDragOver(false);
+              setDragOver(true);
+            }
+          }
         } else if (payload.type === "leave") {
           setDragOver(false);
+          useConvertProgressStore.getState().setBookConvertDragOver(false);
         } else if (payload.type === "drop") {
           setDragOver(false);
+          useConvertProgressStore.getState().setBookConvertDragOver(false);
           dropHandlerRef.current(payload.paths);
         }
       })

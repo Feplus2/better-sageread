@@ -1,4 +1,5 @@
 import { getUtilityModel } from "@/ai/providers/factory";
+import { type ChannelCardState, ChannelProgressCard, channelCardOf } from "@/components/channel-progress-card";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { TaskRunPanel } from "@/components/task-run-panel";
 import { BottomRightPortal, MotionStackCard } from "@/components/ui/bottom-right-stack";
@@ -26,7 +27,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
@@ -58,12 +58,7 @@ import { useConverterStore } from "@/store/converter-store";
 import { useLayoutStore } from "@/store/layout-store";
 import { usePaperTaskRegistry } from "@/store/paper-task-registry";
 import { type ChannelProgress, usePaperTaskStore } from "@/store/paper-task-store";
-import {
-  type ChannelAggregate,
-  type TaskChannel,
-  selectChannelAggregate,
-  useTaskCenterStore,
-} from "@/store/task-center-store";
+import { type TaskChannel, selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import type { PapersSortByType } from "@/types/settings";
 import type { BookWithStatus } from "@/types/simple-book";
 import { conflictReasonText, paperConflicts } from "@/utils/paper-conflict";
@@ -418,166 +413,11 @@ function mergePdfCandidates(prev: string[], incoming: string[]): string[] {
   return [...prev, ...incoming.filter((p) => !seen.has(p))];
 }
 
-/** 批量任务种类：向量化 / 翻译 / 重新解析（共用 LLM 或转换资源，同一时刻只跑一种） */
-type BatchKind = "vectorize" | "translate" | "reparse";
-
-const BATCH_KIND_LABELS: Record<BatchKind, string> = {
+/** 批量任务进度卡标题（卡本体与 channelCardOf 折算已抽取共用：components/channel-progress-card） */
+const BATCH_CARD_TITLES: Record<"vectorize" | "translate", string> = {
   vectorize: "批量向量化",
   translate: "批量翻译",
-  reparse: "批量重新解析",
 };
-
-/** 批量任务右下角进度卡状态（样式对齐 pdfImport 卡与 Zotero 卡） */
-interface BatchProgressState {
-  kind: BatchKind;
-  status: "running" | "success" | "error";
-  /** 当前篇序号（0 基） */
-  index: number;
-  total: number;
-  /** 当前篇标题 */
-  title: string;
-  /** 当前篇细节（阶段/块进度） */
-  detail: string;
-  /** 总进度百分比 */
-  percent: number;
-  doneCount: number;
-  failedCount: number;
-  skippedCount: number;
-  failedNames: string[];
-  /** 收尾汇总（status 非 running 时展示） */
-  summary?: string;
-  /** 取消中（cancel 已触发、当前篇收尾中）——取消按钮置灰文案用 */
-  cancelling?: boolean;
-}
-
-/**
- * 通道聚合 → 批量进度卡视图模型（P2-3：卡片数据源切到 task-center 通道聚合）。
- * 口径对齐旧队列卡：index/total 动态含排队；percent 按篇数加权（含当前篇内进度）；
- * summary/状态文案同旧 drain 收尾（取消汇总=已取消：完成 X · 失败 Y，剩余 Z 篇未处理）。
- * 返回 null = 通道无任何任务（不渲染卡）。
- */
-function channelCardOf(
-  kind: "vectorize" | "translate",
-  agg: ChannelAggregate,
-  cancelling: boolean,
-): (BatchProgressState & { kind: "vectorize" | "translate" }) | null {
-  const { current, queuedCount, settled } = agg;
-  if (!current && queuedCount === 0 && settled.length === 0) return null;
-  const doneCount = settled.filter((t) => t.status === "success").length;
-  const failed = settled.filter((t) => t.status === "error");
-  const cancelledCount = settled.filter((t) => t.status === "cancelled").length;
-  const running = current !== null || queuedCount > 0;
-  const total = settled.length + queuedCount + (current ? 1 : 0);
-  const percent =
-    running && total > 0
-      ? Math.min(100, Math.round(((settled.length + (current ? current.percent / 100 : 0)) / total) * 100))
-      : 100;
-  return {
-    kind,
-    status: running ? "running" : failed.length > 0 ? "error" : "success",
-    index: settled.length,
-    total,
-    title: current?.title ?? "",
-    detail: current?.detail ?? (queuedCount > 0 ? "排队中…" : ""),
-    percent,
-    doneCount,
-    failedCount: failed.length,
-    skippedCount: 0,
-    failedNames: failed.map((t) => t.title),
-    summary: running
-      ? undefined
-      : cancelledCount > 0
-        ? `已取消：完成 ${doneCount} · 失败 ${failed.length}，剩余 ${cancelledCount} 篇未处理${kind === "translate" ? "（已翻部分已落盘，可续翻）" : ""}`
-        : `完成 ${doneCount} 篇${failed.length > 0 ? ` · 失败 ${failed.length}` : ""}`,
-    cancelling,
-  };
-}
-
-/** 批量任务进度卡本体（markup 自 batchCards.map 内联段提取，供 MotionStackCard 离场编排复用） */
-function BatchProgressCard({
-  card,
-  onCancel,
-  onDismiss,
-}: {
-  card: BatchProgressState & { kind: "vectorize" | "translate" };
-  onCancel: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div className="w-80 rounded-xl border bg-background p-3.5 shadow-lg">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium text-sm">{BATCH_KIND_LABELS[card.kind]}</span>
-        <span className="shrink-0 text-muted-foreground text-xs">
-          {Math.min(card.index + 1, card.total)}/{card.total}
-        </span>
-        <button
-          type="button"
-          className="shrink-0 rounded p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-          onClick={(e) => {
-            // 卡本体已接 TaskRunPanel 触发器：阻止冒泡，dismiss 不触发面板开合
-            e.stopPropagation();
-            onDismiss();
-          }}
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-
-      {card.status === "running" ? (
-        <>
-          <Progress value={card.percent} className="h-1.5" />
-          <div className="mt-2 flex items-center justify-between gap-2 text-muted-foreground text-xs">
-            <span className="min-w-0 flex-1 truncate">
-              {card.title ? `《${card.title}》 ` : ""}
-              {card.detail}
-            </span>
-            <span className="shrink-0">{card.percent}%</span>
-          </div>
-          <div className="mt-2.5 flex items-center justify-between gap-2">
-            <span className="text-muted-foreground text-xs">
-              完成 {card.doneCount}
-              {card.failedCount > 0 ? ` · 失败 ${card.failedCount}` : ""}
-              {card.skippedCount > 0 ? ` · 跳过 ${card.skippedCount}` : ""}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              onClick={(e) => {
-                // 同上：取消整批不触发面板开合
-                e.stopPropagation();
-                onCancel();
-              }}
-              disabled={card.cancelling === true}
-            >
-              {card.cancelling ? "正在取消…" : "取消"}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p
-            className={clsx(
-              "text-xs",
-              card.status === "success" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
-            )}
-          >
-            {card.summary}
-          </p>
-          {card.failedNames.length > 0 && (
-            <ul className="mt-1 space-y-0.5 text-red-600 text-xs dark:text-red-400">
-              {card.failedNames.map((name) => (
-                <li key={name} className="truncate" title={name}>
-                  {name}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 /** 文献库：MARKDOWN 论文的管理页（列表 + 文件夹侧栏，§3.2 文件夹模型）；点击论文行打开阅读标签页 */
 export default function PapersPage() {
@@ -645,15 +485,15 @@ export default function PapersPage() {
   );
   const paperImportRunning = paperParseAgg.current !== null || paperParseAgg.queuedCount > 0;
   // 双通道可并行（向量化×翻译读写不相干）：各出一张卡，经 BottomRightStack 纵向堆叠
-  const batchCards: (BatchProgressState & { kind: "vectorize" | "translate" })[] = (
+  const batchCards: (ChannelCardState & { kind: "vectorize" | "translate" })[] = (
     ["vectorize", "translate"] as const
   ).flatMap((kind) => {
     const channelCard = channelCardOf(
-      kind,
       kind === "vectorize" ? vectorizeAgg : translateAgg,
       taskCenterCancelling[kind === "vectorize" ? "paper-vectorize" : "paper-translate"] === true,
+      { resumable: kind === "translate" },
     );
-    if (channelCard) return [channelCard];
+    if (channelCard) return [{ kind, ...channelCard }];
     const recovery = kind === "vectorize" ? storeProgress.vectorize : undefined;
     return recovery ? [{ kind, ...recovery }] : [];
   });
@@ -1712,8 +1552,8 @@ export default function PapersPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72 p-2">
               <div className="px-2 py-1.5 text-muted-foreground text-xs leading-relaxed">
-                适用于已用 Papers_Converter 转换好的目录（含 paper.md 与 images/）。普通用户请直接用「导入
-                PDF / XML」，无需关心此处。
+                适用于已用 Papers_Converter 转换好的目录（含 paper.md 与 images/）。普通用户请直接用「导入 PDF /
+                XML」，无需关心此处。
               </div>
               <DropdownMenuItem onSelect={() => handleImport("选择论文目录（含 paper.md）")}>
                 <FolderOpen className="size-4" />
@@ -2277,8 +2117,9 @@ export default function PapersPage() {
             <MotionStackCard key={kind} show={!!progress}>
               {progress && (
                 <TaskRunPanel channel={kind === "vectorize" ? "paper-vectorize" : "paper-translate"}>
-                  <BatchProgressCard
+                  <ChannelProgressCard
                     card={progress}
+                    title={BATCH_CARD_TITLES[kind]}
                     onCancel={() => handleCancelBatch(kind)}
                     onDismiss={() => handleDismissBatchProgress(progress)}
                   />

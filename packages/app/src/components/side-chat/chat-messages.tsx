@@ -68,6 +68,7 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   editFile: "编辑文件",
   runCommand: "执行命令",
   searchFiles: "搜索文件",
+  translateBook: "书籍翻译",
 };
 
 /** P3 聊天消息尾部窗口（性能优化，2026-08-08；2026-08-09 收窄+视口填充）：

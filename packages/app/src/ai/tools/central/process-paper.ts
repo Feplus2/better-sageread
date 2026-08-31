@@ -46,7 +46,7 @@ async function readPaperMarkdown(paperId: string): Promise<string> {
 export const processPaperTool = tool({
   description: `文献库论文的翻译、句词对齐与重新解析管理。
 
-📚 **适用范围**：仅文献库论文（MARKDOWN 格式）；书籍翻译请走 convertPdf 的转换链路。
+📚 **适用范围**：仅文献库论文（MARKDOWN 格式）；书籍（EPUB）翻译请用 translateBook。
 
 🎯 **核心功能**：
 • action=status：查询论文的翻译与对齐状态（有无译本、句/词对齐覆盖率、译本/向量是否因重解析而陈旧）

@@ -27,6 +27,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 • getBooks: 查询书籍/论文列表，支持 kind（book=书籍/paper=论文/all）/状态/关键词筛选；大库全量清点或只挑条目 ID 时用 fields=minimal（仅 id/标题/类型，上限 1000 条，更多配 offset 翻页）
 • manageBook: 书籍与论文条目管理（action=delete 移入回收站可恢复 / open 自动按类型打开对应阅读器 / resetProgress 重置进度）
 • convertPdf: 将 PDF 转换为 EPUB 并导入书库
+• translateBook: 书籍（EPUB）全书翻译与译本状态查询（action=status 查译本完整度与句词对齐覆盖，省略 bookId 列全部书籍 / action=translate 翻译全书：默认幂等续翻跳过已翻，force=true 全量重翻——已有译文作废，先与用户确认；完成自动带句级对齐；进度见右下角「图书翻译」任务卡；bookId 先用 getBooks(kind=book) 查得。论文翻译用 processPaper；PDF 书籍先 convertPdf 转 EPUB）
 • manageThreads: 对话管理（list 列出 / search 搜索 / star/unstar 标星 / rename 改名 / delete 删除 / export 导出为 markdown/html/png）
 • readThread: 召回对话的完整问答记录（仅用户/AI 问答，不含工具过程；缺省读当前对话；整理本次对话为笔记或回顾被压缩截断的早期内容前必用，不能只凭残存上下文；读其他对话先用 manageThreads 的 list/search 拿 threadId。仅在有进行中的对话时注入——新对话首条消息时此工具不可用）
 • exportNotes: 导出某本书的划线、想法与关联笔记为 Markdown 文件
@@ -58,7 +59,7 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 • manageMcp: 管理 MCP 服务器配置（list/create/update/toggle/delete；用户说"装/配某个 MCP"时用）
 • mcp_* 前缀工具：由已启用 MCP 服务器注入的外部工具（前缀后为 server 名与工具名），按需直接调用
 • managePaperFolders: 文献库文件夹管理（查看树/论文清单、创建、重命名、删除、移动、归档论文）
-• processPaper: 文献库论文翻译、句词对齐与重新解析（action=status 查状态，含译本/向量是否因重解析而陈旧 / translate 翻译（完成后自动带句词对齐）/ align 仅对齐 / reparse 用源文件（PDF/XML）重新解析替换正文（破坏性，会弹确认）；论文专属，书籍翻译走 convertPdf；「把重解析过但翻译/向量化还是旧版本的都重做一遍」这类需求：先 status 查 stale 再逐个 translate / vectorizeBook）
+• processPaper: 文献库论文翻译、句词对齐与重新解析（action=status 查状态，含译本/向量是否因重解析而陈旧 / translate 翻译（完成后自动带句词对齐）/ align 仅对齐 / reparse 用源文件（PDF/XML）重新解析替换正文（破坏性，会弹确认）；论文专属，书籍（EPUB）翻译走 translateBook；「把重解析过但翻译/向量化还是旧版本的都重做一遍」这类需求：先 status 查 stale 再逐个 translate / vectorizeBook）
 • paperSearch: 文献库语义检索（需已配置向量模型；跨论文主题调研、按主题/方法找论文用它——英文术语构造 query 命中率更高；结果自带论文标题，引用须注明出自哪篇）
 • mindmap: 生成思维导图
 • webSearch: 网络搜索
