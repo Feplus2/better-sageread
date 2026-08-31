@@ -53,6 +53,40 @@ jobs:
             console.log(JSON.stringify(j, null, 2));
           "
 
+      # 官网数据源落桶（api.github.com 国内可达性差，站点版本号/大小/累计下载数改从 CDN 拉）
+      - name: Write site-data JSON to bucket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          PRODUCT_KEY: ${{ github.event.repository.name || github.repository }}
+        run: |
+          set -e
+          node -e "
+            const fs = require('fs');
+            const rel = JSON.parse(fs.readFileSync('assets/latest.json', 'utf8'));
+            const latest = {
+              tag: process.env.TAG,
+              assets: fs.readdirSync('assets').filter((n) => !/\.(sig|json|blockmap|txt)$/.test(n)).map((n) => {
+                const st = fs.statSync('assets/' + n);
+                return { name: n, size: st.size };
+              }),
+            };
+            (async () => {
+              // 累计下载数：全部 release 的可安装资产求和
+              const res = await fetch('https://api.github.com/repos/${{ github.repository }}/releases?per_page=100', {
+                headers: { Authorization: 'token ' + process.env.GH_TOKEN, Accept: 'application/vnd.github+json' },
+              });
+              const rels = await res.json();
+              let cumulative = 0;
+              for (const r of rels) for (const a of r.assets ?? []) {
+                if (!/\.(sig|json|blockmap|txt)$/.test(a.name)) cumulative += a.download_count;
+              }
+              const out = { tag: latest.tag, assets: latest.assets, cumulative };
+              fs.writeFileSync('assets/site-data.better-sageread.json', JSON.stringify(out, null, 2));
+              console.log(JSON.stringify(out, null, 2));
+            })().catch((e) => { console.error(e); process.exit(1); });
+          "
+
       - name: Upload to Tencent COS
         env:
           TENCENT_COS_SECRET_ID: ${{ secrets.TENCENT_COS_SECRET_ID }}

@@ -84,7 +84,7 @@ var TABS = {
 
 /* ---------- 帧资源（渐进加载：首帧立即，其余 6 路队列闲时续载） ---------- */
 var imgs = {}, queue = [], activeJobs = 0;
-function frameSrc(dir, i) { return "frames/" + dir + "/f" + String(i).padStart(3, "0") + ".jpg"; }
+function frameSrc(dir, i) { return "frames/" + dir + "/f" + String(i).padStart(3, "0") + ".webp"; }
 function ensureDir(dir) {
   if (imgs[dir]) return;
   imgs[dir] = new Array(N);

@@ -75,8 +75,48 @@
       return box.d;
     } catch (e) { return null; }
   }
+  /* 过期缓存兜底（api.github.com 不可达时宁用旧数据，不回退到硬编码默认值——
+   * 2026-08-31 用户实测：无代理下站点版本号回退到 0.2.1 的事故根因） */
+  function cachedStale(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw).d : null;
+    } catch (e) { return null; }
+  }
   function store(key, data) {
     try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), d: data })); } catch (e) {}
+  }
+
+  /* 官网数据源：CDN 桶上的 site-data.<repo>.json（cos-sync 每次发版写入；
+   * api.github.com 国内可达性差，CDN 优先、GitHub API 兜底、过期缓存垫底） */
+  function fetchSiteData(repo) {
+    return new Promise(function (resolve) {
+      var slug = repo.split("/")[1];
+      var key = "sageread-site:sd:" + slug;
+      var hit = cached(key);
+      if (hit) return resolve(hit);
+      if (!CFG.cosBase) return resolve(null);
+      fetch(CFG.cosBase.replace(/\/+$/, "") + "/site-data." + slug + ".json")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.tag) { store(key, d); resolve(d); }
+          else resolve(cachedStale(key));
+        })
+        .catch(function () { resolve(cachedStale(key)); });
+    });
+  }
+  function siteDataToRelease(repo, d) {
+    return {
+      tag_name: d.tag,
+      assets: (d.assets || []).map(function (a) {
+        return {
+          name: a.name,
+          size: a.size,
+          browser_download_url: "https://github.com/" + repo + "/releases/download/" + d.tag + "/" + a.name,
+          download_count: 0,
+        };
+      }),
+    };
   }
 
   function fetchRelease(repo) {
@@ -124,7 +164,7 @@
     return (bytes / 1048576).toFixed(1) + " MB";
   }
 
-  function applyProduct(productId, def, release, allReleases) {
+  function applyProduct(productId, def, release, allReleases, presetTotal) {
     var total = 0;
     var resolved = {};
 
@@ -158,9 +198,11 @@
     });
 
     if (release) {
-      // 下载数 = 全版本累计（该产品的 pick 匹配资产跨全部 release 求和；回退 latest 单版）
+      // 下载数 = 全版本累计；CDN site-data 带现成累计值时直接用
       var picks = def.assets.map(function (a) { return a.pick; });
-      if (allReleases && allReleases.length) {
+      if (typeof presetTotal === "number") {
+        total = presetTotal;
+      } else if (allReleases && allReleases.length) {
         total = allReleases.reduce(function (sum, rel) {
           return sum + countable(rel.assets).reduce(function (s, a) {
             return picks.some(function (p) { return a.name.indexOf(p) !== -1; }) ? s + a.download_count : s;
@@ -194,8 +236,10 @@
         });
         return;
       }
-      Promise.all([fetchRelease(def.repo), fetchAllReleases(def.repo)]).then(function (rs) {
-        grand += applyProduct(id, def, rs[0], rs[1]);
+      Promise.all([fetchSiteData(def.repo), fetchRelease(def.repo), fetchAllReleases(def.repo)]).then(function (rs) {
+        var release = rs[0] ? siteDataToRelease(def.repo, rs[0]) : rs[1];
+        var presetTotal = rs[0] && typeof rs[0].cumulative === "number" ? rs[0].cumulative : null;
+        grand += applyProduct(id, def, release, rs[2], presetTotal);
         var t = $("[data-total-downloads]");
         if (t && grand > 0) t.textContent = grand;
       });
