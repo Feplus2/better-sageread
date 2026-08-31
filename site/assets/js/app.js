@@ -96,6 +96,25 @@
     });
   }
 
+  /* 全版本列表（下载数累计用——GitHub 的 download_count 按 release 分开计，
+   * 只看 latest 会每次发版清零，2026-08-31 用户反馈修为全量累计） */
+  function fetchAllReleases(repo) {
+    return new Promise(function (resolve) {
+      var key = "sageread-site:rels:" + repo;
+      var hit = cached(key);
+      if (hit) return resolve(hit);
+      fetch("https://api.github.com/repos/" + repo + "/releases?per_page=100", {
+        headers: { Accept: "application/vnd.github+json" },
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (Array.isArray(d)) { store(key, d); resolve(d); }
+          else resolve(null);
+        })
+        .catch(function () { resolve(null); });
+    });
+  }
+
   function countable(assets) {
     return (assets || []).filter(function (a) {
       return !/\.(sig|json|blockmap|txt)$/i.test(a.name);
@@ -105,7 +124,7 @@
     return (bytes / 1048576).toFixed(1) + " MB";
   }
 
-  function applyProduct(productId, def, release) {
+  function applyProduct(productId, def, release, allReleases) {
     var total = 0;
     var resolved = {};
 
@@ -139,7 +158,17 @@
     });
 
     if (release) {
-      total = countable(release.assets).reduce(function (s, a) { return s + a.download_count; }, 0);
+      // 下载数 = 全版本累计（该产品的 pick 匹配资产跨全部 release 求和；回退 latest 单版）
+      var picks = def.assets.map(function (a) { return a.pick; });
+      if (allReleases && allReleases.length) {
+        total = allReleases.reduce(function (sum, rel) {
+          return sum + countable(rel.assets).reduce(function (s, a) {
+            return picks.some(function (p) { return a.name.indexOf(p) !== -1; }) ? s + a.download_count : s;
+          }, 0);
+        }, 0);
+      } else {
+        total = countable(release.assets).reduce(function (s, a) { return s + a.download_count; }, 0);
+      }
       $all('[data-version-badge="' + productId + '"]').forEach(function (el) { el.textContent = release.tag_name; });
       $all('[data-version="' + productId + '"]').forEach(function (el) {
         var setup = resolved[productId + "-setup"] || resolved[productId + "-gui"];
@@ -165,8 +194,8 @@
         });
         return;
       }
-      fetchRelease(def.repo).then(function (release) {
-        grand += applyProduct(id, def, release);
+      Promise.all([fetchRelease(def.repo), fetchAllReleases(def.repo)]).then(function (rs) {
+        grand += applyProduct(id, def, rs[0], rs[1]);
         var t = $("[data-total-downloads]");
         if (t && grand > 0) t.textContent = grand;
       });
