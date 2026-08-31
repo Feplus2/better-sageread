@@ -47,3 +47,6 @@ site/prototype/
 .tmp-site-prototype/
 .tmp-e2e/
 .tmp-webdav-root/
+
+# 公众号文章草稿（不入库，本地迭代）
+docs/wechat-article-draft.md
