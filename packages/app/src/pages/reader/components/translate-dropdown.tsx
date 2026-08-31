@@ -1,5 +1,5 @@
 /**
- * 书籍阅读器翻译下拉（docs/book-translation-plan.md 一期入口）。
+ * 书籍阅读器翻译下拉（docs/plans/book-translation-plan.md 一期入口）。
  *
  * 与论文侧 PaperTranslationDropdown 同构的三区：显示模式（radio，书籍一期两态——
  * 原文/逐段对照，"译文模式"二期）+ 翻译入口/进度/取消 + 句对齐状态与重建。

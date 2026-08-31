@@ -1,4 +1,4 @@
-// 书籍翻译段落枚举 ↔ 注入一致性测试（docs/book-translation-plan.md 的工程不变量）：
+// 书籍翻译段落枚举 ↔ 注入一致性测试（docs/plans/book-translation-plan.md 的工程不变量）：
 // jsdom 中验证 section-blocks 的四条契约——
 //   1) 枚举规则：嵌套块取叶子、脚注 aside 排除、纯标点/空块不可翻译；
 //   2) 注入幂等：注入译文并序列化往返后，重新枚举的段序号与文本与首次完全一致（译文块不入枚举）；

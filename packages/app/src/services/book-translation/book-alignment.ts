@@ -1,5 +1,5 @@
 /**
- * 书籍译本对齐服务（T2 句级 + T3 词级，docs/book-translation-plan.md 批次 3）。
+ * 书籍译本对齐服务（T2 句级 + T3 词级，docs/plans/book-translation-plan.md 批次 3）。
  *
  * 与论文侧 paper-alignment-service 同构，但两级相位**拆开独立触发**（08-29 用户裁定，
  * 书籍篇幅大、词级嵌入贵，成本须可见可控行）：

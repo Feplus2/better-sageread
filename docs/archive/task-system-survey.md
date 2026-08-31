@@ -150,9 +150,9 @@
 ### 论文解析通道（converter 子进程 ×N）
 
 - **资源画像**：Papers_Converter sidecar 是纯 API 客户端（引擎 MinerU 云端 VLM / PaddleOCR 云端异步 job；GLM、mineru-pipeline 均已下线，`docs/papers-converter-integration.md:60`），元数据提取走辅助模型（`DEEPSEEK_*` env = OpenAI 兼容端点，`paper_converter.rs:86-91`）。本机内存 = 单个 PyInstaller Python 进程（exe 56MB，运行期数百 MB 级），N=2 可承受；**瓶颈在云端：MinerU token 的 QPS/并发限额与辅助模型 QPS**（具体额度随用户套餐，属外部约束，建议按"可配置并发数，默认 1~2"处理而非写死）。
-- **Rust 侧阻塞点**：`PaperConverterState` 单 child 句柄（`paper_converter.rs:15-17,95-99`）——并发两次解析互相覆盖取消句柄（**已知边界**，`docs/next-round-backlog.md:51` 明文记录）。需改成 `HashMap<pdf_path, child>` 或任务 id 键控。
+- **Rust 侧阻塞点**：`PaperConverterState` 单 child 句柄（`paper_converter.rs:15-17,95-99`）——并发两次解析互相覆盖取消句柄（**已知边界**，`docs/plans/next-round-backlog.md:51` 明文记录）。需改成 `HashMap<pdf_path, child>` 或任务 id 键控。
 - **事件路由**：已具备多任务归属（每事件注入 pdf_path，`paper_converter.rs:117-125`；前端各链路按 pdf_path 过滤，`convert-progress-store.ts:849`、`paper-service.ts:404`）——并发的最大前置条件已满足。
-- **staging/产物隔离**：staging 在 `{appData}/papers-converter/_staging/`，目录形如 `{标题}-{短hex}`（实例 `…-6546e9`，`docs/paper-structure-boundary-plan.md:19`；后缀是否内容 digest 由 converter 侧实现决定，本仓库无源码可核——**待核点**：同一 PDF 两进程并发会共享 staging 撞车）。前端已有内容哈希预去重（`paper-dedup.ts`，`startPaperImportBatch:389-413`）挡住同内容并发；最终产物 `{slug}/` 有碰撞消歧后缀（⑪ chen2023d-ufj6tyeh 例），但消歧若是"看目录已存在"实现则存在 TOCTOU 竞态窗口——**建议并发上限 2 起步并实测**，而非一步到位放开。
+- **staging/产物隔离**：staging 在 `{appData}/papers-converter/_staging/`，目录形如 `{标题}-{短hex}`（实例 `…-6546e9`，`docs/archive/paper-structure-boundary-plan.md:19`；后缀是否内容 digest 由 converter 侧实现决定，本仓库无源码可核——**待核点**：同一 PDF 两进程并发会共享 staging 撞车）。前端已有内容哈希预去重（`paper-dedup.ts`，`startPaperImportBatch:389-413`）挡住同内容并发；最终产物 `{slug}/` 有碰撞消歧后缀（⑪ chen2023d-ufj6tyeh 例），但消歧若是"看目录已存在"实现则存在 TOCTOU 竞态窗口——**建议并发上限 2 起步并实测**，而非一步到位放开。
 
 ### 向量化通道
 
@@ -239,5 +239,5 @@
 
 - dev 全局向量库（`com.bettersageread.dev/papers/vectors.sqlite`）三查全绿：无 (paper_id × chunk_order) 重复、15 篇无孤儿、无 paper_id='' 遗留行；vec0 表 `FLOAT[2048]`。
 - 6131195 diff 实证右键菜单回归（§1）。
-- `docs/next-round-backlog.md:51` 明文记录 PaperConverterState 单句柄为已知边界（§6）。
+- `docs/plans/next-round-backlog.md:51` 明文记录 PaperConverterState 单句柄为已知边界（§6）。
 - 图书侧 books/{id}/vectors.sqlite 散见文件均属 EPUB 书（含 book.epub），非论文遗留（§4）。

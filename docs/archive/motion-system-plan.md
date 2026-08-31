@@ -9,7 +9,7 @@
 > 批次 5：2026-08-26，commit 5b50c51，主页路由 keepalive 化（AnimatedRouteLayers visited 集合常驻、
 > 二次切换零重挂载）+ 全 TabsContent 面进场动画（motion-enter-slide-up，token 驱动三档退化），
 > CDP 实盘验证 17 项全过（scripts/cdp-motion-batch5-verify.mjs 可复跑）。
-> 批次 2 内容已并入批次 1。二期（共享元素/手势）立项见 docs/motion-phase2-plan.md。**
+> 批次 2 内容已并入批次 1。二期（共享元素/手势）立项见 docs/archive/motion-phase2-plan.md。**
 > 来源：用户提出——应用内大量"动作"（卡片弹出、侧边栏、进入管理状态、划线等）帧间硬切无过渡，想要 iOS 式连贯丝滑；同时接受动效有卡顿风险，须在设置页提供性能模式开关，用户说了算。
 > 结论：**能实现，且本项目底子好于一般 Web 应用**。90% 丝滑感来自纯 CSS 即可覆盖的部分；framer-motion 仅在三个 CSS 干不了的场合启用；性能模式是"降级三档"而非"全关"。
 

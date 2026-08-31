@@ -1,5 +1,5 @@
 /**
- * 图书转换通道执行器（P2-1，docs/task-queue-p2-plan.md；卡 1 队列化，docs/book-convert-queue-plan.md）。
+ * 图书转换通道执行器（P2-1，docs/archive/task-queue-p2-plan.md；卡 1 队列化，docs/plans/book-convert-queue-plan.md）。
  *
  * 吸收 convert-progress-store 原 startBookConvert / startBookConvertAuto 的：
  * 进度监听注册、阶段流水线推进（buildBookStages/markBookActiveError 复用 store 导出）、

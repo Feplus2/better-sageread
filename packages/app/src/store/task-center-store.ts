@@ -1,5 +1,5 @@
 /**
- * 统一任务中心（P2 地基，docs/task-queue-p2-plan.md；P3 有界并发，docs/task-concurrency-p3-plan.md）。
+ * 统一任务中心（P2 地基，docs/archive/task-queue-p2-plan.md；P3 有界并发，docs/archive/task-concurrency-p3-plan.md）。
  *
  * 五通道（图书解析/图书向量化/论文解析/论文向量化/论文翻译）共用一张任务表 + 一套队列泵：
  * 通道内按注册表 concurrency 有界并发（默认 1，paper-parse 为 2）、UI 与 AI 入口统一 enqueue、

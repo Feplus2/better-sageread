@@ -196,7 +196,7 @@ computed 断言；脚本沉淀 `scripts/cdp-motion-batch5-verify.mjs`，截图 `
 ## 任务卡 3：动效二期（共享元素转场 + 手势侧栏）
 
 **状态**：🧊 **已悬置（2026-08-28 用户裁定：风险与收益不成正比）**。立项文档在
-`docs/motion-phase2-plan.md`（含开工门禁、工程量评估、风险；含候选 A 重定向为
+`docs/archive/motion-phase2-plan.md`（含开工门禁、工程量评估、风险；含候选 A 重定向为
 「卡片即容器」Morph 式转场的终局讨论——封面飞首屏方案被否，容器变形方案获认可
 但整体仍裁悬置）。重启需用户重新拍板。
 原执行口径（重启时仍适用）：候选 A 先做 spike 最小闭环验证再全面铺，
@@ -222,7 +222,7 @@ elsevier 级命中 XML 落盘）。
 ## 任务卡 5：ZBS 适配 Phase 2——Papers_Converter XML→MD 转换器
 
 **状态**：未开工。**蓝本**：`roadmap_legit_channels.md` B 节 +
-`SageRead/docs/zotero-brain-xml-pipeline-plan.md`（立项五问先回答进报告）。
+`SageRead/docs/plans/zotero-brain-xml-pipeline-plan.md`（立项五问先回答进报告）。
 **施工规格**：
 - 标准 JATS 先试 `pandoc -f jats -t markdown`；Elsevier 变体 pandoc 不认则轻量解析
   （正文/标题层级/图表占位/参考文献）。
@@ -304,7 +304,7 @@ CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）�
 
 ## 挂账记录（不修只记，防遗忘）
 
-- **sync P6 已知取舍**（`docs/sync-direction-audit.md` 末节）：20MB 大行静默跳过、
+- **sync P6 已知取舍**（`docs/audits/sync-direction-audit.md` 末节）：20MB 大行静默跳过、
   >50 包兜底删除、防回环 DELETE 并发窗口、ui-config 前端 LWW——备查不动。
 - **foliate-resize-update dead dispatch**：全部发送方发 `{bookId}` 单数、消费方
   `event-manager.ts:63` 读 `{bookIds}` 数组——全死；重分页实际靠 paginator 自身
@@ -320,9 +320,9 @@ CI 出 draft（~20min）→ 检查 draft 产物（win 安装包 + 更新包）�
   无声功能残废；漏收 ALLOW 行代价为零（放行恰好正确），故只有"用户真在用的
   文本型号"需要收全 DENY 侧。仅存两条身份归一（非能力推断）：OpenRouter 作者
   前缀剥离、日期快照别名剥离（厂商口径：日期 ID 是基名快照）。研究底稿
-  `docs/vision-map-research.md`（2026-08-24 逐家官方引用）。
+  `docs/archive/vision-map-research.md`（2026-08-24 逐家官方引用）。
   维护 = 查官方文档往表里加一行。
-- **AI 用量统计面板**（想法池 `docs/next-round-backlog.md` 末节）：不排期。
+- **AI 用量统计面板**（想法池 `docs/plans/next-round-backlog.md` 末节）：不排期。
 - **opacity 隐藏模型试验与回退**（2026-08-27）：raster 墙/pe 继承税两项归因实测成立，
   但 opacity 默认上线后被用户实测否决——常驻栅格化把合成开销扩散到原丝滑路由。
   已 revert 回 visibility 默认。结论留存：图书馆↔文献库冷态 620ms 墙的真因是

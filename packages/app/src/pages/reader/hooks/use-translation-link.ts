@@ -1,5 +1,5 @@
 /**
- * 书籍翻译交互层（二期批次 4b/5，docs/book-translation-plan.md）：hover 句词级双向联动 + 右键句选。
+ * 书籍翻译交互层（二期批次 4b/5，docs/plans/book-translation-plan.md）：hover 句词级双向联动 + 右键句选。
  * （批次 4c 划词对照卡 2026-08-29 用户裁定撤销——hover 联动已覆盖该需求，不保留冗余入口。）
  *
  * 挂载方式与 foliate-viewer-manager 的 iframe 事件先例一致：宿主监听 foliate view 的

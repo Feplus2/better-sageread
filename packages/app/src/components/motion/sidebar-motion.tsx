@@ -13,7 +13,7 @@ import {
 } from "react";
 
 /**
- * 动效批次 4：侧栏开合动效（docs/motion-system-plan.md 裁定三口径 2「冻结式」+ 第七节序 4）。
+ * 动效批次 4：侧栏开合动效（docs/archive/motion-system-plan.md 裁定三口径 2「冻结式」+ 第七节序 4）。
  *
  * 阅读器侧栏三件套（书籍 tab 与论文 tab 共用）：
  * - <SidebarMotionProvider>：一行 flex 阅读区的冻结编排器。侧栏动画期间把内容钉层宽度钉死

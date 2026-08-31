@@ -19,7 +19,7 @@
  * gpt-4o-2024-11-20 就是 gpt-4o；豆包用六位式 -260628，同理）——归一后仍查同一张表。
  *
  * 维护：新型号上线 → 查官方文档 → 表里加一行（DENY 侧优先级高：用户真在用的
- * 文本聊天型号收全，报错才少）。调研底稿与各家官方链接：docs/vision-map-research.md。
+ * 文本聊天型号收全，报错才少）。调研底稿与各家官方链接：docs/archive/vision-map-research.md。
  */
 export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
 // ↑ 不参与能力判定（本表已无规则层）——仅 factory.ts 的 DeepSeek 适配器分派在用

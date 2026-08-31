@@ -76,12 +76,12 @@ EPUB 渲染内核，是上游 [johnfactotum/foliate-js](https://github.com/johnf
 
 ### docs/
 
-23 篇设计文档，按主题对应 wiki 章节：
+设计文档按分层存放（`plans/` 活跃计划、`audits/` 审计报告、`archive/` 收官存档，约定见 `docs/README.md`），按主题对应 wiki 章节：
 
-- Agent：`agent-ecosystem-plan.md`、`agent-next-phase-plan.md`、`agent-capability-roadmap.md`、`agent-tool-recipe.md`
+- Agent：`archive/agent-ecosystem-plan.md`、`archive/agent-next-phase-plan.md`、`archive/agent-capability-roadmap.md`、`agent-tool-recipe.md`
 - 同步：`sync-protocol.md`、`sync-testing-guide.md`
-- 论文管线：`format-strategy-and-paper-module.md`、`papers-converter-integration.md`、`books-converter-integration.md`、`paper-format-contract.md`、`paper-textlayer-pipeline.md`、`paper-structure-boundary-plan.md`、`paper-polish-backlog.md`、`paper-reading-feasibility.md`、`sidebar-figures-notes-plan.md`
-- 其他：`release-workflow.md`、`zotero-batch-import.md`、`performance-optimization-plan.md`、`refactoring-lessons.md`、`living-library-vision.md`、`local-roadmap.md`、`next-round-backlog.md`、`THEMING.md`
+- 论文管线：`format-strategy-and-paper-module.md`、`papers-converter-integration.md`、`archive/books-converter-integration.md`、`paper-format-contract.md`、`archive/paper-textlayer-pipeline.md`、`archive/paper-structure-boundary-plan.md`、`plans/paper-polish-backlog.md`、`archive/paper-reading-feasibility.md`、`archive/sidebar-figures-notes-plan.md`
+- 其他：`release-workflow.md`、`archive/zotero-batch-import.md`、`archive/performance-optimization-plan.md`、`refactoring-lessons.md`、`living-library-vision.md`、`archive/local-roadmap.md`、`plans/next-round-backlog.md`、`THEMING.md`
 
 **重要提醒**：这些文档记录的是决策演进史，早期结论可能被后续推翻（典型例子：云端目录已从 `sageread/` 更名为 `bettersageread/`，同步文档未跟进）。读文档时以日期较新者为准，引用行为时务必回代码核实——本 wiki 各章末尾列出了已知的文档/代码不一致点。
 

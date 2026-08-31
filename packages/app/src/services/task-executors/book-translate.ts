@@ -1,5 +1,5 @@
 /**
- * 图书翻译通道执行器（docs/book-translation-plan.md 一期）。
+ * 图书翻译通道执行器（docs/plans/book-translation-plan.md 一期）。
  *
  * 链路：translateBook（全书一键、批级落盘、断点续翻）→ 句级对齐一条龙
  * （alignBookTranslation，幂等补齐；无嵌入能力服务内跳过）→ book_status.metadata.translation

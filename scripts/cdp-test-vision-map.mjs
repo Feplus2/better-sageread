@@ -1,5 +1,5 @@
 // E2E 冒烟：J2 多模态能力枚举表（ai/providers/vision-map.ts）
-// 断言各 provider+model 组合的图片放行/拦截（2026-08-24 调研枚举，见 docs/vision-map-research.md）
+// 断言各 provider+model 组合的图片放行/拦截（2026-08-24 调研枚举，见 docs/archive/vision-map-research.md）
 // 运行：node scripts/cdp-test-vision-map.mjs（需 dev 实例 CDP 9223）
 const LIST_URL = "http://127.0.0.1:9223/json/list";
 

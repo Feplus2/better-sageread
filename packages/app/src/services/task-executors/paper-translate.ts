@@ -1,5 +1,5 @@
 /**
- * 论文翻译通道执行器（P2-3，docs/task-queue-p2-plan.md）。
+ * 论文翻译通道执行器（P2-3，docs/archive/task-queue-p2-plan.md）。
  *
  * 迁移自 paper-task-store 的 translateQueue/drainTranslate 与阅读器 handleTranslate 直跑路径
  * （迁移而非重写，不动清单逐条保持）：

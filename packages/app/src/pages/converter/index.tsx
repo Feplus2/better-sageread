@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 /**
- * 图书转换任务台（卡 1，docs/book-convert-queue-plan.md）：
+ * 图书转换任务台（卡 1，docs/plans/book-convert-queue-plan.md）：
  * 窗口内容模型 = book-convert 通道队列——拖入/选入多份 PDF 即逐本入队（通道串行连转，
  * 完成自动导入书库 + toast + 自动出队）；队列每行 = 文件名 + 状态 + 操作（取消/重试/删除），
  * 失败行滞留带错误原因。「更换」语义已删除（删除→新拖入替代，用户拍板）。

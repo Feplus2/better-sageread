@@ -1,5 +1,5 @@
 /**
- * 书籍翻译的段落枚举与译文注入（共享契约模块，docs/book-translation-plan.md）。
+ * 书籍翻译的段落枚举与译文注入（共享契约模块，docs/plans/book-translation-plan.md）。
  *
  * 定位键 = spineIndex（章序）+ 段序号 + 段文本 hash。段序号的契约保障是**结构性的**：
  * 翻译服务（createDocument 读原文）与渲染注入 transformer（transform 管道的 XHTML 字符串）

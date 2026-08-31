@@ -4,7 +4,7 @@
 
 ## 待办
 
-> **2026-08-06 注**：以下条目已纳入 `docs/agent-ecosystem-plan.md` 排产——C2 打磨项 / webSearch 结构化面板 / read_epub 元组 bug → E 批；F 批 MCP 相关 → B/D 批（Zotero brain 夹带暂缓待确认）。
+> **2026-08-06 注**：以下条目已纳入 `docs/archive/agent-ecosystem-plan.md` 排产——C2 打磨项 / webSearch 结构化面板 / read_epub 元组 bug → E 批；F 批 MCP 相关 → B/D 批（Zotero brain 夹带暂缓待确认）。
 
 ### F 批：Agent 与生态（2026-08-04 用户输入）
 - **Agent 能力大升级（"给它双手"）**：让 Agent 拥有读取/创建/写入/修改本地文件的能力 + 运行命令行（Python 指令等）的能力。定位共识：不做专业科研 Agent，但必须能完成基础任务（写报告、跑脚本）。现状盘点：已有 `readLocalFile`/`downloadFile`/`httpRequest`/`extractZip` 等 central 工具（ai/tools/central/），缺**写文件/编辑文件**与**执行命令**两大类；执行命令的安全模型需设计（白名单？沙盒目录？确认制？）

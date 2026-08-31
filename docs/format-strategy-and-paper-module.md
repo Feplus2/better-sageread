@@ -16,7 +16,7 @@
 > - 翻译体系完成：T1 块级平行译本（三显示模式 + 幂等续翻）、T2 句级对齐、T3 词级对齐（跨语言标注/ hover 精确到词）
 > - UI 打磨完成：论文标签页化与书籍分组、三段式阅读布局、skill/快捷指令/提示词预设（热插拔）、tooltip 统一、设置入口统一
 > - 提示词热插拔：prompt_presets 表 + AI 中心"提示词"tab
-> - **打磨细节全记录在 `docs/paper-polish-backlog.md`；方向与开放 MCP 契约见 `docs/living-library-vision.md`**
+> - **打磨细节全记录在 `docs/plans/paper-polish-backlog.md`；方向与开放 MCP 契约见 `docs/living-library-vision.md`**
 > - **下一批**：papers converter（Papers_Converter 三 bug 修复 + sidecar 整合，见 vision 文档开放问题）、第 8 步 Zotero 联动；备选：RAG 增强（LLM 重排/query 改写）、notes→标注迁移专项、术语表
 
 ## 一、格式策略决策
@@ -256,7 +256,7 @@ Zotero 同步    ─┐
 
 ---
 
-## 三、与旧方案（paper-reading-feasibility.md）的关系
+## 三、与旧方案（docs/archive/paper-reading-feasibility.md）的关系
 
 | 旧方案（7/22） | 新方案（7/28） | 变更原因 |
 |---|---|---|
@@ -266,7 +266,7 @@ Zotero 同步    ─┐
 | "不合并、不搬运" | **要的是思路和功能，不是现成工具** | 现有代码无Pandoc/无标题层级，需重做 |
 | PDF 对照面板（阶段 2） | 保留，移至远景 | 优先级让位于 MD 渲染器 |
 
-`paper-reading-feasibility.md` 中的核心洞察仍然成立：
+`docs/archive/paper-reading-feasibility.md` 中的核心洞察仍然成立：
 - "SageRead 的 RAG 链路已格式无关"（向量化输入就是 MD 分片）
 - "Zotero Brain 恰好握着 PDF→结构化 MD 这一段"（其 MinerU 经验供 papers converter 参考，但产物与运行时不复用）
 - "论文 MD 与 EPUB 章节结构天然同构"

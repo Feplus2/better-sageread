@@ -1,5 +1,5 @@
 /**
- * 图书向量化通道执行器（P2-2，docs/task-queue-p2-plan.md）。
+ * 图书向量化通道执行器（P2-2，docs/archive/task-queue-p2-plan.md）。
  *
  * 吸收图书馆 book-item 直跑 indexEpub 的全链路（processing/success/failed 三态
  * book_status.metadata.vectorization 回写、epub://index-progress 进度事件、

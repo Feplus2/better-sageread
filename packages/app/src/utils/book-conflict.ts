@@ -1,7 +1,7 @@
 import { type TaskChannel, useTaskCenterStore } from "@/store/task-center-store";
 
 /**
- * 图书任务冲突矩阵（2026-08-31，docs/book-convert-queue-plan.md 卡 2）：
+ * 图书任务冲突矩阵（2026-08-31，docs/plans/book-convert-queue-plan.md 卡 2）：
  * book-translate × book-vectorize × book-convert 同一归属互斥（翻译中禁止向量化/重转换等），
  * 不同书全豁免；论文通道返回 null（论文半区在 utils/paper-conflict）。
  *

@@ -1,5 +1,5 @@
 /**
- * 论文解析通道执行器（P2-4，docs/task-queue-p2-plan.md）。
+ * 论文解析通道执行器（P2-4，docs/archive/task-queue-p2-plan.md）。
  *
  * 迁移自 convert-progress-store 的 paperQueue/drainPaperQueue/runOnePdf（迁移而非重写，
  * 不动清单逐条保持）：

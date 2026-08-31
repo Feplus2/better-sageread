@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
  * 逐面 backdrop-filter 在拖拽布局时会产生残留合成块，且性能差）。
  * 未声明 --bg-video 的主题返回 null，零侵入。
  *
- * 性能门控（motion-system-plan.md §5.4）：生效动效档位非 full 时冻结为静态帧
+ * 性能门控（docs/archive/motion-system-plan.md §5.4）：生效动效档位非 full 时冻结为静态帧
  * （pause 停在当前画面），解码与逐帧合成归零；对任何 --bg-video 视频壁纸普适。
  */
 export function ThemeBackgroundVideo() {

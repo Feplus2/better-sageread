@@ -10,7 +10,7 @@
  *
  * P2-1（统一任务队列）：图书转换的执行（监听注册/阶段推进/结算/自动导入）已迁入
  * services/task-executors/book-convert.ts 并注册为 task-center 的 book-convert 通道。
- * 卡 1（2026-08-31，docs/book-convert-queue-plan.md）：转换窗口改造为双态任务台——
+ * 卡 1（2026-08-31，docs/plans/book-convert-queue-plan.md）：转换窗口改造为双态任务台——
  * 内容模型是通道队列（拖入/选入多份 PDF 即逐本入队、串行连转、完成自动导入自动出队），
  * 窗口态 ⇄ 右下角通道卡由 bookConvertDialogOpen/bookConvertMinimized 状态机承载；
  * 本 store 的 bookConvert 收窄为「当前在跑任务的详情数据源 + 转换配置 + 窗口状态机 +

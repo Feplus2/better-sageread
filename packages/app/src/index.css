@@ -47,7 +47,7 @@
   --shadow-xl: 0 1px 3px 0px oklch(0.0 0 0 / 0.1), 0 8px 10px -1px oklch(0.0 0 0 / 0.1);
   --shadow-2xl: 0 1px 3px 0px oklch(0.0 0 0 / 0.25);
 
-  /* ---------- 动效 token（docs/motion-system-plan.md §五） ----------
+  /* ---------- 动效 token（docs/archive/motion-system-plan.md §五） ----------
    * 所有动效的时长/位移/缓动只准引用这组变量，禁止裸数值；
    * data-motion 属性挂 documentElement（use-motion-mode.ts 驱动），一处切换全局生效。 */
   --motion-dur-fast: 120ms; /* 微交互：复选框 pop 等 */
@@ -187,7 +187,7 @@
   pointer-events: auto;
 }
 
-/* ---------- 批次 4：侧栏开合（docs/motion-system-plan.md 裁定三口径 2 冻结式 + 序 4） ----------
+/* ---------- 批次 4：侧栏开合（docs/archive/motion-system-plan.md 裁定三口径 2 冻结式 + 序 4） ----------
  * 阅读器侧栏壳：只碰 transform/opacity（第一宪法），CSS transition 天然可中断反向；
  * 位移量 token 化（--motion-sidebar-shift），fade-only 归零退化为纯 fade、reduced 0.01ms 硬切。
  * 动画期间内容区宽度冻结由 SidebarMotionProvider 钉层负责（不逐帧重排/重分页），

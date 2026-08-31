@@ -1,6 +1,6 @@
 # sync-e2e —— L2 增量同步双实例端到端验证脚本
 
-针对 `docs/sync-direction-audit.md` 缺陷清单（P0/P1/P4 于 2026-08-25 修、P2/P3/P5 于 commit 1fa785d 修）的 E2E 实证套件。
+针对 `docs/audits/sync-direction-audit.md` 缺陷清单（P0/P1/P4 于 2026-08-25 修、P2/P3/P5 于 commit 1fa785d 修）的 E2E 实证套件。
 2026-08-25/26 本机双实例 + 本地 dufs WebDAV 实测：**全部 PASS**。证据存于 `F:/MyProjects/SageRead/.tmp-e2e/evidence/`。
 
 ## 环境（一次性，不动主库）

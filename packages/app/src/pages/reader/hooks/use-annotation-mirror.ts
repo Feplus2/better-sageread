@@ -1,5 +1,5 @@
 /**
- * 书籍翻译交互层（二期批次 4d，docs/book-translation-plan.md）：标注镜像——
+ * 书籍翻译交互层（二期批次 4d，docs/plans/book-translation-plan.md）：标注镜像——
  * 书籍标注（book_notes CFI，本体由 foliate overlayer SVG 绘制、只认 CFI 锚点）在对侧语言上的
  * 常驻镜像高亮（原文标注 → 译文对应区间镜像，反向亦然，效果对齐论文阅读器 paper-reader.tsx
  * 的标注镜像 effect）。

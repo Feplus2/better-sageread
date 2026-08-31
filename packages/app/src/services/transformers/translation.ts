@@ -8,7 +8,7 @@ import {
 import type { Transformer } from "./types";
 
 /**
- * 书籍对照翻译注入（docs/book-translation-plan.md 渲染通道）。
+ * 书籍对照翻译注入（docs/plans/book-translation-plan.md 渲染通道）。
  *
  * 章节内容流入 iframe 前，按段序号把章译本插入原文段落后
  * （<div class="translation-target translation-target-block" data-book-translation>）。

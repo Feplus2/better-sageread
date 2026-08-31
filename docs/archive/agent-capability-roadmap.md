@@ -6,7 +6,7 @@
 
 编排层已经是**真 Agent**：AI SDK v5 `streamText` + `toolChoice:auto` + `stopWhen:20` 的 ReAct 循环（`ai/custom-chat-transport.ts:82`），三 scope 动态工具集（`ai/tools/registry.ts:318`），central 已有 26 个动作工具。**框架不缺，缺的是写类工具与 MCP 客户端运行时。**
 
-## 二、既定设计约束（docs/local-roadmap.md §Agent 架构设想）
+## 二、既定设计约束（docs/archive/local-roadmap.md §Agent 架构设想）
 
 ~~动作工具只挂全局助手（central）；阅读助手保持只读 + 本书 RAG，防工具过多误触发。~~ **2026-08-05 用户拍板修订**："读着论文让 AI 整理笔记落盘"是直觉场景，论证成立——文件五件套（writeFile/editFile/readLocalFile/searchFiles/runCommand）+ exportNotes + askAppHelp 下放 shared（三 scope 可用），安全分档由 tool-guard 统一包装（确认卡已挂载三处聊天面）。**仍锁 central 的**：网络外发类（httpRequest/downloadFile/extractZip，书/论文正文是不可信输入，注入面不收口子）与应用管理类（删书/回收站/备份/同步/设置/技能，管家职责）。
 
@@ -53,11 +53,11 @@ central 26 → 17：五组"单实体多动作"合并——`manageBook`（delete/
 
 ### P2 · MCP 客户端运行时（盘活生态 + F 批 Zotero brain 夹带）—— ✅ 2026-08-06 已落地
 
-> **2026-08-06 已拍板排产**：详细执行计划见 `docs/agent-ecosystem-plan.md`（分两期：B 批远程 HTTP/SSE 运行时 → D 批 stdio；配套秘钥安全 A 批、市场 C 批；Zotero brain 精简版夹带已纳入 F 批，含下载源瀑布与代理配套）。**当日全批次（S/A/B/C/D/F/E）落地**，静态验收全绿；真机运行时验证项（stdio server 实连/无残留进程/代理全链路）留待用户手测。
+> **2026-08-06 已拍板排产**：详细执行计划见 `docs/archive/agent-ecosystem-plan.md`（分两期：B 批远程 HTTP/SSE 运行时 → D 批 stdio；配套秘钥安全 A 批、市场 C 批；Zotero brain 精简版夹带已纳入 F 批，含下载源瀑布与代理配套）。**当日全批次（S/A/B/C/D/F/E）落地**，静态验收全绿；真机运行时验证项（stdio server 实连/无残留进程/代理全链路）留待用户手测。
 
 - **B 批（远程运行时）**：AI SDK `experimental_createMCPClient` + 自研 Streamable HTTP/SSE 传输（`ai/mcp/mcp-transport.ts`，走 Tauri 网络栈绕 CORS）；连接管理器 `ai/mcp/mcp-manager.ts` 按 scope 聚合工具，命名空间 `mcp_{server}_{tool}`；tool-guard 全确认卡（server 维度免打扰）；`manageMcp` 工具让 Agent 自管理配置。
 - **D 批（stdio）**：Rust 子进程桥 `core/mcp/`（Windows `cmd /C` 包裹 + CREATE_NO_WINDOW + Job Object 孤儿防护 + taskkill 树杀 + 审计日志），前端 `TauriStdioMcpTransport`；首次启动确认卡（strict/relaxed）；env 的 `{{secret:NAME}}` 在 Rust 侧替换，真值不进 JS。
-- **A 批（秘钥安全）/C 批（市场）**：keyring 保管箱 + `{{secret:NAME}}` 引用机制；MCP 官方 Registry 市场一键安装；SKILL.md 兼容导入（Claude Code 生态）。~~自建技能索引仓市场（`sageread-skills`）~~：2026-08-09 用户拍板**不做**（口径以 `agent-ecosystem-plan.md` 为准），技能生态只保留文件导入。
+- **A 批（秘钥安全）/C 批（市场）**：keyring 保管箱 + `{{secret:NAME}}` 引用机制；MCP 官方 Registry 市场一键安装；SKILL.md 兼容导入（Claude Code 生态）。~~自建技能索引仓市场（`sageread-skills`）~~：2026-08-09 用户拍板**不做**（口径以 `docs/archive/agent-ecosystem-plan.md` 为准），技能生态只保留文件导入。
 - **F 批（Zotero brain 夹带）**：独立仓 `zotero-brain-slim`（~1400 行，6 工具：搜库/四源发现/7 级下载瀑布/导入 Zotero/Collection 管理，剪除解析与向量化）+ SageRead 侧应用级代理三档（设置页，作用 Rust 请求与 stdio spawn env）+ `importPaper` 工具（单篇 PDF→文献库，与 importBook 书库链路区分）。分发形态（uvx 独立仓 vs sidecar）待用户拍板；灰色口径按 ecosystem-plan F4 执行。
 
 ### P3 · 上下文与对话工程（长任务硬伤）

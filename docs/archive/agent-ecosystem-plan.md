@@ -369,7 +369,7 @@ async function getMcpToolsForScope(
 2. **stdio 的 Windows 兼容**：`.cmd` 解析与 `CREATE_NO_WINDOW` 是历史坑位，D 批务必在真机验证 node/npm 全局与 npx 缓存两种形态。
 3. **CORS**：B1 验证结论决定 B3 传输实现路径，执行者不得在跳过 B1 的情况下直接写传输层。
 4. **确认卡疲劳**：MCP 工具默认全确认是有意设计（roadmap 已定），"按 server 记忆放行"是缓解阀，不要做成"全局不再询问 MCP"。
-5. **文档收尾**：全部批次完成后，回更 `agent-capability-roadmap.md`（P2 标记完成、指向本文档）、`paper-polish-backlog.md`（E 批条目划线消化）、`README.md`（特性表补 MCP/市场/密钥保管箱）。
+5. **文档收尾**：全部批次完成后，回更 `docs/archive/agent-capability-roadmap.md`（P2 标记完成、指向本文档）、`docs/plans/paper-polish-backlog.md`（E 批条目划线消化）、`README.md`（特性表补 MCP/市场/密钥保管箱）。
 
 ---
 
@@ -379,7 +379,7 @@ S–F 批之外，各文档里记录的其余待办如下。分类口径：**下
 
 ### 建议下一批（未排进 S–F）
 
-> 2026-08-08 更新：剩余项已重新分批排产，见 `docs/agent-next-phase-plan.md`（G–J 批）。以下条目状态同步更新。
+> 2026-08-08 更新：剩余项已重新分批排产，见 `docs/archive/agent-next-phase-plan.md`（G–J 批）。以下条目状态同步更新。
 
 1. **词对齐残留打磨**（paper-polish-backlog D 批，2026-08-05 已拍板排产）：句首虚词错配（worth↔远离）、非连续对应（"not…at all"↔"根本"，jieba 粘连）、历史标注 -tgt 镜像疑似重复区间注册。
 2. **多模态图片输入**（agent-capability-roadmap P3 残留）：消息 schema 扩展 + 附件 UI + 多模态能力检测 + 图片预览"发送到对话"按钮接线。

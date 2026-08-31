@@ -197,7 +197,7 @@ await check("收尾接续：执行期间入队的新任务在泵收尾后接续�
   assert(log.join(",") === "start:F,done:F,start:S,done:S", `接续失败: ${log.join(",")}`);
 });
 
-// ─── P3 有界并发槽语义（docs/task-concurrency-p3-plan.md §1） ───
+// ─── P3 有界并发槽语义（docs/archive/task-concurrency-p3-plan.md §1） ───
 
 await check("并发槽：concurrency=2 同通道最多两个 running，第三个排队等槽释放", async () => {
   const log = [];

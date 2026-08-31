@@ -1,6 +1,6 @@
 # Papers_Converter 整合进 SageRead · 实施交接文档
 
-> 2026-08-04 建立。单篇 PDF 论文导入解析入库全流程（sidecar 模式，与 Books_Converter 整合同构，见 docs/books-converter-integration.md）。
+> 2026-08-04 建立。单篇 PDF 论文导入解析入库全流程（sidecar 模式，与 Books_Converter 整合同构，见 docs/archive/books-converter-integration.md）。
 
 ## 一、架构
 
@@ -61,5 +61,5 @@ papers 页「导入 PDF」按钮
 - **封面误判整页丢失事故（2026-08-12）已根修**：converter 侧 `cover_detect.py` 统一判定（只判 page 0 + 标记阈值收紧 + 正文信号一票否决 + 元数据锚定），AB 验证 127 篇零误杀；专题文档（事故复盘/现行逻辑/调研/辅助模型与脏 PDF spec/AB 记录）见 Papers_Converter `docs/structure-detection.md`；回归测试 `test_cover_detect.py`/`test_article_boundary.py`，AB 脚本 `ab_cover_detect.py`。同批落地：`STRUCTURE_LLM` 辅助模型仲裁通道（默认关）、`ARTICLE_BOUNDARY` 脏 PDF 标题锚点头切/References 后尾切。exe 已重打包并同步 binaries；实测 zhao2020 重解析页锚 4/4、Figure 1-4 齐全、无 incomplete 打标。存量受损篇（zhao2020/Xiang 2015）已补 source.pdf，走文献页「批量重新解析」修复
 - staging 的 LLM 元数据缓存（slug 防漂移，backlog 定论 converter 侧待实现）
 - **stage1 引擎 VLM 退化循环**（2026-08-05 实测）：长枚举内容触发"模式延续"失控（如 nm 波长列从真实值 1700 一路递增编到 15800；另一篇单词 fire 重复数百次），失控在引擎原始产物即存在。**两侧已闭环**：converter 侧 `quality_guard.py`（签名周期法，阈值与 SageRead 一致）在 stage1 命中即重试（≤2 次）并最终经 done 事件 `degenerate:true` 打标；SageRead 侧本地同款检测 + 协议字段双通道提示"换引擎重新解析"。实测注意：Yang 2021 这篇在 PaddleOCR-VL 三次重跑全复发，重试不自愈的内容以换引擎为准。exe 未随源码重建（见交接文档待办）
-- Zotero 批量导入：已实现（SageRead 侧，见 docs/zotero-batch-import.md）；converter 侧 `--zotero-key` 透传锚定 slug 仍为 converter 遗留（当前方案不依赖，zotero_key 由 SageRead 注入 frontmatter）
+- Zotero 批量导入：已实现（SageRead 侧，见 docs/archive/zotero-batch-import.md）；converter 侧 `--zotero-key` 透传锚定 slug 仍为 converter 遗留（当前方案不依赖，zotero_key 由 SageRead 注入 frontmatter）
 - Books_Converter 同款 _MEIPASS 隐患（SageRead 侧恒传 --output-dir 规避，未修 converter 本体）

@@ -1,6 +1,6 @@
 # 下一轮待办清单（2026-08-09 补漏审计 + 用户拍板修订版）
 
-G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收录剩余事项，按施工顺序排列。
+G–J 批已全部完工（详见 `docs/archive/agent-next-phase-plan.md`）。本文档收录剩余事项，按施工顺序排列。
 用户手册 + repo wiki + 提示词对齐按用户要求放到**最后**；原 P3（外部跟踪）、P4（可选润色）移除。
 
 ---
@@ -52,7 +52,7 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ### 文档口径 —— 已全部修订
 
-1. `README.md` 技能表格删"技能市场"表述；`agent-capability-roadmap.md` P2 段自建技能索引仓市场划线删除（注明 2026-08-09 拍板不做，以 ecosystem-plan 为准）。
+1. `README.md` 技能表格删"技能市场"表述；`docs/archive/agent-capability-roadmap.md` P2 段自建技能索引仓市场划线删除（注明 2026-08-09 拍板不做，以 ecosystem-plan 为准）。
 2. E5 按用户拍板「改文档不改代码」修订：plan 原文改为实现口径 `sandbox="allow-scripts allow-modals"`（`html-preview.tsx`，opaque origin）并附风险评估。
 3. `registry.ts` 头注释与 `mcp-registry-service.ts` oci 文案已按现状改写（"MCP 预留后续迭代"、"待批次 D" 两处过时口径清除）。
 
@@ -161,7 +161,7 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 
 ## ⑥ 远景：论文交叉引用超链接重建（2026-08-17 提出）—— ✅ 已拍板立项（2026-08-19）
 
-**施工计划见 `docs/paper-link-rebuild-plan.md`**：P1 保留 PDF 原生链接
+**施工计划见 `docs/archive/paper-link-rebuild-plan.md`**：P1 保留 PDF 原生链接
 （fitz link annotations + 锚点映射）→ P2 参考文献增强链（结构化解析 +
 元数据 + 在库检查 + 获取/落地页兜底，含 zotero-brain no_pdf 结构化返回改造）
 → P3 语义重建（无链接论文保守补链 + 图书脚注 epub:type 语义化弹注）。
@@ -233,7 +233,7 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
   收编为一把全局锁——插件新增 `metadata_json.rs` 的 `patch_metadata_json`（锁内读改写合并），
   插件向量锚、app 侧 `inject_zotero_key`、新命令 `patch_paper_metadata_json`（TS 翻译服务
   两处写者经 invoke 走它）全部走同一路径。cargo 52+25 绿、翻译容错单测 8/8 绿。
-- ✅ **同步方向复核（原挂账项 7）**：审计完成，结论见 `docs/sync-direction-audit.md`——
+- ✅ **同步方向复核（原挂账项 7）**：审计完成，结论见 `docs/audits/sync-direction-audit.md`——
   单次 502 全链路 fail-closed（无根因）；钓出 6 个真实风险点（P0 修剪误删未消费包、
   P1 sync-state 非原子写致水位清零+删除复活、P2 拉取尾部水位跳跃、P3 暂时坏包 3 次永弃、
   P4 无 L2 互斥、P5 进度回落键被顶翻）。**修法已列，动 sync 临界区前需用户拍板范围。**
@@ -241,14 +241,14 @@ G–J 批已全部完工（详见 `agent-next-phase-plan.md`）。本文档收�
 ### v0.3.0 主线：P2 统一任务队列 + P3 有界并发 + P4 AI 体验
 
 **施工规格已全部落定（2026-08-25）**：
-- `docs/task-queue-p2-plan.md`——五通道统一模型 + 六直跑入口收敛入队 + 图书两通道队列化 +
+- `docs/archive/task-queue-p2-plan.md`——五通道统一模型 + 六直跑入口收敛入队 + 图书两通道队列化 +
   卡片点开子任务面板，分 P2-0~P2-5 六阶段，每阶段附不动清单与验证矩阵。
-- `docs/task-concurrency-p3-plan.md`——解析有界并发 2（多句柄化 + staging 撞车待核点）、
+- `docs/archive/task-concurrency-p3-plan.md`——解析有界并发 2（多句柄化 + staging 撞车待核点）、
   向量化单篇内并行 embed + busy_timeout、翻译维持 3 路；依赖 P2 完成。
-- `docs/ai-experience-p4-plan.md`——工具描述跳板（文案级先行）→ getBooks/status 发现增强 →
+- `docs/plans/ai-experience-p4-plan.md`——工具描述跳板（文案级先行）→ getBooks/status 发现增强 →
   central 语义检索（选型待定）→ 目录牌观测审计；不依赖 P2/P3 可提前搭车。
 
-前置调研见 `docs/task-system-survey.md`。
+前置调研见 `docs/archive/task-system-survey.md`。
 
 ---
 
@@ -298,5 +298,5 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 - book-translate 通道未接入右下角任务栏（bottom-right-stack 按通道渲染卡片，新通道无卡）；
   图书翻译没有队列化呈现（通道内并发 1 但 UI 无队列感）。
 - AI 工具链未跟进：无「翻译图书/查图书翻译状态」工具（process-paper 只有论文侧）；
-  加的时候要带冲突矩阵（翻译×向量化×转换同书互斥——book-translation-plan.md「未来待办」
+  加的时候要带冲突矩阵（翻译×向量化×转换同书互斥——docs/plans/book-translation-plan.md「未来待办」
   节已有 blocking 矩阵设计口径）。

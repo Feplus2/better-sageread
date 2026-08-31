@@ -346,7 +346,7 @@ StyleManager 进 iframe），①部分成立（事件通道本身可达，但监
 
 **顶栏下拉交互优化（08-29 用户提出，通用 UI 待办）**：
 - 点开动效：顶栏各下拉（目录/搜索/设置/翻译）展开与收起均无动画——按动效体系规范
-  （docs/motion-system-plan.md）补 DropdownMenuContent 的进出场过渡；
+  （docs/archive/motion-system-plan.md）补 DropdownMenuContent 的进出场过渡；
 - 外点收起：点开下拉后点击空白处不能收起、必须再点 icon——排查 radix DropdownMenu 的
   onPointerDownOutside 失效原因（受控 open/portal/modal 层级/全局事件拦截），四个下拉
   （toc/search/settings/translate）同治。

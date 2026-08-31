@@ -1,6 +1,6 @@
 # P4 AI 体验施工计划（ai-experience-p4-plan）
 
-> 2026-08-25 建立。前置调研：`docs/task-system-survey.md` §8（「向量化某篇论文搜不到」复盘，
+> 2026-08-25 建立。前置调研：`docs/archive/task-system-survey.md` §8（「向量化某篇论文搜不到」复盘，
 > 含机制事实与改进建议）。痛点原点：全局助手找论文只能靠 `getBooks` 的 SQL LIKE 子串匹配，
 > 对英文标题/主题式描述零命中；且 central scope 工具 36 个 > 30 阈值恒走目录牌模式。
 

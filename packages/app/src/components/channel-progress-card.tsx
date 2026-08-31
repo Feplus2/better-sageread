@@ -1,6 +1,6 @@
 /**
  * 通道聚合进度卡（papers 页批量向量化/翻译卡的共用抽取；卡 2 起图书馆页图书翻译卡复用，
- * docs/book-convert-queue-plan.md）。
+ * docs/plans/book-convert-queue-plan.md）。
  *
  * 数据源 = task-center 通道聚合折算（channelCardOf）；卡本体样式即原 papers 页批量任务卡。
  * 点击卡弹子任务面板由调用方套 TaskRunPanel；取消/关闭回调由调用方接通道操作

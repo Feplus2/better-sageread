@@ -1,5 +1,5 @@
 /**
- * 通用子任务面板（P2-5，docs/task-queue-p2-plan.md）：通道聚合卡点击弹出，
+ * 通用子任务面板（P2-5，docs/archive/task-queue-p2-plan.md）：通道聚合卡点击弹出，
  * 列出该通道当前 run/近期任务的子任务清单（题名 + 状态图标 + 实时 percent/detail + 单项取消）。
  *
  * 形态对齐项目 radix 浮层惯例（进出场动画沿用 ui/popover 的 animate 类），但直用

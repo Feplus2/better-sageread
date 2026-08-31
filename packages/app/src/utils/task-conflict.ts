@@ -3,7 +3,7 @@ import { bookTaskConflict } from "./book-conflict";
 import { paperTaskConflict } from "./paper-conflict";
 
 /**
- * 任务冲突检查器统一注入点（2026-08-31，docs/book-convert-queue-plan.md 卡 2）。
+ * 任务冲突检查器统一注入点（2026-08-31，docs/plans/book-convert-queue-plan.md 卡 2）。
  *
  * task-executor-registry 的冲突检查器是单槽（setTaskConflictChecker 后者覆盖前者），
  * 而论文/图书两侧执行器的模块加载顺序不固定（静态 import 链 + 动态 import 混合）——

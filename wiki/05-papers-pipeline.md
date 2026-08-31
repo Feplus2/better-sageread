@@ -6,7 +6,7 @@
 
 ## 1. Books_Converter（书籍 PDF→EPUB）
 
-- **引擎**：hybrid = MinerU 云 API（版面解析/OCR）+ OpenAI 兼容辅助模型（结构重建/可选翻译）；不用本机 Python、无本地 GPU 模型。集成方案见 `docs/books-converter-integration.md:13-27`；exe 经 `tauri.conf.json:139-142` 的 externalBin 注册
+- **引擎**：hybrid = MinerU 云 API（版面解析/OCR）+ OpenAI 兼容辅助模型（结构重建/可选翻译）；不用本机 Python、无本地 GPU 模型。集成方案见 `docs/archive/books-converter-integration.md:13-27`；exe 经 `tauri.conf.json:139-142` 的 externalBin 注册
 - **拉起方式：Tauri sidecar**（非 HTTP 服务）。`convert_pdf_to_epub` 命令 spawn `books_converter`，env 注入 `MINERU_TOKEN`/`PADDLEOCR_TOKEN`/`DEEPSEEK_BASE_URL|API_KEY|MODEL`（辅助模型复用），args 传 `pdf --headless --output-dir {appData}/converter [--no-ocr] [--engine paddleocr] [--translate LANG]`。出处：`core/converter.rs:44-98`
 - **进度协议**：stdout 逐行 JSON（`start / progress / stage_done / done / error`），Rust 按行转发 `convert://progress` 事件，退出时补发 `{"type":"terminated"}`；`cancel_convert` kill 子进程（`converter.rs:101-147,154-161`）。阶段顺序：MinerU(1) → Hybrid 结构重建(2) → [翻译(3)，可选] → EPUB 生成。Windows 管道 GBK 问题已用 `ensure_ascii=True` 规避
 - **产物入库**：done 后前端 `importConvertedEpub` 用 plugin-fs 读 epub 字节 → 包成 `File` → 复用书籍既有 `uploadBook()` 链路（`save_book` 落 `books/{id}/` + 入库）。出处：`services/converter-service.ts:94-100`；辅助模型参数解析 `resolveLlmParams`（:39-57）
@@ -38,7 +38,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 ### QC 闸（三层）
 
 1. **退化检测 `quality_guard.py`**（stage1 产物层）：签名周期法——字母→a、数字→0、空白折叠后，单行 ≥200 字符内找周期 4..50、连续重复 ≥10 次、覆盖 ≥300 字符的循环；命中即 stage1 重试（`MAX_STAGE1_RETRIES=2`），耗尽则降级到 pipeline 后端兜底；最终仍命中则 done 打标 `degenerate:true` 不阻断。**SageRead 侧有同算法 TS 移植** `src/utils/degenerate.ts:18-21,45-67`（阈值是事故回归出来的，见 `docs/papers-converter-integration.md:62`），入库后本地复检（`pages/papers/index.tsx:1026`、`services/paper-reparse-service.ts:153-190`）
-2. **结构边界判定**（stage2 语义层）：`cover_detect.py`（只判 page 0 + 正文信号一票否决）+ 可选 `STRUCTURE_LLM` 辅助模型仲裁 + `ARTICLE_BOUNDARY` 脏 PDF 头切/尾切。方案稿 `docs/paper-structure-boundary-plan.md` 里计划的 `structure_detector.py` **未以该名落地**，实际拆成上述三文件
+2. **结构边界判定**（stage2 语义层）：`cover_detect.py`（只判 page 0 + 正文信号一票否决）+ 可选 `STRUCTURE_LLM` 辅助模型仲裁 + `ARTICLE_BOUNDARY` 脏 PDF 头切/尾切。方案稿 `docs/archive/paper-structure-boundary-plan.md` 里计划的 `structure_detector.py` **未以该名落地**，实际拆成上述三文件
 3. **完整性闸 `qc_paper.py`**（产物机械层）：WARN 级=图/表编号断号、References 顺序异常、超长参考文献段；**severe 级**=断号 + 页数对照（页锚数 ≤ `int(pdf_pages × 0.6)` 判整页丢失），severe 命中触发换引擎重试链，仍不完整则交付但 done 打标 `incomplete:true` + `qc_warnings` 清单。SageRead 前端消费：`services/paper-service.ts:204-209`（字段定义）、`pages/papers/index.tsx:1017-1019`（toast 提示换引擎重解析）
 
 ## 3. 论文格式契约与渲染衔接
@@ -65,7 +65,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 ## 5. 翻译管线
 
 - **书籍转换期烘焙翻译**：Books_Converter `--translate LANG`（hybrid 链内用辅助模型整书翻译后产出译版 EPUB），SageRead 侧只是传参（`converter.rs:70-75`）——产新文件、一次性，与阅读期对照翻译正交
-- **书籍对照翻译（2026-08-29 起，前端 service 实现，仅 EPUB）**：`services/book-translation/book-translation-service.ts`（方案与验收全档见 `docs/book-translation-plan.md`）
+- **书籍对照翻译（2026-08-29 起，前端 service 实现，仅 EPUB）**：`services/book-translation/book-translation-service.ts`（方案与验收全档见 `docs/plans/book-translation-plan.md`）
   - 粒度：段级平行译本，**按章分文件** sidecar `books/{id}/translation/{spineIndex}.json`；定位键 = 章序号 + 段序号 + 段文本 sha256-16 三重，章 `sourceHash` 判陈旧（EPUB 入库后不变，锚为防御性）
   - 幂等/断点：批级落盘、取消保留、段 hash + 章 sourceHash 双层幂等续翻；失败批次记数可续翻补齐；首轮跨章采样抽术语表注入全部批次（全书术语一致）
   - 注入：transformer 链末位 `translation` 在章节 XHTML 进 iframe 前插译文块（见 `01-architecture.md` 第 4 节）；任务收尾另广播 `book-translation-updated` 对当前章 DOM 直注（foliate blob 缓存下同章不重流 transform）
@@ -86,7 +86,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 ## 6. Zotero 批量导入
 
 - Rust 侧 `core/zotero.rs`：扫描本机 Zotero 7 库、维护去重键（`zotero_key` UNIQUE）与导入状态；表 `zotero_collections`（collection key → 本地 folder 映射缓存，`database.rs:216`）与 `zotero_paper_state`（链接去重状态，`database.rs:228`；无外键，彻底删书时手动清，`books/commands.rs:334`）
-- 前端入口：论文库 `zotero-import-dialog.tsx`（`pages/papers/`）；批量导入的演进与排障记录见 `docs/zotero-batch-import.md`
+- 前端入口：论文库 `zotero-import-dialog.tsx`（`pages/papers/`）；批量导入的演进与排障记录见 `docs/archive/zotero-batch-import.md`
 - 导入的论文走同一 `save_paper` 入库链路（id = paper.md 内容 sha256 前 16 hex，天然去重，含回收站口径）
 
 ## 7. 论文阅读页结构
@@ -103,7 +103,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 
 1. **论文默认引擎**：`docs/papers-converter-integration.md:45` 正文仍写"paddleocr 基线"；实际已改 MinerU-VLM 主引擎（同文档 §六与 `converter-store.ts:44` 才是最新事实）
 2. **`SUPPORTED_FILE_EXTS`**：books-converter 文档 §九称多格式导入解锁 epub/pdf/mobi/cbz/fb2/fbz；代码现状仅 `["epub","pdf"]`（`services/constants.ts:23`）
-3. **结构判定模块命名**：`paper-structure-boundary-plan.md` §5 的 `structure_detector.py` 未以该名落地（实际 `cover_detect.py` + `article_boundary.py` + `structure_llm.py`）
+3. **结构判定模块命名**：`docs/archive/paper-structure-boundary-plan.md` §5 的 `structure_detector.py` 未以该名落地（实际 `cover_detect.py` + `article_boundary.py` + `structure_llm.py`）
 4. **paper.md 存储位置两种说法都成立**：内容存 `books/{id}/`、向量存 `papers/vectors.sqlite`，引用时讲清分离
 5. **"mineru-pipeline 已下线" vs Rust 保留接线**：UI 下线、通道保留（`paper_converter.rs:62-77`）
 6. `docs/format-strategy-and-paper-module.md` §五的风险清单（如"全局向量库 5000 向量无压力"）是早期估算；其"images/ 不在同步文件通道"一说**已被代码推翻**——论文资产现为整目录 zip 捆（含 images/，`core/sync/files.rs:163-207`）
@@ -133,7 +133,7 @@ converter 侧 `content_processor.py:_split_figure_legends` 处理两种图注形
 ## 10. 附：管线常见坑（排雷）
 
 - **行尾必须 LF**：paper.md 若为 CRLF，heading 提取会整批失配（契约 `docs/paper-format-contract.md:53-64` 的硬性条款，真机事故）
-- **Windows 管道编码**：sidecar stdout 走 GBK 会炸，converter 侧已用 `ensure_ascii=True` 规避（`docs/books-converter-integration.md` §九）；改进度协议时勿回退
+- **Windows 管道编码**：sidecar stdout 走 GBK 会炸，converter 侧已用 `ensure_ascii=True` 规避（`docs/archive/books-converter-integration.md` §九）；改进度协议时勿回退
 - **并发串台**：多篇论文同时转换时靠 Rust 注入的 `pdf_path` 区分事件归属（`paper_converter.rs:104-157`）；消费侧分两路——Agent 工具 `import-paper.ts:88,104` 按 `pdf_path` 过滤事件，论文库页面则靠**串行队列**逐篇转换（`pages/papers/index.tsx:1096`）天然不串台
 - **slug 即目录名**：优先 citekey，重名/变更会影响 `{appData}/papers-converter/{slug}/` 与云端产物对应关系
 - **References 噪声**：分块器只认第一个 References 标题（`pipeline.rs:412-421`），变体拼写（如 "REFERENCES"、Bibliography）的覆盖以分块器正则为准

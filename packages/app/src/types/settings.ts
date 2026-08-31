@@ -10,7 +10,7 @@ export type PaperViewModeType = "original" | "translated" | "bilingual";
 export type PapersMetaLangType = "original" | "zh";
 /** 文献库列表排序：导入时间 / 重要度（打星）/ 标题 */
 export type PapersSortByType = "updated" | "created" | "rating" | "title";
-/** 动效模式三档（docs/motion-system-plan.md 裁定二）：完整动效 / 仅淡入淡出（性能模式）/ 遵循系统 */
+/** 动效模式三档（docs/archive/motion-system-plan.md 裁定二）：完整动效 / 仅淡入淡出（性能模式）/ 遵循系统 */
 export type MotionModeType = "full" | "fade-only" | "system";
 
 export interface ReadSettings {

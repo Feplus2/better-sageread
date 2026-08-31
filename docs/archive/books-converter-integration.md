@@ -276,7 +276,7 @@ copy dist\books_converter.exe F:\MyProjects\SageRead\packages\app\src-tauri\bina
 ## 七、待完成 Phase 5：验证
 - exe 就位后 `cargo check`（应通过）；`tsc --noEmit`。
 - 端到端：拖入 PDF → 进度正常 → 导入图书馆 → 书架可见可阅读。
-- 更新 `docs/local-roadmap.md` 第四批标记 Books_Converter 整合完成。
+- 更新 `docs/archive/local-roadmap.md` 第四批标记 Books_Converter 整合完成。
 
 ---
 

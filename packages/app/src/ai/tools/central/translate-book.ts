@@ -1,5 +1,5 @@
 /**
- * 全局助手工具：书籍（EPUB）全书翻译与译本状态查询（2026-08-31，docs/book-convert-queue-plan.md 卡 2）。
+ * 全局助手工具：书籍（EPUB）全书翻译与译本状态查询（2026-08-31，docs/plans/book-convert-queue-plan.md 卡 2）。
  *
  * 与阅读器翻译下拉同一链路：入 task-center 的 book-translate 通道（enqueueBookTranslateAndWait
  * 阻塞等结算，保持"完成后告知结果"语义）；翻译完成后自动顺带句级对齐（与 UI 行为一致，

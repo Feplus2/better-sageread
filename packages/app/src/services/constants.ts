@@ -612,7 +612,7 @@ export const HIGHLIGHT_COLOR_RGBA: Record<HighlightColor, string> = {
   violet: "rgba(167, 139, 250, 0.3)", // violet-400 with 30% opacity
 };
 
-// ─── 批次 4d 标注镜像：CSS Custom Highlight 注册名（docs/book-translation-plan.md） ───
+// ─── 批次 4d 标注镜像：CSS Custom Highlight 注册名（docs/plans/book-translation-plan.md） ───
 // 与 hover 联动层（book-align-hover）分开注册；命名对齐论文侧 paper-anno[-{style}]-{color}-tgt。
 // style.ts 注入 ::highlight 规则与 use-annotation-mirror.ts 的 set/delete 共用同一套命名。
 

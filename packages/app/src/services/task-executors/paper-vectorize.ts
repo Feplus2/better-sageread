@@ -1,5 +1,5 @@
 /**
- * 论文向量化通道执行器（P2-3，docs/task-queue-p2-plan.md）。
+ * 论文向量化通道执行器（P2-3，docs/archive/task-queue-p2-plan.md）。
  *
  * 迁移自 paper-task-store 的 vectorizeQueue/drainVectorize 与 trackSoloVectorize（迁移而非重写）：
  * - 注册表打点（paper-task-registry 的 vectorize 槽，解析×向量化互斥的事实源不变）；

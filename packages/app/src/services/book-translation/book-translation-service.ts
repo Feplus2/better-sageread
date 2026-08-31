@@ -1,5 +1,5 @@
 /**
- * 书籍翻译服务（全书平行译本，docs/book-translation-plan.md）。
+ * 书籍翻译服务（全书平行译本，docs/plans/book-translation-plan.md）。
  *
  * 产物：{appDataDir}/books/{bookId}/translation/{spineIndex}.json（按章分文件 sidecar，
  * 原 EPUB 永远只读）。结构平移论文侧 translation-zh.json：

@@ -1,4 +1,4 @@
-// 卡 1 + 卡 2 CDP 实盘验证（docs/book-convert-queue-plan.md 验收口径）：
+// 卡 1 + 卡 2 CDP 实盘验证（docs/plans/book-convert-queue-plan.md 验收口径）：
 // A. 通道注册 + translateBook 工具注册
 // B. 冲突矩阵（occupyForRecovery 注入假占用，零 token 消耗）：同书互斥提示语、异书豁免
 // C. 造书：导入小 EPUB（2 章 12 段英文；经 %TEMP% 路径绕开 plugin-fs 作用域）

@@ -8,7 +8,7 @@ import { create } from "zustand";
  * - vectorizePercent：每篇向量化百分比（卡片圆环；由通道执行器/恢复扫描/页面监听喂）；
  * - readerTranslate：阅读器单篇翻译的右下角小卡（执行器回写；阅读器页内由栈禁区隐藏）；
  * - progress.vectorize：刷新后的「恢复监控」卡（Rust 侧 index_paper 跨刷新存活的挂载扫描恢复，
- *   见 docs/task-queue-p2-plan.md §0 内存态保持原则）；
+ *   见 docs/archive/task-queue-p2-plan.md §0 内存态保持原则）；
  * - onSettled：通道收尾回调（PapersPage 注册刷新列表；由执行器模块的通道空闲沿触发）。
  */
 

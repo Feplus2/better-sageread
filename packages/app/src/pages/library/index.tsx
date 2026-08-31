@@ -55,7 +55,7 @@ export default function NewLibraryPage() {
   const openBookConvertDialog = useConvertProgressStore((s) => s.openBookConvertDialog);
   const closeBookConvertDialog = useConvertProgressStore((s) => s.closeBookConvertDialog);
 
-  // 图书翻译通道卡（卡 2，docs/book-convert-queue-plan.md）：book-translate 通道聚合折算，
+  // 图书翻译通道卡（卡 2，docs/plans/book-convert-queue-plan.md）：book-translate 通道聚合折算，
   // 论文批量翻译卡同款样式（共享组件 channel-progress-card），经 BottomRightPortal 入右下角
   // 共享栈（栈在阅读/聊天页禁区自动隐藏）。selectChannelAggregate 每次返回新对象——
   // 订阅稳定的 tasks/order 引用再 useMemo 聚合（global-convert-progress 同款写法）
