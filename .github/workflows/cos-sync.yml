@@ -28,9 +28,30 @@ jobs:
           set -e
           mkdir -p assets
           gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
-          # 只要安装包本体：剔除签名/更新清单/校验类小文件（官网 countable 同口径）
-          rm -f assets/*.sig assets/*.json assets/*.blockmap assets/*.txt
+          # 安装包本体剔除签名/更新清单/校验类小文件（官网 countable 同口径）；
+          # latest.json 单独保留——它是应用内更新通道的清单（下方改写后传桶根）
+          rm -f assets/*.sig assets/*.blockmap assets/*.txt
           ls -lh assets
+
+      - name: Rewrite latest.json download URL to CDN
+        env:
+          CDN_BASE: "https://dl.bettersageread.cn"
+          GH_BASE: "https://github.com/${{ github.repository }}/releases/download"
+        run: |
+          set -e
+          [ -f assets/latest.json ] || { echo "no latest.json in release, skip"; exit 0; }
+          # 把清单里的安装包地址从 GitHub 换成 CDN（只换 host 前缀，文件名不动）
+          node -e "
+            const fs = require('fs');
+            const j = JSON.parse(fs.readFileSync('assets/latest.json', 'utf8'));
+            for (const p of Object.values(j.platforms ?? {})) {
+              if (typeof p.url === 'string') {
+                p.url = p.url.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/[^/]+\//, '$CDN_BASE/');
+              }
+            }
+            fs.writeFileSync('assets/latest.json', JSON.stringify(j, null, 2));
+            console.log(JSON.stringify(j, null, 2));
+          "
 
       - name: Upload to Tencent COS
         env:

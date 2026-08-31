@@ -155,6 +155,7 @@
     "updater": {
       "active": true,
       "endpoints": [
+        "https://dl.bettersageread.cn/latest.json",
         "https://github.com/Feplus2/better-sageread/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxOUVFQTc0MDI0NzM0OEMKUldTTU5FY0NkT3Fld1kzUVNLVzFnSXFBeWpvcktCWWZnOUVZZTN0VGJLY05NckxDbDZCSFNnQlUK"
