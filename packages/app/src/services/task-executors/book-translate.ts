@@ -19,6 +19,7 @@ import {
   listBookTranslationSectionIndexes,
   translateBook,
 } from "@/services/book-translation/book-translation-service";
+import { useLibraryStore } from "@/store/library-store";
 import {
   type EnqueueResult,
   type TaskContext,
@@ -32,11 +33,13 @@ import { toast } from "sonner";
 
 /** book-translate 通道 payload：force=全量重翻（覆盖既有译文）；
  *  alignOnly=跳过翻译只跑对齐（翻译菜单对齐入口）；alignPhase=对齐相位（08-29 裁定拆开：
- *  sentence=句级【force 时重算句级并作废词级】；words=句级补齐+词级【force 只作用于词级】） */
+ *  sentence=句级【force 时重算句级并作废词级】；words=句级补齐+词级【force 只作用于词级】）；
+ *  solo=图书馆右键单本直发（结算后刷新图书馆列表，translation meta 即时反映到书卡右键菜单） */
 export interface BookTranslatePayload {
   force?: boolean;
   alignOnly?: boolean;
   alignPhase?: "sentence" | "words";
+  solo?: boolean;
 }
 
 /** 结算产物（TaskItem.result） */
@@ -157,6 +160,13 @@ async function executeBookTranslate(task: TaskItem, ctx: TaskContext): Promise<v
   } finally {
     // 收尾广播：阅读器若开着此书，对当前章注入译文/更新对齐（含取消场景的已翻部分）
     window.dispatchEvent(new CustomEvent("book-translation-updated", { detail: { bookId: task.targetId } }));
+    // 单本直发（图书馆右键）收尾刷新图书馆列表（translation meta 回写即时反映到书卡右键菜单；
+    // 对齐 book-vectorize solo 口径，批量/AI 路径不逐本刷新）
+    if (payload.solo)
+      useLibraryStore
+        .getState()
+        .refreshBooks()
+        .catch(() => {});
   }
 }
 
@@ -172,7 +182,8 @@ function dismissBookTranslateIfIdle(): void {
   if (!agg.current && agg.queuedCount === 0) st.dismissSettled("book-translate");
 }
 
-/** 单本入队（阅读器翻译下拉：翻译/重建句对齐/构建·重建词对齐）。拒入队不 toast，由调用方按 detail 提示 */
+/** 单本入队（阅读器翻译下拉：翻译/重建句对齐/构建·重建词对齐；图书馆右键：翻译/重新翻译 solo 直发）。
+ *  拒入队不 toast，由调用方按 detail 提示 */
 export function enqueueBookTranslate(input: { id: string; title: string } & BookTranslatePayload): EnqueueResult {
   dismissBookTranslateIfIdle();
   return useTaskCenterStore.getState().enqueue({
@@ -183,6 +194,7 @@ export function enqueueBookTranslate(input: { id: string; title: string } & Book
       force: input.force,
       alignOnly: input.alignOnly,
       alignPhase: input.alignPhase,
+      solo: input.solo,
     } satisfies BookTranslatePayload,
   });
 }

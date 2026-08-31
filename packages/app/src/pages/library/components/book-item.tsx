@@ -47,6 +47,12 @@ interface BookUpdateData {
   tags?: string[];
 }
 
+/** fixed-layout 探测缓存（bookId → 是否固定版式）：右键菜单翻译守卫用——该信息只在解析 EPUB 后
+ *  可知（rendition.layout），对每书每会话至多惰性解析一次；翻译执行器的 assertBookTranslatable
+ *  仍是权威兜底（探测失败不置灰，拒翻文案与阅读器下拉一致） */
+const fixedLayoutProbeCache = new Map<string, boolean>();
+const fixedLayoutProbePending = new Set<string>();
+
 interface BookItemProps {
   book: BookWithStatusAndUrls;
   viewMode?: "grid" | "list";
@@ -96,6 +102,43 @@ export default function BookItem({
     return null;
   });
   const vectorizeProgress: number | null = vectorizeTask ? vectorizeTask.percent : null;
+
+  // ── 翻译右键入口（与阅读器翻译下拉同通道 book-translate；菜单口径照论文页右键菜单） ──
+  // 守卫与阅读器下拉同一套：仅 EPUB；中文书禁（primaryLanguage=DB language 字段判定）；
+  // fixed-layout 禁（开菜单时惰性探测，见上模块级缓存）
+  const translationMeta = book.status?.metadata?.translation;
+  // 论文页口径：仅「已有完整译本」才显示「重新翻译」并 force 全量重翻；未翻译/部分/失败 → 幂等续翻
+  const hasCompleteTranslation = translationMeta?.status === "complete";
+  const bookLanguage = (book.language ?? "").toLowerCase();
+  const looksChinese = bookLanguage.includes("zh") || bookLanguage.includes("chi") || bookLanguage.includes("中文");
+  const [isFixedLayout, setIsFixedLayout] = useState(() => fixedLayoutProbeCache.get(book.id) === true);
+  const probeTranslateGuard = useCallback(() => {
+    if (book.format !== "EPUB" || looksChinese) return;
+    const cached = fixedLayoutProbeCache.get(book.id);
+    if (cached !== undefined) {
+      if (cached !== isFixedLayout) setIsFixedLayout(cached);
+      return;
+    }
+    if (fixedLayoutProbePending.has(book.id)) return;
+    fixedLayoutProbePending.add(book.id);
+    void import("@/services/book-translation/book-translation-service")
+      .then((m) => m.openBookDocument(book.id))
+      .then(({ bookDoc }) => {
+        const fixed = bookDoc.rendition?.layout === "pre-paginated";
+        fixedLayoutProbeCache.set(book.id, fixed);
+        setIsFixedLayout(fixed);
+      })
+      .catch(() => {})
+      .finally(() => fixedLayoutProbePending.delete(book.id));
+  }, [book.id, book.format, looksChinese, isFixedLayout]);
+  const translateGuardReason =
+    book.format !== "EPUB"
+      ? "仅 EPUB 书籍支持对照翻译"
+      : looksChinese
+        ? "中文书籍无需对照翻译"
+        : isFixedLayout
+          ? "固定版式（fixed-layout）书籍不支持对照翻译"
+          : null;
 
   // 数据库标签（供右键菜单“管理标签”子菜单映射真实标签 ID）
   const [databaseTags, setDatabaseTags] = useState<Tag[]>([]);
@@ -298,6 +341,31 @@ export default function BookItem({
     else toast.info(res.detail ?? "该书已在向量化队列中");
   }, [book.id, book.title]);
 
+  // 翻译（book-translate 通道，与阅读器翻译下拉同入口薄壳）：默认幂等续翻；已有完整译本走
+  // 「重新翻译」= force 全量重翻，确认框与论文页右键重翻同款（pages/papers/index.tsx handleBatchTranslate）。
+  // book-translate × book-vectorize × book-convert 同书互斥由统一冲突检查器拒入（detail 透传 toast）
+  const handleTranslateBook = useCallback(async () => {
+    if (translateGuardReason) return;
+    let force = false;
+    if (hasCompleteTranslation) {
+      let confirmed = false;
+      try {
+        confirmed = await ask(`将全量重新翻译《${book.title}》：已有译文作废重翻，耗时与额度消耗与首次翻译相当。`, {
+          title: "重新翻译",
+          kind: "warning",
+        });
+      } catch (error) {
+        console.error("确认对话框失败:", error);
+      }
+      if (!confirmed) return;
+      force = true;
+    }
+    const { enqueueBookTranslate } = await import("@/services/task-executors/book-translate");
+    const res = enqueueBookTranslate({ id: book.id, title: book.title, force, solo: true });
+    if (res.ok) toast.success("已加入翻译队列");
+    else toast.info(res.detail ?? "该书已在翻译队列中");
+  }, [book.id, book.title, hasCompleteTranslation, translateGuardReason]);
+
   const handleTagToggle = useCallback(
     async (tagId: string) => {
       if (!onUpdate) return;
@@ -431,6 +499,21 @@ export default function BookItem({
           <ContextMenuItem onClick={() => setShowEmbeddingDialog(true)}>向量化测试</ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
+      {translateGuardReason ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* 置灰项 pointer-events-none，包一层 span 让 tooltip 可悬停（说明禁用原因） */}
+            <span className="block">
+              <ContextMenuItem disabled>{hasCompleteTranslation ? "重新翻译" : "翻译"}</ContextMenuItem>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{translateGuardReason}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <ContextMenuItem onClick={() => void handleTranslateBook()}>
+          {hasCompleteTranslation ? "重新翻译" : "翻译"}
+        </ContextMenuItem>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => setShowEditDialog(true)}>编辑信息</ContextMenuItem>
       {book.coverUrl && <ContextMenuItem onClick={() => handleDownloadImage()}>下载图片</ContextMenuItem>}
@@ -465,7 +548,12 @@ export default function BookItem({
 
   return (
     <>
-      <ContextMenu onOpenChange={setMenuOpen}>
+      <ContextMenu
+        onOpenChange={(open) => {
+          setMenuOpen(open);
+          if (open) probeTranslateGuard();
+        }}
+      >
         <ContextMenuTrigger asChild>
           <div className="group cursor-pointer" onClick={handleClick}>
             <div
@@ -528,7 +616,11 @@ export default function BookItem({
                 <div className="flex-1">{renderProgress()}</div>
                 <div className="flex items-center gap-2">
                   {renderVectorizationStatus()}
-                  <DropdownMenu>
+                  <DropdownMenu
+                    onOpenChange={(open) => {
+                      if (open) probeTranslateGuard();
+                    }}
+                  >
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
@@ -563,6 +655,23 @@ export default function BookItem({
                           <DropdownMenuItem onClick={() => setShowEmbeddingDialog(true)}>向量化测试</DropdownMenuItem>
                         </DropdownMenuSubContent>
                       </DropdownMenuSub>
+                      {translateGuardReason ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            {/* 置灰项 pointer-events-none，包一层 span 让 tooltip 可悬停（说明禁用原因） */}
+                            <span className="block">
+                              <DropdownMenuItem disabled>
+                                {hasCompleteTranslation ? "重新翻译" : "翻译"}
+                              </DropdownMenuItem>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="right">{translateGuardReason}</TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <DropdownMenuItem onClick={() => void handleTranslateBook()}>
+                          {hasCompleteTranslation ? "重新翻译" : "翻译"}
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setShowEditDialog(true)}>编辑信息</DropdownMenuItem>
                       {book.coverUrl && (

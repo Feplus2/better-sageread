@@ -112,6 +112,9 @@ interface TaskCenterState {
   /** 移除单个任务（队列行删除 / 图书转换成功后自动出队）：已结算直接移除；
    *  排队按取消结算 waiter 后移除；运行中拒删（先 cancelTask）。返回是否移除 */
   removeTask: (taskId: string) => boolean;
+  /** 排队中任务的 payload 热更新（浅合并 patch；转换窗口徽标改选项用）：仅 queued 允许，
+   *  running/已结算/镜像拒绝。返回是否更新——调用方据 false 提示「任务已开始运行」 */
+  updateQueuedTaskPayload: (taskId: string, patch: Record<string, unknown>) => boolean;
   /** 刷新恢复占用（P2-4 paper-parse；P3 起按并发槽计）：以 running 态注入任务并占住一个并发槽
    * （旧 paperDraining 占位等价物）——占用期间新 enqueue 只能填剩余空槽，settleRecoveredTask
    *  释放后自动接续。返回绑定到该任务的 report/reportExtra/setResult 与取消 signal；
@@ -355,6 +358,13 @@ export const useTaskCenterStore = create<TaskCenterState>()((set, get) => ({
       delete tasks[taskId];
       return { tasks, order: s.order.filter((id) => id !== taskId) };
     });
+    return true;
+  },
+
+  updateQueuedTaskPayload: (taskId, patch) => {
+    const task = get().tasks[taskId];
+    if (!task || task.mirror || task.status !== "queued") return false;
+    patchTask(taskId, { payload: { ...(task.payload as Record<string, unknown>), ...patch } });
     return true;
   },
 

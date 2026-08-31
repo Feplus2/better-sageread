@@ -296,6 +296,56 @@ await check("排队移除：queued 任务 removeTask 拒 waiter；运行中拒�
   await first;
 });
 
+await check("排队 payload 热更新：queued 浅合并生效且执行器读到新值；running/已结算/镜像拒改", async () => {
+  let seenPayload = null;
+  registerTaskChannel("book-convert", {
+    executor: async (task, ctx) => {
+      seenPayload = task.payload;
+      await sleep(5);
+      ctx.report(100, "完");
+    },
+    concurrency: 1,
+  });
+  const s = useTaskCenterStore.getState();
+  // 占位任务先把唯一并发槽占成 running，后续入队保持 queued
+  const running = s.enqueueAndWait({
+    channel: "book-convert",
+    targetId: "run.pdf",
+    title: "跑",
+    payload: { ocr: false, translate: "none" },
+  });
+  const queued = s.enqueue({
+    channel: "book-convert",
+    targetId: "q2.pdf",
+    title: "排",
+    payload: { pdfPath: "q2.pdf", ocr: false, translate: "none", autoImport: true },
+  });
+  assert(queued.ok, "排队任务应入队成功");
+  // queued 可改：浅合并只动 patch 字段，其余保留
+  assert(s.updateQueuedTaskPayload(queued.taskId, { ocr: true, translate: "zh" }) === true, "queued 应可更新 payload");
+  const patched = useTaskCenterStore.getState().tasks[queued.taskId];
+  assert(
+    patched.payload.ocr === true && patched.payload.translate === "zh" && patched.payload.autoImport === true,
+    `payload 合并异常: ${JSON.stringify(patched.payload)}`,
+  );
+  // running 拒改
+  const runningTask = Object.values(useTaskCenterStore.getState().tasks).find((t) => t.status === "running");
+  assert(s.updateQueuedTaskPayload(runningTask.taskId, { ocr: true }) === false, "running 应拒改");
+  // 镜像任务拒改
+  const mirrorId = s.beginMirrorTask({ channel: "book-convert", targetId: "m.pdf", title: "镜像" });
+  assert(s.updateQueuedTaskPayload(mirrorId, { ocr: true }) === false, "镜像应拒改");
+  s.endMirrorTask(mirrorId);
+  await running;
+  // 执行器在槽位释放后起跑，读到的应是热更新后的 payload
+  await useTaskCenterStore.getState().waitTask(queued.taskId);
+  assert(
+    seenPayload?.ocr === true && seenPayload?.translate === "zh",
+    `执行器应读到更新后 payload，got ${JSON.stringify(seenPayload)}`,
+  );
+  // 已结算拒改
+  assert(s.updateQueuedTaskPayload(queued.taskId, { ocr: false }) === false, "已结算应拒改");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 rmSync(outDir, { recursive: true, force: true });
 process.exit(failures.length > 0 ? 1 : 0);

@@ -1,10 +1,13 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  type BookConvertPayload,
   type BookConvertResult,
   enqueueBookConvertBatch,
   retryBookConvertTask,
@@ -14,7 +17,8 @@ import { useConverterStore } from "@/store/converter-store";
 import { type TaskItem, selectChannelAggregate, useTaskCenterStore } from "@/store/task-center-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Ban, CheckCircle2, Clock, FileDown, FileText, Loader2, RotateCcw, X, XCircle } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 /**
  * 图书转换任务台（卡 1，docs/book-convert-queue-plan.md）：
@@ -55,6 +59,114 @@ function RowStatusIcon({ status }: { status: TaskItem["status"] }) {
   }
 }
 
+const translateOptionLabel = (value: string) =>
+  TRANSLATE_OPTIONS.find((o) => o.value === value)?.label ?? TRANSLATE_OPTIONS[0].label;
+
+/** 行上选项徽标：展示该行入队时的 ocr/translate 快照（payload）。
+ *  排队中（queued）可点——弹出小编辑改两个选项，保存经 updateQueuedTaskPayload 热更新 payload；
+ *  running/已结算只读（仅显示开启的项）。排队行两枚徽标常显（含关态），否则关着的选项没有改入的入口 */
+function QueueRowOptions({ task }: { task: TaskItem }) {
+  const payload = task.payload as BookConvertPayload | undefined;
+  const editable = task.status === "queued";
+  const [open, setOpen] = useState(false);
+  const ocr = payload?.ocr === true;
+  const translate = payload?.translate || "none";
+  const [editOcr, setEditOcr] = useState(ocr);
+  const [editTranslate, setEditTranslate] = useState(translate);
+
+  // 打开编辑时同步该行当前快照（别带上一轮编辑残值）
+  useEffect(() => {
+    if (open) {
+      setEditOcr(ocr);
+      setEditTranslate(translate);
+    }
+  }, [open, ocr, translate]);
+
+  if (!payload) return null;
+
+  const handleSave = () => {
+    const ok = useTaskCenterStore
+      .getState()
+      .updateQueuedTaskPayload(task.taskId, { ocr: editOcr, translate: editTranslate });
+    // 竞态：编辑期间任务起跑 → 拒改，提示后按只读口径收尾
+    if (ok) toast.success(`已更新排队任务选项：${task.title}`);
+    else toast.info("任务已开始运行，选项不可再改");
+    setOpen(false);
+  };
+
+  const badges = (
+    <>
+      <Badge variant={ocr ? "secondary" : "outline"} className={ocr ? undefined : "text-muted-foreground"}>
+        {ocr ? "强制 OCR" : "OCR 关"}
+      </Badge>
+      <Badge
+        variant={translate !== "none" ? "secondary" : "outline"}
+        className={translate !== "none" ? undefined : "text-muted-foreground"}
+      >
+        {translateOptionLabel(translate)}
+      </Badge>
+    </>
+  );
+
+  if (!editable) {
+    // running/已结算：只读，且只列开启的项（全关即不占位）
+    if (!ocr && translate === "none") return null;
+    return (
+      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        {ocr && <Badge variant="secondary">强制 OCR</Badge>}
+        {translate !== "none" && <Badge variant="secondary">{translateOptionLabel(translate)}</Badge>}
+      </div>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <span
+          className="mt-1.5 flex w-fit cursor-pointer flex-wrap items-center gap-1"
+          title="排队中——点击调整本任务的转换选项"
+        >
+          {badges}
+        </span>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72">
+        <div className="space-y-3">
+          <p className="text-muted-foreground text-xs">本任务选项（仅排队中可改，不影响其他行与默认选项）</p>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor={`row-ocr-${task.taskId}`} className="text-sm">
+              强制 OCR
+            </Label>
+            <Switch id={`row-ocr-${task.taskId}`} checked={editOcr} onCheckedChange={setEditOcr} />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm">全书翻译</Label>
+            <Select value={editTranslate} onValueChange={setEditTranslate}>
+              <SelectTrigger className="h-8 w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRANSLATE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setOpen(false)}>
+              取消
+            </Button>
+            <Button size="sm" className="h-7 px-2.5 text-xs" onClick={handleSave}>
+              保存
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /** 队列行：文件名 + 状态（排队/转换中带进度/完成/失败/已取消）+ 行操作 */
 function QueueRow({ task }: { task: TaskItem }) {
   const cancelTask = () => useTaskCenterStore.getState().cancelTask(task.taskId);
@@ -83,6 +195,9 @@ function QueueRow({ task }: { task: TaskItem }) {
             {task.status === "cancelled" && "已取消"}
           </span>
         </div>
+
+        {/* 选项徽标：该行入队时快照；queued 可点改，running/已结算只读 */}
+        <QueueRowOptions task={task} />
 
         {task.status === "running" && (
           <>
@@ -221,9 +336,15 @@ export default function ConverterPage() {
           <span className="text-xs">仅支持 .pdf 格式 · 入队即转，完成自动导入书库</span>
         </button>
 
-        {/* 配置（作用于此后入队的任务；已入队行持入队时快照） */}
+        {/* 新入队默认选项（作用于此后入队的任务；已入队行持入队时快照，排队中可点行上徽标单独改） */}
         <section className="rounded-xl border dark:border-neutral-700">
           <div className="divide-y dark:divide-neutral-800">
+            <div className="px-4 py-2.5">
+              <p className="font-medium text-sm">新入队默认选项</p>
+              <p className="text-muted-foreground text-xs">
+                只作用于此后拖入/选入的 PDF；已入队任务各持入队时快照，排队中的行可点行上徽标单独调整
+              </p>
+            </div>
             <div className="flex items-center justify-between gap-4 px-4 py-3.5">
               <div className="space-y-0.5">
                 <Label htmlFor="ocr-switch" className="text-sm">
