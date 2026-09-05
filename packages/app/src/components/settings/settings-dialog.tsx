@@ -25,6 +25,7 @@ import LlamaSettings from "./llama";
 import ProviderDetailSettings from "./provider-detail";
 import ProvidersSettings from "./providers";
 import ProxySettings from "./proxy-settings";
+import SciverseSettings from "./sciverse-settings";
 import SecretVault from "./secret-vault";
 import ShortcutsSettings from "./shortcuts";
 import SyncSettings from "./sync";
@@ -44,6 +45,7 @@ type SettingsKey =
   | "sync"
   | "converter"
   | "web-search"
+  | "sciverse"
   | "agent"
   | "proxy"
   | "model-providers"
@@ -104,6 +106,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     { key: "llama", label: "向量模型" },
     { key: "tts", label: "语音模型" },
     { key: "web-search", label: "网络搜索" },
+    { key: "sciverse", label: "科研搜索" },
     { key: "agent", label: "Agent" },
     { key: "proxy", label: "网络代理" },
     { key: "sync", label: "数据同步" },
@@ -149,6 +152,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         return <ConverterSettings />;
       case "web-search":
         return <WebSearchSettings />;
+      case "sciverse":
+        return <SciverseSettings />;
       case "agent":
         return <AgentSettings />;
       case "proxy":

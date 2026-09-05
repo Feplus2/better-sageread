@@ -28,12 +28,19 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const { state, input, output, type } = toolPart;
   const { stopScroll } = useStickToBottomContext();
-  const isMindmap = type === TOOL_NAME_MAP.mindmap;
+  // D8 目录牌模式：useTool 转发卡的真实工具名在 input.tool（output 即原工具结果结构），
+  // 还原原名做类型判定与标题显示——转发卡与直达卡同待遇（眼睛图标、结果计数等）
+  const forwarded = type === "useTool" && typeof input?.tool === "string" ? String(input.tool) : null;
+  const effectiveType = forwarded ? (TOOL_NAME_MAP[forwarded] ?? forwarded) : type;
+  const isMindmap = effectiveType === TOOL_NAME_MAP.mindmap;
   const isRagTool =
-    type === TOOL_NAME_MAP.ragSearch || type === TOOL_NAME_MAP.ragContext || type === TOOL_NAME_MAP.ragToc;
-  const isWebSearch = type === TOOL_NAME_MAP.webSearch;
-  const isGetSkillsTool = type === TOOL_NAME_MAP.getSkills;
-  const isWriteFile = type === TOOL_NAME_MAP.writeFile;
+    effectiveType === TOOL_NAME_MAP.ragSearch ||
+    effectiveType === TOOL_NAME_MAP.ragContext ||
+    effectiveType === TOOL_NAME_MAP.ragToc;
+  const isWebSearch = effectiveType === TOOL_NAME_MAP.webSearch;
+  const isSciverse = effectiveType === TOOL_NAME_MAP.sciverseSearch;
+  const isGetSkillsTool = effectiveType === TOOL_NAME_MAP.getSkills;
+  const isWriteFile = effectiveType === TOOL_NAME_MAP.writeFile;
 
   // E5：writeFile 产物可预览格式（按目标路径扩展名；内容取自 input.content，零 IO）
   const writeFilePreviewFormat: PreviewFormat | null = (() => {
@@ -146,8 +153,8 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
             <div className="flex h-auto w-full cursor-pointer justify-between gap-2 rounded-b-none px-3 py-2 font-normal hover:bg-muted">
               <div className="flex flex-1 items-center gap-2 overflow-hidden">
                 <div>{getStateIcon()}</div>
-                <span className="flex-nowrap text-sm">{type}</span>
-                {type === TOOL_NAME_MAP.ragSearch && input?.question && (
+                <span className="flex-nowrap text-sm">{effectiveType}</span>
+                {effectiveType === TOOL_NAME_MAP.ragSearch && input?.question && (
                   <span className="flex-1 overflow-hidden truncate font-medium font-mono text-sm">
                     {String(input?.question)}
                   </span>
@@ -196,7 +203,7 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
                     <TooltipContent side="bottom">查看详情</TooltipContent>
                   </Tooltip>
                 )}
-                {isWebSearch && state === "output-available" && onViewDetail && (
+                {(isWebSearch || isSciverse) && state === "output-available" && onViewDetail && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div

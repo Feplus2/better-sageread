@@ -11,6 +11,7 @@ import ModelSelector from "@/components/side-chat/model-selector";
 import { SearchEngineSelector } from "@/components/side-chat/search-engine-selector";
 import { MindmapViewer } from "@/components/tools/mindmap-viewer";
 import { RagResultViewer } from "@/components/tools/rag-result-viewer";
+import { SciverseViewer } from "@/components/tools/sciverse-viewer";
 import { WebSearchViewer } from "@/components/tools/web-search-viewer";
 import { Button } from "@/components/ui/button";
 import { useAutoPreview } from "@/hooks/use-auto-preview";
@@ -238,7 +239,11 @@ function ChatPage() {
   const renderToolContent = () => {
     if (!toolDetail?.output?.results) return null;
 
-    const toolType = toolDetail.type;
+    // D8 目录牌模式：useTool 转发卡的真实工具名在 input.tool（output 即原工具结果结构）
+    const rawType = toolDetail.type;
+    const forwarded =
+      rawType === "useTool" && typeof toolDetail.input?.tool === "string" ? String(toolDetail.input.tool) : null;
+    const toolType = forwarded ? (TOOL_NAME_MAP[forwarded] ?? forwarded) : rawType;
 
     if (toolType === TOOL_NAME_MAP.mindmap) {
       return <MindmapViewer markdown={toolDetail.output.results.markdown} />;
@@ -255,6 +260,10 @@ function ChatPage() {
 
     if (toolType === TOOL_NAME_MAP.webSearch) {
       return <WebSearchViewer results={toolDetail.output.results} />;
+    }
+
+    if (toolType === TOOL_NAME_MAP.sciverseSearch) {
+      return <SciverseViewer results={toolDetail.output.results} />;
     }
 
     return null;

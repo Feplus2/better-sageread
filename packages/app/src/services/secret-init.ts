@@ -1,6 +1,7 @@
 import { useConverterStore } from "@/store/converter-store";
 import { useLlamaStore } from "@/store/llama-store";
 import { useProviderStore } from "@/store/provider-store";
+import { useSciverseStore } from "@/store/sciverse-store";
 import { useTTSStore } from "@/store/tts-store";
 import { useWebSearchStore } from "@/store/web-search-store";
 import { secretGetForRuntime, secretSet } from "./secret-service";
@@ -151,6 +152,10 @@ async function loadKeyringIntoMemory(): Promise<void> {
   if (zhipu) webSearchStore.setZhipuKey(zhipu);
   if (tavily) webSearchStore.setTavilyKey(tavily);
   if (serper) webSearchStore.setSerperKey(serper);
+
+  // 科研搜索（Sciverse）
+  const sciverseToken = await readSecret("sciverse", "token");
+  if (sciverseToken) useSciverseStore.getState().setToken(sciverseToken);
 
   // TTS（DashScope）
   const ttsKey = await readSecret("tts", "dashscope");

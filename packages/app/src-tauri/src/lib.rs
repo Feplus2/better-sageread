@@ -91,6 +91,7 @@ use crate::core::{
         create_thread, delete_thread, edit_thread, get_all_threads, get_global_threads,
         get_latest_thread_by_book_id, get_thread_by_id, get_threads_by_book_id,
     },
+    sciverse::sciverse_search,
     web_search::web_search,
     zotero::{
         inject_zotero_key, list_paper_dedup_keys, zotero_get_state, zotero_scan_library,
@@ -298,6 +299,7 @@ pub fn run() {
             sync_get_ui_config,
             sync_update_prefs,
             web_search,
+            sciverse_search,
             // converter (PDF → EPUB)
             convert_pdf_to_epub,
             cancel_convert,

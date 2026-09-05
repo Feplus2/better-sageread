@@ -1,5 +1,5 @@
 /**
- * J2：模型多模态（图片）能力表 —— 纯静态枚举（2026-08-27 定稿）。
+ * J2：模型多模态（图片）能力表 —— 纯静态枚举（2026-08-27 定稿，最近更新 2026-09-05）。
  *
  * 范围（用户裁定）：**能生成文本的聊天模型**——只回答"text-to-text 还是 any-to-text
  * （含图片输入）"；图像/视频生成、语音系不在本表范围。
@@ -30,6 +30,7 @@ export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
 // ---------------------------------------------------------------------------
 const MODEL_VISION: Readonly<Record<string, boolean>> = {
   // ---- OpenAI（官方 Models 页 "All latest OpenAI models support text and image input"）----
+  "gpt-6-astra": true, // 2026-09-03 发布、09-05 起 API 全量开放，官方型号页 Input: Text, image（2026-09-05 核实）
   "gpt-5.6-sol": true,
   "gpt-5.6-sol-ultra": true,
   "gpt-5.6-terra": true,
@@ -74,6 +75,7 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "gpt-oss-20b": false, // 开放权重，官方页仅文本/推理/工具
 
   // ---- Anthropic（官方 "All current Claude models support text and image input"；3.5-haiku 与远古系例外）----
+  "claude-fable-5-1": true, // 2026-09-01 上线（Fable 5 继任者），官方文档 text & image input（2026-09-04 核实）
   "claude-fable-5": true,
   "claude-mythos-5": true,
   "claude-opus-5": true,

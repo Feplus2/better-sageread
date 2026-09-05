@@ -9,7 +9,7 @@
 
 **各 scope 实际挂载**
 
-- **shared（三 scope 通用，13 个，`registry.ts:106-187`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp
+- **shared（三 scope 通用，14 个，`registry.ts:106-193`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp
 - **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
 - **central 专属（23 个，`registry.ts:191-335`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes
 - **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底）、manageNotes（绑定当前书）
@@ -124,6 +124,8 @@
 **审计日志**：`{appData}/agent-audit/*.jsonl`（如 `mcp-stdio.jsonl`、`local-api.jsonl`、`tool-catalog.jsonl`）。所有写盘日志先过 `redact_secrets` 脱敏（`core/secrets/mod.rs:244-279`），脱敏模式清单与前端 `ai/utils/secret-patterns.ts` 保持一致。`full` 档静默放行写操作时也照写审计。`tool-catalog.jsonl` 是目录牌模式观测（P4-4）：describeTool/useTool 调用序列（时间戳+进程内单调 seq+工具名+参数键名，参数值绝不进日志），供复盘「查牌→执行」链路。
 
 **联网搜索**：`core/web_search.rs` 双通道——内置 HTML 爬取（Bing/百度/DuckDuckGo）+ API provider（Tavily/Serper/SearXNG），key 从 keyring 取；前端工具为 shared 的 `webSearch`。
+
+**科研搜索（Sciverse，2026-09-05 起）**：`core/sciverse.rs` 走 OpenDataLab 科学证据数据层（`https://api.sciverse.space`，Bearer Token 从 keyring `sciverse:token` 取，前端不传密钥）；前端工具为 shared 的 `sciverseSearch`（`ai/tools/sciverse-search.ts`），返回带论文标题/页码/偏移坐标的原文证据片段。设置页「科研搜索」开关+Token（`settings/sciverse-settings.tsx`），未启用时工具报错引导开启；结果查看器 `tools/sciverse-viewer.tsx` 与 webSearch 同链路（目录牌转发卡在 prompt-kit/tool.tsx 的 effectiveType 还原）。工具分工口径：学术证据检索走它，通用网页/实时资讯仍走 webSearch（两边 description 与 central-prompt 已互相标注）。
 
 ## 10. 附：消息清洗与 UI 展示细节
 

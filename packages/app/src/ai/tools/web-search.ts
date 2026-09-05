@@ -10,7 +10,7 @@ interface WebSearchResult {
 }
 
 export const webSearchTool = tool({
-  description: `联网搜索实时网络信息。
+  description: `联网搜索实时网络信息（学术/科研类问题请改用 sciverseSearch 科研搜索，拿论文原文证据）。
 
 🎯 **适用场景**：
 • 用户询问书籍内容之外的实时信息、新闻、资料

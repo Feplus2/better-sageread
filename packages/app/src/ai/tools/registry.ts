@@ -60,6 +60,7 @@ import {
   mindmapTool,
   notesTool,
   readImageTool,
+  sciverseSearchTool,
   webSearchTool,
 } from "./index";
 import { createManageNotesTool } from "./manage-notes";
@@ -145,6 +146,12 @@ registerTools([
     scope: "shared",
     tool: webSearchTool as Tool,
     description: "网络搜索",
+  },
+  {
+    name: "sciverseSearch",
+    scope: "shared",
+    tool: sciverseSearchTool as Tool,
+    description: "科研搜索（学术证据检索）",
   },
   // P1 · 工作区文件/执行工具（2026-08-05 拍板下放：reader/paper 读着读着整理笔记落盘是直觉场景；
   // 安全分档由 transport 的 tool-guard 统一包装，三 scope 一致生效；网络外发类仍锁 central）

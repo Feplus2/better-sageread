@@ -1,5 +1,5 @@
 /**
- * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿）。
+ * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，最近更新 2026-09-05）。
  *
  * 用户可见档位 = 模型原生档位（不再经过 off/low/medium/high 四档映射）：
  * grok-4.6 支持 none/low/medium/high/xhigh → UI 直接呈现这五项；
@@ -112,6 +112,15 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
     transport: "effort",
   },
   "gpt-5.6-luna": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
+  // GPT-6 Astra（2026-09-03 发布、09-05 起 API 全量开放；developers.openai.com/api/docs/models/gpt-6-astra，2026-09-05 核实）：
+  // 思考恒开——官方明确不支持 none；effort 五档 low/medium/high/xhigh/max。
+  // 「GPT-6 Astra Pro」是 ChatGPT 订阅档位/Pro mode（reasoning.mode:"pro" 参数），非独立型号 ID，不入表
+  "gpt-6-astra": {
+    alwaysOn: true,
+    offParam: null,
+    levels: ["low", "medium", "high", "xhigh", "max"],
+    transport: "effort",
+  },
 
   // ---- Google Gemini（ai.google.dev/gemini-api/docs/thinking + /gemini-3）----
   "gemini-2.5-pro": { alwaysOn: false, offParam: "budget:0", levels: ["budget"], transport: "budget" },

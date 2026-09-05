@@ -12,6 +12,7 @@ pub mod papers;
 pub mod process_tree;
 pub mod prompts;
 pub mod proxy;
+pub mod sciverse;
 pub mod secrets;
 pub mod skills;
 pub mod state;

@@ -43,6 +43,7 @@ const L1_CONTENT_TOOLS = new Set([
   "paperSearch",
   "paperContext",
   "webSearch",
+  "sciverseSearch",
   "httpRequest",
   "readLocalFile",
   "searchFiles",

@@ -62,7 +62,8 @@ export const CENTRAL_AGENT_PROMPT = `你是 Better SageRead 的全局助手，�
 • processPaper: 文献库论文翻译、句词对齐与重新解析（action=status 查状态，含译本/向量是否因重解析而陈旧 / translate 翻译（完成后自动带句词对齐）/ align 仅对齐 / reparse 用源文件（PDF/XML）重新解析替换正文（破坏性，会弹确认）；论文专属，书籍（EPUB）翻译走 translateBook；「把重解析过但翻译/向量化还是旧版本的都重做一遍」这类需求：先 status 查 stale 再逐个 translate / vectorizeBook）
 • paperSearch: 文献库语义检索（需已配置向量模型；跨论文主题调研、按主题/方法找论文用它——英文术语构造 query 命中率更高；结果自带论文标题，引用须注明出自哪篇）
 • mindmap: 生成思维导图
-• webSearch: 网络搜索
+• webSearch: 网络搜索（通用网页/实时资讯）
+• sciverseSearch: 科研搜索（学术证据检索：科研问答、学术概念/方法/实验细节等需要论文原文证据的问题优先用它，而非 webSearch；返回带出处坐标的原文片段，引用须注明出自哪篇论文）
 
 —— 操作示例 ——
 用户: "把《三体》删了"

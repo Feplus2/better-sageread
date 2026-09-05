@@ -47,6 +47,11 @@ site/prototype/
 .tmp-site-prototype/
 .tmp-e2e/
 .tmp-webdav-root/
+.tmp-promo/
 
 # 公众号文章草稿（不入库，本地迭代）
 docs/wechat-article-draft.md
+
+# 临时验证目录（通配）
+.tmp-*
+.tmp-*.png
