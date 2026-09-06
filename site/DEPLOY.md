@@ -120,6 +120,12 @@ git push
 4. Pages 侧（网页本体）：自适应频控 + AI 爬虫处置等已在控制台开启。
 5. 设备维度（同设备换 IP 反复烧）免费版做不到精确识别，IP+UA 组合近似；真有规模
    攻击再考虑 Bot 管理（付费）。
+6. **清单缓存刷新（2026-09-06 起）**：`latest.json`/`site-data.*.json` 是固定 URL 的
+   更新清单，CDN 边缘 TTL 陈旧会让「检查更新」拿到旧版本（且陈旧但合法的响应不会
+   触发 GitHub 兜底）。cos-sync workflow 上传后已自动调 `cdn:PurgeUrlsCache` 刷新——
+   **前提是 CAM 子用户（COS 那对密钥）加授 CDN 权限**：CAM 控制台挂
+   `QcloudCDNFullAccess`（或自定义策略放行 `cdn:PurgeUrlsCache`）。未授权时该步骤
+   仅告警不阻断同步。手动救急：CDN 控制台 → 缓存刷新 → 刷这两个 URL。
 
 ## 7. 绑定自己的域名（正式上线的必要步骤）
 

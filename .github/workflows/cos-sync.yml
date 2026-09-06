@@ -115,6 +115,37 @@ jobs:
             if [ "$ok" != 1 ]; then echo "FAILED: $name"; exit 1; fi
           done
 
+      # 刷新 CDN 边缘缓存：latest.json / site-data 是固定 URL 的更新清单，
+      # 边缘 TTL 陈旧会让「检查更新」拿到旧版本（2026-09-06 v0.3.2 实测卡点：
+      # CDN 边缘停在 0.3.1，且陈旧但合法的响应不会触发 GitHub 兜底）。
+      # 失败仅告警不阻断同步；告警多半是该 CAM 子用户缺 CDN 权限。
+      - name: Purge CDN edge cache for manifests
+        continue-on-error: true
+        env:
+          TENCENT_COS_SECRET_ID: ${{ secrets.TENCENT_COS_SECRET_ID }}
+          TENCENT_COS_SECRET_KEY: ${{ secrets.TENCENT_COS_SECRET_KEY }}
+        run: |
+          pip install -q tencentcloud-sdk-python-cdn
+          python - <<'EOF'
+          import os
+          from tencentcloud.common import credential
+          from tencentcloud.cdn.v20180606 import cdn_client, models
+          cred = credential.Credential(os.environ["TENCENT_COS_SECRET_ID"],
+                                       os.environ["TENCENT_COS_SECRET_KEY"])
+          client = cdn_client.CdnClient(cred, "")
+          urls = ["https://dl.bettersageread.cn/latest.json",
+                  "https://dl.bettersageread.cn/site-data.better-sageread.json"]
+          try:
+              req = models.PurgeUrlsCacheRequest()
+              req.Urls = urls
+              resp = client.PurgeUrlsCache(req)
+              print("CDN 边缘缓存刷新已提交:", resp.to_json_string())
+          except Exception as e:
+              print("::warning::CDN 刷新失败（多半是该 CAM 子用户尚无 CDN 权限）:", e)
+              print("::warning::CAM 控制台给该子用户挂 QcloudCDNFullAccess"
+                    "（或自定义策略放行 cdn:PurgeUrlsCache）后本步骤自动生效")
+          EOF
+
       # 只保留最新版：按本仓库产品前缀限定清理范围，别动其他产品的包
       - name: Prune stale packages in COS
         env:
