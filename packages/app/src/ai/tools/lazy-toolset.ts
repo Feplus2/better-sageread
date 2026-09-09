@@ -137,7 +137,29 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
         return { success: false, error: `工具「${name}」不可执行` };
       }
       try {
-        return await real.execute(args, options);
+        // 转发前按真实工具的 inputSchema 校验（2026-09-09 根修）：useTool 直调 execute，
+        // 绕过了 SDK 对真实工具的入参校验与 zod 默认值填充——模型字段名猜错时
+        // undefined 级联成"内部错误"（searchDevDocs 实例：args 传 query 而非 question，
+        // 语义/关键词两级路径连锁崩溃）。校验失败回明确报错+schema 让模型自纠；
+        // 成功则转发解析值（默认值同步补齐，此前省略默认字段的调用拿到的是 undefined）。
+        const rawSchema = (real as any).inputSchema;
+        let parsedArgs: any = args ?? {};
+        if (rawSchema) {
+          const schema = asSchema(rawSchema);
+          if (schema.validate) {
+            const validation = await schema.validate(parsedArgs);
+            if (!validation.success) {
+              return {
+                success: false,
+                error: `参数校验失败：${validation.error.message.slice(0, 500)}`,
+                hint: "按 expected_schema 修正字段后重试（不要凭猜测传参）",
+                expected_schema: serializeSchema(rawSchema),
+              };
+            }
+            parsedArgs = validation.value;
+          }
+        }
+        return await real.execute(parsedArgs, options);
       } catch (error) {
         return {
           success: false,
