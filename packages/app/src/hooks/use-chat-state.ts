@@ -191,7 +191,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   const { selectedModel, setSelectedModel, currentModelInstance } = useModelSelector("deepseek", "deepseek-chat");
 
   const { messages, status, error, stop, setMessages, sendMessage, clearError, regenerate } = useChat(
-    currentModelInstance || "deepseek-chat",
+    // 不用字符串兜底：AI SDK v7 会把字符串模型路由到默认 provider（Vercel AI Gateway），
+    // 报出与用户配置无关的网关错误。null 时由 transport 抛出"请先配置模型"的引导提示。
+    currentModelInstance,
     {
       // 节流 50→150（2026-09-08 长推理流卡死根修）：50ms 下每次 tick 整页重渲染，
       // 思考型模型高频长流时事件循环积压 → GC 恶化 → 渲染进程假死。CDP 强制长流

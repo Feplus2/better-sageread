@@ -10,7 +10,7 @@ type CustomChatOptions = Omit<ChatInit<UIMessage>, "transport"> &
     chatContext?: ChatContext;
   };
 
-export function useChat(model: LanguageModel, options?: CustomChatOptions) {
+export function useChat(model: LanguageModel | null, options?: CustomChatOptions) {
   const { chatContext, ...restOptions } = options || {};
   const chatContextRef = useRef(chatContext);
   // 活注册表：渲染即写（模块级单例），transport 兜底读取——结构性消灭陈旧捕获类故障

@@ -61,11 +61,11 @@ function buildDynamicStateSection(chatContext: ChatContext | undefined): string 
 }
 
 export class CustomChatTransport implements ChatTransport<UIMessage> {
-  private model: LanguageModel;
+  private model: LanguageModel | null;
   private prepareSendMessagesRequest?: PrepareSendMessagesRequest<UIMessage>;
 
   constructor(
-    model: LanguageModel,
+    model: LanguageModel | null,
     options?: {
       prepareSendMessagesRequest?: PrepareSendMessagesRequest<UIMessage>;
       /** 面板的 agent scope：body 未携带 chatContext 时按此从活注册表兜底（G 修复） */
@@ -78,7 +78,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
   }
   private scopeHint?: string;
 
-  updateModel(model: LanguageModel) {
+  updateModel(model: LanguageModel | null) {
     this.model = model;
   }
 
@@ -92,6 +92,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       messageId: string | undefined;
     } & ChatRequestOptions,
   ): Promise<ReadableStream<UIMessageChunk>> {
+    // 未配置/未启用模型时直接给引导提示（原先兜底字符串 "deepseek-chat" 会被 AI SDK v7
+    // 路由到默认 provider —— Vercel AI Gateway，报出与用户配置完全无关的网关错误）
+    const model = this.model;
+    if (model == null) {
+      throw new Error("还没有可用模型：请先到 设置 → 模型提供商 填写 API Key 并启用一个模型，选中后再发送消息");
+    }
     let requestBody = options.body;
 
     if (this.prepareSendMessagesRequest) {
@@ -229,7 +235,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const providerOptions = sel ? chatReasoningProviderOptions(sel.providerId, sel.modelId, reasoningLevel) : undefined;
 
     const result = streamText({
-      model: this.model,
+      model,
       messages: convertedMessages,
       abortSignal: options.abortSignal,
       toolChoice: "auto",
