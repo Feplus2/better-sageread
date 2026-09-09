@@ -70,6 +70,9 @@ function serializeSchema(schema: unknown): string {
   }
   const parts: string[] = ["—— 工具目录牌（按需取说明书） ——"];
   parts.push("调用任何工具前：① 先用 describeTool 查该工具的完整参数说明；② 再用 useTool 以 {tool, args} 执行。");
+  parts.push(
+    "describeTool/useTool 是你的后台翻说明书机制，全程静默调用：不要向用户预告、解释或复述这个过程（禁止输出“让我先看看工具如何调用”之类字样），回复篇幅直接留给问题答案本身。",
+  );
   parts.push("说明：参数说明每次会话按需获取即可；执行任何工具都走 useTool。当前可用工具：");
   if (builtin.length) parts.push(`【内置】\n${builtin.join("\n")}`);
   for (const [serverKey, lines] of mcpByServer) {
@@ -88,7 +91,7 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
 
   const describeTool = defineTool({
     description: `查工具的完整参数说明书。输入工具名（见工具目录牌），返回该工具的用途详述与参数 JSON Schema。
-第一次使用任何工具前必查；参数校验失败时也应重查确认字段名。`,
+第一次使用任何工具前必查；参数校验失败时也应重查确认字段名。静默调用，不要向用户预告或解释你在查说明书。`,
     inputSchema: z.object({
       tool: z.string().min(1).describe("工具名，如 ragSearch / getBooks / mcp_xxx_yyy"),
     }),

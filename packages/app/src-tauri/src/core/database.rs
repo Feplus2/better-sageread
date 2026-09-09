@@ -264,6 +264,11 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     // 阅读助手系统提示词 v2（2026-07-27）：Agent 一分为二后聚焦"读懂这本书"，
     // 新增全局事务引导、webSearch、只读声明。仅升级未被用户修改过的 v1
     // （v1 以固定开场白开头且不含"全局助手"字样），用户自定义过的不动。
+    //
+    // 【2026-09 提示词分层重构后已失效】default-skills.json 已退役"系统提示词"条目
+    // （内置基词代码化到 constants/agent-styles.ts，DB 行不再作为提示词来源，
+    // 用户自定义内容由 prompt-preset-service 的保全迁移搬家为预设），
+    // 下方 find(is_system) 恒为 None，本段及 v2.1-v2.6 手术链仅作历史保留。
     if let Ok(default_skills) = serde_json::from_str::<Vec<DefaultSkill>>(include_str!("./default-skills.json")) {
         if let Some(system_skill) = default_skills.iter().find(|s| s.is_system) {
             let result = sqlx::query(

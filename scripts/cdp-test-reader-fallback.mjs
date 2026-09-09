@@ -1,8 +1,8 @@
 // E2E 冒烟：P3 reader 未向量化原文兜底（read_book_section）
 //   1) Rust 命令直调：真实 EPUB 按标题读小节（先故意给错误标题拿候选清单，再按清单读成功）
 //   2) 工具层：createReadBookSectionTool 工厂 execute（成功 + 未找到返回候选）
-//   3) registry 分支：有向量能力 → rag 四件、无 readBookSection；无则相反
-//   4) buildReadingPrompt 无向量时含「章节原文直读」注入段
+//   3) registry 分支：readBookSection 常驻；有向量能力时 rag 四件同在，无向量时 rag 缺席
+//   4) buildReadingPrompt 无向量时含「当前书未建立索引」策略段（2026-09 分层重构后口径）
 // 运行：node scripts/cdp-test-reader-fallback.mjs（需 dev 实例 CDP 9223）
 const LIST_URL = "http://127.0.0.1:9223/json/list";
 
@@ -93,11 +93,11 @@ const expression = `
   const hasVec = llama.useLlamaStore.getState().hasVectorCapability();
   const rt = registry.getToolsForScope("reader", { bookId: epub.id });
   if (hasVec) {
-    check("有向量：rag 四件在、readBookSection 不在", !!rt.ragSearch && !!rt.ragToc && !!rt.ragContext && !!rt.ragRange && !rt.readBookSection, "");
+    check("有向量：rag 四件在、readBookSection 常驻兜底也在", !!rt.ragSearch && !!rt.ragToc && !!rt.ragContext && !!rt.ragRange && !!rt.readBookSection, "");
   } else {
     check("无向量：readBookSection 在、rag 不在", !!rt.readBookSection && !rt.ragSearch, "");
     const prompt = await promptMod.buildReadingPrompt({ agentScope: "reader", activeBookId: epub.id });
-    check("无向量提示词含原文直读段", prompt.includes("章节原文直读"), "");
+    check("无向量提示词含未建索引策略段", prompt.includes("当前书未建立索引"), "");
   }
 
   return checks;

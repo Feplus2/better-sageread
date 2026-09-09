@@ -66,12 +66,11 @@ const expr = `(async () => {
   }
   // D1 断言：语义上下文彻底消失
   if (full.includes('【语义上下文】') || sys.includes('语义上下文')) out.fails.push('D1: 语义上下文残留');
-  // 基词断言（DB 技能内容，migration v2.5 后应无该行）
-  const skillMod = await import('/src/services/skill-service.ts');
-  const skills = await skillMod.getSkills();
-  const base = (skills.find((s) => s.isSystem && s.isActive) || {}).content || '';
-  out.baseSkillChars = base.length;
-  if (base.includes('【语义上下文】')) out.fails.push('D1: DB 基词仍含【语义上下文】行（migration v2.5 未生效？）');
+  // 内置默认风格断言（2026-09 分层重构后基词代码化，agent-styles.ts 为唯一内置来源）
+  const styleMod = await import('/src/constants/agent-styles.ts');
+  const base = styleMod.DEFAULT_READER_STYLE || '';
+  out.baseStyleChars = base.length;
+  if (base.includes('【语义上下文】')) out.fails.push('D1: 内置默认风格仍含【语义上下文】行');
   // 2) 工具 schema（P4 前基准）
   const reg = await import('/src/ai/tools/registry.ts');
   const tools = reg.getToolsForScope('reader', { bookId: '${bookId}' });
@@ -93,7 +92,7 @@ console.log("=== cdp-context-audit ===");
 console.log(`向量能力: ${out.hasVectorCapability}`);
 console.log(`system prompt（buildPrompt 静态部分）: ${out.systemPromptChars} 字符`);
 console.log(`完整 system（含工作区/记忆/动态段模拟）: ${out.fullSystemChars} 字符`);
-console.log(`DB 基词: ${out.baseSkillChars} 字符`);
+console.log(`内置默认风格（代码）: ${out.baseStyleChars} 字符`);
 console.log("段落位置（字节序，须递增）:", out.sectionPositions);
 console.log(`内置工具: ${out.builtinToolCount} 个 / schema ${out.builtinToolsTotalChars} 字符`);
 if (out.fails.length) {

@@ -12,7 +12,8 @@ interface SectionReadResult {
 
 /**
  * 阅读助手兜底工具（P3）：按目录章节标题直读本书小节原文。
- * 仅在无向量能力时注册（registry reader 分支 else）；不依赖向量索引与 mdbook 产物，
+ * 常驻注册（registry reader 分支）：有向量能力时是 ragSearch 命中为空（通常是本书未建索引）
+ * 的兜底通道；无向量能力时是唯一的正文通道。不依赖向量索引与 mdbook 产物，
  * Rust 侧 read_book_section 随读随解析 EPUB（目录 href → spine 页范围 → HTML 提取文本）。
  */
 export const createReadBookSectionTool = (activeBookId: string | undefined) =>

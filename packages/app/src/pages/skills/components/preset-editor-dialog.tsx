@@ -14,7 +14,7 @@ interface PresetEditorDialogProps {
   onClose: () => void;
   scope: PromptPresetScope;
   preset?: PromptPreset | null;
-  /** 该 scope 的内置默认提示词全文，供"从默认复制"作为起点 */
+  /** 该 scope 的内置默认风格全文，供"从默认复制"作为起点 */
   defaultContent: string;
 }
 
@@ -48,7 +48,7 @@ export default function PresetEditorDialog({
 
   const handleCopyDefault = () => {
     setContent(defaultContent);
-    toast.info("已复制默认提示词，可在此基础上修改");
+    toast.info("已复制默认风格，可在此基础上修改");
   };
 
   const handleSave = async () => {
@@ -100,7 +100,7 @@ export default function PresetEditorDialog({
             </div>
             <Textarea
               id="preset-content"
-              placeholder="该预设激活后，将整体替换内置默认提示词（技能注入与上下文注入不受影响）"
+              placeholder="该预设激活后，将替换内置默认风格（工具策略、技能注入与上下文注入不受影响，预设改不到它们）"
               value={content}
               onChange={(e) => setContent(e.target.value)}
               disabled={isLoading}

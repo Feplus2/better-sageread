@@ -55,7 +55,7 @@
 - `ai/tools/registry.ts:332` — `getToolsForScope(agentScope, context)` 按角色动态组装工具；`tools/central/` 目录导出 28 个工具（22 个 central 专属 + 6 个归 shared）、`tools/paper/` 论文工具、根级共享工具与 `rag-*.ts` 检索工具
 - `ai/mcp/mcp-manager.ts` — MCP 连接管理；`ai/providers/factory.ts` — 按 provider 创建模型实例；anthropic 与 openai-compatible 分支走 Tauri fetch 绕 CORS，其余走 WebView 默认 fetch（跟随系统代理）
 - `ai/hooks/use-chat.ts` — 包装 `@ai-sdk/react` 的 useChat 注入自定义 transport
-- 提示词常量在 `src/constants/`：`prompt.ts:13-26` 按 `agentScope` 路由到 `central-prompt.ts`/`paper-prompt.ts`/阅读提示词，并叠加技能与预设
+- 提示词常量在 `src/constants/`：`prompt.ts:15-24` 按 `agentScope` 路由到 `central-prompt.ts`/`paper-prompt.ts`/阅读构建器；每个构建器 = 风格层（`agent-styles.ts`，可预设替换）+ 通用规范（`shared-policy.ts`）+ 系统策略段（代码持有），再叠加技能清单与元数据
 - `ai/utils/`：message-selector（上下文活塞）、token-estimator、tool-guard（写操作拦截）、secret-patterns（脱敏）
 
 ## 2. Rust 核心（packages/app/src-tauri/src/）

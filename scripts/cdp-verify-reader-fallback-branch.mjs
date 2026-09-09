@@ -1,4 +1,5 @@
-// 一次性验证：无向量能力分支（registry else + prompt 注入段）
+// 一次性验证：无向量能力分支（registry 常驻 readBookSection + prompt 无索引策略段）
+// 2026-09 分层重构后断言口径：无向量时提示词含「当前书未建立索引」段，且无 RAG 主通道描述
 const LIST_URL = "http://127.0.0.1:9223/json/list";
 const pages = await (await fetch(LIST_URL)).json();
 const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
@@ -25,8 +26,8 @@ const expression = `
   return {
     fallbackRegistered: !!rt.readBookSection,
     ragAbsent: !rt.ragSearch && !rt.ragToc,
-    promptHasSection: prompt.includes("章节原文直读"),
-    promptNoRag: !prompt.includes("RAG 工具使用策略"),
+    promptHasSection: prompt.includes("当前书未建立索引"),
+    promptNoRag: !prompt.includes("ragSearch 快速定位"),
   };
 })()
 `;

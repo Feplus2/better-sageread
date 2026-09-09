@@ -9,7 +9,7 @@
 **关键认知：schema 分两层，直接读 `schema.sql` 会漏掉一半表。**
 
 - 基础层：`core/schema.sql`（ threads/books/book_status/reading_sessions/tags/book_notes/notes/skills ）
-- 迁移层：`database.rs:55` 起的 `run_migrations()`——fork 专属的新列与新表全在这里（文件头注释明确要求**新增列勿写进 schema.sql**，见 `schema.sql:1` 与 `database.rs:55-56`）。迁移风格：无版本表，纯幂等增量——`ALTER TABLE ADD COLUMN` 捕获 "duplicate column name" 跳过、`CREATE TABLE IF NOT EXISTS`、外加数据回填与系统提示词手术式升级
+- 迁移层：`database.rs:55` 起的 `run_migrations()`——fork 专属的新列与新表全在这里（文件头注释明确要求**新增列勿写进 schema.sql**，见 `schema.sql:1` 与 `database.rs:55-56`）。迁移风格：无版本表，纯幂等增量——`ALTER TABLE ADD COLUMN` 捕获 "duplicate column name" 跳过、`CREATE TABLE IF NOT EXISTS`、外加数据回填（早期还有阅读助手基词的手术式升级链 v2→v2.6；2026-09 提示词分层重构后内置基词代码化，该链退役为空操作）
 
 WAL：代码未显式设置 `PRAGMA journal_mode`，依赖 sqlx 默认（WAL）；`sync/restore.rs:152-154` 明确处理 `app.db-wal`/`app.db-shm` 伴生文件，`sync/backup.rs:243` 注释说明活库直接拷贝会带未合并的 WAL 页。
 

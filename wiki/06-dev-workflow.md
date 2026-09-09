@@ -127,7 +127,7 @@ cd packages/app/src-tauri && cargo test
 1. 在 `ai/tools/` 对应目录实现工具（central 专属放 `central/`，三 scope 通用放根级），在 `registry.ts` 注册并同步 `getToolDescriptions()` 的清单
 2. 若是写操作：在 `ai/utils/tool-guard.ts` 的决策表加分支（决定三档下的确认行为），危险动作（delete/create 类）参考"恒确认"惯例
 3. 若需要 Rust 能力：在 `core/` 对应模块加 command 并在 `lib.rs` 的 invoke_handler 注册；涉及文件系统边界的必须走 `agent_resolve_path` 守卫
-4. 补提示词：`constants/` 下对应 scope 的 prompt 常量加工具说明；reader 系统提示词在 DB（改 `default-skills.json` + `database.rs` 的条件迁移）
+4. 补提示词：在 `constants/` 下对应 scope 的系统策略段加工具使用策略（reader → `prompt.ts` 的 `buildReaderPolicy`，paper → `paper-prompt.ts` 的 `PAPER_POLICY_*`，central → `central-prompt.ts` 的 `CENTRAL_POLICY`；三 scope 通用规则进 `shared-policy.ts`）。风格层（`agent-styles.ts`）不含工具内容，无需动；DB 不再存内置基词（旧 default-skills.json + 条件迁移套路已随 2026-09 分层重构退役）
 5. 验证组合拳：`pnpm --filter app exec tsc --noEmit` → `biome check <改动文件>` → 新写/复用 `scripts/test-*.mjs` → 起应用跑 `cdp-test-*` 冒烟 → 必要时 `cargo test`
 6. 提交信息用 `feat:`/`fix:` 前缀 + 中文正文，结尾附上测试证据（如「cargo test 39+1 全绿」）
 

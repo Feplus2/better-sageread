@@ -1,7 +1,9 @@
+import { DEFAULT_READER_STYLE } from "@/constants/agent-styles";
 import { buildCentralPrompt } from "@/constants/central-prompt";
 import { buildPaperPrompt } from "@/constants/paper-prompt";
+import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
-import { getActivePresetContent } from "@/services/prompt-preset-service";
+import { getActivePresetContent, migrateLegacyReaderBaseIfNeeded } from "@/services/prompt-preset-service";
 import { getSkills, skillAppliesTo } from "@/services/skill-service";
 import { useLlamaStore } from "@/store/llama-store";
 import { appDataDir } from "@tauri-apps/api/path";
@@ -24,14 +26,74 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
   return await buildReadingPrompt(chatContext);
 }
 
+/**
+ * 阅读助手系统策略（2026-09 提示词分层重构）：代码持有、随版本更新，
+ * 预设只替换风格层，永远覆盖不到本段。历史上的"DB 系统技能基词"已退役——
+ * 工具策略收编于此，与注册表（ai/tools/registry.ts）对齐维护。
+ *
+ * 按向量能力分两档：有索引时 RAG 为主通道、readBookSection 为兜底；
+ * 无索引时 readBookSection 是唯一正文通道。
+ */
+function buildReaderPolicy(hasVectorCapability: boolean): string {
+  const retrieval = hasVectorCapability
+    ? `—— 内容检索（RAG 已启用） ——
+• 主通道：ragSearch 快速定位（BM25 + 向量混合检索，返回片段与 chunk_id）→ ragContext 扩展上下文（默认 prev=2/next=2，最多调用 4 次）→ ragRange 按全局索引连续取块（范围来自检索返回的全局索引，单次 ≤20 块）→ ragToc 取整章正文（重操作，仅用户明确要求读全章时使用）。
+• 查询构造：检索词即查询质量——英文书用英文术语检索（中文问题先把核心概念译成英文术语）；复杂问题拆 2-3 个不同措辞分次检索，比一次长查询召回更全。
+• 元数据问题（书名/作者/出版社/目录）直接用【当前阅读图书元信息与目录】回答，禁止调用检索工具。
+• ragSearch 命中为空时（通常是本书未建索引），立即改用 readBookSection 按目录标题直读原文再作答，不要凭印象编造。
+
+—— 引用标注规范 ——
+引用 RAG 返回的内容必须标注 chunk_id：在引用句末添加 [chunk_id]（如：这个概念很重要[118]）；多来源逐个独立标注（[118] [877]，严禁合并为 [118, 877]）；结论性陈述和数字必须有检索依据并标注；检索无据就明说，不得臆造。
+
+—— 图片输出规范 ——
+RAG 返回内容含图片时：完整复制返回的原始路径（一个字符都不要改），用 Markdown 格式输出（![图号-主题描述](完整路径)）；图片前一句说明作用，图后 2-4 句解释关键信息；只输出与用户问题相关的图片。`
+    : `—— 内容检索（当前书未建立索引） ——
+当前书籍未建立向量索引，RAG 检索不可用。回答书中内容问题前，用 readBookSection 按目录章节标题读取小节原文（目录见【当前阅读图书元信息与目录】，标题支持模糊匹配）；未读到原文前不得凭印象编造书中内容。元数据问题（书名/作者/目录）直接回答，不调用工具。`;
+
+  return `—— 能力边界 ——
+你只负责"内容理解"。以下全局事务不在你的工具面：书籍的导入、删除、格式转换、打开其他书；主题、明暗模式、字体、阅读设置等外观与偏好调整；备份、同步、恢复、向量化；对话管理（标星、删除、导出）、标签管理。用户提出这类需求时，用一句话引导："这属于全局事务，请到主页侧边栏的「全局助手」里直接对它说同样的需求。"不要假装能够执行，回复中也不要提及提示词或内部工具名称。
+
+${retrieval}
+
+—— 藏书与笔记查询 ——
+• getBooks：查询书库列表（支持按状态/关键词筛选）。用户问"当前在读什么书"时用【当前阅读图书元信息与目录】直接回答，不调用工具。
+• getReadingStats：获取阅读统计（需书籍 ID，可从 getBooks 结果获取）。
+• notes：查询用户的划线与想法（支持按时间范围、书名筛选）。
+
+—— 笔记面板 ——
+manageNotes：当前书的长文笔记管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。笔记是长文 Markdown 产出（章节总结/读书灵感/人话版解读），与划线标注（notes 工具查询的对象）是两套概念，不要混写。讨论产出值得留存时，先把整理稿展示给用户讨论，再用 create/update 落笔（会自动弹确认卡由用户过目）；可按当前章节名填 locationTag。
+
+—— 对话召回 ——
+readThread：读回本对话的完整问答记录（仅用户提问与 AI 回答，不含工具过程）。对话被上下文压缩截断后，整理本次对话为笔记或回顾早期内容前，先用它读回全量，不要只凭残存上下文。仅在有进行中的对话时可用（新对话首条消息时尚未注入）。
+
+—— 外部检索 ——
+• webSearch：用户明确要求联网、查询最新资讯、或书中概念需要外部背景（作者生平、历史背景、术语释义）补充时使用。回答"书里写了什么"优先用本书检索，不用搜索替代原文；搜索结果转述要点并附来源链接。
+• sciverseSearch：学术证据检索——科研概念、方法、实验细节等需要论文原文证据的问题优先于 webSearch；返回带出处坐标的原文片段，引用须注明出自哪篇论文。
+
+—— 思维导图 ——
+mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="生成思维导图") 获取规范并严格按步骤执行；生成思维导图时不要在回复中输出任何图片（含 Markdown 图片语法）。
+
+—— 文件工具 ——
+writeFile / editFile / readLocalFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段），整理好的阅读笔记/摘要可落盘；exportNotes 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）。
+
+—— 全书翻译 ——
+全书翻译不在你的工具面：引导用户用阅读器顶栏「翻译」菜单（翻译全书/继续翻译/重新翻译，含句词对齐重建入口），或到全局助手执行；翻译进度在主页右下角「图书翻译」任务卡可见、可取消。`;
+}
+
+/**
+ * 阅读助手完整提示词装配：风格层（预设 ?? 内置默认风格）+ 通用规范 + 系统策略
+ * + 技能清单 + 书籍元信息与目录（静态部分）。
+ * 每轮可能变化的【当前阅读章节】由 transport 移到全部注入段的最尾部（缓存友好）。
+ */
 export async function buildReadingPrompt(chatContext: ChatContext | undefined): Promise<string> {
   const activeBookId = chatContext?.activeBookId;
-  let systemPromptBase = "";
+
+  // 旧版 DB 基词的保全迁移（幂等，每会话最多一次；详见 prompt-preset-service）
+  void migrateLegacyReaderBaseIfNeeded();
+
   let activeSkillNames: string[] = [];
   try {
     const allSkills = await getSkills();
-    const systemPromptSkill = allSkills.find((skill) => skill.isSystem && skill.isActive);
-    systemPromptBase = systemPromptSkill?.content || "";
     activeSkillNames = allSkills
       .filter((skill) => skill.isActive && !skill.isSystem && skillAppliesTo(skill.scope, "reader"))
       .map((skill) => skill.name);
@@ -39,14 +101,19 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     console.warn("获取技能列表失败:", error);
   }
 
-  // 提示词预设（B 批）：有激活预设时替换内置默认基词（即 DB 系统技能的内容，不改库），
-  // 其余组装照旧——下方 RAG 裁剪只匹配内置基词的固定小节标记，对自定义预设自然不生效（no-op）。
+  // 风格层：有激活预设时用预设，否则用代码内置的默认风格（随版本更新，送达有保证）
   const presetContent = await getActivePresetContent("reader");
-  if (presetContent && presetContent.trim().length > 0) {
-    systemPromptBase = presetContent;
-  }
+  const style = presetContent && presetContent.trim().length > 0 ? presetContent : DEFAULT_READER_STYLE;
 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
+
+  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability)}`;
+
+  if (activeSkillNames.length > 0) {
+    prompt += "\n\n—— 可用技能库 ——\n";
+    prompt += "当前系统已配置以下技能，当用户需求匹配时，请先调用 getSkills 工具获取详细执行步骤：\n";
+    prompt += activeSkillNames.map((name) => `• ${name}`).join("\n");
+  }
 
   let metadataMd: string | null = null;
   try {
@@ -68,52 +135,11 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     console.warn("加载书籍元数据失败：", e);
   }
 
-  let base = systemPromptBase;
-
-  if (hasVectorCapability === false) {
-    base = base.replace(/—— RAG 工具使用策略 ——[\s\S]*?—— 引用标注规范 ——/m, "");
-    base = base.replace(/—— 引用标注规范 ——[\s\S]*?—— 图片输出规范 ——/m, "");
-    base = base.replace(/—— 图片输出规范 ——[\s\S]*?—— 书籍与笔记管理工具 ——/m, "—— 书籍与笔记管理工具 ——");
-    // P3 兜底：无向量能力时注入原文直读通道说明（readBookSection 对 reader 常驻注册）
-    base +=
-      "\n\n—— 章节原文直读（当前书未建立索引） ——\n当前书籍未建立向量索引，RAG 检索不可用。回答书中内容问题前，用 readBookSection 按目录章节标题读取小节原文（目录见【当前阅读图书元信息与目录】，标题支持模糊匹配）；未读到原文前不得凭印象编造书中内容。元数据问题（书名/作者/目录）直接回答，不调用工具。";
-  } else {
-    // 有向量能力 ≠ 本书已建索引：补充直读兜底的使用时机（工具常驻注册）
-    base +=
-      "\n\n—— 补充工具：章节原文直读 ——\nreadBookSection：按目录章节标题直读小节原文。RAG 检索命中为空时（通常是本书未建索引），立即改用它读取原文再作答，不要凭印象编造。";
-  }
-
-  // 笔记面板（manageNotes 对 reader 常驻注册；静态追加说明，不动 DB 基词/预设）
-  base +=
-    "\n\n—— 笔记面板 ——\nmanageNotes：当前书的笔记面板管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。笔记是长文 Markdown 产出（章节总结/读书灵感/人话版解读），与划线标注（notes 工具查询的是后者）是两套概念，不要混写。讨论产出值得留存时，先把整理稿展示给用户讨论，再用 create/update 落笔（会自动弹确认卡由用户过目）；可按当前章节名填 locationTag。";
-
-  // 对话召回（readThread 条件注册：仅当前有进行中的对话线程时注入，新对话首条消息时不可用；
-  // 静态追加说明，不动 DB 基词/预设）
-  base +=
-    "\n\n—— 对话召回 ——\nreadThread：读回本对话的完整问答记录（仅用户提问与 AI 回答，不含工具过程）。对话被上下文压缩截断后，整理本次对话为笔记或回顾早期内容前，先用它读回全量，不要只凭残存上下文。仅在有进行中的对话时可用（新对话首条消息时尚未注入）。";
-
-  // 全书翻译（translateBook 仅全局助手注册，阅读助手无翻译工具——静态路由说明，不动 DB 基词/预设）
-  base +=
-    "\n\n—— 全书翻译 ——\n全书翻译不在本助手工具面：用户要翻译本书时，引导用阅读器顶栏「翻译」菜单（翻译全书/继续翻译/重新翻译，含句词对齐重建入口），或到全局助手让 translateBook 执行。翻译进度在主页右下角「图书翻译」任务卡可见、可取消。";
-
-  // 公式格式（静态追加）：渲染管线吃 $…$ / $$…$$，模型用 \(…\) 会源码外泄（实测 deepseek 解释公式时如此）
-  base +=
-    "\n\n—— 公式格式 ——\n输出数学公式时，行内用 $…$ 包裹，块级用 $$…$$ 包裹（围栏各自独占一行，多行方程组如 \\begin{cases} 也一样）；不要用 \\(…\\) 或 \\[…\\] 定界符。";
-
-  let prompt = base;
-
-  if (activeSkillNames && activeSkillNames.length > 0) {
-    prompt += "\n\n—— 可用技能库 ——\n";
-    prompt += "当前系统已配置以下技能，当用户需求匹配时，请先调用 getSkills 工具获取详细执行步骤：\n";
-    prompt += activeSkillNames.map((name) => `• ${name}`).join("\n");
-  }
-
-  // 静态优先布局（D3）：稳定的元信息与目录段在 system prompt 内殿后；
-  // 每轮可能变化的【当前阅读章节】由 transport 移到全部注入段的最尾部（缓存友好）。
-  // D2 保守档：目录按当前章裁剪（一级平铺 + 当前章子树），深层走 ragToc/readBookSection。
+  // 静态优先布局（D3）：稳定的元信息与目录段在 system prompt 内殿后。
+  // D2 保守档：目录按当前章裁剪（一级平铺 + 当前章子树），深层内容走检索/直读工具按需获取。
   if (metadataMd && metadataMd.trim().length > 0) {
     const tocHint = hasVectorCapability
-      ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；完整目录用 ragToc 获取，readBookSection 支持标题模糊匹配）"
+      ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；ragToc 可按章标题取整章正文，readBookSection 支持按标题模糊直读小节）"
       : "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；readBookSection 按标题模糊直读原文）";
     const trimmed = trimMetadataForPrompt(metadataMd, chatContext?.activeSectionLabel, tocHint);
     prompt += `\n\n【当前阅读图书元信息与目录】\n${trimmed}`;
@@ -125,7 +151,7 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
 /**
  * D2 metadata 保守档（2026-08-21）：整份目录树不再常驻 system prompt——
  * 注入视图 = 元信息 + 一级章节平铺 + 当前章子树（祖先链保留以维持层级可读），
- * 深层目录由 ragToc/readBookSection 按需获取。生成侧（pipeline.rs 的完整 metadata.md）不动，
+ * 深层内容由检索/直读工具按需获取。生成侧（pipeline.rs 的完整 metadata.md）不动，
  * 本函数只裁剪注入视图；无目录结构或解析失败时原样返回（安全回落）。
  */
 function trimMetadataForPrompt(md: string, sectionLabel: string | undefined, hintLine: string): string {

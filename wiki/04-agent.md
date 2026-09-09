@@ -5,11 +5,11 @@
 ## 1. 三个 scope 与工具注册表
 
 - 角色类型 `AgentScope = "central" | "reader" | "paper"` 定义在 `ai/tools/registry.ts:75`；工具归属维度 `ToolScope = "central" | "reader" | "shared" | "mcp"` 在 :66（注意：`"reader"` 是合法 ToolScope 但**没有任何工具静态注册到它**——reader 的专属工具全是工厂函数动态创建）
-- 静态注册表是模块级数组 `registry`（:92），组装入口 `getToolsForScope(agentScope, context)`（:342）；提示词里的工具清单**不走生成器**——central/paper 硬编码在 `constants/central-prompt.ts` / `paper-prompt.ts` 常量，reader 在 DB 系统技能基词（`default-skills.json` 种子）+ `constants/prompt.ts` 的静态追加段，工具的参数级说明走各工具 schema 的 describe；`getToolDescriptions()`（:415）只是注册表描述的文本汇总，**当前无调用方**
+- 静态注册表是模块级数组 `registry`（:92），组装入口 `getToolsForScope(agentScope, context)`（:342）；提示词里的工具策略**不走生成器**——2026-09 分层重构后，三个 scope 的工具使用策略集中在各自的系统策略段（`constants/prompt.ts` 的 `buildReaderPolicy`、`paper-prompt.ts` 的 `PAPER_POLICY_*`、`central-prompt.ts` 的 `CENTRAL_POLICY`）加三 scope 共享的 `constants/shared-policy.ts`，工具的参数级说明走各工具 schema 的 describe；`getToolDescriptions()`（:415）只是注册表描述的文本汇总，**当前无调用方**
 
 **各 scope 实际挂载**
 
-- **shared（三 scope 通用，14 个，`registry.ts:106-193`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp
+- **shared（三 scope 通用，15 个，`registry.ts:106-206`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage
 - **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
 - **central 专属（23 个，`registry.ts:191-335`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes
 - **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底）、manageNotes（绑定当前书）
@@ -20,7 +20,7 @@
 
 两个维护要点：
 
-- 增删工具时真正的同步点是**提示词硬编码清单**（`central-prompt.ts` / `paper-prompt.ts` / reader 的 `default-skills.json` 基词或 `prompt.ts` 追加段）与各工具 schema 的 describe——漏改提示词则模型不知道新工具存在；`getToolDescriptions()` 里也手动同步了一份 paper 工厂工具描述（`registry.ts:424-445`），但该函数无调用方，改它不影响模型所见
+- 增删工具时真正的同步点是**提示词系统策略段**（`prompt.ts` 的 `buildReaderPolicy` / `paper-prompt.ts` 的 `PAPER_POLICY_*` / `central-prompt.ts` 的 `CENTRAL_POLICY`，共享规则在 `shared-policy.ts`）与各工具 schema 的 describe——漏改策略段则模型不知道新工具的存在与分工；风格层（`agent-styles.ts`）不含任何工具内容，无需同步；`getToolDescriptions()` 里也手动同步了一份 paper 工厂工具描述（`registry.ts:424-445`），但该函数无调用方，改它不影响模型所见
 - reader/paper 的专属工具是**工厂函数**（闭包捕获 bookId/paperId），不是静态注册——所以 `ToolScope` 里的 `"reader"` 分支恒为空，排查"工具没挂"先看组装时的 context 是否传了 id
 
 ## 2. 写操作安全三档与确认卡
@@ -51,7 +51,7 @@
 ## 4. 技能系统
 
 - **存储**：`skills` 表（`schema.sql:134-142`）：name UNIQUE、content（Markdown SOP）、is_active、is_system（系统技能不可删）；`scope` 列由迁移添加（`database.rs:119-131`，默认 `'both'`）
-- **`default-skills.json` 是种子而非数据源**：`database.rs:455-486` 在库初始化时把内嵌 JSON 的两条（"系统提示词"即 reader 系统提示词 is_system=true、"生成思维导图"）插入 skills 表；存量库不自动更新，官方文案变更靠 `database.rs` 的条件迁移手术（指纹匹配才动）。因此 **reader 的系统提示词活在 DB 里**，central/paper 的则在 TS 常量（`constants/central-prompt.ts`、`paper-prompt.ts`）
+- **`default-skills.json` 是种子而非数据源**：`database.rs` 在库初始化时把内嵌 JSON 插入 skills 表；存量库不自动更新。2026-09 提示词分层重构后，种子只剩"生成思维导图"一条；原来的"系统提示词"条目（reader 基词，is_system=true）已退役——**三个 scope 的内置基词全部代码化**（风格层 `constants/agent-styles.ts`，系统策略层各 `*-prompt.ts` + `shared-policy.ts`），随安装包版本化，不再依赖 DB 迁移手术（`database.rs` 里 v2→v2.6 的手术链仅作历史保留，已恒为空操作）。存量库里的旧系统技能行不再被读取；若其内容非任何一代官方文案（真·用户自定义），`prompt-preset-service.ts` 的 `migrateLegacyReaderBaseIfNeeded()` 会把它保全为未激活的 reader 预设（幂等，每会话最多一次）
 - **SKILL.md 兼容导入（Claude Code skills 生态）**：解析器 `services/skill-import-service.ts`——YAML frontmatter 取 `name`（必填）/`description`/`scope`（缺省全选三 scope，:21-28），body 作 content 落库（:113-121，恒 `isSystem:false`）。三通道：SKILL.md 直链 URL、GitHub 仓库/目录 URL（转 raw.githubusercontent.com，main 失败试 master，:77-147）、粘贴文本。UI 入口 `pages/skills/components/skill-import-dialog.tsx`，导入后扫 `{{secret:NAME}}` 占位并引导去密钥保管箱补齐（:38-49）。**不自建技能市场**（拍板不做）
 - Agent 侧工具：`getSkills`（shared）、`manageSkill`（central）
 - **勿混淆**：`core/prompts/`（`prompt_presets` 表）是 reader/paper 的**命名提示词预设**（同 scope 内 `is_active` 互斥，无激活行=用内置默认，`database.rs:243-259`、`prompts/models.rs:7-19`），与技能是两套东西
@@ -99,13 +99,13 @@
 
 **提示词组装**（每条消息发送时重新组装）：
 
-- `constants/prompt.ts:13-26` 按 `agentScope` 路由：central → `central-prompt.ts`，paper → `paper-prompt.ts`，reader → DB 里的系统技能（见第 4 节"种子而非数据源"）；再叠加当前激活的技能与提示词预设
-- transport 内的最终拼装顺序：buildPrompt + 工作区段 + memory.md 段 + 前情摘要（`custom-chat-transport.ts:164-169`）
-- **提示词预设**（`prompt_presets` 表）：reader/paper 的命名系统提示词，同 scope 内 `is_active` 互斥，无激活行时用内置默认（`database.rs:243-259`、`core/prompts/models.rs:7-19`）；与技能是两套东西，别混淆
+- `constants/prompt.ts:15-24` 按 `agentScope` 路由到三个构建器。2026-09 分层重构后，每个构建器的产出都是同一个三层结构：**风格层**（激活预设 ?? `agent-styles.ts` 的内置默认风格；全局助手暂无预设恒用默认）+ **通用规范**（`shared-policy.ts`）+ **系统策略段**（`prompt.ts` 的 `buildReaderPolicy` / `paper-prompt.ts` 的 `PAPER_POLICY_*` / `central-prompt.ts` 的 `CENTRAL_POLICY`，检索能力按 `hasVectorCapability()` 分档拼接）；之后照旧叠加激活技能清单与书籍/论文元数据。预设只替换风格层，够不到策略段
+- transport 内的最终拼装顺序：buildPrompt + 目录牌（D8，条件触发）+ 工作区段 + memory.md 段 + 动态状态段（【当前阅读章节】/【当前阅读小节】）+ 前情摘要（`custom-chat-transport.ts:213-224`）
+- **提示词预设**（`prompt_presets` 表）：reader/paper 的命名风格预设，同 scope 内 `is_active` 互斥，无激活行时用内置默认风格（`database.rs:243-259`、`core/prompts/models.rs:7-19`）；与技能是两套东西，别混淆
 
 **Agent 工作区**：默认根 `{appData}/agent-workspace/`（`core/agent_ws/mod.rs:7-16`），其中的 `memory.md` 由 Agent 通过文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）自管理，作为跨会话记忆注入 system prompt（注入点在 `custom-chat-transport.ts:164-169` 的拼装段）。界内/界外判定统一走 Rust `agent_resolve_path`（canonicalize + 根前缀，`agent_ws/commands.rs:69-77`）——**路径守卫只有这一处实现**，前端守卫只是它的调用方；同文件 :9-14 还定义了读取限额常量（防 Agent 一次读爆上下文）。
 
-**提示词预设的 UI**：AI Hub 第二个 tab（`pages/skills/index.tsx:9-14`）；预设与技能的区别——预设是"整套系统提示词的命名替换"（同 scope 互斥激活），技能是"可叠加的 SOP 片段"（多条同时激活）。
+**提示词预设的 UI**：AI Hub 第二个 tab（`pages/skills/index.tsx:9-14`）；预设与技能的区别——预设是"风格层的命名替换"（同 scope 互斥激活，只影响角色/语气/表达偏好，工具策略由系统内置、预设够不到），技能是"可叠加的 SOP 片段"（多条同时激活）。
 
 ## 9. 模型层、快捷指令与审计
 
@@ -125,7 +125,7 @@
 
 **联网搜索**：`core/web_search.rs` 双通道——内置 HTML 爬取（Bing/百度/DuckDuckGo）+ API provider（Tavily/Serper/SearXNG），key 从 keyring 取；前端工具为 shared 的 `webSearch`。
 
-**科研搜索（Sciverse，2026-09-05 起）**：`core/sciverse.rs` 走 OpenDataLab 科学证据数据层（`https://api.sciverse.space`，Bearer Token 从 keyring `sciverse:token` 取，前端不传密钥）；前端工具为 shared 的 `sciverseSearch`（`ai/tools/sciverse-search.ts`），返回带论文标题/页码/偏移坐标的原文证据片段。设置页「科研搜索」开关+Token（`settings/sciverse-settings.tsx`），未启用时工具报错引导开启；结果查看器 `tools/sciverse-viewer.tsx` 与 webSearch 同链路（目录牌转发卡在 prompt-kit/tool.tsx 的 effectiveType 还原）。工具分工口径：学术证据检索走它，通用网页/实时资讯仍走 webSearch（两边 description 与 central-prompt 已互相标注）。
+**科研搜索（Sciverse，2026-09-05 起）**：`core/sciverse.rs` 走 OpenDataLab 科学证据数据层（`https://api.sciverse.space`，Bearer Token 从 keyring `sciverse:token` 取，前端不传密钥）；前端工具为 shared 的 `sciverseSearch`（`ai/tools/sciverse-search.ts`），返回带论文标题/页码/偏移坐标的原文证据片段。设置页「科研搜索」开关+Token（`settings/sciverse-settings.tsx`），未启用时工具报错引导开启；结果查看器 `tools/sciverse-viewer.tsx` 与 webSearch 同链路（目录牌转发卡在 prompt-kit/tool.tsx 的 effectiveType 还原）。工具分工口径：学术证据检索走它，通用网页/实时资讯仍走 webSearch（两边 description 与三个 scope 的系统策略段均已互相标注）。
 
 ## 10. 附：消息清洗与 UI 展示细节
 

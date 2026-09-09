@@ -9,7 +9,7 @@ import PresetItem from "./preset-item";
 
 interface PromptScopeSectionProps {
   scope: PromptPresetScope;
-  /** 该 scope 的内置默认提示词全文（只读预览；"从默认复制"的起点） */
+  /** 该 scope 的内置默认风格全文（只读预览；"从默认复制"的起点） */
   defaultContent: string;
   presets: PromptPreset[];
   onCreatePreset: (scope: PromptPresetScope) => void;
@@ -17,8 +17,8 @@ interface PromptScopeSectionProps {
 }
 
 /**
- * 单个 Agent 作用域（阅读/论文助手）的提示词管理分组：
- * 默认提示词卡片（只读预览 + 使用中/恢复默认）+ 命名预设列表（同组互斥激活）。
+ * 单个 Agent 作用域（阅读/论文助手）的提示词风格管理分组：
+ * 默认风格卡片（只读预览 + 使用中/恢复默认）+ 命名预设列表（同组互斥激活）。
  */
 export default function PromptScopeSection({
   scope,
@@ -33,9 +33,9 @@ export default function PromptScopeSection({
   const handleRestoreDefault = async () => {
     try {
       await clearActiveMutation.mutateAsync(scope);
-      toast.success(`已恢复${PROMPT_PRESET_SCOPE_LABELS[scope]}默认提示词，下条消息生效`);
+      toast.success(`已恢复${PROMPT_PRESET_SCOPE_LABELS[scope]}默认风格，下条消息生效`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "恢复默认提示词失败");
+      toast.error(error instanceof Error ? error.message : "恢复默认风格失败");
     }
   };
 
@@ -43,7 +43,7 @@ export default function PromptScopeSection({
     <section className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-medium text-foreground">{PROMPT_PRESET_SCOPE_LABELS[scope]}系统提示词</h3>
+          <h3 className="font-medium text-foreground">{PROMPT_PRESET_SCOPE_LABELS[scope]}提示词风格</h3>
           <p className="text-muted-foreground text-xs">新建命名预设可一键切换，切换后下条消息立即生效</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => onCreatePreset(scope)}>
@@ -52,10 +52,10 @@ export default function PromptScopeSection({
         </Button>
       </div>
 
-      {/* 默认提示词卡片（内置全文只读预览） */}
+      {/* 默认风格卡片（内置全文只读预览） */}
       <div className="space-y-2 rounded-xl border border-border p-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm">默认提示词（内置）</span>
+          <span className="text-sm">默认风格（内置）</span>
           {activePreset ? (
             <div className="flex items-center gap-2">
               <Badge variant="secondary">未使用</Badge>
