@@ -53,11 +53,13 @@ jobs:
 
       # Release Notes 从仓库根 RELEASE_NOTES.md 读取——同时进入 GitHub Release 正文
       # 与更新清单 latest.json 的 notes（应用内"检查更新"确认框直接展示它）。
+      # 文件本身是全版本累积存档，但正文只取顶部当前版本（此前整份 cat 进正文，
+      # 每版 Release 与更新提示都把历史版本重复一遍）。
       - name: Read release notes
         id: notes
         shell: bash
         run: |
-          { echo 'body<<RELEASE_NOTES_EOF'; cat RELEASE_NOTES.md; echo RELEASE_NOTES_EOF; } >> "$GITHUB_OUTPUT"
+          { echo 'body<<RELEASE_NOTES_EOF'; awk 'BEGIN{c=0} /^# /{c++; if(c==2) exit} {print}' RELEASE_NOTES.md; echo RELEASE_NOTES_EOF; } >> "$GITHUB_OUTPUT"
 
       - name: Build and Release
         uses: tauri-apps/tauri-action@v0
