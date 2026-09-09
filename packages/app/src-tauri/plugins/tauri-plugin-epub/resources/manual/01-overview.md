@@ -2,7 +2,7 @@
 
 ## Better SageRead 是什么
 
-Better SageRead 是一款本地优先的桌面阅读器（Windows / macOS），把「读书」和「读论文」放在同一个书架里：EPUB 书籍、论文全文（PDF / XML）都能导入，阅读时随时跟 AI 对话。所有数据保存在本机，AI 服务由你自己配置。
+Better SageRead 是一款本地优先的桌面阅读器（Windows；macOS 版暂缓），把「读书」和「读论文」放在同一个书架里：EPUB 书籍、论文全文（PDF / XML）都能导入，阅读时随时跟 AI 对话。所有数据保存在本机，AI 服务由你自己配置。
 
 两条内容主线：
 
@@ -38,4 +38,4 @@ AI 用量无需任何配置：每次 AI 回复自动记一行流水。统计自�
 
 ## 数据都在哪里
 
-一切数据在本机应用数据目录（Windows：`C:\Users\<你>\AppData\Roaming\com.bettersageread.dev`）：书库文件在 `books/`、数据库在 `database/`、向量库在 `papers/`、配置为若干 JSON。密钥（API Key 等）不在这里——它们保存在系统凭据管理器，永不明文落盘。卡片右键菜单的「打开文件夹」可以直达某本书/某篇论文的文件目录。
+一切数据在本机应用数据目录（Windows：`C:\Users\<你>\AppData\Roaming\com.bettersageread.app`，开发版为 `com.bettersageread.dev`）：书库文件在 `books/`、数据库在 `database/`、向量库在 `papers/`、配置为若干 JSON。密钥（API Key 等）不在这里——它们保存在系统凭据管理器，永不明文落盘。卡片右键菜单的「打开文件夹」可以直达某本书/某篇论文的文件目录。

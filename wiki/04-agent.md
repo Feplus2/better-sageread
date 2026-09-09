@@ -83,17 +83,19 @@
 
 ## 7. chat transport 接线
 
-`ai/custom-chat-transport.ts` 实现 AI SDK v5 的 `ChatTransport<UIMessage>`（:34），核心 `sendMessages`（:52-212）：
+`ai/custom-chat-transport.ts` 实现 AI SDK v7 的 `ChatTransport<UIMessage>`（:63，v7 起 `system` 更名 `instructions`），核心 `sendMessages`（:85-270）：
 
-1. `prepareSendMessagesRequest` 把 `chatContext`（agentScope/activeBookId/paperScopeIds/threadId）塞进 body（:64-82；注入端 `ai/hooks/use-chat.ts:21-33`）
-2. 多模态闸：非视觉模型 `stripFileParts`（:86-89）+ mediaType 嗅探修复（:93-113）
-3. 上下文活塞 + 滚动摘要（第 3 节，:115-130）
-4. 工具组装：`getToolsForScope(scope, ctx)` 合并 `await getMcpToolsForScope(scope)`（:134-148，MCP 失败逐个 toast），再过 `wrapToolsWithGuard`（:140-150）
-5. `convertToModelMessages(stripUnknownToolParts(sanitizeMessageParts(...)), { tools, ignoreIncompleteToolCalls: true })`（:156-162）——stripUnknownToolParts 剔除已下线工具的旧 part 防 TypeValidationError
-6. system prompt = buildPrompt + 工作区段 + memory.md 段 + 前情摘要（:164-169）
-7. `streamText({ toolChoice:"auto", stopWhen: stepCountIs(20), tools, ... })` 的 ReAct 循环（:176-188），`onFinish` 关闭 MCP 连接；`toUIMessageStream` 回流给 useChat（:190-211）
+1. `prepareSendMessagesRequest` 把 `chatContext`（agentScope/activeBookId/paperScopeIds/threadId）塞进 body；body 缺失时按 scopeHint 读活注册表兜底（`utils/live-chat-context.ts`）
+2. 多模态闸：非视觉模型 `stripFileParts` + mediaType 魔数嗅探修复（:122-151）
+3. 引用块拼装（`processQuoteMessages`）+ 图片附件物化（仅最后一条 user 消息带真图，更早轮次降级 ⟦可用 readImage 重看⟧ 存根）
+4. 上下文活塞（双水位 256k/128k + 保底 10 条，`message-selector.ts`）+ 老轮次 RAG 结果存根降级（`tool-result-slimming.ts`）；被裁前缀滚成摘要（第 3 节）
+5. 工具组装：`getToolsForScope(scope, ctx)` 合并 `await getMcpToolsForScope(scope)`（MCP 失败逐个 toast），再过 `wrapToolsWithGuard` 安全门控（:173-192）
+6. **D8 目录牌**（`tools/lazy-toolset.ts`）：工具池 >30 个或 schema >12k 字符时，请求工具面收缩为 describeTool/useTool 两个入口 + 目录牌文本进 system 静态区；**useTool 转发前经 `asSchema(inputSchema).validate` 校验入参并填 zod 默认值**（2026-09-09 根修：此前直调 execute 绕过校验，错参静默级联成"内部错误"）
+7. `convertToModelMessages(stripUnknownToolParts(sanitizeMessageParts(...)), { tools, ignoreIncompleteToolCalls: true })`——stripUnknownToolParts 剔除已下线工具的旧 part 防 TypeValidationError
+8. system prompt = buildPrompt + 目录牌 + 工作区段 + memory.md 段 + 动态状态段（【当前阅读章节】/【当前阅读小节】）+ 前情摘要（:213-224，D3 静态优先保前缀缓存）
+9. `streamText({ toolChoice:"auto", stopWhen: isStepCount(20), tools, instructions, ... })` 的 ReAct 循环，`onEnd` 关闭 MCP 连接；`toUIMessageStream` 回流给 useChat
 
-思考强度经 `chatReasoningProviderOptions` 下发（:171-174,187）；`reconnectToStream` 返回 null（:214-220，不支持断流重连）。
+思考强度经 `chatReasoningProviderOptions` 下发（:226-229）；**UI 刷新节流 `experimental_throttle: 150ms`**（`hooks/use-chat-state.ts:207`——2026-09-08 长推理流卡死根修：50ms 下每 tick 整页重渲染，思考型模型高频长流时事件循环积压致死；CDP 强制长流 A/B 实证）；`reconnectToStream` 返回 null（不支持断流重连）。
 
 ## 8. 系统提示词组装与 Agent 工作区
 

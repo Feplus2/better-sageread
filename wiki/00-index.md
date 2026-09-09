@@ -27,9 +27,9 @@
 | --- | --- | --- |
 | 前端框架 | React 19 + TypeScript 5.8 + Vite 7 | `packages/app/package.json`（`react ^19.1.0`、`typescript ~5.8.3`、`vite ^7.0.4`） |
 | 桌面壳 | Tauri 2.8（Rust） | `packages/app/src-tauri/Cargo.toml`（`tauri = "2.8"`） |
-| 路由 | react-router v7（HashRouter） | `packages/app/src/main.tsx:55-62` |
+| 路由 | react-router v7（HashRouter） | `packages/app/src/main.tsx:66-69` |
 | 状态管理 | zustand 5（含 persist 落盘） | `packages/app/src/store/` |
-| AI | Vercel AI SDK v5（`ai ^5.0.44`、`@ai-sdk/react ^2.0.44`） | `packages/app/src/ai/` |
+| AI | Vercel AI SDK v7（`ai ^7.0.73`、`@ai-sdk/react ^4.0.76`） | `packages/app/src/ai/` |
 | UI | Tailwind CSS 4 + 自研组件（`components/ui/`，shadcn 风格） | `packages/app/package.json` |
 | Rust 关键依赖 | tokio 1、sqlx 0.8（SQLite）、reqwest 0.12、rusqlite 0.32 | `packages/app/src-tauri/Cargo.toml` |
 | 阅读器内核 | foliate-js（vendored fork，见下） | `packages/foliate-js/` |
@@ -48,8 +48,8 @@ SageRead/
 │   ├── app/            # 主应用：前端 src/ + Rust 后端 src-tauri/
 │   ├── app-tabs/       # Chrome 风格标签 UI 库（拖拽排序，基于 draggabilly）
 │   └── foliate-js/     # EPUB 渲染内核（johnfactotum/foliate-js 的 vendored fork）
-├── scripts/            # 开发辅助脚本：15 个 test-*.mjs、62 个 cdp-*.mjs 等
-├── docs/               # 23 篇设计/演进文档（见下"文档地图"）
+├── scripts/            # 开发辅助脚本：26 个 test-*.mjs、174 个 cdp-*.mjs 等
+├── docs/               # 42 篇设计/演进文档（plans/audits/archive 分层，见 `docs/README.md` 导引）
 ├── fixtures/papers/    # 测试用样例论文（akter2026atscale，CC-BY 开放获取论文的真实管线产物）
 ├── assets/             # README 截图
 ├── package.json        # 根脚本入口（dev/build/...）

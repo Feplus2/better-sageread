@@ -31,7 +31,7 @@ cd packages/app/src-tauri && cargo test
 
 ## 2. 前端测试脚本惯例（scripts/test-*.mjs）
 
-**15 个** `test-*.mjs`（另有 21 个 `cdp-test-*.mjs` 走 CDP，见下节）。共同套路（以 `scripts/test-chat-math-delimiters.mjs:1-23` 为代表）：
+**26 个** `test-*.mjs`（另有 33 个 `cdp-test-*.mjs` 走 CDP，见下节）。共同套路（以 `scripts/test-chat-math-delimiters.mjs:1-23` 为代表）：
 
 1. 注释头写覆盖点 + 运行方式 `node scripts/test-xxx.mjs`
 2. 从 `node_modules/.pnpm` 里**翻目录找 esbuild 包**动态 import（:10-13，没找到就提示先 `pnpm install`）——不新增 devDependency
@@ -44,7 +44,7 @@ cd packages/app/src-tauri && cargo test
 
 ## 3. CDP 调试（scripts/cdp-*.mjs）
 
-**62 个** `cdp-*.mjs`，用于对**运行中**的应用做 DOM 断言、截图、性能采样、复现探针。
+**174 个** `cdp-*.mjs`，用于对**运行中**的应用做 DOM 断言、截图、性能采样、复现探针。
 
 - 端口：老脚本硬编码 **9222**（38 处，如 `cdp-check-state.mjs:2`），较新的一批用 **9223**（如 `cdp-test-p0-tools.mjs:12`），双实例测试时 dev2 用 **9224**（`test-l1-backup-restore-e2e.mjs:19-20`）
 - 应用侧没有开启 remote debugging 的代码——启动时用环境变量开（Windows/WebView2）：
@@ -99,12 +99,12 @@ cd packages/app/src-tauri && cargo test
 
 ## 7. 脚本清单速查
 
-**test-*.mjs（15 个，node 直跑）**：`test-chat-math-delimiters`、`test-rawmath-transformer`、`test-paper-math-normalize`、`test-paper-display-math`、`test-paper-blocks`、`test-paper-blocks-consistency`、`test-paper-sentences`、`test-paper-figures`、`test-paper-hover-rects`、`test-paper-ai-highlights`、`test-paper-alignment`、`test-paper-alignment-service`、`test-paper-translation-tolerance`、`test-paper-export`、`test-l1-backup-restore-e2e`。可见重心在论文管线的渲染/对齐/翻译不变量上。
+**test-*.mjs（26 个，node 直跑）**：`test-chat-math-delimiters`、`test-rawmath-transformer`、`test-paper-math-normalize`、`test-paper-display-math`、`test-paper-blocks`、`test-paper-blocks-consistency`、`test-paper-sentences`、`test-paper-figures`、`test-paper-hover-rects`、`test-paper-ai-highlights`、`test-paper-alignment`、`test-paper-alignment-service`、`test-paper-translation-tolerance`、`test-paper-export`、`test-l1-backup-restore-e2e` 等（完整清单见 `scripts/` 目录）。可见重心在论文管线的渲染/对齐/翻译不变量上。
 
-**cdp-*.mjs（62 个，连运行中的应用）**，按前缀分工：
+**cdp-*.mjs（174 个，连运行中的应用）**，按前缀分工：
 
 - `cdp-check-*` / `cdp-verify-*` — 状态断言与修复验证（划线、高亮、阅读位置）
-- `cdp-test-*` — 功能冒烟（Agent 工具、论文导入、Zotero、摘要滚动等 21 个）
+- `cdp-test-*` — 功能冒烟（Agent 工具、论文导入、Zotero、摘要滚动等 33 个）
 - `cdp-debug-*` / `cdp-diag-*` / `cdp-repro-*` / `cdp-try-*` — 病灶定位与复现探针
 - `cdp-screenshot` / `cdp-shot-*` — 截图
 - `cdp-perf-*` — 性能审计/CSS A-B/采样
