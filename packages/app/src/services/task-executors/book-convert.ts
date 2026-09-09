@@ -4,7 +4,7 @@
  * 吸收 convert-progress-store 原 startBookConvert / startBookConvertAuto 的：
  * 进度监听注册、阶段流水线推进（buildBookStages/markBookActiveError 复用 store 导出）、
  * 完成/失败/取消结算、自动入库（卡 1 起窗口路径也默认开——完成 → 自动导入 + toast + 自动出队）
- * 与 10 分钟超时兜底（无回执的托管死等防护）。
+ * 与心跳式超时兜底（实质进度静默 20 分钟才判死，节拍爬行不续命）。
  *
  * 运行态回写 convert-progress-store.bookConvert（在跑任务详情数据源：通道卡阶段行/窗口
  * 运行行详情）；队列现场（排队/运行/结算各行）始终以 task-center 通道聚合为准——
@@ -55,8 +55,13 @@ export interface BookConvertResult {
 /** convert://progress 载荷（Rust 侧注入 pdf_path 归属字段；converter-service 的接口尚未声明，此处扩展） */
 type BookConvertProgress = ConvertProgress & { pdf_path?: string };
 
-/** 托管转换的超时兜底：10 分钟无终态 → 错误态 + 取消进程 */
-const BOOK_AUTO_TIMEOUT_MS = 10 * 60 * 1000;
+/** 托管转换的超时兜底：实质进度静默 20 分钟 → 错误态 + 取消进程。
+ *  心跳式而非绝对计时：MinerU 单片等待可达 15 分钟（MINERU_TIMEOUT=900）且期间无新进度，
+ *  大书 stage2 的 LLM 分块推理也要十几到几十分钟——绝对 10 分钟会把健康进程拦死
+ *  （《汉语语义学》447 页实测：MinerU 4 分钟 + stage2 百余次 LLM 调用，必被误杀）。
+ *  注意续命只认实质进度：sidecar 节拍线程的纯 percent 爬行事件不算（进程 hang 住时它
+ *  照样 0.5s 一拍，会掩盖真死等）；带 detail 的进度与 stage_done/done/error 等才重置计时。 */
+const BOOK_AUTO_STALL_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** 成功行自动出队延迟：窗口/通道卡先闪出「完成」态再移除（失败行滞留，不在此列） */
 const BOOK_AUTO_DEQUEUE_MS = 2500;
@@ -149,25 +154,33 @@ async function executeBookConvert(task: TaskItem, ctx: TaskContext): Promise<voi
     };
     ctx.signal.addEventListener("abort", onAbort);
 
-    // 托管路径长超时兜底：进程静默卡死且连 terminated 都丢失时给出错误态
-    if (autoImport) {
+    // 托管路径超时兜底（心跳式）：实质进度静默超阈值才判死——进程静默卡死且连
+    // terminated 都丢失时给出错误态；正常长跑（MinerU 单片/大书 LLM 分块）不误杀。
+    // 续命口径见 BOOK_AUTO_STALL_TIMEOUT_MS 注释：纯 percent 节拍不重置计时。
+    const armStallWatchdog = () => {
+      if (!autoImport || settled) return;
+      if (autoTimeout) clearTimeout(autoTimeout);
       autoTimeout = setTimeout(() => {
         autoTimeout = null;
         if (settled) return;
         markBookActiveError();
         useConvertProgressStore.setState((s) => ({
-          bookConvert: { ...s.bookConvert, status: "error", errorMessage: "转换超时（10 分钟无完成回执），已取消进程" },
+          bookConvert: { ...s.bookConvert, status: "error", errorMessage: "转换超时（20 分钟无实质进度），已取消进程" },
         }));
         void cancelConvert().catch(() => {});
-        settleError("转换超时（10 分钟无完成回执），已取消进程");
-      }, BOOK_AUTO_TIMEOUT_MS);
-    }
+        settleError("转换超时（20 分钟无实质进度），已取消进程");
+      }, BOOK_AUTO_STALL_TIMEOUT_MS);
+    };
+    armStallWatchdog();
 
     // 进度事件 → 大窗口数据源回写（原 handleBookProgress 同款补丁逻辑）+ 队列进度上报 + 终态结算
     const handle = async (p: BookConvertProgress) => {
       // 任务归属过滤：上一进程退出后的迟到事件不归本任务（对齐论文侧 runOnePdf 口径）
       if (p.pdf_path && p.pdf_path !== pdfPath) return;
       if (settled) return;
+
+      // 实质进度（带 detail 或终态/阶段事件）给看门狗续命；节拍爬行不续
+      if (p.type !== "progress" || p.detail) armStallWatchdog();
 
       useConvertProgressStore.setState((s) => {
         const bookConvert = s.bookConvert;

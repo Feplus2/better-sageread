@@ -1,4 +1,4 @@
-import { createModelInstance, getUtilityModel } from "@/ai/providers/factory";
+import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions } from "@/ai/providers/factory";
 import { type ParsedPaperSections, parsePaperSections } from "@/pages/paper-reader/markdown-sections";
 import type { PaperHighlightLocation } from "@/pages/paper-reader/paper-highlight-locator";
 import { parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
@@ -127,8 +127,15 @@ function requireUtilityModel() {
 async function callUtilityModel(prompt: string, temperature: number): Promise<string> {
   try {
     const model = requireUtilityModel();
-    const modelInstance = createModelInstance(model.providerId, model.modelId);
-    const { text, usage } = await generateText({ model: modelInstance, prompt, temperature });
+    // 辅助任务走轻量实例 + 最低思考强度（能禁则禁/恒思考取最低档，见 reasoning-map.ts 用户口径）——
+    // 裸 createModelInstance 会让恒思考模型（glm-5.3 系）对每个标注块全量思考，慢一个数量级
+    const modelInstance = createUtilityModelInstance(model.providerId, model.modelId);
+    const { text, usage } = await generateText({
+      model: modelInstance,
+      prompt,
+      temperature,
+      providerOptions: utilityTaskProviderOptions(model.providerId, model.modelId),
+    });
     recordAuxUsage(model.providerId, model.modelId, usage, "highlight");
     return text;
   } catch (error) {

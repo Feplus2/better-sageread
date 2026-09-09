@@ -224,6 +224,26 @@ export async function listPapers(): Promise<BookWithStatus[]> {
   return books.filter((book) => book.format === "MARKDOWN");
 }
 
+/** 论文元数据手工编辑载荷（文献库「编辑信息」）。只写出现的字段；空串/空数组 = 移除该字段（title 前端校验非空） */
+export interface PaperMetadataUpdate {
+  title?: string;
+  /** 完整作者名列表（覆盖式，不含机构） */
+  authors?: string[];
+  /** 年份/日期（CSL date 原样字符串） */
+  date?: string;
+  /** 期刊/会议名（CSL container-title） */
+  containerTitle?: string;
+  doi?: string;
+}
+
+/**
+ * 手工编辑论文元数据：Rust 侧一次同步 paper.md frontmatter（事实源）、metadata.json、books 表，
+ * 译文/向量版本锚随之重锚（正文不动，无需重翻/重嵌），向量库冗余标题列同步改写。
+ */
+export async function updatePaperMetadata(paperId: string, updates: PaperMetadataUpdate): Promise<SimpleBook> {
+  return invoke<SimpleBook>("update_paper_metadata", { paperId, updates });
+}
+
 // ==================== 单篇 PDF 解析导入（Papers_Converter sidecar） ====================
 
 /** 论文解析进度事件（对应 Papers_Converter headless JSON 协议 + Rust 补发的 terminated） */
@@ -421,8 +441,10 @@ export interface PaperPdfImportOutcome {
   incomplete?: boolean;
 }
 
-/** 解析超时上限：论文解析（OCR/VLM）耗时可达十分钟级 */
-const PAPER_PARSE_TIMEOUT_MS = 15 * 60 * 1000;
+/** 解析静默超时上限：实质进度 20 分钟无更新才判超时（心跳式——随 detail/终态事件续命；
+ *  绝对计时会误杀慢模型/大文件 OCR 下的健康解析）。覆盖 OCR 单片等待（converter 侧
+ *  MINERU_TIMEOUT=900s）与 LLM 结构化长批次的空窗。 */
+const PAPER_PARSE_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
  * 解析单篇论文全文（PDF 或 XML）并导入文献库（AI 工具 importPaper 的链路）。
@@ -473,13 +495,24 @@ export async function importPaperPdf(
   const taskId = enq.taskId;
   const onAbort = () => useTaskCenterStore.getState().cancelTask(taskId);
   abortSignal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(onAbort, PAPER_PARSE_TIMEOUT_MS);
+  // 心跳式超时：实质进度（带 detail 的事件、stage_done/done/error 等终态）续命；
+  // 纯 percent 节拍不续（进程 hang 住时节拍照发，会掩盖死等）。监听失败不影响既有绝对兜底。
+  let timer = setTimeout(onAbort, PAPER_PARSE_TIMEOUT_MS);
+  const rearmTimer = () => {
+    clearTimeout(timer);
+    timer = setTimeout(onAbort, PAPER_PARSE_TIMEOUT_MS);
+  };
+  const unlistenProgress = await listenPaperConvertProgress((p) => {
+    if (p.pdf_path && p.pdf_path !== filePath) return;
+    if (p.type !== "progress" || p.detail) rearmTimer();
+  }).catch(() => null);
   try {
     await useTaskCenterStore.getState().waitTask(taskId);
   } catch {
     // 失败/取消：从任务本体取分类信息（result 由执行器在抛错前写入；取消无 result）
   } finally {
     clearTimeout(timer);
+    unlistenProgress?.();
     abortSignal?.removeEventListener("abort", onAbort);
   }
 
