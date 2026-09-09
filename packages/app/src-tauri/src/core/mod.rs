@@ -7,6 +7,8 @@ pub mod fonts;
 pub mod llama;
 pub mod local_api;
 pub mod mcp;
+#[cfg(all(debug_assertions, target_os = "android"))]
+pub mod mobile_spike;
 pub mod paper_converter;
 pub mod papers;
 pub mod process_tree;

@@ -11,6 +11,7 @@ import { isCJKLang } from "@/utils/lang";
 import { getDirFromUILanguage } from "@/utils/rtl";
 import { applyFixedlayoutStyles, applyImageStyle, applyTranslationStyle, transformStylesheet } from "@/utils/style";
 import {
+  attachMobileLongPress,
   handleClick,
   handleImageClick,
   handleImageContextMenu,
@@ -20,6 +21,7 @@ import {
   handleMouseup,
   handleWheel,
 } from "../../utils/iframeEventHandlers";
+import { isMobile } from "@/utils/mobile";
 import { EventManager } from "./event-manager";
 import { type LayoutDimensions, StyleManager } from "./style-manager";
 
@@ -229,6 +231,10 @@ export class FoliateViewerManager {
       doc.addEventListener("keydown", (event: KeyboardEvent) => handleKeydown(bookId, event));
       // D3+T4：图片右键主题菜单 / 点击大图预览（宿主层经 postMessage 接收）
       doc.addEventListener("contextmenu", (event: MouseEvent) => handleImageContextMenu(bookId, event));
+      // 移动端：长按句子 → 合成 contextmenu 走桌面右键的切句+标注路径（M3 手势地图）
+      if (isMobile && doc.defaultView) {
+        attachMobileLongPress(doc, doc.defaultView);
+      }
     }
   }
 

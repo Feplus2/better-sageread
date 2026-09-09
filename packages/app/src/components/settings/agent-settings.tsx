@@ -6,6 +6,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { isMobile } from "@/utils/mobile";
 
 const MODE_OPTIONS: { value: AgentSafetyMode; label: string; desc: string }[] = [
   {
@@ -73,12 +74,17 @@ export default function AgentSettings() {
       <section className="rounded-lg bg-muted/80 p-4">
         <div className="flex items-center justify-between gap-4">
           <Label className="text-sm">安全模式</Label>
-          <Select value={safetyMode} onValueChange={(v) => setSafetyMode(v as AgentSafetyMode)}>
+          <Select
+            value={safetyMode}
+            onValueChange={(v) => setSafetyMode(v as AgentSafetyMode)}
+            disabled={isMobile}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {MODE_OPTIONS.map((m) => (
+              {/* 移动端 Agent 收敛（M3-g）：无子进程能力，只保留严格模式 */}
+              {(isMobile ? MODE_OPTIONS.filter((m) => m.value === "strict") : MODE_OPTIONS).map((m) => (
                 <SelectItem key={m.value} value={m.value}>
                   {m.label}
                 </SelectItem>
@@ -86,11 +92,15 @@ export default function AgentSettings() {
             </SelectContent>
           </Select>
         </div>
-        <p className="mt-2 text-neutral-500 text-xs dark:text-neutral-400">{currentMode.desc}</p>
-        <p className="mt-1 text-neutral-500 text-xs dark:text-neutral-400">
-          对全局助手与侧边栏的阅读/论文助手一致生效。确认卡可勾选"本次会话不再询问"（重启应用后失效）。命令执行在任何模式下都会记录审计日志：
-          <code className="mx-1 break-all rounded bg-background px-1 dark:bg-neutral-700">{auditPath || "…"}</code>
+        <p className="mt-2 text-neutral-500 text-xs dark:text-neutral-400">
+          {isMobile ? "移动端固定为严格模式：仅库内问答与搜索，禁完全访问（桌面端可切换三档）。" : currentMode.desc}
         </p>
+        {!isMobile && (
+          <p className="mt-1 text-neutral-500 text-xs dark:text-neutral-400">
+            对全局助手与侧边栏的阅读/论文助手一致生效。确认卡可勾选"本次会话不再询问"（重启应用后失效）。命令执行在任何模式下都会记录审计日志：
+            <code className="mx-1 break-all rounded bg-background px-1 dark:bg-neutral-700">{auditPath || "…"}</code>
+          </p>
+        )}
       </section>
 
       {/* 共享工作区根 */}

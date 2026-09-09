@@ -35,7 +35,6 @@ tauri-plugin-llamacpp = { path = "plugins/tauri-plugin-llamacpp" }
 tauri-plugin-epub = { path = "plugins/tauri-plugin-epub" }
 jan-utils = { path = "utils" }
 tauri-plugin-log = "2"
-reqwest = { version = "0.12", features = ["stream", "blocking", "json"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 # changeset gzip 压缩（L2 流量：结构化 JSON 实测压缩 10 倍+）
@@ -45,16 +44,22 @@ rusqlite = { version = "0.32.1", features = ["bundled"] }
 sqlite-vec = "0.1.6"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
 globset = "0.4"
 regex = "1.10"
-# 注意：keyring v3 默认 features 为空（不启用任何平台后端，写入会落在 mock 后端导致重启后丢失），
-# 必须按平台显式启用原生后端（见下方 target 段）
-keyring = "3"
+# 注意：keyring v4 只开 v1 API（Entry 接口与 v3 完全兼容），平台后端一律在下方 target 段显式启用，
+# 不留默认 feature（默认含 windows/zbus 后端，会漏进安卓构建）
+# 安卓后端选型见 docs/plans/android-port-plan.md M2（android-native-keyring-store：Keystore 加密 + SharedPreferences）
+keyring = { version = "4", default-features = false, features = ["v1"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
+# 桌面端 TLS 走系统原生栈（Windows schannel），与既有行为一致
+reqwest = { version = "0.12", features = ["stream", "blocking", "json"] }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+# 移动端无法交叉编译 OpenSSL：rustls + webpki 根证书，纯 Rust
+reqwest = { version = "0.12", default-features = false, features = ["stream", "blocking", "json", "rustls-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 # MCP stdio 子进程 Job Object 孤儿防护（批次 D1）
@@ -64,15 +69,23 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
 ] }
 # keyring 必须启用 Windows Credential Manager 后端，否则密钥不持久化
-keyring = { version = "3", features = ["windows-native"] }
+keyring = { version = "4", features = ["windows-native-keyring-store"] }
 # follow-env 代理档的系统代理注册表回退（core/mcp proxy_spawn_env）
 winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "4", features = ["apple-native-keyring-store"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["linux-native-sync-persistent"] }
+# 对应 v3 的 linux-native-sync-persistent：同步 DBus Secret Service 存储
+keyring = { version = "4", features = ["dbus-secret-service-keyring-store"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# M2-2 实测定论：keyring v4 的 v1 门面自动选型仅覆盖 macOS/Windows/非安卓 *nix，
+# 安卓上 v1::Entry::new 恒报 NoDefaultStore。须直连 keyring-core 并在启动时 set_default_store
+# （android-native-keyring-store：Keystore 硬件级加密 + SharedPreferences 持久化，ndk-context 由 Tauri 初始化）
+keyring-core = "1"
+android-native-keyring-store = "1"
 
 
 [profile.release]

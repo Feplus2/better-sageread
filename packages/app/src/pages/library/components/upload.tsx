@@ -3,6 +3,7 @@ import { Upload as UploadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBookUpload } from "@/hooks/use-book-upload";
 import { useThemeStore } from "@/store/theme-store";
+import { isMobile } from "@/utils/mobile";
 
 export default function Upload() {
   const { isDarkMode } = useThemeStore();
@@ -27,7 +28,7 @@ export default function Upload() {
         <input
           type="file"
           multiple
-          accept=".epub,.pdf"
+          accept={isMobile ? ".epub" : ".epub,.pdf"}
           className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
           onChange={handleFileSelect}
           disabled={isUploading}

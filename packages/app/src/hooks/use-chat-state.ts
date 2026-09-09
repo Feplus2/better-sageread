@@ -10,6 +10,7 @@ import { recordAiUsage } from "@/services/ai-usage-service";
 import { saveImageAttachment } from "@/services/attachment-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
+import { useChatDraftStore } from "@/store/chat-draft-store";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { useThreadStore } from "@/store/thread-store";
 import type { ChatReference, ImageAttachment, MessageMetadata } from "@/types/message";
@@ -103,7 +104,14 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   const { activeBookId, agentScope } = chatContext;
   // 根据 Agent 角色确定线程 scope
   const threadScope = agentScope === "central" ? "global" : "book";
-  const [input, setInput] = useState("");
+  // 草稿入全局 store（M3-d）：移动端 AI 抽屉收起即卸载，组件内 useState 会丢未发送内容
+  const draftKey = `${agentScope}:${activeBookId ?? "none"}`;
+  const input = useChatDraftStore((s) => s.drafts[draftKey] ?? "");
+  const setDraft = useChatDraftStore((s) => s.setDraft);
+  const setInput = useCallback<React.Dispatch<React.SetStateAction<string>>>(
+    (value) => setDraft(draftKey, value),
+    [draftKey, setDraft],
+  );
   const [showThreads, setShowThreads] = useState(false);
   const [threadsKey, setThreadsKey] = useState(0);
   const [displayError, setDisplayError] = useState<Error | null>(null);

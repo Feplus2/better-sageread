@@ -2,6 +2,7 @@ import { useAppSettingsStore } from "@/store/app-settings-store";
 import type { ViewSettings } from "@/types/book";
 import type { FoliateView } from "@/types/view";
 import { eventDispatcher } from "@/utils/event";
+import { isMobile } from "@/utils/mobile";
 import { useReaderStoreApi } from "../components/reader-provider";
 
 export type ScrollSource = "touch" | "mouse";
@@ -50,7 +51,10 @@ export const usePagination = (bookId: string, containerRef: React.RefObject<HTML
               const centerStartX = viewStartX + viewRect.width * 0.375;
               const centerEndX = viewStartX + viewRect.width * 0.625;
               if (globalViewSettings.disableClick! || (screenX >= centerStartX && screenX <= centerEndX)) {
-                // Center area - no action needed
+                // 移动端中央区单击 = 弹出/收回上下栏（M3 手势地图；桌面中央区无动作）
+                if (isMobile) {
+                  window.dispatchEvent(new CustomEvent("mobile-reader-toggle-bars", { detail: { bookId } }));
+                }
               } else {
                 if (!globalViewSettings.disableClick! && screenX >= viewCenterX) {
                   if (globalViewSettings.swapClickArea) {

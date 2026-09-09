@@ -41,6 +41,7 @@ use crate::core::{
         update_book_note,
         update_book_status,
         update_note,
+        update_paper_metadata,
         update_reading_session,
     },
     database,
@@ -100,13 +101,17 @@ use crate::core::{
 };
 use tauri::Manager;
 
+/// 移动端返回链终点：无事可退时退出应用（安卓返回键全交前端裁决，见 src/utils/android-back.ts）
+#[tauri::command]
+fn mobile_exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::default())
         .manage(ConverterState::default())
         .manage(PaperConverterState::default())
@@ -122,12 +127,77 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
-        .plugin(tauri_plugin_epub::init())
+        .plugin(tauri_plugin_epub::init());
+    // 桌面专属：updater / global-shortcut 插件（依赖在 Cargo.toml 已按平台门控，
+    // 安卓无此二者——分发走 GitHub Release APK，快捷键无意义）+ on_window_event
+    // 退出清理（移动端 Window 无 destroy API、CloseRequested 亦不触发）
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // 阻止默认关闭：先完成退出前推送与进程清理，再主动销毁窗口
+                api.prevent_close();
+                let window = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_handle = window.app_handle().clone();
+
+                    // 退出前推送：L2 开启且有未推送变更时同步一轮（5s 超时，失败不阻塞退出）
+                    let exit_sync = async {
+                        let config = crate::core::sync::commands::load_webdav_config(&app_handle)?;
+                        if !config.l2_enabled || config.endpoint.is_empty() {
+                            return Ok::<(), String>(());
+                        }
+                        let state = app_handle.state::<AppState>();
+                        let pool_guard = state.db_pool.lock().await;
+                        let Some(pool) = pool_guard.as_ref() else {
+                            return Ok(());
+                        };
+                        let config_dir = app_handle.path().app_config_dir().map_err(|e| e.to_string())?;
+                        let sync_state = crate::core::sync::backup::read_sync_state(&config_dir);
+                        if crate::core::sync::engine::has_unpushed(pool, sync_state.last_pushed_seq.unwrap_or(0))
+                            .await?
+                        {
+                            log::info!("退出前推送未同步变更...");
+                            crate::core::sync::engine::run_sync(&app_handle, pool, &config).await?;
+                        }
+                        Ok(())
+                    };
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), exit_sync).await;
+
+                    if let Err(e) =
+                        tauri_plugin_llamacpp::cleanup_llama_processes(app_handle.clone()).await
+                    {
+                        log::error!("清理 llamacpp 进程失败: {}", e);
+                    }
+
+                    // MCP stdio 子进程全部回收（批次 D1：防孤儿 node/uvx）
+                    crate::core::mcp::close_all_sessions(&app_handle).await;
+
+                    // destroy 不再触发 CloseRequested，避免循环
+                    let _ = window.destroy();
+                });
+            }
+        });
+    builder
         .setup(|app| {
             let app_handle = app.handle().clone();
             // 应用级代理设置载入内存快照（批次 F3-1；失败视为 off 不阻塞）
             crate::core::proxy::load(&app_handle);
-            if std::env::consts::OS == "windows" {
+            // 安卓无 TMPDIR 环境变量：std::env::temp_dir() 落到 /data/local/tmp（应用无写权限，
+            // M2-6 实测 EPUB 导入失败 Permission denied）。指到应用私有 cache 目录后，
+            // 前端 @tauri-apps/api/path 的 tempDir() 及一切 Rust 临时文件逻辑随之可用
+            #[cfg(target_os = "android")]
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                std::env::set_var("TMPDIR", cache_dir);
+            }
+            // M2 真机 spike 自检（debug 安卓构建每次启动跑一轮，结果见 logcat [M2SPIKE]）
+            #[cfg(all(debug_assertions, target_os = "android"))]
+            crate::core::mobile_spike::run_spike(&app_handle);
+            // Windows 去窗口装饰（编译期门控：set_decorations 在移动端 API 中不存在）
+            #[cfg(target_os = "windows")]
+            {
                 if let Some(window) = app.get_webview_window("main") {
                     if let Err(e) = window.set_decorations(false) {
                         eprintln!("Failed to set window decorations: {}", e);
@@ -158,6 +228,11 @@ pub fn run() {
 
                 // 启动时清理回收站：超过保留期的书籍彻底删除
                 drop(db_pool_guard);
+
+                // M2-3 WebDAV 同步 spike（debug 安卓构建；连 PC 侧 dufs 走 adb reverse）
+                // 必须在 drop(db_pool_guard) 之后：spike 内部会重新取池锁
+                #[cfg(all(debug_assertions, target_os = "android"))]
+                crate::core::mobile_spike::run_sync_spike(&app_handle).await;
                 if let Err(e) = core::books::commands::purge_expired_trash(&app_handle).await {
                     log::error!("回收站自动清理失败: {}", e);
                 }
@@ -196,6 +271,7 @@ pub fn run() {
             replace_paper_content,
             get_paper_source_status,
             patch_paper_metadata_json,
+            update_paper_metadata,
             path_exists,
             // papers (文献库文件夹)
             list_folders,
@@ -336,52 +412,9 @@ pub fn run() {
             proxy_get_config,
             proxy_save_config,
             proxy_test,
+            // 移动端返回链终点（android-back.ts 无事可退时调用）
+            mobile_exit_app,
         ])
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // 阻止默认关闭：先完成退出前推送与进程清理，再主动销毁窗口
-                api.prevent_close();
-                let window = window.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_handle = window.app_handle().clone();
-
-                    // 退出前推送：L2 开启且有未推送变更时同步一轮（5s 超时，失败不阻塞退出）
-                    let exit_sync = async {
-                        let config = crate::core::sync::commands::load_webdav_config(&app_handle)?;
-                        if !config.l2_enabled || config.endpoint.is_empty() {
-                            return Ok::<(), String>(());
-                        }
-                        let state = app_handle.state::<AppState>();
-                        let pool_guard = state.db_pool.lock().await;
-                        let Some(pool) = pool_guard.as_ref() else {
-                            return Ok(());
-                        };
-                        let config_dir = app_handle.path().app_config_dir().map_err(|e| e.to_string())?;
-                        let sync_state = crate::core::sync::backup::read_sync_state(&config_dir);
-                        if crate::core::sync::engine::has_unpushed(pool, sync_state.last_pushed_seq.unwrap_or(0))
-                            .await?
-                        {
-                            log::info!("退出前推送未同步变更...");
-                            crate::core::sync::engine::run_sync(&app_handle, pool, &config).await?;
-                        }
-                        Ok(())
-                    };
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), exit_sync).await;
-
-                    if let Err(e) =
-                        tauri_plugin_llamacpp::cleanup_llama_processes(app_handle.clone()).await
-                    {
-                        log::error!("清理 llamacpp 进程失败: {}", e);
-                    }
-
-                    // MCP stdio 子进程全部回收（批次 D1：防孤儿 node/uvx）
-                    crate::core::mcp::close_all_sessions(&app_handle).await;
-
-                    // destroy 不再触发 CloseRequested，避免循环
-                    let _ = window.destroy();
-                });
-            }
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

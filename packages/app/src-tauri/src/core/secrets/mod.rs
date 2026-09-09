@@ -19,6 +19,30 @@ const SERVICE: &str = "com.bettersageread.app";
 /// keyring 后端不可用时的降级存储（headless Linux 等场景；主发 Windows/macOS 不会触发）
 const FALLBACK_FILE: &str = "secrets-fallback.json";
 
+// keyring v4 平台分流：桌面走 v1 门面（自动选型），安卓直连 keyring-core（v1 门面不支持安卓，见 Cargo.toml 注）
+#[cfg(not(target_os = "android"))]
+use keyring::{Entry as KeyringEntry, Error as KeyringError};
+#[cfg(target_os = "android")]
+use keyring_core::{Entry as KeyringEntry, Error as KeyringError};
+
+/// 安卓端一次性装配默认凭据存储（Android Keystore + SharedPreferences；ndk-context 由 Tauri 初始化）
+#[cfg(target_os = "android")]
+fn ensure_android_store() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| match android_native_keyring_store::Store::new() {
+        Ok(store) => keyring_core::set_default_store(store),
+        Err(e) => log::error!("Android Keystore 存储初始化失败: {e}"),
+    });
+}
+
+/// 构造 keyring Entry（安卓先确保默认存储就位）
+fn keyring_entry(account: &str) -> Result<KeyringEntry, KeyringError> {
+    #[cfg(target_os = "android")]
+    ensure_android_store();
+    KeyringEntry::new(SERVICE, account)
+}
+
 fn account_name(category: &str, key: &str) -> String {
     format!("{category}:{key}")
 }
@@ -55,7 +79,7 @@ pub fn set_secret(app: &AppHandle, category: &str, key: &str, value: &str) -> Re
         fallback_write(app, &map);
         Ok(())
     };
-    match keyring::Entry::new(SERVICE, &account) {
+    match keyring_entry(&account) {
         Ok(entry) => match entry.set_password(value) {
             Ok(()) => Ok(()),
             Err(e) => fallback(app, e.to_string()),
@@ -67,10 +91,10 @@ pub fn set_secret(app: &AppHandle, category: &str, key: &str, value: &str) -> Re
 /// 读取密钥：优先 keyring，miss 或后端不可用时查降级文件。不存在返回 Ok(None)
 pub fn get_secret(app: &AppHandle, category: &str, key: &str) -> Result<Option<String>, String> {
     let account = account_name(category, key);
-    match keyring::Entry::new(SERVICE, &account) {
+    match keyring_entry(&account) {
         Ok(entry) => match entry.get_password() {
             Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(fallback_read(app).remove(&account)),
+            Err(KeyringError::NoEntry) => Ok(fallback_read(app).remove(&account)),
             // 后端不可用（headless Linux 等）：降级查文件，不视为硬错误
             Err(e) => {
                 log::warn!("keyring 读取失败（{e}），降级查本地文件 {FALLBACK_FILE}");
@@ -84,10 +108,10 @@ pub fn get_secret(app: &AppHandle, category: &str, key: &str) -> Result<Option<S
 /// 删除密钥（keyring 与降级文件双清；keyring 后端不可用时仅告警并继续清文件）
 pub fn delete_secret(app: &AppHandle, category: &str, key: &str) -> Result<(), String> {
     let account = account_name(category, key);
-    if let Ok(entry) = keyring::Entry::new(SERVICE, &account) {
+    if let Ok(entry) = keyring_entry(&account) {
         // NoEntry 视为已删除
         match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Ok(()) | Err(KeyringError::NoEntry) => {}
             Err(e) => log::warn!("keyring 删除失败（{e}），仅清理降级文件 {FALLBACK_FILE}"),
         }
     }

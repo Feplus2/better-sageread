@@ -8,6 +8,7 @@ import { syncGetConfig, syncUploadBook } from "@/services/sync-service";
 import { useLibraryStore } from "@/store/library-store";
 import type { SimpleBook } from "@/types/simple-book";
 import { getFilename, listFormater } from "@/utils/book";
+import { isMobile } from "@/utils/mobile";
 import { readFile } from "@tauri-apps/plugin-fs";
 
 export function useBookUpload() {
@@ -38,11 +39,17 @@ export function useBookUpload() {
 
     const supportedFiles = files.filter((file) => {
       const fileExt = file.name.split(".").pop()?.toLowerCase();
+      // 移动端格式收口（M3-f）：转换器不带手机，PDF 转换基地在电脑端
+      if (isMobile) return fileExt === "epub";
       return FILE_ACCEPT_FORMATS.includes(`.${fileExt}`);
     });
 
     if (supportedFiles.length === 0) {
-      toast.error(`未找到支持的文件。支持的格式：${FILE_ACCEPT_FORMATS}`);
+      toast.error(
+        isMobile
+          ? "移动端仅支持导入 EPUB（PDF 请在电脑端转换后同步过来）"
+          : `未找到支持的文件。支持的格式：${FILE_ACCEPT_FORMATS}`,
+      );
       return;
     }
 
@@ -109,7 +116,7 @@ export function useBookUpload() {
     return new Promise((resolve) => {
       const fileInput = document.createElement("input");
       fileInput.type = "file";
-      fileInput.accept = FILE_ACCEPT_FORMATS;
+      fileInput.accept = isMobile ? ".epub" : FILE_ACCEPT_FORMATS;
       fileInput.multiple = true;
       fileInput.click();
 

@@ -7,6 +7,7 @@ import { useLibraryStore } from "@/store/library-store";
 import { useThemeStore } from "@/store/theme-store";
 import { getInsetEdges } from "@/utils/grid";
 import { getViewInsets } from "@/utils/insets";
+import { isMobile } from "@/utils/mobile";
 import { getReaderBackgroundLayers, resolveBookViewMode } from "@/utils/style";
 import { useCallback, useEffect, useMemo } from "react";
 import useBookShortcuts from "../hooks/use-book-shortcuts";
@@ -187,9 +188,10 @@ export default function ReaderViewer() {
 
   return (
     <div id={`gridcell-${bookId}`} className="relative flex h-full w-full flex-col rounded-md bg-background">
-      <HeaderBar />
+      {/* 移动端上下栏由 MobileLayout 体系接管（M3-c 单击弹出式）；桌面组件原样保留 */}
+      {!isMobile && <HeaderBar />}
       <ReaderViewerContent />
-      <FooterBar />
+      {!isMobile && <FooterBar />}
       <Annotator />
     </div>
   );

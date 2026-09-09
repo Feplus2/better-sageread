@@ -1,5 +1,6 @@
 import GlobalConvertProgress from "@/components/global-convert-progress";
 import HomeLayout from "@/components/home-layout";
+import MobileLayout from "@/components/mobile/mobile-layout";
 import { renderInlineMathHtml } from "@/components/markdown/inline-math-text";
 import { MotionSidebar, SidebarMotionPin, SidebarMotionProvider } from "@/components/motion/sidebar-motion";
 import { NotepadContainer } from "@/components/notepad";
@@ -35,6 +36,7 @@ import { markTabWoken, useLayoutStore } from "@/store/layout-store";
 import { useThemeStore } from "@/store/theme-store";
 import { useUpdateStore } from "@/store/update-store";
 import { getOSPlatform } from "@/utils/misc";
+import { isMobile } from "@/utils/mobile";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "app-tabs";
 import { HomeIcon, PanelLeft, PanelTop, Settings } from "lucide-react";
@@ -525,6 +527,20 @@ export default function ReaderLayout() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeTabId, removeTab]);
+
+  // 移动端整体换壳（M3）：上方全部 hooks（同步调度/主题/字体/更新检查）照常运行，
+  // 桌面 JSX（标签栏/侧栏/keepalive 层）一行不动——分叉只在最终渲染
+  if (isMobile) {
+    return (
+      <div className="flex h-dvh flex-col bg-muted">
+        <MobileLayout />
+        <GlobalConvertProgress />
+        <BottomRightStackHost />
+        <UpdateConfirmDialog />
+        <SettingsDialog open={isSettingsDialogOpen} onOpenChange={toggleSettingsDialog} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-muted">

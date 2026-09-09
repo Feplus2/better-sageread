@@ -8,6 +8,7 @@ import { HashRouter } from "react-router";
 import ReaderLayout from "./components/reader-layout.tsx";
 import { flushAllWrites } from "./lib/tauri-storage.ts";
 import { initSecrets } from "./services/secret-init.ts";
+import { installAndroidBackHandler } from "./utils/android-back.ts";
 import { mountFontsToMainApp } from "./utils/font.ts";
 
 const queryClient = new QueryClient();
@@ -15,6 +16,9 @@ const queryClient = new QueryClient();
 import "./index.css";
 
 mountFontsToMainApp();
+
+// 安卓返回键统一裁决（M3 移动导航；桌面端 no-op）
+installAndroidBackHandler();
 
 // 保活层隐藏模型 A/B 开关（index.css 批次 3 双轨）：默认 visibility 模型（2026-08-25 A/B 裁决：
 // 拆墙假设证伪，墙在 React render，详见 index.css 批次 3 注释与 .tmp-motion-verify/ab-results.json）；

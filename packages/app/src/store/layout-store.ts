@@ -2,6 +2,7 @@ import { tauriStorageKey } from "@/constants/tauri-storage";
 import { tauriStorage } from "@/lib/tauri-storage";
 import type { ReaderStore } from "@/pages/reader/store/create-reader-store";
 import { createReaderStore } from "@/pages/reader/store/create-reader-store";
+import { isMobile } from "@/utils/mobile";
 import type { TabProperties } from "app-tabs";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -52,6 +53,10 @@ interface LayoutStore {
   updateTab: (tabId: string, updates: Partial<Tab>) => void;
   reorderTab: (tabId: string, fromIndex: number, toIndex: number) => void;
   getReaderStore: (tabId: string) => ReaderStore | undefined;
+  /** 移动端单书存活：激活 tab 的 store 缺失时补建（移动端休眠= dispose，见下） */
+  ensureReaderStore: (tabId: string, bookId: string) => ReaderStore;
+  /** 移动端单书存活：释放除 active 外全部书籍 store（真零占用，重开时从 DB 恢复） */
+  disposeReaderStoresExcept: (activeTabId: string | null) => void;
   toggleChatSidebar: () => void;
   toggleNotepadSidebar: () => void;
   toggleTabOrientation: () => void;
@@ -247,6 +252,23 @@ export const useLayoutStore = create<LayoutStore>()(
         return get().readerStores.get(tabId);
       },
 
+      ensureReaderStore: (tabId: string, bookId: string) => {
+        const { readerStores } = get();
+        let store = readerStores.get(tabId);
+        if (!store) {
+          store = createReaderStore(bookId);
+          readerStores.set(tabId, store);
+        }
+        return store;
+      },
+
+      disposeReaderStoresExcept: (activeTabId: string | null) => {
+        const { readerStores } = get();
+        for (const tabId of [...readerStores.keys()]) {
+          if (tabId !== activeTabId) readerStores.delete(tabId);
+        }
+      },
+
       toggleChatSidebar: () => {
         set({ isChatVisible: !get().isChatVisible });
       },
@@ -288,6 +310,8 @@ export const useLayoutStore = create<LayoutStore>()(
 
         for (const tab of tabs) {
           if ((tab.type ?? "book") !== "book") continue; // 论文 tab 无 foliate reader store，无需重建
+          // 移动端单书存活：启动不为历史 tab 重建 store（首开后经 ensureReaderStore 按需建）
+          if (isMobile) continue;
           if (!readerStores.has(tab.id)) {
             const store = createReaderStore(tab.bookId);
             readerStores.set(tab.id, store);

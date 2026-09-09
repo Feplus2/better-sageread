@@ -1,5 +1,6 @@
 import { tauriStorageKey } from "@/constants/tauri-storage";
 import { tauriStorage } from "@/lib/tauri-storage";
+import { isMobile } from "@/utils/mobile";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -35,8 +36,13 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
       safetyMode: "strict",
       workspaceRoot: null,
       perAgentRoots: {},
-      setSafetyMode: (safetyMode) => set({ safetyMode }),
-      setWorkspaceRoot: (workspaceRoot) => set({ workspaceRoot }),
+      // 移动端 Agent 权限收敛（M3-g 裁定）：只保留严格模式——无 shell/子进程能力，
+      // 完全访问在手机上无意义且风险放大；同步过来的桌面配置可能带 full，写入侧一律拦回 strict
+      setSafetyMode: (safetyMode) => set({ safetyMode: isMobile ? "strict" : safetyMode }),
+      setWorkspaceRoot: (workspaceRoot) => {
+        if (isMobile) return; // 手机工作区恒为 app 私有目录，不开放自选
+        set({ workspaceRoot });
+      },
       setPerAgentRoot: (scope, root) =>
         set((state) => {
           const next = { ...state.perAgentRoots };
@@ -56,6 +62,17 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
         workspaceRoot: state.workspaceRoot,
         perAgentRoots: state.perAgentRoots,
       }),
+      // 移动端水合兜底：同步/备份恢复过来的 full/relaxed 一律压回 strict（M3-g）
+      merge: (persisted, current) => {
+        const p = persisted as Partial<AgentSettingsState> | undefined;
+        const merged = { ...current, ...p };
+        if (isMobile) {
+          merged.safetyMode = "strict";
+          merged.workspaceRoot = null;
+          merged.perAgentRoots = {};
+        }
+        return merged;
+      },
     },
   ),
 );

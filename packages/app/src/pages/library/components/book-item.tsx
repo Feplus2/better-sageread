@@ -28,6 +28,7 @@ import { rebuildCoverAfterDownload } from "@/services/book-service";
 import { syncDownloadBook } from "@/services/sync-service";
 import { type Tag, createTag, getTags } from "@/services/tag-service";
 import { useLayoutStore } from "@/store/layout-store";
+import { isMobile } from "@/utils/mobile";
 import { useTaskCenterStore } from "@/store/task-center-store";
 import type { BookWithStatusAndUrls } from "@/types/simple-book";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -192,6 +193,11 @@ export default function BookItem({
     // 多选模式下点击切换选中，不打开书籍
     if (selectionMode) {
       onToggleSelect?.(book.id);
+      return;
+    }
+    // 移动端 PDF 收口（M3-f）：转换基地在电脑端，手机上不给打开
+    if (isMobile && book.format === "PDF") {
+      toast.info("PDF 请在电脑端转换为 EPUB 后同步阅读");
       return;
     }
     if (isCloudOnly) {
@@ -558,7 +564,9 @@ export default function BookItem({
           <div className="group cursor-pointer" onClick={handleClick}>
             <div
               data-region="book-card"
-              className="rounded-r-2xl rounded-l-md border border-neutral-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800"
+              className={`rounded-r-2xl rounded-l-md border border-neutral-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+                isMobile && book.format === "PDF" ? "opacity-55" : ""
+              }`}
             >
               <div className="relative p-2 pb-0">
                 <div className="mb-2">

@@ -11,6 +11,69 @@ const doubleClickEnabled = !DISABLE_DOUBLE_CLICK_ON_MOBILE || !["android", "ios"
 let lastClickTime = 0;
 let longHoldTimeout: ReturnType<typeof setTimeout> | null = null;
 
+/** 移动端长按切句（M3）：长按 = 合成 contextmenu，复用桌面右键"选中整句 + 标注弹窗"整条路径。
+ *  触发后置 suppress 标记，吃掉松手后浏览器补发的 click（否则单击弹栏会紧跟着把菜单弹出来） */
+let mobileLpSuppressClick = false;
+const MOBILE_LP_MS = 500;
+const MOBILE_LP_MOVE_TOLERANCE = 12;
+
+export const attachMobileLongPress = (doc: Document, win: Window) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let startX = 0;
+  let startY = 0;
+  let startTarget: EventTarget | null = null;
+
+  const cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  doc.addEventListener(
+    "touchstart",
+    (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      startX = t.clientX;
+      startY = t.clientY;
+      startTarget = e.target;
+      timer = setTimeout(() => {
+        timer = null;
+        mobileLpSuppressClick = true;
+        const ev = new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: startX,
+          clientY: startY,
+          view: win,
+        });
+        const target = startTarget as Element | null;
+        if (target?.dispatchEvent) target.dispatchEvent(ev);
+        else doc.dispatchEvent(ev);
+      }, MOBILE_LP_MS);
+    },
+    { passive: true },
+  );
+
+  doc.addEventListener(
+    "touchmove",
+    (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      if (
+        Math.abs(t.clientX - startX) > MOBILE_LP_MOVE_TOLERANCE ||
+        Math.abs(t.clientY - startY) > MOBILE_LP_MOVE_TOLERANCE
+      ) {
+        cancel();
+      }
+    },
+    { passive: true },
+  );
+  doc.addEventListener("touchend", cancel, { passive: true });
+  doc.addEventListener("touchcancel", cancel, { passive: true });
+};
+
 export const handleKeydown = (bookId: string, event: KeyboardEvent) => {
   if (["Backspace", "ArrowDown", "ArrowUp"].includes(event.key)) {
     event.preventDefault();
@@ -146,6 +209,12 @@ export const handleImageClick = (bookId: string, event: MouseEvent) => {
 };
 
 export const handleClick = (bookId: string, event: MouseEvent) => {
+  // 移动端长按切句刚触发过：本次 click 是浏览器松手补发，吃掉（M3 手势防串扰）
+  if (mobileLpSuppressClick) {
+    mobileLpSuppressClick = false;
+    event.preventDefault();
+    return;
+  }
   const now = Date.now();
 
   if (doubleClickEnabled && now - lastClickTime < DOUBLE_CLICK_INTERVAL_THRESHOLD_MS) {
