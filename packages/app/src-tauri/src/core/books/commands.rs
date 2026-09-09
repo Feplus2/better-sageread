@@ -415,6 +415,48 @@ fn purge_paper_vectors_inner(db_path: &std::path::Path, paper_id: &str) -> rusql
     Ok(())
 }
 
+/// 同步向量库 document_chunks 冗余的论文标题/作者列（手工编辑元数据后，AI 引用与 BM25
+/// 标题匹配保持新鲜；标题不进嵌入文本，向量本身无需重算，bm25_stats 为全库统计也不受影响）。
+/// 失败仅告警不阻塞主流程。
+fn retitle_paper_vectors(
+    app_data_dir: &std::path::Path,
+    paper_id: &str,
+    title: Option<&str>,
+    author: Option<&str>,
+) {
+    let db_path = app_data_dir.join("papers").join("vectors.sqlite");
+    if !db_path.exists() {
+        return;
+    }
+    let result = (|| -> rusqlite::Result<()> {
+        let conn = rusqlite::Connection::open(&db_path)?;
+        // 老库（迁移前）没有 paper_id 列，不可能存在论文分片（与 purge 同口径）
+        let has_paper_id = conn
+            .prepare("PRAGMA table_info(document_chunks)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|name| name.map(|n| n == "paper_id").unwrap_or(false));
+        if !has_paper_id {
+            return Ok(());
+        }
+        if let Some(t) = title {
+            conn.execute(
+                "UPDATE document_chunks SET book_title = ?1 WHERE paper_id = ?2",
+                rusqlite::params![t, paper_id],
+            )?;
+        }
+        if let Some(a) = author {
+            conn.execute(
+                "UPDATE document_chunks SET book_author = ?1 WHERE paper_id = ?2",
+                rusqlite::params![a, paper_id],
+            )?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        log::warn!("同步向量库论文标题/作者失败 (paper_id={}): {}", paper_id, e);
+    }
+}
+
 /// 彻底删除单本书（回收站手动操作）
 #[tauri::command]
 pub async fn purge_book(app_handle: AppHandle, id: String) -> Result<(), String> {
@@ -1722,6 +1764,299 @@ pub async fn patch_paper_metadata_json(
     tauri_plugin_epub::metadata_json::patch_metadata_json(&meta_path, obj).map_err(|e| e.to_string())
 }
 
+// ==================== 论文元数据手工编辑（文献库「编辑信息」） ====================
+
+/// YAML 双引号标量：换行压成空格（这些字段都是单行语义），\ 与 " 都转义——
+/// 标题常含 LaTeX 反斜杠，漏转 \ 会被 YAML 当转义符吃掉。
+fn yaml_double_quoted(value: &str) -> String {
+    let collapsed = value.replace(['\r', '\n'], " ");
+    format!(
+        "\"{}\"",
+        collapsed.replace('\\', "\\\\").replace('"', "\\\"")
+    )
+}
+
+/// upsert/移除 frontmatter 一个顶层键（lines 含首尾两行 `---`）。
+/// replacement = Some(新块行) 整块替换、未存在则插入收尾 `---` 前；None = 整块删除。
+/// 「块」= 键行 + 续行（空行、缩进行、列 0 的 `- ` 列表项），覆盖 author 列表、
+/// abstract `>-` 折叠块等多行形态。调用方保证 lines[0] == "---"。
+fn upsert_frontmatter_field(lines: &mut Vec<String>, key: &str, replacement: Option<Vec<String>>) {
+    let Some(close_idx) = lines[1..].iter().position(|l| l == "---").map(|p| p + 1) else {
+        return;
+    };
+    let prefix = format!("{}:", key);
+    // 顶层键：列 0 起、key: 前缀（续行有缩进或是 - 列表项；title: 与 title_zh: 靠冒号区分）
+    let start = (1..close_idx)
+        .find(|&i| !lines[i].starts_with(char::is_whitespace) && lines[i].starts_with(&prefix));
+    match (start, replacement) {
+        (Some(i), repl) => {
+            let mut end = i + 1;
+            while end < close_idx {
+                let l = &lines[end];
+                if l.trim().is_empty()
+                    || l.starts_with(char::is_whitespace)
+                    || l.starts_with("- ")
+                    || l == "-"
+                {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            lines.splice(i..end, repl.unwrap_or_default());
+        }
+        (None, Some(block)) => {
+            lines.splice(close_idx..close_idx, block);
+        }
+        (None, None) => {}
+    }
+}
+
+/// 论文元数据手工编辑：一次同步三处副本——paper.md frontmatter（事实源，行级块编辑、其余
+/// 字节不动、LF 写回；无 frontmatter 则新建块置于文首）、metadata.json（列表副信息/判重
+/// 数据源，全局锁读改写）、books 表（列表标题/作者）。仅元数据字段变更（正文不动），故
+/// translation-zh.json 与 vectorizedSourceHash 的版本锚重锚到新 hash——仅当锚在编辑前仍
+/// 同步（== 旧 hash）时才重锚，已陈旧的锚不复活（防把真陈旧误判为新鲜）。标题变更同时
+/// 丢弃 metadata.json 的 title_zh（旧中译名不副实，口径同重解析 merge_translation_artifacts）；
+/// 向量库 document_chunks 冗余的 book_title/book_author 同步改写。
+#[tauri::command]
+pub async fn update_paper_metadata(
+    app_handle: AppHandle,
+    paper_id: String,
+    updates: PaperMetadataUpdate,
+) -> Result<SimpleBook, String> {
+    let db_pool = get_db_pool(&app_handle).await?;
+    if get_book_by_id(app_handle.clone(), paper_id.clone())
+        .await?
+        .is_none()
+    {
+        return Err(format!("论文不存在: {}", paper_id));
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用目录失败: {}", e))?;
+    let book_dir = app_data_dir.join("books").join(&paper_id);
+    let paper_path = book_dir.join("paper.md");
+    if !paper_path.is_file() {
+        return Err(format!("paper.md 不存在: {}", paper_id));
+    }
+    let content =
+        fs::read_to_string(&paper_path).map_err(|e| format!("读取 paper.md 失败: {}", e))?;
+    let old_hash = paper_source_hash(content.as_bytes());
+
+    // 归一化：trim；title 空串报错（None=不改），authors 过滤空项，标量空串=移除该键
+    let title = updates
+        .title
+        .as_ref()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+    if updates.title.is_some() && title.is_none() {
+        return Err("标题不能为空".to_string());
+    }
+    let authors: Option<Vec<String>> = updates.authors.as_ref().map(|list| {
+        list.iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect()
+    });
+
+    // ---- 1. paper.md frontmatter ----
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let has_frontmatter =
+        lines.first().map(String::as_str) == Some("---") && lines[1..].iter().any(|l| l == "---");
+    if has_frontmatter {
+        if let Some(t) = &title {
+            upsert_frontmatter_field(
+                &mut lines,
+                "title",
+                Some(vec![format!("title: {}", yaml_double_quoted(t))]),
+            );
+        }
+        if let Some(list) = &authors {
+            let block = if list.is_empty() {
+                None
+            } else {
+                let mut block = vec!["author:".to_string()];
+                for a in list {
+                    block.push(format!("  - name: {}", yaml_double_quoted(a)));
+                }
+                Some(block)
+            };
+            upsert_frontmatter_field(&mut lines, "author", block);
+        }
+        for (key, value) in [
+            ("date", &updates.date),
+            ("container-title", &updates.container_title),
+            ("doi", &updates.doi),
+        ] {
+            if let Some(v) = value {
+                let v = v.trim();
+                let block =
+                    (!v.is_empty()).then(|| vec![format!("{}: {}", key, yaml_double_quoted(v))]);
+                upsert_frontmatter_field(&mut lines, key, block);
+            }
+        }
+    } else {
+        // 无 frontmatter 块：有字段要写时新建块置于文首（契约要求 frontmatter，缺失多为转换截断）
+        let mut block: Vec<String> = Vec::new();
+        if let Some(t) = &title {
+            block.push(format!("title: {}", yaml_double_quoted(t)));
+        }
+        if let Some(list) = &authors {
+            if !list.is_empty() {
+                block.push("author:".to_string());
+                for a in list {
+                    block.push(format!("  - name: {}", yaml_double_quoted(a)));
+                }
+            }
+        }
+        for (key, value) in [
+            ("date", &updates.date),
+            ("container-title", &updates.container_title),
+            ("doi", &updates.doi),
+        ] {
+            if let Some(v) = value {
+                let v = v.trim();
+                if !v.is_empty() {
+                    block.push(format!("{}: {}", key, yaml_double_quoted(v)));
+                }
+            }
+        }
+        if !block.is_empty() {
+            let mut head = vec!["---".to_string()];
+            head.extend(block);
+            head.push("---".to_string());
+            head.push(String::new());
+            lines.splice(0..0, head);
+        }
+    }
+
+    let mut new_content = lines.join("\n");
+    if content.ends_with('\n') {
+        new_content.push('\n');
+    }
+    if new_content != content {
+        fs::write(&paper_path, &new_content).map_err(|e| format!("写入 paper.md 失败: {}", e))?;
+    }
+    let new_hash = paper_source_hash(new_content.as_bytes());
+
+    // ---- 2. metadata.json（全局锁读改写；空串标量/空作者数组 = 删键）----
+    let mut inserts: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut removals: Vec<&'static str> = Vec::new();
+    if let Some(t) = &title {
+        inserts.push(("title".to_string(), t.clone().into()));
+        removals.push("title_zh");
+    }
+    if let Some(list) = &authors {
+        if list.is_empty() {
+            removals.push("author");
+        } else {
+            inserts.push((
+                "author".to_string(),
+                serde_json::json!(list.iter().map(|a| serde_json::json!({ "name": a })).collect::<Vec<_>>()),
+            ));
+        }
+    }
+    for (key, value) in [
+        ("date", &updates.date),
+        ("container-title", &updates.container_title),
+        ("doi", &updates.doi),
+    ] {
+        if let Some(v) = value {
+            let v = v.trim();
+            if v.is_empty() {
+                removals.push(key);
+            } else {
+                inserts.push((key.to_string(), v.into()));
+            }
+        }
+    }
+
+    let meta_path = book_dir.join("metadata.json");
+    if meta_path.is_file() {
+        let (old_hash_c, new_hash_c) = (old_hash.clone(), new_hash.clone());
+        let result =
+            tauri_plugin_epub::metadata_json::modify_metadata_json(&meta_path, move |obj| {
+                for (k, v) in &inserts {
+                    obj.insert(k.clone(), v.clone());
+                }
+                for k in &removals {
+                    obj.remove(*k);
+                }
+                // 向量版本锚重锚：仅编辑前仍同步（锚 == 旧 hash）时推进到新 hash；锚缺失/已陈旧不动
+                if obj.get("vectorizedSourceHash").and_then(|v| v.as_str())
+                    == Some(old_hash_c.as_str())
+                {
+                    obj.insert("vectorizedSourceHash".to_string(), new_hash_c.clone().into());
+                }
+            });
+        if let Err(e) = result {
+            log::warn!("写入 metadata.json 失败（{}）: {}", meta_path.display(), e);
+        }
+    }
+
+    // ---- 3. translation-zh.json 版本锚重锚（文件名口径同 get_paper_source_status）----
+    if old_hash != new_hash {
+        let translation_path = book_dir.join("translation-zh.json");
+        if let Ok(raw) = fs::read_to_string(&translation_path) {
+            let updated = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|mut file| {
+                    let obj = file.as_object_mut()?;
+                    if obj.get("sourceHash").and_then(|h| h.as_str()) == Some(old_hash.as_str()) {
+                        obj.insert("sourceHash".to_string(), new_hash.clone().into());
+                        Some(file)
+                    } else {
+                        None
+                    }
+                });
+            if let Some(file) = updated {
+                match serde_json::to_string_pretty(&file) {
+                    Ok(text) => {
+                        if let Err(e) = fs::write(&translation_path, text) {
+                            log::warn!(
+                                "重锚译文版本锚失败（{}）: {}",
+                                translation_path.display(),
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => log::warn!("序列化译文文件失败（{}）: {}", translation_path.display(), e),
+                }
+            }
+        }
+    }
+
+    // ---- 4. books 表（列表标题/作者；file_size 随 paper.md 变化；updated_at 推进 LWW）----
+    let author_row = authors.as_ref().map(|list| match list.len() {
+        0 => String::new(),
+        1 => list[0].clone(),
+        _ => format!("{} et al.", list[0]),
+    });
+    sqlx::query(
+        "UPDATE books SET title = COALESCE(?, title), author = COALESCE(?, author), file_size = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(title.as_deref())
+    .bind(author_row.as_deref())
+    .bind(new_content.len() as i64)
+    .bind(chrono::Utc::now().timestamp_millis())
+    .bind(&paper_id)
+    .execute(&db_pool)
+    .await
+    .map_err(|e| format!("更新书籍记录失败: {}", e))?;
+
+    // ---- 5. 向量库冗余标题/作者列同步 ----
+    if title.is_some() || author_row.is_some() {
+        retitle_paper_vectors(&app_data_dir, &paper_id, title.as_deref(), author_row.as_deref());
+    }
+
+    get_book_by_id(app_handle, paper_id)
+        .await?
+        .ok_or_else(|| "更新后无法找到论文".to_string())
+}
+
 // ==================== Note 相关命令（笔记面板，2026-08 重建） ====================
 
 #[tauri::command]
@@ -1861,7 +2196,7 @@ pub async fn delete_note(app_handle: AppHandle, id: String) -> Result<(), String
 mod tests {
     use super::{
         merge_translation_artifacts, paper_source_hash, should_bump_position_changed,
-        translation_stale, vectorized_stale,
+        translation_stale, upsert_frontmatter_field, vectorized_stale, yaml_double_quoted,
     };
 
     #[test]
@@ -1951,5 +2286,64 @@ mod tests {
         assert!(vectorized_stale(Some("h"), Some("h"), 0));
         // paper.md 变化锚未更新 → 陈旧
         assert!(vectorized_stale(Some("old"), Some("new"), 3));
+    }
+
+    fn frontmatter_lines(body: &str) -> Vec<String> {
+        body.lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn test_yaml_double_quoted() {
+        // LaTeX 反斜杠必须双写（否则 YAML 双引号串里 \a 被当转义符吃掉）
+        assert_eq!(yaml_double_quoted("$\\alpha$-Fe"), "\"$\\\\alpha$-Fe\"");
+        // 引号转义；换行压成空格
+        assert_eq!(yaml_double_quoted("He said \"hi\"\nthere"), "\"He said \\\"hi\\\" there\"");
+    }
+
+    #[test]
+    fn test_upsert_frontmatter_field_replace_scalar() {
+        // 单行标量整块替换；其余行（含 abstract 折叠块）不动
+        let mut lines = frontmatter_lines("---\ntitle: Old Title\nauthor:\n- name: A\nabstract: >-\n  folded\n  text\n---\nbody\n");
+        upsert_frontmatter_field(&mut lines, "title", Some(vec!["title: \"New\"".to_string()]));
+        assert_eq!(
+            lines,
+            frontmatter_lines("---\ntitle: \"New\"\nauthor:\n- name: A\nabstract: >-\n  folded\n  text\n---\nbody\n")
+        );
+    }
+
+    #[test]
+    fn test_upsert_frontmatter_field_author_block() {
+        // 列 0 `- ` 列表项是 author 块的续行：整体被替换；后面的 date 键不受牵连
+        let mut lines = frontmatter_lines("---\ntitle: T\nauthor:\n- name: A\n- name: B\ndate: '2010'\n---\n");
+        upsert_frontmatter_field(
+            &mut lines,
+            "author",
+            Some(vec!["author:".to_string(), "  - name: \"C\"".to_string()]),
+        );
+        assert_eq!(
+            lines,
+            frontmatter_lines("---\ntitle: T\nauthor:\n  - name: \"C\"\ndate: '2010'\n---\n")
+        );
+    }
+
+    #[test]
+    fn test_upsert_frontmatter_field_remove_and_insert() {
+        // 删除键：整块（含折叠续行）移除；插入键：落到收尾 --- 之前
+        let mut lines = frontmatter_lines("---\ntitle: T\nabstract: >-\n  multi\n  line\ndate: '2010'\n---\nbody\n");
+        upsert_frontmatter_field(&mut lines, "abstract", None);
+        assert_eq!(lines, frontmatter_lines("---\ntitle: T\ndate: '2010'\n---\nbody\n"));
+        upsert_frontmatter_field(&mut lines, "doi", Some(vec!["doi: \"10.1/x\"".to_string()]));
+        assert_eq!(
+            lines,
+            frontmatter_lines("---\ntitle: T\ndate: '2010'\ndoi: \"10.1/x\"\n---\nbody\n")
+        );
+    }
+
+    #[test]
+    fn test_upsert_frontmatter_field_no_false_prefix_match() {
+        // title: 与 title_zh: 靠冒号区分（title 不以 title_zh 的键行误判）
+        let mut lines = frontmatter_lines("---\ntitle_zh: 中文\ntitle: T\n---\n");
+        upsert_frontmatter_field(&mut lines, "title", Some(vec!["title: \"N\"".to_string()]));
+        assert_eq!(lines, frontmatter_lines("---\ntitle_zh: 中文\ntitle: \"N\"\n---\n"));
     }
 }

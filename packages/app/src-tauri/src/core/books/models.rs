@@ -61,6 +61,21 @@ pub struct BookUpdateData {
     pub updated_at: Option<i64>,
 }
 
+/// 论文元数据手工编辑载荷（文献库「编辑信息」对话框）。字段全部可选，只写出现的字段；
+/// 空串/空数组 = 从 frontmatter 与 metadata.json 移除该键（title 除外：None=不改，空串报错）。
+#[derive(Deserialize, Debug)]
+pub struct PaperMetadataUpdate {
+    pub title: Option<String>,
+    /// 完整作者名列表（覆盖式；对话框为分号分隔纯文本，不含机构）
+    pub authors: Option<Vec<String>>,
+    /// 年份/日期（CSL date 原样字符串，如 2023 / 2023-05）
+    pub date: Option<String>,
+    /// 期刊/会议名（CSL container-title）
+    #[serde(rename = "containerTitle")]
+    pub container_title: Option<String>,
+    pub doi: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BookStatus {
     #[serde(rename = "bookId")]

@@ -11,12 +11,11 @@ use std::sync::Mutex;
 
 static METADATA_JSON_LOCK: Mutex<()> = Mutex::new(());
 
-/// 读改写 metadata.json：合并 patch 字段（不动其他字段），全程持全局锁串行化。
-/// 锁中毒时取回守卫继续（写文件失败本就按各自语义降级，不因一次 panic 永久死锁）。
-/// 文件不存在/损坏返回 Err，由调用方决定降级口径。
-pub fn patch_metadata_json(
+/// 读改写的通用形态：持锁读入 → 闭包就地修改顶层对象 → pretty 写回。
+/// 需要删除键的调用方（如手工编辑清空字段、丢弃名不副实的 title_zh）走这个入口。
+pub fn modify_metadata_json(
     meta_path: &Path,
-    patch: &serde_json::Map<String, serde_json::Value>,
+    f: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
 ) -> anyhow::Result<()> {
     let _guard = METADATA_JSON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let raw = std::fs::read_to_string(meta_path)?;
@@ -24,9 +23,21 @@ pub fn patch_metadata_json(
     let obj = metadata
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("metadata.json 顶层不是 JSON 对象"))?;
-    for (k, v) in patch {
-        obj.insert(k.clone(), v.clone());
-    }
+    f(obj);
     std::fs::write(meta_path, serde_json::to_string_pretty(&metadata)?)?;
     Ok(())
+}
+
+/// 读改写 metadata.json：合并 patch 字段（不动其他字段），全程持全局锁串行化。
+/// 锁中毒时取回守卫继续（写文件失败本就按各自语义降级，不因一次 panic 永久死锁）。
+/// 文件不存在/损坏返回 Err，由调用方决定降级口径。
+pub fn patch_metadata_json(
+    meta_path: &Path,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<()> {
+    modify_metadata_json(meta_path, |obj| {
+        for (k, v) in patch {
+            obj.insert(k.clone(), v.clone());
+        }
+    })
 }

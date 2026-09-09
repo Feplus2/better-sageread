@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
+import EditPaperInfo from "@/pages/papers/edit-paper-info";
 import { ZoteroImportDialog } from "@/pages/papers/zotero-import-dialog";
 import { getBookStatus, updateBookStatus, updateBookVectorizationMeta } from "@/services/book-service";
 import { onPaperListChanged, onPaperStatusChanged } from "@/services/paper-events";
@@ -37,6 +38,7 @@ import {
   type Folder,
   type FolderTreeNode,
   type PaperFolderEntry,
+  type PaperMetadataUpdate,
   buildFolderTree,
   createFolder,
   deleteFolder,
@@ -49,6 +51,7 @@ import {
   renameFolder,
   setPaperFolders,
   trashPaper,
+  updatePaperMetadata,
 } from "@/services/paper-service";
 import { PAPER_TRANSLATION_LANG } from "@/services/paper-translation-service";
 import { syncDownloadBook } from "@/services/sync-service";
@@ -450,6 +453,8 @@ export default function PapersPage() {
   const [movePaper, setMovePaper] = useState<BookWithStatus | null>(null);
   const [moveChecked, setMoveChecked] = useState<Set<string>>(new Set());
   const [moveSubmitting, setMoveSubmitting] = useState(false);
+  // "编辑信息"对话框状态（条件挂载，每次打开表单重置为当前值）
+  const [editingPaper, setEditingPaper] = useState<BookWithStatus | null>(null);
   // PDF 解析导入：选择弹窗（点选/拖拽，可多选累加候选）+ 后台串行队列
   // 队列在 task-center 的 paper-parse 通道（P2-4；全局右下角卡，跨页面持续呈现）
   const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
@@ -585,7 +590,7 @@ export default function PapersPage() {
     return () => clearTimeout(timer);
   }, [cleanSuccessKinds]);
 
-  // metadata.json 缓存：入库后内容不可变，避免每次刷新列表都重读磁盘
+  // metadata.json 缓存：避免每次刷新列表都重读磁盘；「编辑信息」等写操作须先失效对应条目再 loadAll
   const metaCacheRef = useRef<Map<string, PaperMetadata>>(new Map());
 
   // 向量化进度事件（payload 形状对齐 epub://index-progress，id 字段为 paper_id）
@@ -1118,6 +1123,23 @@ export default function PapersPage() {
       toast.error(`移动失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setMoveSubmitting(false);
+    }
+  };
+
+  /** 编辑信息保存：一次 invoke 同步 frontmatter/metadata.json/books 表三处副本；
+   *  失效 meta 缓存（原假设"入库后不可变"，编辑后需重读）再重载列表 */
+  const handleSavePaperInfo = async (updates: PaperMetadataUpdate): Promise<boolean> => {
+    if (!editingPaper) return false;
+    try {
+      await updatePaperMetadata(editingPaper.id, updates);
+      metaCacheRef.current.delete(editingPaper.id);
+      toast.success("论文信息已更新");
+      await loadAll();
+      return true;
+    } catch (error) {
+      console.error("更新论文信息失败:", error);
+      toast.error(`更新论文信息失败：${error instanceof Error ? error.message : String(error)}`);
+      return false;
     }
   };
 
@@ -2003,6 +2025,20 @@ export default function PapersPage() {
                           <RefreshCw className="mr-2 size-4" />
                           重新解析
                         </ContextMenuItem>
+                        {/* 编辑元数据（标题/作者/年份/期刊/DOI）：重解析在跑时禁用——
+                            重解析会整体覆盖 paper.md 与 metadata.json，编辑会丢 */}
+                        <ContextMenuItem
+                          disabled={reparseBlockers.length > 0}
+                          title={
+                            reparseBlockers.length > 0
+                              ? `该篇${conflictReasonText(reparseBlockers)}，完成后再编辑信息`
+                              : undefined
+                          }
+                          onClick={() => setEditingPaper(paper)}
+                        >
+                          <Pencil className="mr-2 size-4" />
+                          编辑信息
+                        </ContextMenuItem>
                         <ContextMenuItem onClick={() => openMoveDialog(paper)}>
                           <FolderPen className="mr-2 size-4" />
                           移动到…
@@ -2241,6 +2277,16 @@ export default function PapersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 编辑论文信息对话框（条件挂载：每次打开重置表单；meta 取 metaMap 缓存提供作者/年份/期刊/DOI 当前值） */}
+      {editingPaper && (
+        <EditPaperInfo
+          paper={editingPaper}
+          meta={metaMap[editingPaper.id]}
+          onClose={() => setEditingPaper(null)}
+          onSave={handleSavePaperInfo}
+        />
+      )}
     </div>
   );
 }
