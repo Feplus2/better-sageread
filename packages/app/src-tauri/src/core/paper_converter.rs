@@ -173,6 +173,20 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
 
     log::info!("[PaperConverter] 启动解析: {} (engine={})", params.pdf_path, engine);
 
+    // 预检：sidecar 缺失时给可操作的指引，而非裸的 "os error 2"。
+    // 路径解析与 tauri-plugin-shell new_sidecar 同源（current_exe 同级目录 + EXE_SUFFIX）。
+    // 最常见根因：未签名的 PyInstaller exe 被杀软（火绒/360/Defender）误报隔离。
+    let sidecar_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|dir| dir.join(format!("papers_converter{}", std::env::consts::EXE_SUFFIX))));
+    if let Some(path) = sidecar_path.as_ref().filter(|p| !p.exists()) {
+        log::warn!("[PaperConverter] 解析组件缺失: {}", path.display());
+        return Err(format!(
+            "找不到论文解析组件（{}）。\n\n该文件很可能被杀毒软件（火绒 / 360 / Windows Defender 等）误删或隔离：请到杀软的「隔离区」恢复该文件，并把应用安装目录加入信任区后重启应用；无法恢复时重新安装应用即可。",
+            path.display()
+        ));
+    }
+
     let command = app
         .shell()
         .sidecar("papers_converter")
@@ -189,7 +203,18 @@ pub async fn convert_paper_pdf(app: AppHandle, params: PaperConvertParams) -> Re
         .env("DEEPSEEK_API_KEY", &params.llm_api_key)
         .env("DEEPSEEK_MODEL", &params.llm_model);
 
-    let (mut rx, child) = command.spawn().map_err(|e| format!("启动论文解析进程失败: {}", e))?;
+    let (mut rx, child) = command.spawn().map_err(|e| {
+        if matches!(&e, tauri_plugin_shell::Error::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+            // 预检通过仍 NotFound：文件在但已损坏/被杀软破坏（加载失败同样报 os error 2）
+            format!(
+                "论文解析组件存在但无法启动（{}），文件可能已损坏或被杀毒软件破坏。请重新安装应用；若反复出现请检查杀软隔离记录。(原始错误: {})",
+                sidecar_path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "未知路径".to_string()),
+                e
+            )
+        } else {
+            format!("启动论文解析进程失败: {}", e)
+        }
+    })?;
 
     // 孤儿防护：挂进全局 Job Object（app 退出/崩溃时整树陪葬；PyInstaller 孙进程默认随父入 Job）
     crate::core::process_tree::assign_by_pid(child.pid());
