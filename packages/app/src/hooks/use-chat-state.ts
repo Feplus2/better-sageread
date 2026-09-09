@@ -193,7 +193,10 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   const { messages, status, error, stop, setMessages, sendMessage, clearError, regenerate } = useChat(
     currentModelInstance || "deepseek-chat",
     {
-      experimental_throttle: 50,
+      // 节流 50→150（2026-09-08 长推理流卡死根修）：50ms 下每次 tick 整页重渲染，
+      // 思考型模型高频长流时事件循环积压 → GC 恶化 → 渲染进程假死。CDP 强制长流
+      // （1500 字）A/B：50ms 必现卡死（探活 FROZEN），150ms 全程扛过（ALIVE）
+      experimental_throttle: 150,
       messages: [],
       chatContext: { ...chatContext, threadId: currentThread?.id },
       onError: (error) => {
