@@ -1,5 +1,5 @@
 /**
- * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，最近更新 2026-09-05）。
+ * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，最近更新 2026-09-10）。
  *
  * 用户可见档位 = 模型原生档位（不再经过 off/low/medium/high 四档映射）：
  * grok-4.6 支持 none/low/medium/high/xhigh → UI 直接呈现这五项；
@@ -159,6 +159,9 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
     transport: "effort",
   },
   "gemini-3.7-flash": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"], transport: "effort" },
+  // gemini-3.8-flash（2026-09-02 GA）：思考面与 3.7 相同——仅 low/medium/high、默认 medium，
+  // minimal/none 不受支持（官方迁移清单 + LiteLLM/TanStack/网关文档一致，2026-09-10 核实）
+  "gemini-3.8-flash": { alwaysOn: true, offParam: null, levels: ["low", "medium", "high"], transport: "effort" },
 
   // ---- xAI Grok（docs.x.ai/developers/model-capabilities/text/reasoning）----
   "grok-4": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
@@ -173,6 +176,14 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
   "grok-4.20": { alwaysOn: false, offParam: "none", levels: ["none", "low", "medium", "high"], transport: "effort" },
 
   // ---- DeepSeek（api-docs.deepseek.com/guides/thinking_mode + updates）----
+  // deepseek-flash = V4.1 Flash（2026-09-10 发布）：官方 Thinking Mode 页确认 thinking:{type:enabled/disabled}
+  // 开关 + reasoning_effort low/high/max（默认开、默认 high，2026-09-10 核实）
+  "deepseek-flash": {
+    alwaysOn: false,
+    offParam: "thinking:disabled",
+    levels: ["low", "high", "max"],
+    transport: "effort",
+  },
   "deepseek-v4-flash": {
     alwaysOn: false,
     offParam: "thinking:disabled",
@@ -263,6 +274,15 @@ const MODEL_REASONING: Readonly<Record<string, ReasoningCapability>> = {
     maxBudget: 32768,
   },
   "qwen3.8-max": {
+    alwaysOn: false,
+    offParam: "enable_thinking:false",
+    levels: ["off", "low", "medium", "high"],
+    transport: "budget",
+    maxBudget: 32768,
+  },
+  // qwen3.8-flash：官方深度思考页列入"千问3.8 Flash系列（混合思考，默认开启）"，
+  // thinking_budget 适用于 Qwen3.8 系列（1-32768，2026-09-10 核实）
+  "qwen3.8-flash": {
     alwaysOn: false,
     offParam: "enable_thinking:false",
     levels: ["off", "low", "medium", "high"],

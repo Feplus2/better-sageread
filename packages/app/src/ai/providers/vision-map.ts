@@ -1,5 +1,5 @@
 /**
- * J2：模型多模态（图片）能力表 —— 纯静态枚举（2026-08-27 定稿，最近更新 2026-09-05）。
+ * J2：模型多模态（图片）能力表 —— 纯静态枚举（2026-08-27 定稿，最近更新 2026-09-10）。
  *
  * 范围（用户裁定）：**能生成文本的聊天模型**——只回答"text-to-text 还是 any-to-text
  * （含图片输入）"；图像/视频生成、语音系不在本表范围。
@@ -22,8 +22,9 @@
  * 文本聊天型号收全，报错才少）。调研底稿与各家官方链接：docs/archive/vision-map-research.md。
  */
 export const VISION_NAME_RE = /vision|-vl|vlm|omni|multimodal|4v\b|\.?\d+v\b/;
-// ↑ 不参与能力判定（本表已无规则层）——仅 factory.ts 的 DeepSeek 适配器分派在用
-//（视觉型号需走 openai-compatible 通道，误路由无害：DeepSeek API 本就是 OpenAI 兼容格式）。
+// ↑ 不参与能力判定（本表已无规则层）——仅 factory.ts 的 DeepSeek 适配器分派在用，
+// 且 2026-09-10 起与 modelSupportsVision 精确表并用（deepseek-flash/V4.1 原生多模态但命名
+// 无 vision 字样，单靠本正则会误路由；误路由无害：DeepSeek API 本就是 OpenAI 兼容格式）。
 
 // ---------------------------------------------------------------------------
 // 精确型号枚举表：true = 接受图片输入（any-to-text）；false = 纯文本（text-to-text）
@@ -102,6 +103,7 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "claude-instant-1.2": false, // 远古系
 
   // ---- Google Gemini（2.5/3.x 文本主线全模态输入，OpenRouter 目录逐型号核过 input_modalities）----
+  "gemini-3.8-flash": true, // 2026-09-02 GA（官方博客 + Model Card，多模态输入；2026-09-10 核实）
   "gemini-3.7-flash": true,
   "gemini-3.6-flash": true,
   "gemini-3.5-flash": true,
@@ -129,10 +131,11 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
   "grok-build-0.1": true,
   "grok-code-fast-1": true, // 连代码专用型也吃图
 
-  // ---- DeepSeek（官方 "Only vision models accept images; others return a 400 error"）----
-  "deepseek-v4-flash-vision-exp": true, // 2026-08-21 上线，当前唯一视觉型号
-  "deepseek-v4-flash": false,
-  "deepseek-v4-pro": false,
+  // ---- DeepSeek（官方 Vision 指南 + 2026-09-10 V4.1 Flash 发布公告/Pricing 页核实）----
+  "deepseek-flash": true, // V4.1 Flash（2026-09-10 发布）：原生多模态视觉理解，官方 API ID 即 deepseek-flash（news260910 + Pricing 页 Vision ✓，2026-09-10 核实）
+  "deepseek-v4-flash-vision-exp": true, // 2026-08-21 上线；2026-09-10 起旧名下线、请求由 V4.1 Flash 承接（多模态）
+  "deepseek-v4-flash": true, // 同上：2026-09-10 起旧名路由到 V4.1 Flash，收图不再 400
+  "deepseek-v4-pro": false, // Pricing 页 Vision: Not supported；2026-09-14 12:00（北京）起官方将路由到 V4.1 Flash，届时本行应改 true
   "deepseek-chat": false,
   "deepseek-reasoner": false,
   "deepseek-coder": false, // 已停用，防御残留配置
@@ -166,6 +169,7 @@ const MODEL_VISION: Readonly<Record<string, boolean>> = {
 
   // ---- 阿里 Qwen/DashScope（官方视觉理解选型页 + 文本生成页；2026-02 起旗舰主线原生视觉）----
   "qwen3.8-max": true,
+  "qwen3.8-flash": true, // 官方模型页：输入模态 Image/Text/Video（help.aliyun.com/zh/model-studio/qwen3-8-flash，2026-09-10 核实）
   "qwen3.8-27b": true,
   "qwen3.8-flash-next": true, // flash-next：Qwen4 架构实验预览、原生多模态（ModelScope 官方页）
   "qwen3.7-plus": true,

@@ -189,3 +189,33 @@ docs.x.ai 本环境不可直连，以下为 Oracle 官方合作页 + OpenRouter 
 1. Google 与 xAI 官方站点本环境不可直连，相关结论经二手/网关元数据交叉，落地代码前建议在有网环境复核 ai.google.dev 与 docs.x.ai。
 2. 模型生命周期极快（本次调研即发现 Kimi 全线换血、DeepSeek 视觉型号 3 天前才上线），枚举表注释务必带调研日期，并建议把"OpenRouter 目录 API 实测"作为低成本的定期校验手段。
 3. `qwen3.7-max` 这类"按快照逐步开放视觉"的型号提醒：正则若只匹配型号族名不匹配快照日期，会存在边界误判；qwen max 线建议显式枚举快照或保守拦截。
+
+---
+
+## 七、增量调研（2026-09-10）：DeepSeek V4.1 Flash / Qwen3.8-Flash / Gemini 3.8 Flash
+
+**DeepSeek V4.1 Flash（2026-09-10 当日发布，已入表）**
+
+- 确切 API 型号 ID 是 `deepseek-flash`（**不是** deepseek-v4.1-flash）。官方[发布公告](https://api-docs.deepseek.com/zh-cn/news/news260910)原文："将模型名称更改为 `deepseek-flash` 即可调用最新的 V4.1 Flash 模型"。
+- 原生多模态：公告"具备原生多模态视觉理解能力"；[Pricing 页](https://api-docs.deepseek.com/quick_start/pricing)型号表 deepseek-flash 行 Vision: ✓（deepseek-v4-pro 行 Not supported）。
+- 思考面（[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode)页，示例型号已全是 deepseek-flash）：`thinking:{type:enabled/disabled}` 开关 + `reasoning_effort: low/high/max`，默认开启、默认 high——与既有 v4-flash 行完全一致。
+- 旧名路由：V4 Flash / V4 Flash Vision Exp 已下线，`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 暂时路由到 V4.1 Flash（故 vision-map 两行改 true）；`deepseek-v4-pro` 2026-09-14 12:00（北京）起路由到 V4.1 Flash，届时 vision-map 该行应改 true（表内已留注释）。
+- 路由影响：新 ID `deepseek-flash` 不匹配 VISION_NAME_RE → factory.ts 已改为"正则 ∪ modelSupportsVision"双判定。
+
+**Qwen3.8-Flash（真实存在，已入表）**
+
+- [官方模型页](https://help.aliyun.com/zh/model-studio/qwen3-8-flash)：调用 ID `qwen3.8-flash`，输入模态 Image/Text/Video → Text，1M 上下文。
+- 思考面（[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)页）：列入"千问3.8 Flash 系列（混合思考模式，默认开启思考模式）"；`thinking_budget` 官方明示"适用于 Qwen3.8 系列"，取值 1~32768——与既有 qwen3.8-max 行同参数面。
+
+**Gemini 3.8 Flash（2026-09-02 GA，上次更新漏收，已入表）**
+
+- 官方发布（[Google 博客](https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/) + [Model Card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)），Gemini API 直发，多模态输入（llm-stats 模态表 + 各 SDK 文档一致）。
+- 思考面：仅 `low/medium/high`、默认 `medium`，`minimal`/`none` 不受支持（传 minimal 报校验错）——与 gemini-3.7-flash 行相同，alwaysOn 处理。来源：Apidog 迁移指南、LiteLLM Day-0 文档、TanStack/Turing/EvoLink 多家独立交叉（ai.google.dev 正文本环境未逐字核到，同既有 Google 行的证据等级）。
+
+**排查中发现的未入表项（拿不准/不适用，仅记录）**
+
+- `gemini-3.8-flash-cyber`：3.8 Flash 的受限网络安全变体，Fairwind 计划审批制，普通用户 API 调不到；视觉口径无官方页面可核 → 不入表（未收录默认放行；对照 gemini-3.5-flash-cyber 先例可后续补 false 行）。
+- `qwen3.8-max-0902`（OpenRouter 09-03 上线）：日期快照别名；vision 侧归一剥日期不命中（`-0902` 四位式不在剥离正则内）但默认放行恰好正确，reasoning 侧 findLongestPrefix 命中 qwen3.8-max → 行为正确，不入表。
+- Grok 4.7：截至 2026-09-08 无任何官方发布/API ID/定价（多源确认）→ 不存在，不入表。
+- `gpt-6-astra-pro`：OpenRouter 目录有该 ID，但 OpenAI 官方文档口径为 Pro mode 参数而非独立型号（表内注释已记录裁定）→ 维持不入表。
+- Inception Mercury 2.5（09-08，扩散型文本模型）：厂家不在表覆盖范围 → 不收。
