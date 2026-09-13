@@ -248,6 +248,13 @@ const getLayoutStyles = (
   h1, h2, h3, h4, h5, h6 {
     text-align: initial;
   }
+  /* 深层级标题字号下限：UA 默认 h5=0.83em、h6=0.67em，比正文还小；
+     抬到与正文同号（1em），靠加粗与正文区分。不加 !important——书籍用
+     类/ID 自定义的标题样式仍可覆盖；本表注入在 head 末尾，同特异度的
+     元素级小字号规则（含 UA 默认）被本下限压平 */
+  h5, h6 {
+    font-size: 1em;
+  }
   /* MathML 块级公式居中：必须显式恢复 UA 的 display: block math——
    * 旧版转换产物的 EPUB CSS 曾写 display:block（覆盖了 UA 的 block math
    * 布局，公式贴左），此处统一兜底（见 Books_Converter FIXLOG 病例 016 补记） */

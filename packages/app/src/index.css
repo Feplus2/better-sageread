@@ -409,6 +409,17 @@ foliate-view {
     margin-bottom: 0.25em;
   }
 
+  /* h5/h6 字号下限：typography 插件只定义到 h4，深层级标题退回 preflight 的
+     inherit（与正文同号同重）甚至 UA 默认（比正文小）——抬回 1em + 600 字重，
+     保证不低于、不弱于正文 */
+  .prose h5,
+  .prose h6 {
+    font-size: 1em;
+    font-weight: 600;
+    margin-top: 0.5em;
+    margin-bottom: 0.25em;
+  }
+
   .prose ul,
   .prose ol {
     margin-top: 0.375em;
@@ -467,6 +478,12 @@ foliate-view {
   }
 
   .prose-sm h4 {
+    margin-top: 0.375em;
+    margin-bottom: 0.1875em;
+  }
+
+  .prose-sm h5,
+  .prose-sm h6 {
     margin-top: 0.375em;
     margin-bottom: 0.1875em;
   }
