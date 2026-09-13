@@ -262,8 +262,51 @@ const getLayoutStyles = (
     display: block math;
     text-align: center;
   }
+  /* 超宽公式的横向滚动导轨：仅对 JS 实测超宽（data-sr-overflowx，由 paginator
+     expand() 里的标记 pass 按布局实况打标）的公式启用——不要无条件施加，滚动容器
+     虽经实测在 multicol 里安全（一页一章仅 +1 页），但应只为需要者付费。
+     居中用盒子自身（fit-content + auto margin）而非 text-align:center——后者会让
+     溢出内容的左端滚不到。
+     导轨常驻渲染、常态隐形：滚动条空间由 padding-bottom 预留，hover 只改滑块颜色、
+     不改变滚动条存在性——若用 scrollbar-width none→thin 切换，hover 会反复重排
+     几千 px 宽的公式元素（实测可视区内有长公式即卡顿）。 */
+  math[display="block"][data-sr-overflowx],
+  .sageread-rawmath[data-sr-overflowx] {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: initial;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  math[display="block"][data-sr-overflowx]:hover,
+  .sageread-rawmath[data-sr-overflowx]:hover {
+    scrollbar-color: color-mix(in oklab, currentColor 45%, transparent) transparent;
+  }
+  .sageread-rawmath[data-sr-overflowx] .katex-display {
+    text-align: initial;
+  }
+  math[display="block"][data-sr-overflowx]::-webkit-scrollbar,
+  .sageread-rawmath[data-sr-overflowx]::-webkit-scrollbar {
+    height: 8px;
+  }
+  math[display="block"][data-sr-overflowx]::-webkit-scrollbar-thumb,
+  .sageread-rawmath[data-sr-overflowx]::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 10px;
+  }
+  math[display="block"][data-sr-overflowx]:hover::-webkit-scrollbar-thumb,
+  .sageread-rawmath[data-sr-overflowx]:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, currentColor 45%, transparent);
+  }
   /* 表格按自然宽度水平居中（窄表不再贴左，宽表受 max-width 约束）；
-   * 旧版转换产物的 width:100% 由本规则（后注入同特异度）覆盖 */
+   * 旧版转换产物的 width:100% 由本规则（后注入同特异度）覆盖。
+   * 警告：不要给 table 加 column-span——Chromium 定高 multicol 里 spanner 会引发
+   * 布局反馈循环（ResizeObserver loop），实测一章 1 张表就页数 28→449、白屏卡顿 */
   table {
     width: fit-content;
     max-width: 100%;

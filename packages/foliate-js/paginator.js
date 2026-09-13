@@ -375,8 +375,25 @@ class View {
       });
     }
   }
+  // 只给实际超宽的块级公式/KaTeX 包装打 data-sr-overflowx 标（配套样式表里的
+  // 滚动导轨规则）。滚动容器已实测在分页 multicol 里安全（无 column-span 时一章仅
+  // +1 页）——分页布局崩溃的教训（512 页爆炸实为 column-span 所致，与此无关）
+  // 仍要求只为真正超宽者付费。在 expand() 开头调用：标注后的布局才参与页数测量。
+  // 幂等：状态不变不写属性，避免无谓 reflow
+  markOverflowMath() {
+    const doc = this.document;
+    if (!doc?.body) return;
+    for (const el of doc.body.querySelectorAll('math[display="block"], .sageread-rawmath')) {
+      // 清理已废弃的分页缩放方案的历史遗留（内联 fontSize/数据属性）
+      if (el.dataset.srNatW) { delete el.dataset.srNatW; if (el.style.fontSize) el.style.fontSize = ""; }
+      const overflowing = el.scrollWidth > el.clientWidth + 2;
+      if (overflowing !== el.hasAttribute("data-sr-overflowx"))
+        el.toggleAttribute("data-sr-overflowx", overflowing);
+    }
+  }
   expand() {
     if (!this.document) return;
+    this.markOverflowMath();
     const { documentElement } = this.document;
     if (this.#column) {
       const side = this.#vertical ? "height" : "width";

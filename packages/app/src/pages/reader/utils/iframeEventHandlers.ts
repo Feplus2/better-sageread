@@ -153,6 +153,18 @@ export const handleMouseMove = (bookId: string, event: MouseEvent) => {
 };
 
 export const handleWheel = (bookId: string, event: WheelEvent) => {
+  // 超宽公式的横向滚动导轨（仅 JS 实测标注过的，见 paginator 的标记 pass）：
+  // 滚轮落在可横滚的公式上时不转发翻页，让 Chromium 原生横滚公式（垂直滚轮对
+  // 只能横滚的容器自动映射为横向）；滚到头后放行，滚动链接续翻页
+  const rail = (event.target as Element | null)?.closest?.(
+    'math[display="block"][data-sr-overflowx], .sageread-rawmath[data-sr-overflowx]',
+  );
+  if (rail && rail.scrollWidth > rail.clientWidth + 1) {
+    const delta = event.deltaX || event.deltaY;
+    const canForward = rail.scrollLeft + rail.clientWidth < rail.scrollWidth - 1;
+    const canBackward = rail.scrollLeft > 0;
+    if ((delta > 0 && canForward) || (delta < 0 && canBackward)) return;
+  }
   window.postMessage(
     {
       type: "iframe-wheel",
