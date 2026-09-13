@@ -45,13 +45,19 @@ export class TOCProgress {
         if (!range || items.length === 1 && !items[0].fragment) return items[0].item
 
         const doc = range.startContainer.getRootNode()
+        // 记录"锚点解析成功且不在可视范围之后"的最近条目：循环正常跑完时返回它，
+        // 而不是无条件返回组内最后一项——锚点缺失（错配/转换产物坏 id）时
+        // 原逻辑会把位置误判成章末
+        let lastResolved = null
         for (const [i, { fragment }] of items.entries()) {
             const el = this.getFragment(doc, fragment)
             if (!el) continue
             if (range.comparePoint(el, 0) > 0)
-                return (items[i - 1]?.item ?? prev)
+                return lastResolved ?? (items[i - 1]?.item ?? prev)
+            lastResolved = items[i].item
         }
-        return items[items.length - 1].item
+        // 一个锚点都没解析出来（异常情况）时退回本章首项，而不是章末
+        return lastResolved ?? items[0].item
     }
 }
 

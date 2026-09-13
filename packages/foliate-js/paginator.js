@@ -456,7 +456,12 @@ export class Paginator extends HTMLElement {
   #margin = 0;
   #index = -1;
   #anchor = 0; // anchor view to a fraction (0-1), Range, or Element
-  #justAnchored = false;
+  // 程序化锚定滚动后的容器位置：用于区分"锚定滚动的回声 scroll 事件"（吞掉）
+  // 与"用户真实滚动"（照常发 relocate）——null 表示最近一次锚定无回声待吞
+  #anchoredScrollPos = null;
+  // 章节过渡中（#index 已更新但 #view 仍是旧文档）：此窗口内禁止发 relocate，
+  // 否则 getProgress 会把旧文档的 range 配对新 index，锚点全部解析失败 → 误判章末
+  #transitioning = false;
   #locked = false; // while true, prevent any further navigation
   #styles;
   #styleMap = new WeakMap();
@@ -561,9 +566,15 @@ export class Paginator extends HTMLElement {
     this.#container.addEventListener(
       "scroll",
       debounce(() => {
+        if (this.#transitioning) return;
         if (this.scrolled) {
-          if (this.#justAnchored) this.#justAnchored = false;
-          else this.#afterScroll("scroll");
+          // 只吞锚定滚动的回声（位置未变）；位置变了说明用户真滚了，照常上报
+          if (this.#anchoredScrollPos != null && this.#container[this.scrollProp] === this.#anchoredScrollPos) {
+            this.#anchoredScrollPos = null;
+          } else {
+            this.#anchoredScrollPos = null;
+            this.#afterScroll("scroll");
+          }
         }
       }, 250),
     );
@@ -995,11 +1006,14 @@ export class Paginator extends HTMLElement {
     return getVisibleRange(this.#view.document, this.start - size, this.end - size, this.#getRectMapper());
   }
   #afterScroll(reason) {
+    // 章节过渡窗口内不发 relocate：此刻 #index 已是新节但 #view 仍是旧文档，
+    // 可见 range 与新节的 TOC 锚点错配，会把位置误判成新章末尾
+    if (this.#transitioning) return;
     const range = this.#getVisibleRange();
     this.#lastVisibleRange = range;
     // don't set new anchor if relocation was to scroll to anchor
     if (reason !== "selection" && reason !== "navigation" && reason !== "anchor") this.#anchor = range;
-    else this.#justAnchored = true;
+    else this.#anchoredScrollPos = this.#container[this.scrollProp];
 
     const index = this.#index;
     const detail = { reason, range, index };
@@ -1028,7 +1042,14 @@ export class Paginator extends HTMLElement {
         onLoad?.({ doc, index });
       };
       const beforeRender = this.#beforeRender.bind(this);
-      await view.load(src, afterLoad, beforeRender);
+      // 加载期间 #index 已是新值而 #view 仍是旧文档：守卫期间禁止任何
+      // relocate（防抖 scroll / resize 重锚等），避免旧文档 range 配对新 index
+      this.#transitioning = true;
+      try {
+        await view.load(src, afterLoad, beforeRender);
+      } finally {
+        this.#transitioning = false;
+      }
       this.dispatchEvent(
         new CustomEvent("create-overlayer", {
           detail: {
