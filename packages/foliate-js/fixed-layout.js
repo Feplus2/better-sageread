@@ -316,4 +316,5 @@ export class FixedLayout extends HTMLElement {
     }
 }
 
-customElements.define('foliate-fxl', FixedLayout)
+// HMR 容错：同上
+if (!customElements.get('foliate-fxl')) customElements.define('foliate-fxl', FixedLayout)

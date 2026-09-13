@@ -639,4 +639,5 @@ export class View extends HTMLElement {
   }
 }
 
-customElements.define("foliate-view", View);
+// HMR 容错：vite 热更时模块会重复执行，重复 define 会抛 NotSupportedError 弄死整个阅读器
+if (!customElements.get("foliate-view")) customElements.define("foliate-view", View);

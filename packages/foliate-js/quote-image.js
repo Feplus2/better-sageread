@@ -49,7 +49,8 @@ const html = `<style>
 </main>`
 
 // TODO: lang, vertical writing
-customElements.define('foliate-quoteimage', class extends HTMLElement {
+// HMR 容错：同上
+if (!customElements.get('foliate-quoteimage')) customElements.define('foliate-quoteimage', class extends HTMLElement {
     #root = this.attachShadow({ mode: 'closed' })
     constructor() {
         super()

@@ -1176,4 +1176,5 @@ export class Paginator extends HTMLElement {
   }
 }
 
-customElements.define("foliate-paginator", Paginator);
+// HMR 容错：同上，重复 define 会抛异常弄死整个阅读器
+if (!customElements.get("foliate-paginator")) customElements.define("foliate-paginator", Paginator);
