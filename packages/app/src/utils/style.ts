@@ -269,7 +269,9 @@ const getLayoutStyles = (
      溢出内容的左端滚不到。
      导轨常驻渲染、常态隐形：滚动条空间由 padding-bottom 预留，hover 只改滑块颜色、
      不改变滚动条存在性——若用 scrollbar-width none→thin 切换，hover 会反复重排
-     几千 px 宽的公式元素（实测可视区内有长公式即卡顿）。 */
+     几千 px 宽的公式元素（实测可视区内有长公式即卡顿）。
+     滑块颜色统一在 getScrollbarStyles 里按主题给真值——currentColor 的 30% 混合
+     在羊皮纸类浅底上≈隐形（实测像素均值仅比背景深 10%）。 */
   math[display="block"][data-sr-overflowx],
   .sageread-rawmath[data-sr-overflowx] {
     width: fit-content;
@@ -283,10 +285,6 @@ const getLayoutStyles = (
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
-  math[display="block"][data-sr-overflowx]:hover,
-  .sageread-rawmath[data-sr-overflowx]:hover {
-    scrollbar-color: color-mix(in oklab, currentColor 45%, transparent) transparent;
-  }
   .sageread-rawmath[data-sr-overflowx] .katex-display {
     text-align: initial;
   }
@@ -299,37 +297,20 @@ const getLayoutStyles = (
     background: transparent;
     border-radius: 10px;
   }
-  math[display="block"][data-sr-overflowx]:hover::-webkit-scrollbar-thumb,
-  .sageread-rawmath[data-sr-overflowx]:hover::-webkit-scrollbar-thumb {
-    background: color-mix(in oklab, currentColor 45%, transparent);
-  }
   /* 超宽表格的滚动框（paginator markOverflowTables 实测包装）：宽度锁栏宽、
      高度阈值上限（inline maxHeight，分页=栏高/滚动=视口高），横纵双向导轨。
-     导轨常驻渲染、常态隐形，hover 仅改滑块颜色零重排——与公式导轨同款交互 */
+     表格导轨常驻可见（鼠标没有触控板的横向滚动手势，隐形导轨等于没有导轨）；
+     滑块颜色统一在 getScrollbarStyles 里按主题给真值（浅底上 30% currentColor 实测≈隐形） */
   .sr-table-scroll {
     max-width: 100%;
     overflow: auto;
     padding-bottom: 8px;
     padding-right: 8px;
     scrollbar-width: thin;
-    /* 表格导轨常驻可见：鼠标没有触控板的横向滚动手势，隐形导轨等于没有导轨。
-       常态弱化色（30%），hover 加深（45%）；公式导轨仍保持 hover 显形（一屏几十个
-       需要克制），表格是独立框，给足存在感 */
-    scrollbar-color: color-mix(in oklab, currentColor 30%, transparent) transparent;
-  }
-  .sr-table-scroll:hover {
-    scrollbar-color: color-mix(in oklab, currentColor 45%, transparent) transparent;
   }
   .sr-table-scroll::-webkit-scrollbar {
     width: 8px;
     height: 8px;
-  }
-  .sr-table-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in oklab, currentColor 30%, transparent);
-    border-radius: 10px;
-  }
-  .sr-table-scroll:hover::-webkit-scrollbar-thumb {
-    background: color-mix(in oklab, currentColor 45%, transparent);
   }
   /* 框内表格恢复自然宽度：单元格内容摊回一行（行高自然回落），
      超出部分由框的双向导轨接管；不再继承框外的 max-width 挤压与居中规则 */
@@ -671,6 +652,30 @@ const getScrollbarStyles = (themeCode: ThemeCode) => {
     
     html[data-flow="scrolled"] ::-webkit-scrollbar-thumb:hover {
       background: ${themeCode.isDarkMode ? "#666" : "#9ca0a5"};
+    }
+
+    /* 公式/表格导轨的滑块颜色：按主题给真值（勿用 currentColor 百分比混合——
+       浅底上≈隐形，实测像素仅比背景深 10%，用户不可见） */
+    math[display="block"][data-sr-overflowx]:hover,
+    .sageread-rawmath[data-sr-overflowx]:hover {
+      scrollbar-color: ${themeCode.isDarkMode ? "#888" : "#9ca0a5"} transparent;
+    }
+    math[display="block"][data-sr-overflowx]:hover::-webkit-scrollbar-thumb,
+    .sageread-rawmath[data-sr-overflowx]:hover::-webkit-scrollbar-thumb {
+      background: ${themeCode.isDarkMode ? "#888" : "#9ca0a5"};
+    }
+    .sr-table-scroll {
+      scrollbar-color: ${themeCode.isDarkMode ? "#666" : "#afb0b3"} transparent;
+    }
+    .sr-table-scroll:hover {
+      scrollbar-color: ${themeCode.isDarkMode ? "#888" : "#9ca0a5"} transparent;
+    }
+    .sr-table-scroll::-webkit-scrollbar-thumb {
+      background: ${themeCode.isDarkMode ? "#666" : "#afb0b3"};
+      border-radius: 10px;
+    }
+    .sr-table-scroll:hover::-webkit-scrollbar-thumb {
+      background: ${themeCode.isDarkMode ? "#888" : "#9ca0a5"};
     }
   `;
   return scrollbarStyles;
