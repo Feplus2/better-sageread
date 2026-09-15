@@ -312,7 +312,10 @@ const getLayoutStyles = (
     padding-bottom: 8px;
     padding-right: 8px;
     scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
+    /* 表格导轨常驻可见：鼠标没有触控板的横向滚动手势，隐形导轨等于没有导轨。
+       常态弱化色（30%），hover 加深（45%）；公式导轨仍保持 hover 显形（一屏几十个
+       需要克制），表格是独立框，给足存在感 */
+    scrollbar-color: color-mix(in oklab, currentColor 30%, transparent) transparent;
   }
   .sr-table-scroll:hover {
     scrollbar-color: color-mix(in oklab, currentColor 45%, transparent) transparent;
@@ -322,7 +325,7 @@ const getLayoutStyles = (
     height: 8px;
   }
   .sr-table-scroll::-webkit-scrollbar-thumb {
-    background: transparent;
+    background: color-mix(in oklab, currentColor 30%, transparent);
     border-radius: 10px;
   }
   .sr-table-scroll:hover::-webkit-scrollbar-thumb {
