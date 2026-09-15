@@ -1,3 +1,4 @@
+import { rangeToStructuredText } from "@/services/book-content/extract-structured-text";
 import { transformContent } from "@/services/transform-service";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { eventDispatcher } from "@/utils/event";
@@ -28,7 +29,9 @@ export const useTextSelector = (
   };
 
   const getAnnotationText = async (range: Range) => {
-    const content = getTextFromRange(range, (primaryLang as string).startsWith("ja") ? ["rt"] : []);
+    // 选区含公式时优先走结构化路径（math → LaTeX），Agent 拿到精确源码而非扁平文本
+    const structured = rangeToStructuredText(range);
+    const content = structured ?? getTextFromRange(range, (primaryLang as string).startsWith("ja") ? ["rt"] : []);
     if (!globalViewSettings) {
       return content;
     }

@@ -85,7 +85,11 @@ function transformText(text: string, katex: typeof import("katex").default): { o
     }
     if (html) {
       // KaTeX 输出实测无具名实体/裸 <，XHTML 安全（strict XML 解析不炸）
-      out += display ? `<div class="sageread-rawmath">${html}</div>` : `<span class="sageread-rawmath">${html}</span>`;
+      // data-latex 存原始源码：划词引用时 Agent 能拿到精确 LaTeX 而非扁平 KaTeX 文本
+      const latexAttr = tex.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      out += display
+        ? `<div class="sageread-rawmath" data-latex="${latexAttr}">${html}</div>`
+        : `<span class="sageread-rawmath" data-latex="${latexAttr}">${html}</span>`;
       changed = true;
     } else {
       out += text.slice(start, end + 2);

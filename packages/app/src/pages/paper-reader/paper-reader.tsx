@@ -6,6 +6,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import { rangeToStructuredText } from "@/services/book-content/extract-structured-text";
 import { ChevronDown, ChevronUp, ImageOff, Undo2 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -55,6 +56,7 @@ import { type HoverRect, mergeOverlappingRects } from "./paper-hover-rects";
 import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "./paper-metadata";
 import { type SentenceSpan, findSentenceAt, segmentSentences, snapRangeToSentences } from "./paper-sentences";
 import { rehypeDelTilde } from "./rehype-del-tilde";
+import { rehypeMathSourceAttr } from "./rehype-math-source-attr";
 import { renderMathInRawTables } from "./render-math-in-tables";
 
 export interface TocItem {
@@ -1736,7 +1738,8 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       if (!container) return;
       const clamped = clampRangeToContainer(container, range);
       const anchor = clamped ? rangeToAnchor(container, clamped) : null;
-      const text = clamped?.toString() ?? "";
+      // 选区含公式时优先结构化路径（data-latex 回解精确 LaTeX），Agent 拿到源码而非扁平 KaTeX 文本
+      const text = (clamped ? rangeToStructuredText(clamped) : null) ?? clamped?.toString() ?? "";
       if (clamped && anchor && text.trim()) {
         setPopupState({
           kind: "create",
@@ -2091,7 +2094,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
           {hasMetadata && <MetadataBlock metadata={metadata} viewMode={viewMode} translatedMeta={translatedMeta} />}
           <ReactMarkdown
             remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-            rehypePlugins={[rehypeRaw, rehypeKatex, rehypeSlug, rehypeDelTilde]}
+            rehypePlugins={[rehypeRaw, rehypeMathSourceAttr, rehypeKatex, rehypeSlug, rehypeDelTilde]}
             components={components}
           >
             {renderedBody}
