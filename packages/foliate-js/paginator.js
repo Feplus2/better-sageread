@@ -300,7 +300,7 @@ class View {
   scrolled({ gap, columnWidth }) {
     const vertical = this.#vertical;
     const doc = this.document;
-    if (!doc?.documentElement) return;
+    if (!doc?.documentElement || !doc?.body) return;
     setStylesImportant(doc.documentElement, {
       "box-sizing": "border-box",
       padding: vertical ? `${gap}px 0` : `0 ${gap}px`,
@@ -320,7 +320,7 @@ class View {
     this.#size = vertical ? height : width;
 
     const doc = this.document;
-    if (!doc || !doc.documentElement) return;
+    if (!doc || !doc.documentElement || !doc.body) return;
     setStylesImportant(doc.documentElement, {
       "box-sizing": "border-box",
       "column-width": `${Math.trunc(columnWidth)}px`,
@@ -391,9 +391,49 @@ class View {
         el.toggleAttribute("data-sr-overflowx", overflowing);
     }
   }
+  // 超宽/超高表格的滚动框（配套样式表 .sr-table-scroll 规则）：满足任一实测条件即包框——
+  //   a) 内容宽于栏宽（scrollWidth 超 clientWidth，宽表）；
+  //   b) 任一行高于 0.8×栏高（单元格被栏宽挤压成超高行——此时表格宽度并未超栏，
+  //      scrollWidth 检测不到，如 Willingness Test 尾行 700px 实例）。
+  // 包框后表格恢复自然宽度（max-width:none，单元格内容摊回一行，行高自然回落），
+  // 框宽度锁栏宽（不再溢出压邻栏）、高度阈值上限（分页=栏高、滚动模式=视口高），
+  // 横纵双向导轨（hover 显形，与公式导轨同款零重排交互）。
+  // 窄而高（行高正常）的表格保持自然分栏跨页，不包框。
+  // 幂等：包装一次到位；宽度/行高回退时保留包装（拆装反而抖动）
+  markOverflowTables() {
+    const doc = this.document;
+    if (!doc?.body) return;
+    const cap = this.#column
+      ? this.#layout?.height
+      : Math.round(this.container?.size ?? 0);
+    for (const table of doc.body.querySelectorAll("table")) {
+      if (table.parentElement?.classList.contains("sr-table-scroll")) continue;
+      const tooWide = table.scrollWidth > table.clientWidth + 2;
+      let tooTall = false;
+      if (!tooWide && cap > 0) {
+        const limit = cap * 0.8;
+        for (const row of table.rows) {
+          if (row.getBoundingClientRect().height > limit) { tooTall = true; break; }
+        }
+      }
+      if (tooWide || tooTall) {
+        const wrap = doc.createElement("div");
+        wrap.className = "sr-table-scroll";
+        table.parentNode.insertBefore(wrap, table);
+        wrap.appendChild(table);
+      }
+    }
+    // 高度阈值按布局实况刷新（栏高/视口高会随设置变化）
+    if (cap > 0)
+      for (const wrap of doc.body.querySelectorAll(".sr-table-scroll")) {
+        const v = `${cap}px`;
+        if (wrap.style.maxHeight !== v) wrap.style.maxHeight = v;
+      }
+  }
   expand() {
     if (!this.document) return;
     this.markOverflowMath();
+    this.markOverflowTables();
     const { documentElement } = this.document;
     if (this.#column) {
       const side = this.#vertical ? "height" : "width";

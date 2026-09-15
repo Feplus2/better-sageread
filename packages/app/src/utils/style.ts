@@ -303,6 +303,39 @@ const getLayoutStyles = (
   .sageread-rawmath[data-sr-overflowx]:hover::-webkit-scrollbar-thumb {
     background: color-mix(in oklab, currentColor 45%, transparent);
   }
+  /* 超宽表格的滚动框（paginator markOverflowTables 实测包装）：宽度锁栏宽、
+     高度阈值上限（inline maxHeight，分页=栏高/滚动=视口高），横纵双向导轨。
+     导轨常驻渲染、常态隐形，hover 仅改滑块颜色零重排——与公式导轨同款交互 */
+  .sr-table-scroll {
+    max-width: 100%;
+    overflow: auto;
+    padding-bottom: 8px;
+    padding-right: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .sr-table-scroll:hover {
+    scrollbar-color: color-mix(in oklab, currentColor 45%, transparent) transparent;
+  }
+  .sr-table-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .sr-table-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 10px;
+  }
+  .sr-table-scroll:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, currentColor 45%, transparent);
+  }
+  /* 框内表格恢复自然宽度：单元格内容摊回一行（行高自然回落），
+     超出部分由框的双向导轨接管；不再继承框外的 max-width 挤压与居中规则 */
+  .sr-table-scroll > table {
+    width: fit-content;
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+  }
   /* 表格按自然宽度水平居中（窄表不再贴左，宽表受 max-width 约束）；
    * 旧版转换产物的 width:100% 由本规则（后注入同特异度）覆盖。
    * 警告：不要给 table 加 column-span——Chromium 定高 multicol 里 spanner 会引发
