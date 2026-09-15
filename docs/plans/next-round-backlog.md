@@ -300,3 +300,23 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 - AI 工具链未跟进：无「翻译图书/查图书翻译状态」工具（process-paper 只有论文侧）；
   加的时候要带冲突矩阵（翻译×向量化×转换同书互斥——docs/plans/book-translation-plan.md「未来待办」
   节已有 blocking 矩阵设计口径）。
+
+---
+
+## 🆕 2026-09-13 阅读器渲染/位置/Agent 内容保真 —— 本轮挂账
+
+本轮已修并提交（local 分支）：h5/h6 字号下限、foliate HMR 防重守卫、TOC 打瞌睡/误判章末、公式横向导轨、表格单元格防污染。
+进行中（用户已批准方案）：A 章节定位偶掉章末（悬句层污染 getVisibleRange）、D 超宽表格外框阈值+双向导轨、E 系列小修（工具折叠/0 results/describeTool 死循环/rag 报错误导）、C+B Agent 内容保真（JS 读取层重写：LaTeX/Markdown 结构化提取 + startOffset 续读 + 深层小节直读）、E6 对话自动命名、E7 历史对话当前项高亮。
+
+### 🔴 转换器侧治本（用户明确要求，勿忘）
+
+**Books_Converter 在 latex2mathml 阶段把原始 LaTeX 写进 `<annotation encoding="application/x-tex">`**。
+- 动机：当前 EPUB 的 MathML 无原文，阅读器/Agent/RAG 只能拿到扁平公式；写入 annotation 后，任何工具都能零成本取回精确 LaTeX，无需运行时反解。
+- 兼容性：`<annotation>` 是 MathML 规范原生元素（MathML Core），不参与渲染，浏览器/Calibre/其他阅读器一律忽略，无副作用；是本问题的标准做法。
+- 配套：本仓库侧——向量化管道与文本提取优先读 annotation（有则直接用原文，无则走运行时反解兜底）。
+- 范围：只对转换产物生效；存量老书需重新转换才有 annotation（不强制重转）。
+
+### 其他备忘
+
+- 论文侧公式引用同样有扁平化风险：论文阅读器渲染的是 KaTeX DOM，划词引用拿到的是渲染文本而非 markdown 源里的 `$...$`。修法：引用抓取时经 paper-highlight-locator 的 quote→源映射回解 LaTeX（并入本轮 B 项施工）。
+- 未向量化书的 rag* 工具报错统一为"本书未建立向量索引"，并评估此类书是否直接不注册 rag* 工具（并入 E4）。
