@@ -236,12 +236,18 @@ const Tool = ({ toolPart, defaultOpen = false, className, onViewDetail, isChatPa
                 )}
                 {!isMindmap && !isRagTool && !isGetSkillsTool && state === "output-available" && (
                   <span className="text-muted-foreground text-sm">
-                    {String((output?.results as unknown[] | undefined)?.length || 0)} results
+                    {String(
+                      Array.isArray(output?.results) ? output.results.length : output?.results ? 1 : 0,
+                    )}{" "}
+                    results
                   </span>
                 )}
                 {isRagTool && state === "output-available" && (
                   <span className="text-muted-foreground text-sm">
-                    {String((output?.results as unknown[] | undefined)?.length || 0)} results
+                    {String(
+                      Array.isArray(output?.results) ? output.results.length : output?.results ? 1 : 0,
+                    )}{" "}
+                    results
                   </span>
                 )}
                 {state !== "output-available" && getStateBadge()}

@@ -246,15 +246,16 @@ const ToolCallGroup = memo(function ToolCallGroup({
   onViewDetail?: (toolPart: any) => void;
   isChatPage: boolean;
 }) {
-  const running = parts.some((p) => p.state === "input-streaming" || p.state === "input-available");
+  const toolParts = parts.filter((p) => String(p.type).startsWith("tool-"));
+  const running = toolParts.some((p) => p.state === "input-streaming" || p.state === "input-available");
   const [open, setOpen] = useState(running);
   const names = Array.from(
     new Set(
-      parts.map((p) => TOOL_NAME_MAP[String(p.type).replace(/^tool-/, "")] ?? String(p.type).replace(/^tool-/, "")),
+      toolParts.map((p) => TOOL_NAME_MAP[String(p.type).replace(/^tool-/, "")] ?? String(p.type).replace(/^tool-/, "")),
     ),
   );
   // 摘要参数：首个工具的首个字符串入参截断（query/command/path 类）
-  const firstInput = parts[0]?.input;
+  const firstInput = toolParts[0]?.input;
   const digestEntry = firstInput
     ? (Object.values(firstInput).find((v) => typeof v === "string" && v.trim()) ?? "")
     : "";
@@ -273,7 +274,7 @@ const ToolCallGroup = memo(function ToolCallGroup({
           <Check className="size-3.5 shrink-0 text-neutral-400" />
         )}
         <span className="shrink-0">
-          {running ? `正在调用工具（${names.join("、")}…）` : `已调用 ${parts.length} 个工具（${names.join("、")}）`}
+          {running ? `正在调用工具（${names.join("、")}…）` : `已调用 ${toolParts.length} 个工具（${names.join("、")}）`}
         </span>
         {digest && <span className="min-w-0 flex-1 truncate text-neutral-400">{digest}</span>}
         <ChevronDown className={cn("size-3.5 shrink-0 text-neutral-400 transition-transform", open && "rotate-180")} />
@@ -281,6 +282,21 @@ const ToolCallGroup = memo(function ToolCallGroup({
       {open && (
         <div className="mt-1 flex flex-col gap-1">
           {parts.map((part, idx) => {
+            // 组内混合内容：工具 part 渲染原卡；reasoning 渲染 Thought 块；step-start 协议件不渲染
+            if (part.type === "reasoning") {
+              return (
+                <Reasoning key={part.toolCallId ?? `tr-${idx}`}>
+                  <ReasoningTrigger className="flex items-center gap-1 text-muted-foreground">
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <Brain className="h-4 w-4" />
+                      <span className="text-sm">Thought</span>
+                    </div>
+                  </ReasoningTrigger>
+                  <MemoizedReasoningContent text={part.text || ""} />
+                </Reasoning>
+              );
+            }
+            if (part.type === "step-start") return null;
             const toolType = String(part.type).replace(/^tool-/, "");
             return (
               <MemoizedTool
@@ -622,16 +638,28 @@ function ChatMessagesComponent({
 
       if (typeof type === "string" && type.startsWith("tool-")) {
         flushText();
-        // T6：向后收拢连续工具 part（≥2 个进折叠组，单个保持原卡）
+        // T6：向后收拢连续工具调用（≥2 个进折叠组，单个保持原卡）。
+        // step-start（协议分隔件）与 reasoning（调用间的 Thought）视为透明——AI SDK 的
+        // parts 序列里它们穿插在工具 part 之间，此前 greedy 收集一遇即断，折叠整站失效
         const groupParts: any[] = [part];
+        let toolCount = 1;
         let j = i + 1;
         while (j < parts.length) {
-          const next = parts[j];
-          if (typeof next?.type !== "string" || !next.type.startsWith("tool-")) break;
-          groupParts.push(next);
-          j += 1;
+          const nextType = parts[j]?.type as string | undefined;
+          if (nextType === "step-start" || nextType === "reasoning") {
+            groupParts.push(parts[j]);
+            j += 1;
+            continue;
+          }
+          if (typeof nextType === "string" && nextType.startsWith("tool-")) {
+            groupParts.push(parts[j]);
+            toolCount += 1;
+            j += 1;
+            continue;
+          }
+          break;
         }
-        if (groupParts.length >= 2) {
+        if (toolCount >= 2) {
           elements.push(
             <ToolCallGroup
               key={`toolgroup-${i}`}
@@ -640,6 +668,7 @@ function ChatMessagesComponent({
               isChatPage={isChatPage}
             />,
           );
+          i = j - 1;
         } else {
           const toolType = type.replace(/^tool-/, "");
           const toolName = TOOL_NAME_MAP[toolType] || toolType;
@@ -652,8 +681,8 @@ function ChatMessagesComponent({
               isChatPage={isChatPage}
             />,
           );
+          // 未成团：不消费后续 step-start/reasoning，交还主循环各自渲染
         }
-        i = j - 1;
         continue;
       }
 
