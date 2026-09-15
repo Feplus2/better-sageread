@@ -1,5 +1,6 @@
 import type { DocumentChunk } from "@/types/document";
 import { invoke } from "@tauri-apps/api/core";
+import { withRagErrorTranslation } from "./rag-error";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -56,11 +57,11 @@ export const createRagRangeTool = (activeBookId: string | undefined) =>
       const requestedRange = Math.min(actualEndIndex - start_index, actualMaxChunks);
       const finalEndIndex = start_index + requestedRange;
 
-      const results = (await invoke("plugin:epub|get_chunks_by_range", {
+      const results = (await withRagErrorTranslation(() => invoke("plugin:epub|get_chunks_by_range", {
         bookId: activeBookId,
         startIndex: start_index,
         endIndex: finalEndIndex,
-      })) as DocumentChunk[];
+      }))) as DocumentChunk[];
 
       if (results.length === 0) {
         throw new Error(`在索引范围 ${start_index}-${finalEndIndex} 中未找到任何内容`);

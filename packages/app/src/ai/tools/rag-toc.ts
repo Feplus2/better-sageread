@@ -1,6 +1,7 @@
 import type { DocumentChunk } from "@/types/document";
 import { resolveMarkdownImagePaths } from "@/utils/path";
 import { invoke } from "@tauri-apps/api/core";
+import { withRagErrorTranslation } from "./rag-error";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -43,10 +44,10 @@ export const createRagTocTool = (activeBookId: string | undefined) =>
         throw new Error("未找到当前阅读图书，请先在阅读器中打开图书");
       }
 
-      const results = (await invoke("plugin:epub|get_toc_chunks", {
+      const results = (await withRagErrorTranslation(() => invoke("plugin:epub|get_toc_chunks", {
         bookId: activeBookId,
         chapterTitle: chapter_title,
-      })) as DocumentChunk[];
+      }))) as DocumentChunk[];
 
       if (results.length === 0) {
         throw new Error(`未找到章节 "${chapter_title}" 的内容`);

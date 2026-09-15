@@ -2,6 +2,7 @@ import type { EnhancedSearchItem } from "@/types/document";
 import { getCurrentVectorModelConfig } from "@/utils/model";
 import { resolveMarkdownImagePaths } from "@/utils/path";
 import { invoke } from "@tauri-apps/api/core";
+import { withRagErrorTranslation } from "./rag-error";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -96,7 +97,7 @@ export const createRagSearchTool = (activeBookId: string | undefined) =>
 
       const vectorConfig = await getCurrentVectorModelConfig();
 
-      const results = (await invoke("plugin:epub|search_db", {
+      const results = (await withRagErrorTranslation(() => invoke("plugin:epub|search_db", {
         bookId: activeBookId,
         query: question,
         limit: limit ?? 5,
@@ -107,7 +108,7 @@ export const createRagSearchTool = (activeBookId: string | undefined) =>
         searchMode: searchMode ?? "hybrid",
         vectorWeight: vectorWeight ?? 0.7,
         bm25Weight: bm25Weight ?? 0.3,
-      })) as EnhancedSearchItem[];
+      }))) as EnhancedSearchItem[];
 
       const enhancedContext = await Promise.all(
         results.map(async (r, idx) => {

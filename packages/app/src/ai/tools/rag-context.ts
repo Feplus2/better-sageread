@@ -1,6 +1,7 @@
 import type { DocumentChunk } from "@/types/document";
 import { resolveMarkdownImagePaths } from "@/utils/path";
 import { invoke } from "@tauri-apps/api/core";
+import { withRagErrorTranslation } from "./rag-error";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -45,12 +46,12 @@ export const createRagContextTool = (activeBookId: string | undefined) =>
         throw new Error("未找到当前阅读图书，请先在阅读器中打开图书");
       }
 
-      const results = (await invoke("plugin:epub|get_chunk_with_context", {
+      const results = (await withRagErrorTranslation(() => invoke("plugin:epub|get_chunk_with_context", {
         bookId: activeBookId,
         chunkId: chunk_id,
         prevCount: prev_count ?? 3,
         nextCount: next_count ?? 3,
-      })) as DocumentChunk[];
+      }))) as DocumentChunk[];
 
       const targetIndex = results.findIndex((chunk) => chunk.id === chunk_id);
 
