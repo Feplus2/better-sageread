@@ -320,3 +320,17 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 
 - 论文侧公式引用同样有扁平化风险：论文阅读器渲染的是 KaTeX DOM，划词引用拿到的是渲染文本而非 markdown 源里的 `$...$`。修法：引用抓取时经 paper-highlight-locator 的 quote→源映射回解 LaTeX（并入本轮 B 项施工）。
 - 未向量化书的 rag* 工具报错统一为"本书未建立向量索引"，并评估此类书是否直接不注册 rag* 工具（并入 E4）。
+
+---
+
+## 🆕 模型映射表热更新（用户提议，2026-09-15 挂账）
+
+**动机**：`vision-map.ts` / `reasoning-map.ts` 两张模型映射表随厂商发模频繁更新，但每次都要随软件发版才能触达用户。
+
+**方案（远程优先 + 本地兜底，复用现有官网/COS 基建）**：
+1. 两张表抽出为 JSON（`maps/v1/vision-map.json` / `reasoning-map.json`，保留每条的"核实日期/来源"审计字段），放 `site/maps/`（push 自动部署 EdgeOne Pages）或 COS 下载通道；带 `schemaVersion` + `minAppVersion`。
+2. 客户端新增 provider-map 服务：启动时 + 每 6h 静默拉取（etag/304）；成功 → zod 校验 + schemaVersion 检查 → 写 appDataDir 缓存并即时生效（映射消费点改读服务层）；失败/离线 → 用上次缓存；缓存也没有 → 用打包内置版（仍随版本发布作 floor）；`minAppVersion` 不满足则忽略（防新字段坑老客户端）。
+3. 纯数据不执行代码；https 固定域名 + 严格 schema 校验。
+4. 消费点：vision-map / reasoning-map 的查询函数改走"远程优先"解析层。
+
+**效果**：更新映射 = 改 site/maps 下 JSON 推一次，客户端 6h 内自动生效，零发版。优先级待用户排（当前排在 C+B/E6/E7 之后）。
