@@ -45,14 +45,21 @@ export class TOCProgress {
         if (!range || items.length === 1 && !items[0].fragment) return items[0].item
 
         const doc = range.startContainer.getRootNode()
-        // 记录"锚点解析成功且不在可视范围之后"的最近条目：循环正常跑完时返回它，
+        // 当前小节的判定锚定视口【顶部】而非底部：用折叠到 range 起点的位置比较锚点。
+        // 原实现按"最后一个不晚于 range 末尾的锚点"判定——未加载完的内容（图片 0 高
+        // 塌陷等）会让 range 末尾越过整个章末，把所有锚点都判成"已过"，位置反复
+        // 掉到本章最后一项（实测滚动中 5.x→5.9 鬼影交替）。
+        // 顶部判定对该类布局塌陷免疫，且与 CFI/阅读进度保存的顶部语义一致。
+        const start = range.cloneRange()
+        start.collapse(true)
+        // 记录"锚点解析成功且不晚于视口顶部"的最近条目：循环正常跑完时返回它，
         // 而不是无条件返回组内最后一项——锚点缺失（错配/转换产物坏 id）时
         // 原逻辑会把位置误判成章末
         let lastResolved = null
         for (const [i, { fragment }] of items.entries()) {
             const el = this.getFragment(doc, fragment)
             if (!el) continue
-            if (range.comparePoint(el, 0) > 0)
+            if (start.comparePoint(el, 0) > 0)
                 return lastResolved ?? (items[i - 1]?.item ?? prev)
             lastResolved = items[i].item
         }
