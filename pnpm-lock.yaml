@@ -213,6 +213,9 @@ importers:
       markmap-view:
         specifier: ^0.18.12
         version: 0.18.12(markmap-common@0.18.9)
+      mathml-to-latex:
+        specifier: ^1.8.0
+        version: 1.8.0
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
@@ -2345,6 +2348,10 @@ packages:
     engines: {node: '>=10.0.0'}
     deprecated: this version has critical issues, please update to the latest version
 
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
+
   '@zip.js/zip.js@2.7.72':
     resolution: {integrity: sha512-3/A4JwrgkvGBlCxtItjxs8HrNbuTAAl/zlGkV6tC5Fb5k5nk4x2Dqxwl/YnUys5Ch+QB01eJ8Q5K/J2uXfy9Vw==}
     engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=16.5.0'}
@@ -3538,6 +3545,9 @@ packages:
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
+
+  mathml-to-latex@1.8.0:
+    resolution: {integrity: sha512-gQ0uK3zqB8HwlfaXJkEL5rgaZNbKUiBMmBP/B/W+b+t6KcseLSuYb1b0BjLgS9ZiQa24ePkqTX8/6FaQuDL7wQ==}
 
   mdast-util-find-and-replace@3.0.2:
     resolution: {integrity: sha512-Tmd1Vg/m3Xz43afeNxDIhWRtFZgM2VLyaf4vSTYwudTyeuTneoL3qtWMA5jeLyz/O1vDJmmV4QuScFCA2tBPwg==}
@@ -6509,6 +6519,8 @@ snapshots:
 
   '@xmldom/xmldom@0.8.11': {}
 
+  '@xmldom/xmldom@0.9.12': {}
+
   '@zip.js/zip.js@2.7.72': {}
 
   acorn-jsx@5.3.2(acorn@8.15.0):
@@ -7787,6 +7799,10 @@ snapshots:
   material-colors@1.2.6: {}
 
   math-intrinsics@1.1.0: {}
+
+  mathml-to-latex@1.8.0:
+    dependencies:
+      '@xmldom/xmldom': 0.9.12
 
   mdast-util-find-and-replace@3.0.2:
     dependencies:
