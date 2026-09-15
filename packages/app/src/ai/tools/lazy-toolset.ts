@@ -73,7 +73,9 @@ function serializeSchema(schema: unknown): string {
   parts.push(
     "describeTool/useTool 是你的后台翻说明书机制，全程静默调用：不要向用户预告、解释或复述这个过程（禁止输出“让我先看看工具如何调用”之类字样），回复篇幅直接留给问题答案本身。",
   );
-  parts.push("说明：参数说明每次会话按需获取即可；执行任何工具都走 useTool。当前可用工具：");
+  parts.push(
+    "说明：describeTool 与 useTool 都是顶层工具、各自直接调用——describeTool 不要经 useTool 转发；useTool 的 tool 字段只填目录牌里的真实工具名。当前可用工具：",
+  );
   if (builtin.length) parts.push(`【内置】\n${builtin.join("\n")}`);
   for (const [serverKey, lines] of mcpByServer) {
     parts.push(`【连接器 ${serverKey}】\n${lines.join("\n")}`);
@@ -125,6 +127,27 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
     }),
     execute: async ({ tool: name, args }: { tool: string; args: Record<string, unknown> }, options: any) => {
       auditToolCatalogCall({ kind: "useTool", tool: name, argKeys: Object.keys(args ?? {}) });
+      // 模型常把 describeTool 误当转发目标（"执行任何工具都走 useTool"的过读）——
+      // 就地代为执行说明书查询，比一句"未找到"更能把它拉回正轨
+      if (name === "describeTool") {
+        const target = typeof args?.tool === "string" ? (args.tool as string) : undefined;
+        const real = target ? tools[target] : undefined;
+        if (!real) {
+          return {
+            success: false,
+            error: `describeTool 应作为顶层工具直接调用（不要经 useTool 转发）；且目标工具「${target ?? name}」不存在`,
+            available_tools: available,
+          };
+        }
+        return {
+          success: true,
+          name: target,
+          description: (real as any).description ?? "",
+          input_schema: serializeSchema((real as any).inputSchema),
+          usage: "把参数按此 schema 组装为 useTool 的 args 后执行",
+          note: "下次请直接调用顶层工具 describeTool，无需经 useTool 转发",
+        };
+      }
       const real = tools[name];
       if (!real) {
         return {
