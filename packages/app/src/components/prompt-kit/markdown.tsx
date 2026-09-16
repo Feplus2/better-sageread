@@ -23,15 +23,34 @@ export type MarkdownProps = {
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
   const tokens = marked.lexer(normalizeMathDelimiters(markdown));
-  return tokens.map((token) => {
-    // remark-math 只把多行 $$…$$ 识别为行间公式，整段一行的 $$…$$ 会被当行内公式。
-    // 对"整段只有一行 $$…$$"的段落改写成多行形式，让行间公式正确出 .katex-display。
-    if (token.type === "paragraph") {
+  return tokens.flatMap((token) => {
+    // remark-math 只把多行 $$…$$ 识别为行间公式，整段一行的 $$…$$ 会被当行内公式——
+    // 行内模式下 \tag 直接让 KaTeX 抛错、整行源码红外泄（模型把长 display 公式拆成
+    // 连续多行 $$…$$ 输出时必现）。把段落里"整行都是 $$…$$"的行逐行提升为多行形式，
+    // 让行间公式正确出 .katex-display；行内混排与多行 $$ 块原样保留。
+    if (token.type === "paragraph" && token.raw.includes("$$")) {
       const raw = token.raw.replace(/\n+$/, "");
-      const m = raw.match(/^\$\$([^\n]+)\$\$$/);
-      if (m) return `$$\n${m[1]}\n$$`;
+      const blocks: string[] = [];
+      let textLines: string[] = [];
+      const flushText = () => {
+        if (textLines.length > 0) {
+          blocks.push(textLines.join("\n"));
+          textLines = [];
+        }
+      };
+      for (const line of raw.split("\n")) {
+        const m = line.match(/^\s*\$\$([^\n]+?)\$\$\s*$/);
+        if (m) {
+          flushText();
+          blocks.push(`$$\n${m[1]}\n$$`);
+        } else {
+          textLines.push(line);
+        }
+      }
+      flushText();
+      return blocks;
     }
-    return token.raw;
+    return [token.raw];
   });
 }
 
