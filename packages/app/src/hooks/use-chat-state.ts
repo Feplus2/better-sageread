@@ -66,6 +66,10 @@ export interface UseChatStateReturn {
   canRetry: boolean;
 }
 
+/** 标题用：剥掉 ⟦引用N⟧/⟦图片N⟧ 占位标记——占位标题来自原始输入，含标记会让
+ * "是否占位标题"的比对失配（quote 首发的对话自动命名被跳过），且标记本身不该进标题 */
+const stripMarkersForTitle = (s: string) => s.replace(/⟦(?:引用|图片)\d+⟧/g, "").trim();
+
 /** 归一化流错误为可读中文（AI SDK 的 APICallError 的 message 常为空，需取 statusCode/responseBody） */
 function normalizeChatError(error: unknown): Error {
   const e = error as { statusCode?: number; responseBody?: string; message?: string } | null;
@@ -305,8 +309,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           const firstUserParts = userMessages[0]?.parts ?? [];
           const firstUserText = firstUserParts.map((p: any) => (p.type === "text" ? p.text : "")).join("");
           const firstQuoteText = (firstUserParts.find((p: any) => p.type === "quote") as any)?.text || "";
-          const placeholderTitle = (firstUserText || firstQuoteText || "新对话").slice(0, 50);
-          const isPlaceholderTitle = !thread.title || thread.title === "新对话" || thread.title === placeholderTitle;
+          const placeholderTitle = stripMarkersForTitle(firstUserText || firstQuoteText || "新对话").slice(0, 50);
+          const cleanTitle = stripMarkersForTitle(thread.title ?? "").slice(0, 50);
+          const isPlaceholderTitle = !cleanTitle || cleanTitle === "新对话" || cleanTitle === placeholderTitle;
           if (!isPlaceholderTitle) return;
 
           generateThreadTitleWithAI(normalizedMessages, selectedModel ?? undefined)
@@ -700,7 +705,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
 
       if (messages.length === 0 && !currentThread) {
         try {
-          const titleSource = trimmedInput || referenceSnapshot[0]?.text || "新对话";
+          const titleSource = stripMarkersForTitle(trimmedInput) || referenceSnapshot[0]?.text || "新对话";
           const thread = await createThread(activeBookId, titleSource.substring(0, 50), [], threadScope);
           setCurrentThread(thread);
           // H1：同步赋值 ref，让随后的流式落库立即能读到 thread id
@@ -774,8 +779,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       const firstUserParts = msgs.find((m) => m.role === "user")?.parts ?? [];
       const firstUserText = firstUserParts.map((p: any) => (p.type === "text" ? p.text : "")).join("");
       const firstQuoteText = (firstUserParts.find((p: any) => p.type === "quote") as any)?.text || "";
-      const placeholderTitle = (firstUserText || firstQuoteText || "新对话").slice(0, 50);
-      const isPlaceholderTitle = !thread.title || thread.title === "新对话" || thread.title === placeholderTitle;
+      const placeholderTitle = stripMarkersForTitle(firstUserText || firstQuoteText || "新对话").slice(0, 50);
+      const cleanTitle = stripMarkersForTitle(thread.title ?? "").slice(0, 50);
+      const isPlaceholderTitle = !cleanTitle || cleanTitle === "新对话" || cleanTitle === placeholderTitle;
       if (isPlaceholderTitle) {
         void generateThreadTitleWithAI(msgs, selectedModel ?? undefined)
           .then(async (title) => {
