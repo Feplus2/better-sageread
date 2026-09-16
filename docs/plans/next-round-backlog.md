@@ -334,3 +334,5 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 4. 消费点：vision-map / reasoning-map 的查询函数改走"远程优先"解析层。
 
 **效果**：更新映射 = 改 site/maps 下 JSON 推一次，客户端 6h 内自动生效，零发版。优先级待用户排（当前排在 C+B/E6/E7 之后）。
+
+- **转换器表格漏转残留**：Feeling Great（英文版）chapter_002 有一个表格未被转换成 HTML，以 Markdown 表格纯文本（`|---|` 管道符）留在 `<p>` 里渲染。阅读器无法补救（内容问题），需转换器侧排查该表格的提取路径。
