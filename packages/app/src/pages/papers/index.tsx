@@ -1925,7 +1925,7 @@ export default function PapersPage() {
                         <div
                           role="button"
                           tabIndex={0}
-                          className="group flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
+                          className="paper-entry-card group flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
                           onClick={() => handleOpen(paper)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {

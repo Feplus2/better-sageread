@@ -564,7 +564,7 @@ export default function BookItem({
           <div className="group cursor-pointer" onClick={handleClick}>
             <div
               data-region="book-card"
-              className={`rounded-r-2xl rounded-l-md border border-neutral-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 ${
+              className={`book-card rounded-r-2xl rounded-l-md border border-neutral-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800 ${
                 isMobile && book.format === "PDF" ? "opacity-55" : ""
               }`}
             >

@@ -180,6 +180,38 @@
     0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
 }
 
+/* ---------- 书籍卡片 / 论文条目：hover 主题色柔光 ----------
+ * 与 .chat-thread-card 同一口径：颜色过渡走动效 token（fade-only/reduced 自动压短/归零），
+ * 位移与主题色光影只在 full 档启用（fade-only 只留颜色过渡）；颜色一律 color-mix 跟随 --primary。
+ * dark 档背景 tint 加浓（参考 .dark .paper-sentence-hover-rect），保证深色卡面上可辨。 */
+.book-card,
+.paper-entry-card {
+  transition:
+    border-color var(--motion-dur-fast) var(--motion-ease),
+    background-color var(--motion-dur-fast) var(--motion-ease),
+    box-shadow var(--motion-dur-base) var(--motion-ease),
+    transform var(--motion-dur-base) var(--motion-ease);
+}
+
+.book-card:hover,
+.paper-entry-card:hover {
+  border-color: color-mix(in oklab, var(--primary) 35%, transparent);
+  background-color: color-mix(in oklab, var(--primary) 6%, transparent);
+}
+
+.dark .book-card:hover,
+.dark .paper-entry-card:hover {
+  background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+
+[data-motion="full"] .book-card:hover,
+[data-motion="full"] .paper-entry-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent),
+    0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+}
+
 /* ---------- 批次 3：保活层交叉淡入（reader tab 层 / 主页路由层 /chat 常驻层共用） ----------
  * 隐藏模型双轨（documentElement data-tab-hide="visibility|opacity"，默认 visibility，运行期翻转免重编）：
  * - visibility（默认/对照组）：opacity 淡 + visibility 延迟链，离场播完淡出再 hidden，进场立即 visible 再淡入。
