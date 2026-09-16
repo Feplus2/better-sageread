@@ -296,10 +296,10 @@ pub fn get_chunk_with_context<R: Runtime>(
     let book_dir = app_data_dir.join("books").join(&book_id);
     let db_path = book_dir.join("vectors.sqlite");
     
-    let db = VectorDatabase::new(&db_path, 1024).map_err(|e| e.to_string())?;
+    let db = VectorDatabase::open_for_search(&db_path, 1024).map_err(|e| e.to_string())?;
     let chunks = db.get_chunk_with_context(chunk_id, prev_count, next_count)
         .map_err(|e| e.to_string())?;
-    
+
     Ok(chunks.into_iter().map(DocumentChunkDto::from).collect())
 }
 
@@ -319,7 +319,9 @@ pub fn get_toc_chunks<R: Runtime>(
     let book_dir = app_data_dir.join("books").join(&book_id);
     let db_path = book_dir.join("vectors.sqlite");
 
-    let db = VectorDatabase::new(&db_path, 1024).map_err(|e| e.to_string())?;
+    // 检索路径必须 open_for_search：VectorDatabase::new 走写入路径的维度自愈，
+    // 对 2048 维索引按硬编码 1024 检出"维度不一致"会整库重建（rag 读取误清索引的根因）
+    let db = VectorDatabase::open_for_search(&db_path, 1024).map_err(|e| e.to_string())?;
     let chunks = db.get_chunks_by_chapter_title(&chapter_title).map_err(|e| e.to_string())?;
 
     Ok(chunks.into_iter().map(DocumentChunkDto::from).collect())
@@ -341,8 +343,9 @@ pub fn get_chunks_by_range<R: Runtime>(
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let book_dir = app_data_dir.join("books").join(&book_id);
     let db_path = book_dir.join("vectors.sqlite");
-    
-    let db = VectorDatabase::new(&db_path, 1024).map_err(|e| e.to_string())?;
+
+    // 同上：检索走 open_for_search，避免写入路径的维度自愈清空索引
+    let db = VectorDatabase::open_for_search(&db_path, 1024).map_err(|e| e.to_string())?;
     let chunks = db.get_chunks_by_global_index_range(start_index, end_index)
         .map_err(|e| e.to_string())?;
     
