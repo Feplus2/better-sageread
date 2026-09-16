@@ -203,7 +203,22 @@ impl<'a> DatabaseSearch<'a> {
     /// 执行文本搜索
     pub fn text_search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let search_pattern = format!("%{}%", query);
-        
+        // 小节号前缀的查询（"5.5 Wick's theorem..."）：DB 里小节标题被转义且段号有损毁
+        // （"5.5" → "5.\."，数字丢失），数字开头的查询追加一条按标题文本部分的匹配
+        // （"Wick's theorem..."），否则 ragToc 类按号索章永远"未找到"
+        let stripped = query
+            .split_once(|c: char| c.is_whitespace())
+            .map(|(head, rest)| (head.trim_matches('.'), rest))
+            .filter(|(head, rest)| {
+                !rest.is_empty()
+                    && head
+                        .split('.')
+                        .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_digit()))
+            })
+            .map(|(_, rest)| format!("%{}%", rest.trim()));
+
+        // 标题归一匹配：mdbook 转换会把小节号的点转义成 "\."（"5.5" → "5.\."），
+        // 原样 LIKE 永远匹配不到——比较前先去转义
         let mut stmt = self.db.connection().prepare(
             r#"
             SELECT 
@@ -212,12 +227,14 @@ impl<'a> DatabaseSearch<'a> {
                 total_chunks_in_file, global_chunk_index, created_at
             FROM document_chunks 
             WHERE chunk_text LIKE ?1 
-               OR related_chapter_titles LIKE ?1
+               OR replace(related_chapter_titles, '\.', '.') LIKE ?1
                OR book_title LIKE ?1
+               OR chunk_text LIKE ?3
+               OR replace(related_chapter_titles, '\.', '.') LIKE ?3
             ORDER BY 
                 CASE 
                     WHEN book_title LIKE ?1 THEN 1
-                    WHEN related_chapter_titles LIKE ?1 THEN 2
+                    WHEN replace(related_chapter_titles, '\.', '.') LIKE ?1 THEN 2
                     ELSE 3
                 END,
                 file_order_in_book,
@@ -226,7 +243,7 @@ impl<'a> DatabaseSearch<'a> {
             "#
         )?;
 
-        let rows = stmt.query_map(params![search_pattern, limit], |row| {
+        let rows = stmt.query_map(params![search_pattern, limit, stripped.unwrap_or_default()], |row| {
             Ok(SearchResult {
                 chunk_id: row.get(0)?,
                 book_title: row.get(1)?,
