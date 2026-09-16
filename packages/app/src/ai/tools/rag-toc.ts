@@ -53,16 +53,36 @@ export const createRagTocTool = (activeBookId: string | undefined) =>
         throw new Error(`未找到章节 "${chapter_title}" 的内容`);
       }
 
+      // 小节级查询（"5.5 ..."）：text_search 命中的是整章文件从头起的块——
+      // 把起点切到该小节标题所在块（段号可能被转义/吃掉，匹配用标题文本兜底）。
+      // 这样小节直读不再回退成"章级从头"（Agent E2E 实测诉求）
+      let contentChunks = results;
+      let sectionNote = "";
+      const secMatch = chapter_title.match(/^(\d+(?:\.\d+)*)\s+(.+)$/);
+      if (secMatch) {
+        const titleText = secMatch[2].trim().toLowerCase();
+        const normalizeHeading = (s: string) => s.replace(/\\./g, "").toLowerCase();
+        const fullTitle = chapter_title.toLowerCase();
+        const startIdx = results.findIndex((c) => {
+          const text = normalizeHeading(c.chunk_text ?? "");
+          return text.includes(fullTitle) || (titleText.length >= 4 && text.includes(titleText));
+        });
+        if (startIdx > 0) {
+          contentChunks = results.slice(startIdx);
+          sectionNote = `（已定位到「${chapter_title}」所在小节，跳过章首至此节的 ${startIdx} 块）`;
+        }
+      }
+
       const chapterInfo = {
         chapter_title: chapter_title,
         related_chapter_titles: results[0].related_chapter_titles,
-        total_chunks: results.length,
+        total_chunks: contentChunks.length,
         md_file_path: results[0].md_file_path,
         file_order_in_book: results[0].file_order_in_book,
       };
 
       const chapterContent = await Promise.all(
-        results.map(async (chunk, index) => {
+        contentChunks.map(async (chunk, index) => {
           let processedContent = chunk.chunk_text;
           // md_file_path 现在存储的是绝对路径，可以直接用于图片路径解析
           if (chunk.md_file_path) {
@@ -90,7 +110,7 @@ export const createRagTocTool = (activeBookId: string | undefined) =>
 
       const lines: string[] = [];
       lines.push(`[章节内容] ${chapterInfo.chapter_title}`);
-      lines.push(`💭 调用原因：${reasoning}`);
+      lines.push(`💭 调用原因：${reasoning}${sectionNote}`);
       lines.push(
         `📖 文件顺序：${chapterInfo.file_order_in_book} | 分块数：${chapterInfo.total_chunks} | 来源：${chapterInfo.md_file_path}`,
       );
