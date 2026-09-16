@@ -331,8 +331,9 @@ const getLayoutStyles = (
     margin-right: auto;
   }
   /* 表格框线跟随字体颜色（书籍默认 #ccc 在浅底上发白看不清；
-     currentColor 跟随局部文字色，暗色主题下自动变浅字色） */
-  td, th {
+     currentColor 跟随局部文字色，暗色主题下自动变浅字色。
+     选择器必须给到 0-0-2——书的 table td/table th 也是 0-0-2，td,th 单元素(0-0-1)会输 */
+  table td, table th {
     border-color: currentColor;
   }
 
