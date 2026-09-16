@@ -24,11 +24,13 @@ import { toast } from "sonner";
 interface ChatThreadsProps {
   bookId: string | undefined;
   scope?: ThreadScope;
+  /** 当前打开的对话 id：列表里主题色高亮标注（.chat-thread-card[data-current]） */
+  currentThreadId?: string | null;
   onBack: () => void;
   onSelectThread: (threadSummary: ThreadSummary) => void;
 }
 
-export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThreadsProps) {
+export function ChatThreads({ bookId, scope, currentThreadId, onBack, onSelectThread }: ChatThreadsProps) {
   const {
     threads,
     error,
@@ -345,7 +347,8 @@ export function ChatThreads({ bookId, scope, onBack, onSelectThread }: ChatThrea
                 <ContextMenuTrigger asChild>
                   <button
                     onClick={() => handleCardClick(thread)}
-                    className="group w-full cursor-pointer rounded-lg border p-2 text-left"
+                    data-current={thread.id === currentThreadId || undefined}
+                    className="chat-thread-card group w-full cursor-pointer rounded-lg border p-2 text-left"
                   >
                     <div className="mb-1 flex items-start justify-between gap-2">
                       {selectionMode && (

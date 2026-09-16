@@ -146,6 +146,40 @@
   animation-name: motion-card-out;
 }
 
+/* ---------- 历史对话卡片：当前项主题色高亮 + hover 光效 ----------
+ * 颜色过渡时长/缓动走动效 token（fade-only/reduced 自动压短/归零）；
+ * 位移与主题色光影只在 full 档启用（fade-only 性能档免阴影重绘，reduced 逃生舱免位移）。
+ * 颜色跟随全局主题主色（--primary），与 paper-sentence-hover-rect 同一 color-mix 口径。 */
+.chat-thread-card {
+  transition:
+    border-color var(--motion-dur-fast) var(--motion-ease),
+    background-color var(--motion-dur-fast) var(--motion-ease),
+    box-shadow var(--motion-dur-base) var(--motion-ease),
+    transform var(--motion-dur-base) var(--motion-ease);
+}
+
+.chat-thread-card:hover {
+  border-color: color-mix(in oklab, var(--primary) 35%, transparent);
+  background-color: color-mix(in oklab, var(--primary) 6%, transparent);
+}
+
+.chat-thread-card[data-current="true"] {
+  border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+  background-color: color-mix(in oklab, var(--primary) 9%, transparent);
+}
+
+.chat-thread-card[data-current="true"]:hover {
+  border-color: color-mix(in oklab, var(--primary) 65%, transparent);
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+
+[data-motion="full"] .chat-thread-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent),
+    0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+}
+
 /* ---------- 批次 3：保活层交叉淡入（reader tab 层 / 主页路由层 /chat 常驻层共用） ----------
  * 隐藏模型双轨（documentElement data-tab-hide="visibility|opacity"，默认 visibility，运行期翻转免重编）：
  * - visibility（默认/对照组）：opacity 淡 + visibility 延迟链，离场播完淡出再 hidden，进场立即 visible 再淡入。

@@ -212,6 +212,7 @@ function ChatContent({ bookId }: ChatContentProps) {
           <ChatThreads
             key={`threads-${threadsKey}`}
             bookId={bookId}
+            currentThreadId={currentThread?.id ?? null}
             onBack={handleBackFromThreads}
             onSelectThread={handleSelectThread}
           />

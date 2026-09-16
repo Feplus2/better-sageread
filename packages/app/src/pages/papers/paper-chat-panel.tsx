@@ -356,6 +356,7 @@ export function PaperChatPanel({
             <ChatThreads
               key={`threads-${threadsKey}`}
               bookId={paperId}
+              currentThreadId={currentThread?.id ?? null}
               onBack={handleBackFromThreads}
               onSelectThread={handleSelectThread}
             />

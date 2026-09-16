@@ -283,6 +283,7 @@ function ChatPage() {
             key={`threads-${threadsKey}`}
             bookId={undefined}
             scope="global"
+            currentThreadId={currentThread?.id ?? null}
             onBack={handleBackFromThreads}
             onSelectThread={handleSelectThread}
           />
