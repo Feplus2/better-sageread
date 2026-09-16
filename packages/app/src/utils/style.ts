@@ -330,6 +330,11 @@ const getLayoutStyles = (
     margin-left: auto;
     margin-right: auto;
   }
+  /* 表格框线跟随字体颜色（书籍默认 #ccc 在浅底上发白看不清；
+     currentColor 跟随局部文字色，暗色主题下自动变浅字色） */
+  td, th {
+    border-color: currentColor;
+  }
 
   :lang(zh), :lang(ja), :lang(ko) {
     widows: 1;
