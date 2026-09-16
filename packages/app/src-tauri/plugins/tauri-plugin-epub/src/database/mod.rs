@@ -316,7 +316,7 @@ impl VectorDatabase {
     pub fn search_chunks_by_chapter(&self, chapter_query: &str, limit: usize) -> Result<Vec<DocumentChunk>> {
         let search = DatabaseSearch::new(&self.db);
         let results = search.text_search(chapter_query, limit)?;
-        Ok(results.into_iter().map(|r| DocumentChunk {
+        let mut chunks: Vec<DocumentChunk> = results.into_iter().map(|r| DocumentChunk {
             id: Some(r.chunk_id),
             book_title: r.book_title,
             book_author: r.book_author,
@@ -330,7 +330,19 @@ impl VectorDatabase {
             global_chunk_index: r.global_chunk_index,
             embedding: Vec::new(),
             is_references: false, // SearchResult 不带出该列，恒 false
-        }).collect())
+        }).collect();
+
+        // 小节级查询（"5.5 Wick's theorem..."）：text_search 的 LIMIT 截断会让结果
+        // 停在章首（小节标题的锚块可能远在 100 块之后）。定位该小节标题所在锚块，
+        // 从锚块起重取——ragToc 小节直读不再回退成章级从头（E2E 实测根因）
+        if let (Some(first), Some(anchor_text)) = (chunks.first(), query_text_after_section_number(chapter_query)) {
+            if let Some(anchor_idx) = find_section_anchor_global_index(&self.db, &first.md_file_path, &anchor_text)? {
+                if anchor_idx > first.global_chunk_index {
+                    chunks = search_chunks_from_global_index(&self.db, &first.md_file_path, anchor_idx, limit)?;
+                }
+            }
+        }
+        Ok(chunks)
     }
 
     /// 通过章节标题精确获取所有相关分块（向后兼容）
@@ -386,3 +398,77 @@ impl VectorDatabase {
 }
 
 
+
+/// 数字小节号查询（"5.5 Wick's theorem..."）→ 取数字后的标题文本（"Wick's theorem..."）
+fn query_text_after_section_number(query: &str) -> Option<String> {
+    let (head, rest) = query.split_once(char::is_whitespace)?;
+    if rest.is_empty() {
+        return None;
+    }
+    let numeric = head
+        .trim_matches('.')
+        .split('.')
+        .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_digit()));
+    numeric.then(|| rest.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// 找小节标题所在锚块的全局序号（chunk_text 含该标题文本；段号损毁/转义无碍，
+/// 因为只匹配数字后的标题文本部分）
+fn find_section_anchor_global_index(
+    db: &DatabaseConnection,
+    md_file_path: &str,
+    anchor_text: &str,
+) -> Result<Option<usize>> {
+    use rusqlite::params;
+    let mut stmt = db.connection().prepare(
+        r#"
+        SELECT global_chunk_index FROM document_chunks
+        WHERE md_file_path = ?1 AND chunk_text LIKE ?2
+        ORDER BY chunk_order_in_file ASC
+        LIMIT 1
+        "#,
+    )?;
+    let pattern = format!("%{}%", anchor_text);
+    let mut rows = stmt.query(params![md_file_path, pattern])?;
+    Ok(rows.next()?.map(|r| r.get(0)).transpose()?)
+}
+
+/// 从指定全局序号起按顺序取某文件的连续分块
+fn search_chunks_from_global_index(
+    db: &DatabaseConnection,
+    md_file_path: &str,
+    from_global_index: usize,
+    limit: usize,
+) -> Result<Vec<DocumentChunk>> {
+    use rusqlite::params;
+    let mut stmt = db.connection().prepare(
+        r#"
+        SELECT
+            id, book_title, book_author, paper_id, md_file_path,
+            file_order_in_book, related_chapter_titles, chunk_text,
+            chunk_order_in_file, total_chunks_in_file, global_chunk_index
+        FROM document_chunks
+        WHERE md_file_path = ?1 AND global_chunk_index >= ?2
+        ORDER BY global_chunk_index ASC
+        LIMIT ?3
+        "#,
+    )?;
+    let chunks = stmt.query_map(params![md_file_path, from_global_index, limit], |row| {
+        Ok(DocumentChunk {
+            id: Some(row.get(0)?),
+            book_title: row.get(1)?,
+            book_author: row.get(2)?,
+            paper_id: row.get(3)?,
+            md_file_path: row.get(4)?,
+            file_order_in_book: row.get(5)?,
+            related_chapter_titles: row.get(6)?,
+            chunk_text: row.get(7)?,
+            chunk_order_in_file: row.get(8)?,
+            total_chunks_in_file: row.get(9)?,
+            global_chunk_index: row.get(10)?,
+            embedding: Vec::new(),
+            is_references: false,
+        })
+    })?;
+    Ok(chunks.collect::<rusqlite::Result<Vec<_>>>()?)
+}
