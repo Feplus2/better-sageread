@@ -58,6 +58,16 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptBoxRef = useRef<HTMLDivElement>(null);
+  // 引用区限高滚动：新增引用时自动滚到底（最新引用优先可见）；删除不扰动滚动位置
+  const refsBoxRef = useRef<HTMLDivElement>(null);
+  const prevRefsLenRef = useRef(0);
+  useEffect(() => {
+    const box = refsBoxRef.current;
+    if (box && references.length > prevRefsLenRef.current) {
+      box.scrollTop = box.scrollHeight;
+    }
+    prevRefsLenRef.current = references.length;
+  }, [references.length]);
   // K2：把内部 textarea 注册给宿主 hook（引用/图片标记在光标处插入）
   useEffect(() => {
     const ta = promptBoxRef.current?.querySelector("textarea") ?? null;
@@ -169,14 +179,18 @@ export function ChatInputArea({
             </div>
           )}
           {references.length > 0 && (
-            <div className="my-1 flex flex-col">
+            <div ref={refsBoxRef} className="my-1 flex max-h-36 flex-col overflow-y-auto">
               {references.map((reference) => (
                 <div
                   key={reference.id}
-                  className="group flex w-full items-start gap-2 rounded-xl border border-neutral-200 bg-muted/70 p-2 text-xs dark:border-neutral-700 dark:bg-neutral-700/70"
+                  className="group flex w-full flex-shrink-0 items-start gap-2 rounded-xl border border-neutral-200 bg-muted/70 p-2 text-xs dark:border-neutral-700 dark:bg-neutral-700/70"
                 >
-                  <Quote className="mt-[1px] size-3.5 text-neutral-600 dark:text-neutral-100" />
-                  <span className="flex-1 whitespace-pre-wrap break-words text-left text-neutral-700 dark:text-neutral-100">
+                  <Quote className="mt-[1px] size-3.5 flex-shrink-0 text-neutral-600 dark:text-neutral-100" />
+                  {/* 单条限高三行（公式引用是 LaTeX 源码，不限高会无限堆叠）；全文悬浮 title 可读 */}
+                  <span
+                    title={reference.text}
+                    className="line-clamp-3 flex-1 whitespace-pre-wrap break-words text-left text-neutral-700 dark:text-neutral-100"
+                  >
                     {reference.markerNum != null && (
                       <span className="mr-1 font-medium text-neutral-500 dark:text-neutral-300">
                         ⟦引用{reference.markerNum}⟧

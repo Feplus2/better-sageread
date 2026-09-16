@@ -1875,7 +1875,7 @@ export default function PapersPage() {
               </p>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-8">
               <div className="space-y-2">
                 {/* 子文件夹行：文件夹图标 + 名称 + 直接成员论文数，点击进入（侧栏选中同步） */}
                 {currentSubfolders.map((folder) => (

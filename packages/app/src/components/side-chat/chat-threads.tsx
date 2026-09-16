@@ -327,7 +327,7 @@ export function ChatThreads({ bookId, scope, currentThreadId, onBack, onSelectTh
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 pb-8">
+      <div className="flex-1 overflow-y-auto px-2 pt-2 pb-8">
         {threads.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
