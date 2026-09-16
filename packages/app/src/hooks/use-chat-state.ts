@@ -511,14 +511,18 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         return;
       }
 
-      // K2：先判重再分配标记号/插占位——已在列表中的文本直接忽略，
-      // 否则占位已插而引用未增，留下无 chip 对应的孤儿 ⟦引用N⟧
-      if (references.some((reference) => reference.text === trimmed)) {
-        return;
+      // K2：判重不新建 chip（同文本只保留一张引用卡），但既有标记号照常插入光标处——
+      // 同一内容允许在正文多处指涉（此前直接 return，二次引用静默失败、无标记入文）
+      const existing = references.find((reference) => reference.text === trimmed);
+      if (existing) {
+        if (existing.markerNum != null) {
+          insertMarkerIntoInput(`⟦引用${existing.markerNum}⟧`);
+        }
+      } else {
+        const markerNum = ++markerSeqRef.current;
+        setReferences((prev) => [...prev, { id: createReferenceId(), text: trimmed, markerNum }]);
+        insertMarkerIntoInput(`⟦引用${markerNum}⟧`);
       }
-      const markerNum = ++markerSeqRef.current;
-      setReferences((prev) => [...prev, { id: createReferenceId(), text: trimmed, markerNum }]);
-      insertMarkerIntoInput(`⟦引用${markerNum}⟧`);
 
       // 论文面板的输入区在 #paper-chat-panel 下，书籍/全局在 #chat-sidebar 下
       const panelSelector = agentScope === "paper" ? "#paper-chat-panel" : "#chat-sidebar";
