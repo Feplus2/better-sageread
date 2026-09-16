@@ -229,6 +229,14 @@ export function ChatInputArea({
             placeholder="问我任何问题..."
             style={{ minHeight: inputHeight }}
             className="flex-1 py-2 pl-2 text-sm leading-[1.3] placeholder:font-light dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-400"
+            onPaste={(e) => {
+              // 剪贴板图片直接 Ctrl+V 进附件（与上传按钮同一链路/同一视觉闸）；
+              // 无图片时放行默认文本粘贴
+              const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+              if (files.length === 0) return;
+              e.preventDefault();
+              onAddImageFiles?.(files);
+            }}
           />
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
