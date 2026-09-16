@@ -118,6 +118,31 @@ function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+/** 发送后消息里的引用卡：默认折叠三行（公式引用是 LaTeX 源码，不限高会刷屏），点击展开/收起 */
+const MessageQuotePart = memo(function MessageQuotePart({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const needClamp = text.length > 120 || text.includes("\n");
+  const clamped = needClamp && !expanded;
+  return (
+    <div className="flex max-w-full items-start gap-1 rounded-lg text-muted-foreground text-sm leading-4.5">
+      <span className="mt-0.5 flex-nowrap">
+        <Quote className="size-3" />
+      </span>
+      <span
+        title={needClamp ? (clamped ? "点击展开全文" : "点击收起") : undefined}
+        onClick={needClamp ? () => setExpanded((v) => !v) : undefined}
+        className={cn(
+          "flex-1 whitespace-pre-wrap break-words text-left",
+          needClamp && "cursor-pointer",
+          clamped && "line-clamp-3",
+        )}
+      >
+        {text}
+      </span>
+    </div>
+  );
+});
+
 interface ChatMessagesProps {
   messages: any[];
   status: string;
@@ -571,17 +596,7 @@ function ChatMessagesComponent({
 
       if (type === "quote") {
         flushText();
-        elements.push(
-          <div
-            key={`quote-${i}`}
-            className="flex max-w-full items-start gap-1 rounded-lg text-muted-foreground text-sm leading-4.5"
-          >
-            <span className="mt-0.5 flex-nowrap">
-              <Quote className="size-3" />
-            </span>
-            <span className="flex-1 whitespace-pre-wrap break-words text-left">{part.text}</span>
-          </div>,
-        );
+        elements.push(<MessageQuotePart key={`quote-${i}`} text={part.text ?? ""} />);
         continue;
       }
 
