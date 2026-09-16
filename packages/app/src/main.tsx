@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
 import ReaderLayout from "./components/reader-layout.tsx";
 import { flushAllWrites } from "./lib/tauri-storage.ts";
+import { refreshModelMaps } from "./services/model-maps-service.ts";
 import { initSecrets } from "./services/secret-init.ts";
 import { installAndroidBackHandler } from "./utils/android-back.ts";
 import { mountFontsToMainApp } from "./utils/font.ts";
@@ -29,6 +30,9 @@ document.documentElement.dataset.tabHide ??= "visibility";
 initSecrets().catch((error) => {
   console.error("密钥初始化失败:", error);
 });
+
+// 模型映射表热更新（site/maps 远程优先、本地兜底）：异步拉取，失败静默回退，不阻塞启动
+refreshModelMaps().catch(() => {});
 
 // I2：拉起 sageread-mcp 本地通道（localhost-only HTTP + token 写入 mcp-local.json）；
 // 失败不阻塞 app 启动（只影响外部 MCP 的执行类工具）

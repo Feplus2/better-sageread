@@ -1,0 +1,900 @@
+{
+  "updatedAt": "2026-09-10",
+  "models": {
+    "o1": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o1-pro": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o1-mini": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o3": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o3-pro": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o4-mini": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5-pro": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5-mini": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5-nano": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.1": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.1-mini": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.2": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh"],
+      "transport": "effort"
+    },
+    "gpt-5.3-codex": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh"],
+      "transport": "effort"
+    },
+    "gpt-5.4": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.5": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.6-sol": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "max"],
+      "transport": "effort"
+    },
+    "gpt-5.6-terra": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-5.6-luna": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-6-astra": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high", "xhigh", "max"],
+      "transport": "effort"
+    },
+    "gemini-2.5-pro": {
+      "alwaysOn": false,
+      "offParam": "budget:0",
+      "levels": ["budget"],
+      "transport": "budget"
+    },
+    "gemini-2.5-flash": {
+      "alwaysOn": false,
+      "offParam": "budget:0",
+      "levels": ["budget"],
+      "transport": "budget"
+    },
+    "gemini-2.5-flash-lite": {
+      "alwaysOn": false,
+      "offParam": "budget:0",
+      "levels": ["budget"],
+      "transport": "budget"
+    },
+    "gemini-3-pro": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3-flash": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.1-pro": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.1-flash": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.5-flash": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.5-flash-lite": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.6-flash": {
+      "alwaysOn": false,
+      "offParam": "minimal",
+      "levels": ["minimal", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.7-flash": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gemini-3.8-flash": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-4": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-4.3": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-4.5": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-4.6": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh"],
+      "transport": "effort"
+    },
+    "grok-4.20": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "deepseek-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "deepseek-v4-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "deepseek-v4-pro": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "deepseek-v4-flash-vision-exp": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "glm-5.3": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "glm-5.3-flash": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "glm-5.2": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "glm-5.1": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-5": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.7": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.6": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.6-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-5v-turbo": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "qwen3.5-plus": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.5-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.6-plus": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.6-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.7-plus": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.7-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.7-max": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.7-max-2026-06-08": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.8-max": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.8-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.8-27b": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.8-flash-next": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.8-2.4t": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3-max": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qvq-max": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k3": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
+    "kimi-k2.7-code": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2.7-code-highspeed": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2.6": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2.5": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2-thinking": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2-turbo": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "kimi-k2": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-a-reasoning": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-a-plus": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-a": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-a-vision": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-r-plus": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "command-r": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "mimo-v2.5": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "mimo-v2.5-pro": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "mimo-v2-omni": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "gpt-4o": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-4o-mini": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-4.1": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-4.1-mini": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "gpt-4.1-nano": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "o3-mini": {
+      "alwaysOn": false,
+      "offParam": "low",
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "qwen3.5-32b": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.5-72b": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.5-omni": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3.5-ocr": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3-vl-plus": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3-vl-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3-coder-plus": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "qwen3-coder-flash": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": ["off", "low", "medium", "high"],
+      "transport": "budget",
+      "maxBudget": 32768
+    },
+    "glm-4.5": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.5-air": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.5-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.5v": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.1v": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4.1v-thinking": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4v-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4v-plus": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4-plus": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4-air": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "glm-4-long": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "deepseek-reasoner": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "deepseek-chat": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "deepseek-coder": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "minimax-m3": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "minimax-m2.5": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "minimax-h3": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-5.0": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-5.1": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-x1.1": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-4.5-vl-28b-a3b": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-4.5-vl-28b-a3b-thinking": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "ernie-4.5-turbo-128k": {
+      "alwaysOn": false,
+      "offParam": "enable_thinking:false",
+      "levels": [],
+      "transport": "switch"
+    },
+    "hunyuan-hy4-preview": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high"],
+      "transport": "effort"
+    },
+    "hy4-preview": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high"],
+      "transport": "effort"
+    },
+    "hunyuan-hy3": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "hunyuan-hy3-preview": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "hy3": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "hy3-preview": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "hunyuan-turbo": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "hunyuan-pro": {
+      "alwaysOn": false,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-2-1-pro": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-2-1-turbo": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-2-0-pro": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-2-0-lite": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-2-0-mini": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-1-8": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-1-6": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-1-6-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-1-6-thinking": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-1.5-thinking-pro": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-1.5-thinking-pro-vision": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "doubao-seed-evolving": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "grok-3": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-build-0.1": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "grok-code-fast-1": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high"],
+      "transport": "effort"
+    },
+    "skywork-r1v": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    },
+    "skywork-r1v-3": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
+      "transport": "switch"
+    }
+  }
+}

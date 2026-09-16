@@ -568,6 +568,12 @@ export const READEST_UPDATER_FILE = `${LATEST_DOWNLOAD_BASE_URL}/latest.json`;
 
 export const READEST_CHANGELOG_FILE = `${LATEST_DOWNLOAD_BASE_URL}/release-notes.json`;
 
+// 模型映射表（视觉/思考）远程热更新源：换源只改这个基址。站点部署见 site/DEPLOY.md
+// （EdgeOne Pages 以 site/ 为站点根，site/maps/*.json 即下列两个 URL）
+export const MODEL_MAPS_BASE_URL = "https://www.bettersageread.cn/maps";
+export const REMOTE_VISION_MAP_URL = `${MODEL_MAPS_BASE_URL}/vision-map.json`;
+export const REMOTE_REASONING_MAP_URL = `${MODEL_MAPS_BASE_URL}/reasoning-map.json`;
+
 export const SYNC_PROGRESS_INTERVAL_SEC = 3;
 export const SYNC_NOTES_INTERVAL_SEC = 5;
 export const SYNC_BOOKS_INTERVAL_SEC = 5;
