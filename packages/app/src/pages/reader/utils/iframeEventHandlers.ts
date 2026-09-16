@@ -153,8 +153,8 @@ export const handleMouseMove = (bookId: string, event: MouseEvent) => {
 };
 
 export const handleWheel = (bookId: string, event: WheelEvent) => {
-  // 可滚动内容（超宽公式导轨 / 超宽表格滚动框）上的滚轮不转发翻页，让 Chromium
-  // 原生滚动内容；滚到头后放行，滚动链接续翻页。公式只横向，表格横纵皆可
+  // 可滚动内容（超宽公式导轨 / 超宽表格滚动框）上的滚轮不转发翻页，让内容原生滚动；
+  // 滚到头后放行，滚动链接续翻页。公式只横向，表格横纵皆可
   const rail = (event.target as Element | null)?.closest?.(
     'math[display="block"][data-sr-overflowx], .sageread-rawmath[data-sr-overflowx], .sr-table-scroll',
   );
@@ -165,6 +165,18 @@ export const handleWheel = (bookId: string, event: WheelEvent) => {
     const canYBackward = rail.scrollTop > 0;
     const dx = event.deltaX;
     const dy = event.deltaY;
+    // 斜向滚轮（触控板双指斜滑）：Chromium 轴锁一次只给一个轴——手动双轴同发，
+    // 横纵导轨同时响应（用户实测体感诉求）；任一轴到头则该轴分量自然夹紧为 0
+    if (rail.classList.contains("sr-table-scroll") && dx !== 0 && dy !== 0) {
+      const xOk = (dx > 0 && canXForward) || (dx < 0 && canXBackward);
+      const yOk = (dy > 0 && canYForward) || (dy < 0 && canYBackward);
+      if (xOk || yOk) {
+        event.preventDefault();
+        rail.scrollLeft += dx;
+        rail.scrollTop += dy;
+        return;
+      }
+    }
     if (
       (dx > 0 && canXForward) || (dx < 0 && canXBackward) ||
       (dy > 0 && (canYForward || (!canYBackward && canXForward))) ||
