@@ -423,10 +423,16 @@ class View {
         wrap.appendChild(table);
       }
     }
-    // 高度阈值按布局实况刷新（栏高/视口高会随设置变化）
-    if (cap > 0)
+    // 高度阈值按布局实况刷新：栏高/视口高减去底部让位——应用侧 footer-bar（h-10=40px，
+    // 页码栏，pointer-events-auto）会正好盖住贴底的 8px 横向导轨（用户实测"导轨不可见
+    // 且不可鼠标操作"的根因：导轨在 footer 覆盖区里）。48 = 40(footer) + 8(余量)
+    const rawCap = this.#column
+      ? this.#layout?.height
+      : Math.round(this.container?.size ?? 0);
+    const maxHCap = rawCap > 0 ? Math.max(rawCap - 48, 200) : 0;
+    if (maxHCap > 0)
       for (const wrap of doc.body.querySelectorAll(".sr-table-scroll")) {
-        const v = `${cap}px`;
+        const v = `${maxHCap}px`;
         if (wrap.style.maxHeight !== v) wrap.style.maxHeight = v;
       }
   }
