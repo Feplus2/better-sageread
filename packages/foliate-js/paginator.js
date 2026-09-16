@@ -408,7 +408,13 @@ class View {
       : Math.round(this.container?.size ?? 0);
     for (const table of doc.body.querySelectorAll("table")) {
       if (table.parentElement?.classList.contains("sr-table-scroll")) continue;
-      const tooWide = table.scrollWidth > table.clientWidth + 2;
+      // c) 渲染宽度超栏宽（min-content 超栏时 max-width:100% 按规范被忽略，
+      //    表格溢出压邻栏——此时 clientWidth≈scrollWidth，a) 检测不到，
+      //    实测 Feeling Great 第三/四表 932/1023px 实例）
+      const colW = this.#column ? (this.#layout?.columnWidth ?? 0) : 0;
+      const tooWide =
+        table.scrollWidth > table.clientWidth + 2 ||
+        (colW > 0 && table.getBoundingClientRect().width > colW + 2);
       let tooTall = false;
       if (!tooWide && cap > 0) {
         const limit = cap * 0.8;
