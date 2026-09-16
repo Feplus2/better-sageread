@@ -761,11 +761,34 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   );
 
   const handleNewThread = useCallback(() => {
+    // 离开当前对话前：有内容、标题仍是占位（首轮自动命名未成功/未触发）、未星标 →
+    // 后台无感补一次 AI 命名（用户拍板：点「新对话」时对存量未命名对话补命名；
+    // 手动命名过的标题不是占位、星标对话不动，均自然跳过；失败静默保留占位）
+    const thread = currentThreadRef.current;
+    const msgs = messagesRef.current;
+    if (thread?.id && !thread.starred && msgs.length > 0) {
+      const firstUserParts = msgs.find((m) => m.role === "user")?.parts ?? [];
+      const firstUserText = firstUserParts.map((p: any) => (p.type === "text" ? p.text : "")).join("");
+      const firstQuoteText = (firstUserParts.find((p: any) => p.type === "quote") as any)?.text || "";
+      const placeholderTitle = (firstUserText || firstQuoteText || "新对话").slice(0, 50);
+      const isPlaceholderTitle = !thread.title || thread.title === "新对话" || thread.title === placeholderTitle;
+      if (isPlaceholderTitle) {
+        void generateThreadTitleWithAI(msgs, selectedModel ?? undefined)
+          .then(async (title) => {
+            if (!title) return;
+            await editThread(thread.id, { title });
+            queryClient.invalidateQueries({ queryKey: ["threads"] });
+          })
+          .catch((error) => {
+            console.warn("新对话前补命名失败，保留占位标题:", error);
+          });
+      }
+    }
     setCurrentThread(null);
     setMessages([]);
     setDisplayError(null);
     setReferences([]);
-  }, [setCurrentThread, setMessages]);
+  }, [setCurrentThread, setMessages, selectedModel, queryClient]);
 
   const handleShowThreads = useCallback(() => {
     if (!showThreads) {
