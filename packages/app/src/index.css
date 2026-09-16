@@ -865,9 +865,15 @@ foliate-view {
   margin-inline: auto;
 }
 
-/* 公式编号 \tag 右对齐：渲染实际由 rehype-katex 内嵌的 katex 0.16 执行（编号类名 .tag），
- * 而全量引入的 katex.min.css 来自直接依赖 0.18（类名已更名 .katex-tag）——0.16 的选择器不在册，
- * 编号退化为紧跟公式的静态 span。按 0.16 原规则补登（双类名并写，将来版本对齐后仍有效）。 */
+/* 公式编号 \tag 定位（0.16 的 .tag 与 0.18 的 .katex-tag 双类名并写）：
+ * 内层 .katex-html 收缩包裹公式 + 自动外边距居中——窄公式时编号近标准右对齐，
+ * 宽公式（超出对话框/阅读宽出横向滚动）时编号落在公式内容末端、随滚动可见，
+ * 不再钉在容器宽处与公式正文重叠（此前 right:0 相对容器宽内层，编号压字实例）。 */
+.prose .katex-display > .katex > .katex-html {
+  width: fit-content;
+  max-width: none;
+  margin-inline: auto;
+}
 .prose .katex-display > .katex > .katex-html > .tag,
 .prose .katex-display > .katex > .katex-html > .katex-tag {
   position: absolute;
