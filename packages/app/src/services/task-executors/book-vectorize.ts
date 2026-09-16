@@ -76,6 +76,9 @@ async function executeBookVectorize(task: TaskItem, ctx: TaskContext): Promise<v
         dimension: res.report.vector_dimension,
         finishedAt: Date.now(),
       });
+      // 状态入库后刷新前端 store：rag* 工具按书门控（registry）与书卡向量化标识都读它，
+      // 不刷新则本次会话内状态停留在 processing/idle（Agent 实测 ragToc 不注入的根因之一）
+      void useLibraryStore.getState().refreshBooks();
       ctx.setResult({ chunkCount: res.report.total_chunks } satisfies BookVectorizeResult);
       ctx.report(100, "向量化完成");
       if (solo) {

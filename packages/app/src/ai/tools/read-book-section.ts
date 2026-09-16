@@ -29,7 +29,8 @@ function flattenToc(items: TocEntry[] | undefined, out: { label: string; href: s
   return out;
 }
 
-/** 匹配语义（E5 根修：要 5 章给 5.9 的病）：精确 > 前缀 > 包含，逐级短路 */
+/** 匹配语义（E5 根修：要 5 章给 5.9 的病）：精确 > 前缀 > 包含，逐级短路；
+ *  查无命中且查询形如小节号（5.5.1）时逐级退化到父级号（5.5）——深层小节常无目录项 */
 function matchTocEntry(entries: { label: string; href: string }[], query: string) {
   const q = normalize(query);
   if (!q) return { kind: "none" as const };
@@ -39,7 +40,21 @@ function matchTocEntry(entries: { label: string; href: string }[], query: string
   if (prefix.length) return { kind: "hit" as const, entry: prefix[0]! };
   const contains = entries.filter((e) => normalize(e.label).includes(q));
   if (contains.length === 1) return { kind: "hit" as const, entry: contains[0]! };
-  if (contains.length > 1) return { kind: "ambiguous" as const, candidates: contains.slice(0, 20) };
+  if (contains.length > 1)
+    return {
+      kind: "ambiguous" as const,
+      candidates: [...contains].sort((a, b) => a.label.length - b.label.length).slice(0, 20),
+      total: contains.length,
+    };
+  // 小节号逐级退化：'5.5.1' → '5.5' → '5'（仅数字点号查询启用，防普通关键词误退）
+  if (/^\d+(\.\d+)*$/.test(q.replace(/\s.*$/, ""))) {
+    const segs = q.split(".");
+    for (let k = segs.length - 1; k >= 1; k--) {
+      const parent = segs.slice(0, k).join(".");
+      const hit = entries.filter((e) => normalize(e.label).startsWith(parent));
+      if (hit.length) return { kind: "fallback" as const, entry: hit[0]!, matchedQuery: parent };
+    }
+  }
   return { kind: "none" as const };
 }
 
@@ -126,13 +141,15 @@ export const createReadBookSectionTool = (activeBookId: string | undefined) =>
           return {
             results: {
               success: false,
-              message: `标题「${chapterTitle}」有 ${m.candidates.length} 个候选，请精确后重试`,
+              message: `标题「${chapterTitle}」有 ${m.total} 个候选（按相关度列出前 ${m.candidates.length} 个），请精确后重试`,
               candidates: m.candidates.map((c) => c.label),
             },
             meta: { reasoning, chapterTitle },
           };
         }
-        if (m.kind === "hit") {
+        if (m.kind === "hit" || m.kind === "fallback") {
+          const fallbackNote =
+            m.kind === "fallback" ? `（查询的小节号无目录项，已从最近的父级「${m.matchedQuery}」起读）` : "";
           const resolved = resolveHref(bookDoc, m.entry.href);
           if (resolved) {
             const section = (bookDoc as any).sections[resolved.spineIndex];
@@ -147,8 +164,8 @@ export const createReadBookSectionTool = (activeBookId: string | undefined) =>
                 results: {
                   success: true,
                   message: truncated
-                    ? `已读取「${m.entry.label}」（第 ${offset + 1}–${nextOffset} 字符，共 ${totalChars}；未读完——用 startOffset=${nextOffset} 续读）`
-                    : `已读取「${m.entry.label}」（${totalChars} 字符，已读完）`,
+                    ? `已读取「${m.entry.label}」${fallbackNote}（第 ${offset + 1}–${nextOffset} 字符，共 ${totalChars}；未读完——用 startOffset=${nextOffset} 续读）`
+                    : `已读取「${m.entry.label}」${fallbackNote}（${totalChars} 字符，已读完）`,
                   matchedTitle: m.entry.label,
                   content: slice,
                   truncated,

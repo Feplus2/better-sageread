@@ -378,13 +378,13 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
   }
 
   // 3. 阅读助手专属：RAG 工具（需要 bookId + 向量能力 + 本书已建索引）+ 章节直读兜底（常驻；
-  // 全局有向量能力 ≠ 本书已建索引——未建索引时 rag* 报原始路径错误误导模型，故按书门控）
+  // 全局有向量能力 ≠ 本书已建索引——未建索引时 rag* 报原始路径错误误导模型，故按书门控。
+  // 注意状态源是 booksWithStatus（library 是 Book[] 无 status 字段，读它门控永远为假）
   if (agentScope === "reader" && context?.bookId) {
     const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
-    const book = useLibraryStore.getState().library.find((b) => b.id === context.bookId) as
-      | { status?: { metadata?: { vectorization?: { status?: string } } } }
-      | undefined;
-    const bookIndexed = book?.status?.metadata?.vectorization?.status === "success";
+    const bookIndexed =
+      useLibraryStore.getState().booksWithStatus.find((b) => b.id === context.bookId)?.status?.metadata
+        ?.vectorization?.status === "success";
     if (hasVectorCapability && bookIndexed) {
       tools.ragSearch = createRagSearchTool(context.bookId) as Tool;
       tools.ragToc = createRagTocTool(context.bookId) as Tool;
