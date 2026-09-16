@@ -866,18 +866,19 @@ foliate-view {
 }
 
 /* 公式编号 \tag 定位（0.16 的 .tag 与 0.18 的 .katex-tag 双类名并写）：
- * 内层 .katex-html 收缩包裹公式 + 自动外边距居中——窄公式时编号近标准右对齐，
- * 宽公式（超出对话框/阅读宽出横向滚动）时编号落在公式内容末端、随滚动可见，
- * 不再钉在容器宽处与公式正文重叠（此前 right:0 相对容器宽内层，编号压字实例）。 */
+ * 内层 .katex-html 收缩包裹公式 + 自动外边距居中 + 右侧预留 3.5em 编号位——
+ * 编号落在预留空位，无论宽窄公式都不与公式正文重叠；
+ * 窄公式近标准右对齐，宽公式编号在公式末端之后随滚动可见。 */
 .prose .katex-display > .katex > .katex-html {
   width: fit-content;
   max-width: none;
   margin-inline: auto;
+  padding-right: 3.5em;
 }
 .prose .katex-display > .katex > .katex-html > .tag,
 .prose .katex-display > .katex > .katex-html > .katex-tag {
   position: absolute;
-  right: 0;
+  right: 0.25em;
 }
 
 /* ---------- 论文块级惰性布局（性能优化施工 B，2026-08-08） ----------
