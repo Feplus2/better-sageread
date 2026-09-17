@@ -335,19 +335,19 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 
 - ~~**剪切板图片 Ctrl+V 直发**~~ ✅ 已落地（2026-09-16，606053e，用户已验收）：输入区 onPaste 拦剪贴板图片进附件链路（与上传按钮同一视觉闸门），三面板共用组件一并生效。
 
-### 通用附件上传（回形针扩展，用户 2026-09-16 提出）—— 方案已调研，待拍板
+### 通用附件上传（回形针扩展，用户 2026-09-16 提出）—— ✅ 方案已拍板（2026-09-17），施工中
 
 **现状**：回形针只收图片（`accept="image/*"`，过视觉模型闸门）；Agent 读本地文件只能靠 readLocalFile 等工具按路径访问（权限允许时）。`tauri.conf.json` 已开 `dragDropEnabled`（原生拖拽直接给真实路径，免 base64 免复制）。
 
 **开箱即用方案调研（2026-09-16）**：
 
-- **MarkItDown（微软，MIT，用户点名方向）**：Python 包 + CLI（`markitdown file -o out.md`），一站式覆盖 PDF/DOCX/PPTX/XLSX/HTML/CSV/EPUB/图片(EXIF+OCR)/音频，输出就是为 LLM 优化的 Markdown（标题/表格/列表结构保留）。已知短板：复杂/扫描版 PDF 成功率低（pdfminer 系，无布局分析，社区实测约 25% 复杂 PDF 翻车）——但聊天附件场景的 PDF 多为文本型，够用；扫描件另有论文管线兜底。落地形态 = PyInstaller sidecar（与 books_converter 同基建：Rust spawn + Job Object 防孤儿），一次性调用非常驻；代价是安装包 +几十 MB、冷启动 1–3s。
-- **JS 小分队（备选/提速层）**：mammoth(docx) + pdfjs-dist(pdf 文本层) + SheetJS(xlsx) + 文本直读——零原生依赖、即时；但格式覆盖不如 MarkItDown（pptx/EPUB/图片 OCR 缺），等于自己维护一条迷你转换链。**倾向不做，避免重复造轮子**。
-- **Pandoc**：不读 PDF/PPTX/XLSX 输入，出局。
+- **MarkItDown（微软，MIT，用户点名方向）**：Python 包 + CLI（`markitdown file -o out.md`），一站式覆盖 PDF/DOCX/PPTX/XLSX/HTML/CSV/EPUB/图片(EXIF+OCR)/音频，输出就是为 LLM 优化的 Markdown（标题/表格/列表结构保留）。已知短板：复杂/扫描版 PDF 成功率低（pdfminer 系，无布局分析）——聊天附件场景多为文本型 PDF，够用；扫描件走下方三通道分流。落地形态 = PyInstaller sidecar（与 books_converter 同基建：Rust spawn + Job Object 防孤儿），一次性调用非常驻；代价是安装包 +几十 MB（**用户已拍板接受**）、冷启动 1–3s。
+- **JS 小分队**：mammoth/pdfjs/SheetJS 覆盖不如 MarkItDown 且等于自养迷你转换链——不做，避免重复造轮子。**Pandoc**：不读 PDF/PPTX/XLSX 输入，出局。
 
-**推荐架构（三层）**：
+**拍板架构（三层 + 扫描件分流）**：
 1. 文本类（.md/.txt/.py/.json/.csv/.log 等 ≤256KB）→ 直读注入消息（不过 sidecar，零延迟）；
 2. PDF/Office/EPUB 等 → MarkItDown sidecar 转 .md 后注入（>8000 字符截断 + 转存文件路径供 Agent 续读）；
 3. 超大（>50MB）/转换失败/纯二进制 → 路径登记（复制入 `attachments/`，消息里登记路径，Agent 用 readLocalFile/searchFiles 自取）。
+**扫描版 PDF 分流（用户 2026-09-17 补充）**：① 当前模型支持视觉 → PDF 页栅格化喂图（保真最高；按页烧 token，需页数上限+"大文件先问一句"闸门）；② 文本模型 → 复用论文管线 MinerU sidecar 提取（纯复用不新造；依赖本地模型权重/embedding 配置，未配置不可用属预期，按需触发而非主通道——MarkItDown 提取为空/乱码时才建议/自动走）；③ 均不可用 → 路径登记 + 明确提示，不静默失败。
 阈值：单文件 ≤50MB、单次 ≤10 个；交互：原生拖拽 + 回形针 accept 扩宽，附件区文件 chip 显图标+名称+大小。
-**待拍板**：MarkItDown sidecar（包体+几十 MB）是否接受；还是先只做第 1+3 层（纯文本+路径登记，零新依赖）试水。
+**施工分期**：A. app 侧附件基建（文件 chip/拖拽/文本注入/路径登记/消息渲染/提示词指引）；B. MarkItDown sidecar 打包接入；C. 扫描件分流（多模态栅格化 + MinerU 复用）。
