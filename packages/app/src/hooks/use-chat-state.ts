@@ -89,6 +89,9 @@ export interface ChatContext {
   /** paper 专用：当前阅读小节正文（页面按 heading 从 paper.md 规则提取）；reader/central 不使用 */
   activeContext?: string;
   activeSectionLabel?: string;
+  /** reader 专用：EPUB 原生 TOC 的 Markdown 列表（转换器生成的 metadata.md 目录段号被
+   *  转义吃掉——"5.6"→"5.\."，Agent 看到的子节号码全丢）；有则整段替换注入目录 */
+  bookTocMd?: string;
   agentScope?: "central" | "reader" | "paper";
   /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合；仅 agentScope="paper" 时有效） */
   paperScopeIds?: string[] | null;

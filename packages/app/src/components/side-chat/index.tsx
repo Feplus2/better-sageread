@@ -17,7 +17,7 @@ import {
   Search,
   UserSearch,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
@@ -43,6 +43,21 @@ function ChatContent({ bookId }: ChatContentProps) {
   const progress = useReaderStore((state) => state.progress);
   const currentThread = useReaderStore((state) => state.currentThread);
   const setCurrentThread = useReaderStore((state) => state.setCurrentThread)!;
+
+  // EPUB 原生 TOC → Markdown 列表（注入提示词替换转换器生成的损坏目录，见 ChatContext.bookTocMd）
+  const bookToc = useReaderStore((state) => state.bookData?.bookDoc?.toc);
+  const bookTocMd = useMemo(() => {
+    const walk = (items: readonly any[] | null | undefined, depth: number): string =>
+      (items ?? [])
+        .map((it) => {
+          const line = `${"  ".repeat(depth)}- ${it?.label ?? ""}`;
+          const children = it?.subitems?.length ? `\n${walk(it.subitems, depth + 1)}` : "";
+          return line + children;
+        })
+        .join("\n");
+    const md = walk(bookToc, 0);
+    return md.trim().length > 0 ? md : undefined;
+  }, [bookToc]);
 
   // 多选导出：切换对话自动退出
   const { selectionMode, selectedIds, toggleSelectionMode, exitSelectionMode, handleToggleSelect } =
@@ -80,6 +95,7 @@ function ChatContent({ bookId }: ChatContentProps) {
     chatContext: {
       activeBookId: bookId,
       activeSectionLabel: progress?.sectionLabel,
+      bookTocMd,
       agentScope: "reader",
     },
     setActiveBookId: () => {},

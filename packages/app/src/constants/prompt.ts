@@ -141,11 +141,28 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
     const tocHint = hasVectorCapability
       ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；ragToc 可按章标题取整章正文，readBookSection 支持按标题模糊直读小节）"
       : "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；readBookSection 按标题模糊直读原文）";
-    const trimmed = trimMetadataForPrompt(metadataMd, chatContext?.activeSectionLabel, tocHint);
+    // 目录段优先用 EPUB 原生 TOC（metadata.md 的目录由转换器生成，段号被转义吃掉）
+    const md = chatContext?.bookTocMd ? replaceTocSection(metadataMd, chatContext.bookTocMd) : metadataMd;
+    const trimmed = trimMetadataForPrompt(md, chatContext?.activeSectionLabel, tocHint);
     prompt += `\n\n【当前阅读图书元信息与目录】\n${trimmed}`;
   }
 
   return prompt;
+}
+
+/** 用 EPUB 原生 TOC 整段替换 metadata.md 的目录段（保留"说明："等前言行；无目录段原样返回） */
+function replaceTocSection(md: string, cleanTocMd: string): string {
+  const tocMark = "## 目录";
+  const tocIdx = md.indexOf(tocMark);
+  if (tocIdx === -1) return md;
+  const head = md.slice(0, tocIdx + tocMark.length);
+  const tailLines = md.slice(tocIdx + tocMark.length).split("\n");
+  const preamble: string[] = [];
+  for (const line of tailLines) {
+    if (/^\s*-\s+\S/.test(line)) break;
+    preamble.push(line);
+  }
+  return `${head}${preamble.join("\n")}${cleanTocMd}\n`;
 }
 
 /**
