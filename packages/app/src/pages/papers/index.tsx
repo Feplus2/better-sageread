@@ -1883,13 +1883,14 @@ export default function PapersPage() {
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-8">
               <div className="space-y-2">
-                {/* 子文件夹行：文件夹图标 + 名称 + 直接成员论文数，点击进入（侧栏选中同步） */}
+                {/* 子文件夹行：文件夹图标 + 名称 + 直接成员论文数，点击进入（侧栏选中同步）。
+                    hover 与文献条目同款主题色柔光（.paper-entry-card 全局体系统一） */}
                 {currentSubfolders.map((folder) => (
                   <div
                     key={folder.id}
                     role="button"
                     tabIndex={0}
-                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/60"
+                    className="paper-entry-card flex cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
                     onClick={() => handleSelect({ kind: "folder", id: folder.id })}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {

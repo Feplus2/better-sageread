@@ -137,14 +137,13 @@ html:not(.dark) [data-region="bookshelf"] {
   background-color: var(--card);
   border-color: var(--border);
   box-shadow: var(--shadow-warm-sm);
+  /* hover 位移/光影统一由全局 .book-card 体系负责（动效 token 三档自适应），
+   * 主题只留底色/边框/静息阴影；时长同样改走 token 与全局一致 */
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-[data-region="book-card"]:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-warm-md);
+    transform var(--motion-dur-fast) var(--motion-ease),
+    box-shadow var(--motion-dur-fast) var(--motion-ease),
+    border-color var(--motion-dur-fast) var(--motion-ease),
+    background-color var(--motion-dur-fast) var(--motion-ease);
 }
 
 [data-region="book-cover"] {
