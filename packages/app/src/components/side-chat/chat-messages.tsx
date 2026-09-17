@@ -1,4 +1,5 @@
 import { CitationMapContext, buildCitationMap } from "@/components/markdown/citation-source";
+import { ImagePreviewOverlay } from "@/components/media/image-interactions";
 import { ChatContainerContent, ChatContainerScrollAnchor } from "@/components/prompt-kit/chat-container";
 import { Message, MessageAction, MessageActions, MessageContent } from "@/components/prompt-kit/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
@@ -26,6 +27,7 @@ import {
   Download,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
   NotebookPen,
   Pause,
   Quote,
@@ -79,34 +81,8 @@ export const TOOL_NAME_MAP: Record<string, string> = {
 const INITIAL_WINDOW = 6;
 const EXPAND_STEP = 6;
 
-/** D4 图片附件渲染：attachment:// 引用 → asset 协议 URL（文件在 {appData}/attachments，UI 不再吃 base64） */
-function AttachmentImg({ url, alt }: { url: string; alt: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void attachmentToAssetUrl(url).then((resolved) => {
-      if (alive) setSrc(resolved);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [url]);
-  if (!src) {
-    return (
-      <div className="max-h-72 max-w-full rounded-lg border border-neutral-200 p-4 text-neutral-400 text-xs dark:border-neutral-700 dark:text-neutral-500">
-        图片加载中…
-      </div>
-    );
-  }
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
-    />
-  );
-}
-
+/** D4 图片附件渲染：attachment:// 引用 → asset 协议 URL（文件在 {appData}/attachments，UI 不再吃 base64）。
+ *  渲染组件 = MessageImagePart（限高折叠 + 大图预览，见 MessageQuotePart 之后） */
 /** 向上找最近的可滚动祖先（全局聊天与书籍侧栏各自有自己的滚动容器） */
 function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
   let cur = el?.parentElement ?? null;
@@ -142,6 +118,92 @@ const MessageQuotePart = memo(function MessageQuotePart({ text }: { text: string
     </div>
   );
 });
+
+/** 折叠态限高（与 max-h-40 对应；图片渲染到此高度即视为"想更高"，给出展开交互） */
+const COLLAPSED_IMG_PX = 160;
+
+/** 消息图片附件：默认限高折叠（与引用卡同口径的"点击就地展开"），
+ *  右上角悬浮「放大」开 ImagePreviewOverlay——复制/缩放/保存/引用与正文图片同机制。
+ *  attachment:// 引用先解析为 asset URL（文件在 {appData}/attachments，UI 不吃 base64） */
+function MessageImagePart({ url, alt, bookId }: { url: string; alt: string; bookId?: string | null }) {
+  const isAttachment = url.startsWith("attachment://");
+  const [src, setSrc] = useState<string | null>(isAttachment ? null : url);
+  useEffect(() => {
+    if (!isAttachment) {
+      setSrc(url);
+      return;
+    }
+    let alive = true;
+    void attachmentToAssetUrl(url).then((resolved) => {
+      if (alive) setSrc(resolved);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [url, isAttachment]);
+
+  const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [clippable, setClippable] = useState(false);
+  useEffect(() => {
+    setExpanded(false);
+    setClippable(false);
+  }, [src]);
+
+  if (!src) {
+    return (
+      <div className="max-h-72 max-w-full rounded-lg border border-neutral-200 p-4 text-neutral-400 text-xs dark:border-neutral-700 dark:text-neutral-500">
+        图片加载中…
+      </div>
+    );
+  }
+
+  const collapsed = clippable && !expanded;
+  return (
+    <div className="group/img relative w-fit max-w-full">
+      <img
+        src={src}
+        alt={alt}
+        onLoad={(e) => setClippable(e.currentTarget.clientHeight >= COLLAPSED_IMG_PX)}
+        onClick={() => (clippable ? setExpanded((v) => !v) : setPreview(true))}
+        title={clippable ? (expanded ? "点击收起" : "点击展开全图") : "点击查看大图"}
+        className={cn(
+          "max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700",
+          expanded ? "max-h-[70vh]" : "max-h-40",
+          "cursor-zoom-in",
+          expanded && "cursor-zoom-out",
+        )}
+      />
+      {/* 折叠态底部渐隐（视觉提示"还有内容"） */}
+      {collapsed && (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-lg bg-gradient-to-t from-black/25 to-transparent"
+          role="presentation"
+        />
+      )}
+      <button
+        type="button"
+        title="大图预览（复制/缩放/保存/引用）"
+        onClick={(e) => {
+          e.stopPropagation();
+          setPreview(true);
+        }}
+        className="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity hover:bg-black/75 group-hover/img:opacity-100"
+      >
+        <Maximize2 className="size-3.5" />
+      </button>
+      {preview && (
+        <ImagePreviewOverlay
+          image={{ src, alt }}
+          onClose={() => setPreview(false)}
+          onQuote={(image) => {
+            window.dispatchEvent(new CustomEvent("imageToChat", { detail: { ...image, bookId: bookId ?? undefined } }));
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
 interface ChatMessagesProps {
   messages: any[];
@@ -607,16 +669,7 @@ function ChatMessagesComponent({
         const mediaType = (part as any).mediaType ?? "";
         if (typeof url === "string" && mediaType.startsWith("image/")) {
           elements.push(
-            url.startsWith("attachment://") ? (
-              <AttachmentImg key={`file-${i}`} url={url} alt={(part as any).filename ?? "图片"} />
-            ) : (
-              <img
-                key={`file-${i}`}
-                src={url}
-                alt={(part as any).filename ?? "图片"}
-                className="max-h-72 max-w-full rounded-lg border border-neutral-200 object-contain dark:border-neutral-700"
-              />
-            ),
+            <MessageImagePart key={`file-${i}`} url={url} alt={(part as any).filename ?? "图片"} bookId={bookId} />,
           );
         }
         continue;
