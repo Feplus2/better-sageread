@@ -11,13 +11,14 @@
 - **配套（本仓库侧）**：向量化管道与文本提取优先读 annotation；阅读器提取器（`extract-structured-text.ts`）可无缝切换。
 - **证据**：QFT（Maggiore）公式 5.46/5.96 实测；本仓库 C+B 施工记录。
 
-## 2. 标题段号转义吃掉数字（ragToc 章节匹配的生产商侧根因）
+## 2. 标题段号转义吃掉数字（ragToc/readBookSection 章节匹配的生产商侧根因）
 
 - **症状（实证）**：向量库 `related_chapter_titles` 与 md 正文里的小节标题形如 `5.\. Wick's theorem and Feynman diagrams`——"5.5" 被转义成 "5.\."，**段号数字被吃掉**。按小节号检索永远"未找到章节"。
+- **新增受害面（2026-09-16 实证）**：`metadata.md` 的 `## 目录` 段同样全灭——Agent 系统提示词里注入的目录所有子节同名（`5.\. The S-matrix` / `5.\. Renormalization` / …号码全丢），模型无法得知真实小节号，只能凭领域知识编幻觉标题（实测编出 "5.6 Basic Feynman graphs, in λφ4 theory"——本书真实 5.6 是 Renormalization），readBookSection 文本匹配因此全败。注：该书 EPUB 自带 toc.ncx 是干净的（且只到两级，5.x.y 不存在并非转换器丢层级），说明损坏发生在标题提取/转义环节而非 TOC 源。
 - **根因猜测**：htmd/标题提取把 `5.5` 里的 `.` 做 Markdown 转义时把数字也吞了（"5.5" → "5.\." 而非 "5\.5"）。
-- **修法**：转义只动 `.`，保留数字（"5.5" → "5\.5"）；或入库前统一去转义（`title.replace('\\.', '.')`）。
-- **本仓库侧已做的兜底**：Rust `text_search` 比较前 `replace('\.', '.')` 归一 + 数字开头查询追加按标题文本匹配（已提交，实测命中）。
-- **证据**：`SELECT related_chapter_titles FROM document_chunks`（ae649ba 副本，chapter_004 全部小节号）。
+- **修法**：转义只动 `.`，保留数字（"5.5" → "5\.5"）；或入库前统一去转义（`title.replace('\\.', '.')`）。metadata.md 目录段同源修复；存量书需重跑向量化（metadata.md 随之重建）才生效。
+- **本仓库侧已做的兜底**：Rust `text_search` 比较前 `replace('\.', '.')` 归一 + 数字开头查询追加按标题文本匹配（已提交，实测命中）；readBookSection 加小节号相等命中通道（幻觉标题文本对不上也能按号命中，b16d328）；提示词目录段改用 EPUB 原生 TOC 注入（5a36e2b）——Agent 侧观感已治本，数据层残留仍待转换器修复。
+- **证据**：`SELECT related_chapter_titles FROM document_chunks`（ae649ba 副本，chapter_004 全部小节号）；`books/ae649ba…/metadata.md` 目录段；E2E 线程 a8d9188e。
 
 ## 3. 表格漏转残留 Markdown 纯文本
 

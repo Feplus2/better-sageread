@@ -335,15 +335,19 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 
 - ~~**剪切板图片 Ctrl+V 直发**~~ ✅ 已落地（2026-09-16，606053e，用户已验收）：输入区 onPaste 拦剪贴板图片进附件链路（与上传按钮同一视觉闸门），三面板共用组件一并生效。
 
-### 通用附件上传（回形针扩展，用户 2026-09-16 提出）—— 方案待拍板
+### 通用附件上传（回形针扩展，用户 2026-09-16 提出）—— 方案已调研，待拍板
 
-**现状**：回形针只收图片（`accept="image/*"`，过视觉模型闸门）；Agent 读本地文件只能靠 readLocalFile 等工具按路径访问（权限允许时）。
+**现状**：回形针只收图片（`accept="image/*"`，过视觉模型闸门）；Agent 读本地文件只能靠 readLocalFile 等工具按路径访问（权限允许时）。`tauri.conf.json` 已开 `dragDropEnabled`（原生拖拽直接给真实路径，免 base64 免复制）。
 
-**方案**：
-1. **支持范围与双通道接入**：
-   - 小文本类（.md/.txt/.py/.json/.csv/.log 等，≤256KB）→ **内容注入**：读全文作为消息 part（类似 quote 形态），附文件名标注；
-   - 大文件与二进制（PDF/EPUB/docx/表格/压缩包等）→ **路径登记**：复制到 `attachments/` 后在消息里登记路径，Agent 按需用 readLocalFile/searchFiles 自取（不占上下文）；
-   - 图片维持现有链路（视觉闸门不变）。
-2. **阈值**：文本直读 ≤256KB；单文件硬上限 50MB；单次 ≤10 个。超限给明确提示并降级路径登记。
-3. **交互**：拖拽入输入区（dragover 高亮）+ 回形针 accept 扩宽；附件区图片显缩略图、文件显图标+名称+大小。
-4. **风险点**：AI SDK 的 file part 只稳支持 image/PDF 媒体类型，任意文本文件走 file part 可能被模型商拒——故文本走 text/quote 注入或路径登记最稳；PDF 是否做内容解析（复用论文管线）留待拍板，一期可先路径登记。
+**开箱即用方案调研（2026-09-16）**：
+
+- **MarkItDown（微软，MIT，用户点名方向）**：Python 包 + CLI（`markitdown file -o out.md`），一站式覆盖 PDF/DOCX/PPTX/XLSX/HTML/CSV/EPUB/图片(EXIF+OCR)/音频，输出就是为 LLM 优化的 Markdown（标题/表格/列表结构保留）。已知短板：复杂/扫描版 PDF 成功率低（pdfminer 系，无布局分析，社区实测约 25% 复杂 PDF 翻车）——但聊天附件场景的 PDF 多为文本型，够用；扫描件另有论文管线兜底。落地形态 = PyInstaller sidecar（与 books_converter 同基建：Rust spawn + Job Object 防孤儿），一次性调用非常驻；代价是安装包 +几十 MB、冷启动 1–3s。
+- **JS 小分队（备选/提速层）**：mammoth(docx) + pdfjs-dist(pdf 文本层) + SheetJS(xlsx) + 文本直读——零原生依赖、即时；但格式覆盖不如 MarkItDown（pptx/EPUB/图片 OCR 缺），等于自己维护一条迷你转换链。**倾向不做，避免重复造轮子**。
+- **Pandoc**：不读 PDF/PPTX/XLSX 输入，出局。
+
+**推荐架构（三层）**：
+1. 文本类（.md/.txt/.py/.json/.csv/.log 等 ≤256KB）→ 直读注入消息（不过 sidecar，零延迟）；
+2. PDF/Office/EPUB 等 → MarkItDown sidecar 转 .md 后注入（>8000 字符截断 + 转存文件路径供 Agent 续读）；
+3. 超大（>50MB）/转换失败/纯二进制 → 路径登记（复制入 `attachments/`，消息里登记路径，Agent 用 readLocalFile/searchFiles 自取）。
+阈值：单文件 ≤50MB、单次 ≤10 个；交互：原生拖拽 + 回形针 accept 扩宽，附件区文件 chip 显图标+名称+大小。
+**待拍板**：MarkItDown sidecar（包体+几十 MB）是否接受；还是先只做第 1+3 层（纯文本+路径登记，零新依赖）试水。
