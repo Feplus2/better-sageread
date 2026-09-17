@@ -8,7 +8,12 @@ import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
 import { recordAiUsage } from "@/services/ai-usage-service";
 import { attachmentToAbsPath, saveFileAttachment, saveImageAttachment } from "@/services/attachment-service";
-import { convertWithMarkitdown, isMarkitdownCandidate } from "@/services/markitdown-service";
+import {
+  convertWithMarkitdown,
+  isMarkitdownCandidate,
+  ocrPdfForAttachment,
+  pickAttachmentOcrEngine,
+} from "@/services/markitdown-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { useChatDraftStore } from "@/store/chat-draft-store";
@@ -727,6 +732,55 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
                 ]);
               }
               toast.success(`「${file.name}」已转换为 Markdown`, { id: toastId });
+            } else if (file.name.toLowerCase().endsWith(".pdf") && pickAttachmentOcrEngine()) {
+              // Phase C：PDF 提取为空/失败 → 引擎兜底（MinerU 优先、PaddleOCR 兜底，可能需几分钟）
+              const engine = pickAttachmentOcrEngine()!;
+              const engineLabel = engine === "mineru" ? "MinerU" : "PaddleOCR";
+              toast.loading(`MarkItDown 提取为空，改用 ${engineLabel} 引擎解析（扫描件可能需要几分钟）…`, { id: toastId });
+              const ocr = await ocrPdfForAttachment(origPath, `${origPath}-ocr`, engine);
+              if (ocr.ok && ocr.md_path) {
+                const mdText = await readTextFile(ocr.md_path);
+                if (mdText.length <= INLINE_ATTACHMENT_BYTES) {
+                  setFiles((prev) => [
+                    ...prev,
+                    { id, markerNum, name: file.name, size: file.size, mode: "inline", content: mdText, via: engineLabel },
+                  ]);
+                } else {
+                  setFiles((prev) => [
+                    ...prev,
+                    {
+                      id,
+                      markerNum,
+                      name: file.name,
+                      size: file.size,
+                      mode: "ref",
+                      content: "",
+                      attachmentRef,
+                      absPath: ocr.md_path ?? undefined,
+                      origPath,
+                      via: engineLabel,
+                    },
+                  ]);
+                }
+                toast.success(`「${file.name}」已由 ${engineLabel} 引擎解析`, { id: toastId });
+              } else {
+                setFiles((prev) => [
+                  ...prev,
+                  {
+                    id,
+                    markerNum,
+                    name: file.name,
+                    size: file.size,
+                    mode: "ref",
+                    content: "",
+                    attachmentRef,
+                    absPath: origPath,
+                    via: engineLabel,
+                    note: `ocr-failed:${ocr.error ?? "未知原因"}`,
+                  },
+                ]);
+                toast.error(`「${file.name}」${engineLabel} 引擎也未解析成功，已按原文件登记`, { id: toastId });
+              }
             } else {
               setFiles((prev) => [
                 ...prev,
@@ -740,12 +794,13 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
                   attachmentRef,
                   absPath: origPath,
                   via: "MarkItDown",
-                  note: empty ? "empty" : (outcome.error ?? "failed"),
+                  note: empty ? (file.name.toLowerCase().endsWith(".pdf") ? "empty-no-engine" : "empty") : (outcome.error ?? "failed"),
                 },
               ]);
-              toast.warning(`「${file.name}」MarkItDown ${empty ? "提取为空（可能是扫描件）" : "转换失败"}，已按原文件登记`, {
-                id: toastId,
-              });
+              toast.warning(
+                `「${file.name}」MarkItDown ${empty ? "提取为空（可能是扫描件，且未配置 MinerU/PaddleOCR token）" : "转换失败"}，已按原文件登记`,
+                { id: toastId },
+              );
             }
             insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
           } catch (error) {
@@ -828,7 +883,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           });
         } else {
           const lines = [`【附件已登记：${f.name}（${formatAttachmentSize(f.size)}${f.via ? `，${f.via} 已处理` : ""}）】`];
-          if (f.via === "MarkItDown" && f.absPath?.endsWith(".md")) {
+          if (f.via && f.absPath?.endsWith(".md")) {
             lines.push(`Markdown 版（用 readLocalFile 分段读取）：${f.absPath}`);
             if (f.origPath) lines.push(`原始文件：${f.origPath}`);
           } else {
@@ -836,6 +891,12 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           }
           if (f.note === "empty") {
             lines.push("注意：MarkItDown 对该文件提取为空（可能是扫描件/图片型文档）——如需内容请如实告知，不要凭文件名猜测。");
+          } else if (f.note === "empty-no-engine") {
+            lines.push(
+              "注意：MarkItDown 对该 PDF 提取为空（扫描件特征），且未配置 MinerU/PaddleOCR token（设置→PDF 转换）无法 OCR——如需内容请如实告知用户并引导配置，不要凭文件名猜测。",
+            );
+          } else if (f.note?.startsWith("ocr-failed:")) {
+            lines.push(`注意：MarkItDown 与 OCR 引擎均未提取成功（${f.note.slice("ocr-failed:".length)}），已按原文件登记——如需内容请如实告知。`);
           } else if (f.note) {
             lines.push(`注意：MarkItDown 转换失败（${f.note}），已按原文件登记。`);
           }
