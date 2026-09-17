@@ -345,7 +345,7 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 - **JS 小分队**：mammoth/pdfjs/SheetJS 覆盖不如 MarkItDown 且等于自养迷你转换链——不做，避免重复造轮子。**Pandoc**：不读 PDF/PPTX/XLSX 输入，出局。
 
 **拍板架构（三层 + 扫描件分流）**：
-1. 文本类（.md/.txt/.py/.json/.csv/.log 等 ≤256KB）→ 直读注入消息（不过 sidecar，零延迟）；
+1. 文本类（.md/.txt/.py/.json/.csv/.log 等 ≤32KB）→ 直读注入消息（不过 sidecar，零延迟）【阈值 256KB→32KB：256KB 直注入 ≈6 万+ token 且随每轮请求重复计费，Phase A 实施时收紧】；
 2. PDF/Office/EPUB 等 → MarkItDown sidecar 转 .md 后注入（>8000 字符截断 + 转存文件路径供 Agent 续读）；
 3. 超大（>50MB）/转换失败/纯二进制 → 路径登记（复制入 `attachments/`，消息里登记路径，Agent 用 readLocalFile/searchFiles 自取）。
 **扫描版 PDF 分流（用户 2026-09-17 补充）**：① 当前模型支持视觉 → PDF 页栅格化喂图（保真最高；按页烧 token，需页数上限+"大文件先问一句"闸门）；② 文本模型 → 复用论文管线 MinerU sidecar 提取（纯复用不新造；依赖本地模型权重/embedding 配置，未配置不可用属预期，按需触发而非主通道——MarkItDown 提取为空/乱码时才建议/自动走）；③ 均不可用 → 路径登记 + 明确提示，不静默失败。
