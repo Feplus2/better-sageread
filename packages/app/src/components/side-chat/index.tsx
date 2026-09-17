@@ -82,6 +82,9 @@ function ChatContent({ bookId }: ChatContentProps) {
     images,
     handleRemoveImage,
     handleAddImageFiles,
+    files,
+    handleRemoveFile,
+    handleAddFiles,
     registerInputEl,
     handleSubmit,
     handleRetry,
@@ -283,6 +286,9 @@ function ChatContent({ bookId }: ChatContentProps) {
             images={images}
             onRemoveImage={handleRemoveImage}
             onAddImageFiles={handleAddImageFiles}
+            files={files}
+            onRemoveFile={handleRemoveFile}
+            onAddFiles={handleAddFiles}
             onInputEl={registerInputEl}
             onSubmit={handleSubmit}
             onStop={stop}

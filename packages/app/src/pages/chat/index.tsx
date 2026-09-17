@@ -191,6 +191,9 @@ function ChatPage() {
     images,
     handleRemoveImage,
     handleAddImageFiles,
+    files,
+    handleRemoveFile,
+    handleAddFiles,
     registerInputEl,
     handleSubmit,
     handleRetry,
@@ -403,6 +406,9 @@ function ChatPage() {
                       images={images}
                       onRemoveImage={handleRemoveImage}
                       onAddImageFiles={handleAddImageFiles}
+                      files={files}
+                      onRemoveFile={handleRemoveFile}
+                      onAddFiles={handleAddFiles}
                       onInputEl={registerInputEl}
                       onSubmit={handleSubmit}
                       onStop={stop}

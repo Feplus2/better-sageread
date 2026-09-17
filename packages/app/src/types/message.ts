@@ -18,6 +18,24 @@ export interface ImageAttachment {
   name: string;
 }
 
+/** 通用文件附件（⟦文件N⟧ 标记内联定位）：
+ * inline = 小文本内容直接注入消息（content 随消息落库）；
+ * ref = 已复制到 attachments/ 登记路径（content 为空，Agent 用工具按需读取） */
+export interface FileAttachment {
+  id: string;
+  markerNum: number;
+  name: string;
+  /** 字节数（UI 展示与 Agent 提示） */
+  size: number;
+  mode: "inline" | "ref";
+  /** inline 模式的文本内容（ref 模式为空串） */
+  content: string;
+  /** ref 模式：attachment:// 引用（可解出 attachments/ 内绝对路径） */
+  attachmentRef?: string;
+  /** ref 模式：attachments/ 内绝对路径（登记给 Agent 用工具读取） */
+  absPath?: string;
+}
+
 /**
  * Extended metadata interface for UIMessage
  * Includes custom fields for our application

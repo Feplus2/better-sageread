@@ -82,3 +82,32 @@ export async function attachmentToAssetUrl(url: string): Promise<string | null> 
     return null;
   }
 }
+
+// ─── 通用文件附件（Phase A，2026-09-17）───
+// 与图片同目录的 files/ 子目录；消息里登记"路径"指 attachments/ 内的绝对路径
+// （Agent 的 readLocalFile 等工具可读），原文件被移动/删除不受影响。
+
+/** 落盘通用文件附件（bytes 已在 JS 侧），返回 `attachment://files/文件名` 引用 */
+export async function saveFileAttachment(id: string, name: string, bytes: Uint8Array): Promise<string> {
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeName = name.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80).trim() || "file";
+  const filename = `files/${safeId}-${safeName}`;
+  await ensureDir();
+  if (!(await exists("attachments/files", { baseDir: BaseDirectory.AppData }))) {
+    await mkdir("attachments/files", { baseDir: BaseDirectory.AppData, recursive: true });
+  }
+  await writeFile(`attachments/${filename}`, bytes, { baseDir: BaseDirectory.AppData });
+  return `${ATTACHMENT_URL_PREFIX}${filename}`;
+}
+
+/** attachment:// 引用 → attachments/ 内绝对路径（登记给 Agent 的路径；非引用返回 null） */
+export async function attachmentToAbsPath(url: string): Promise<string | null> {
+  if (!isAttachmentUrl(url)) return null;
+  const rel = url.slice(ATTACHMENT_URL_PREFIX.length);
+  try {
+    const base = await appDataDir();
+    return `${base.replace(/[\\/]+$/, "")}/attachments/${rel}`;
+  } catch {
+    return null;
+  }
+}

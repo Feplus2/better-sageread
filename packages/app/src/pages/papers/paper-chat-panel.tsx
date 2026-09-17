@@ -179,6 +179,9 @@ export function PaperChatPanel({
     images,
     handleRemoveImage,
     handleAddImageFiles,
+    files,
+    handleRemoveFile,
+    handleAddFiles,
     registerInputEl,
     handleSubmit,
     handleRetry,
@@ -411,6 +414,9 @@ export function PaperChatPanel({
               images={images}
               onRemoveImage={handleRemoveImage}
               onAddImageFiles={handleAddImageFiles}
+              files={files}
+              onRemoveFile={handleRemoveFile}
+              onAddFiles={handleAddFiles}
               onInputEl={registerInputEl}
               onSubmit={handleSubmit}
               onStop={stop}

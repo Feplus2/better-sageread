@@ -7,13 +7,13 @@ import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
 import { recordAiUsage } from "@/services/ai-usage-service";
-import { saveImageAttachment } from "@/services/attachment-service";
+import { attachmentToAbsPath, saveFileAttachment, saveImageAttachment } from "@/services/attachment-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { useChatDraftStore } from "@/store/chat-draft-store";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { useThreadStore } from "@/store/thread-store";
-import type { ChatReference, ImageAttachment, MessageMetadata } from "@/types/message";
+import type { ChatReference, FileAttachment, ImageAttachment, MessageMetadata } from "@/types/message";
 import type { Thread, ThreadSummary } from "@/types/thread";
 import { useQueryClient } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
@@ -49,6 +49,10 @@ export interface UseChatStateReturn {
   images: ImageAttachment[];
   handleRemoveImage: (id: string) => void;
   handleAddImageFiles: (files: File[]) => Promise<void>;
+  /** Phase A 通用文件附件（⟦文件N⟧）：图片路由进 handleAddImageFiles，文本小文件 inline 注入，大文件/二进制 ref 登记路径 */
+  files: FileAttachment[];
+  handleRemoveFile: (id: string) => void;
+  handleAddFiles: (files: File[]) => Promise<void>;
   registerInputEl: (el: HTMLTextAreaElement | null) => void;
 
   // 消息处理
@@ -66,9 +70,29 @@ export interface UseChatStateReturn {
   canRetry: boolean;
 }
 
-/** 标题用：剥掉 ⟦引用N⟧/⟦图片N⟧ 占位标记——占位标题来自原始输入，含标记会让
+/** 标题用：剥掉 ⟦引用N⟧/⟦图片N⟧/⟦文件N⟧ 占位标记——占位标题来自原始输入，含标记会让
  * "是否占位标题"的比对失配（quote 首发的对话自动命名被跳过），且标记本身不该进标题 */
-const stripMarkersForTitle = (s: string) => s.replace(/⟦(?:引用|图片)\d+⟧/g, "").trim();
+const stripMarkersForTitle = (s: string) => s.replace(/⟦(?:引用|图片|文件)\d+⟧/g, "").trim();
+
+// ─── Phase A 通用文件附件阈值 ───
+/** 单文件硬上限（拍板值） */
+const MAX_ATTACHMENT_MB = 50;
+const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
+/** inline 注入阈值：≤32KB 直接进消息（256KB 直注入 ≈6 万+ token 且随每轮请求重复计费，故收紧） */
+const INLINE_ATTACHMENT_BYTES = 32 * 1024;
+/** 按扩展名判文本（无扩展名时看 MIME/二进制嗅探） */
+const TEXT_ATTACHMENT_EXTS = new Set(
+  "md markdown txt log csv json jsonl yaml yml xml html htm css scss less js jsx ts tsx mjs cjs py ipynb sh bash bat ps1 sql rs go java c h cpp hpp cc cs rb php pl lua tex bib sty ini cfg conf toml properties env gitignore vue svelte kt swift r dart scala groovy gradle makefile cmake dockerfile diff patch".split(
+    " ",
+  ),
+);
+
+/** 附件大小人类可读（chip 与登记文案共用） */
+export const formatAttachmentSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
 
 /** 归一化流错误为可读中文（AI SDK 的 APICallError 的 message 常为空，需取 statusCode/responseBody） */
 function normalizeChatError(error: unknown): Error {
@@ -123,8 +147,10 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   const [threadsKey, setThreadsKey] = useState(0);
   const [displayError, setDisplayError] = useState<Error | null>(null);
   const [references, setReferences] = useState<ChatReference[]>([]);
-  // J2/K2：图片附件与内联标记体系（⟦引用N⟧/⟦图片N⟧ 占位插在输入区，提交时按位置展开）
+  // J2/K2：图片附件与内联标记体系（⟦引用N⟧/⟦图片N⟧/⟦文件N⟧ 占位插在输入区，提交时按位置展开）
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  // 通用文件附件（Phase A）：小文本 inline 注入，大文件/二进制 ref 登记路径
+  const [files, setFiles] = useState<FileAttachment[]>([]);
   const markerSeqRef = useRef(0);
   const inputElRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -627,6 +653,58 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     [addImageAttachment],
   );
 
+  // ─── Phase A 通用文件附件 ───
+  const handleRemoveFile = useCallback((id: string) => {
+    setFiles((prev) => {
+      const target = prev.find((f) => f.id === id);
+      if (target) setInput((p) => p.replaceAll(`⟦文件${target.markerNum}⟧`, ""));
+      return prev.filter((f) => f.id !== id);
+    });
+  }, []);
+
+  /** 通用附件入口（回形针/拖拽共用）：图片走 J2 原链路；文本小文件 inline 注入；
+   *  大文件/二进制复制进 attachments/ 后 ref 登记路径（Agent 用工具按需读取） */
+  const handleAddFiles = useCallback(
+    async (newFiles: File[]) => {
+      const images = newFiles.filter((f) => f.type.startsWith("image/"));
+      if (images.length > 0) await handleAddImageFiles(images);
+
+      for (const file of newFiles.filter((f) => !f.type.startsWith("image/"))) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          toast.error(`「${file.name}」超过 ${MAX_ATTACHMENT_MB}MB 上限，未添加`);
+          continue;
+        }
+        const markerNum = ++markerSeqRef.current;
+        const id = `file-${Date.now()}-${markerNum}`;
+        const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+        const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
+        const looksBinary = head.includes(0);
+        const looksText =
+          !looksBinary && (TEXT_ATTACHMENT_EXTS.has(ext) || file.type.startsWith("text/") || file.type === "application/json");
+
+        if (looksText && file.size <= INLINE_ATTACHMENT_BYTES) {
+          const content = await file.text();
+          setFiles((prev) => [...prev, { id, markerNum, name: file.name, size: file.size, mode: "inline", content }]);
+          insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
+          continue;
+        }
+
+        // ref 模式：复制进 attachments/ 并登记绝对路径（保存失败给提示但不阻塞）
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const attachmentRef = await saveFileAttachment(id, file.name, bytes);
+          const absPath = (await attachmentToAbsPath(attachmentRef)) ?? undefined;
+          setFiles((prev) => [...prev, { id, markerNum, name: file.name, size: file.size, mode: "ref", content: "", attachmentRef, absPath }]);
+          insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
+        } catch (error) {
+          console.warn("附件落盘失败:", error);
+          toast.error(`「${file.name}」保存失败，未添加`);
+        }
+      }
+    },
+    [handleAddImageFiles, insertMarkerIntoInput],
+  );
+
   useTextEventHandler({
     sendMessage,
     activeBookId,
@@ -636,48 +714,72 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     onImageReference: handleAddImageDataUrl,
   });
 
-  // K2/J2：按输入区标记位置把正文/引用/图片交织成有序 parts（⟦引用N⟧/⟦图片N⟧ 占位）；
-  // 无标记的旧式引用兼容前置，未定位的图片后置
-  const buildMessageParts = useCallback((rawInput: string, refs: ChatReference[], imgs: ImageAttachment[]) => {
-    const parts: any[] = [];
-    const usedRefNums = new Set<number>();
-    const usedImgNums = new Set<number>();
-    const pushText = (segment: string) => {
-      const trimmed = segment.trim();
-      if (trimmed) parts.push({ type: "text", text: trimmed });
-    };
-    const markerRe = /⟦(引用|图片)(\d+)⟧/g;
-    let last = 0;
-    for (let match = markerRe.exec(rawInput); match; match = markerRe.exec(rawInput)) {
-      pushText(rawInput.slice(last, match.index));
-      const num = Number(match[2]);
-      if (match[1] === "引用") {
-        const ref = refs.find((r) => r.markerNum === num);
-        if (ref) {
-          usedRefNums.add(num);
-          parts.push({ type: "quote", text: ref.text, source: `引用${num}`, id: ref.id });
+  // K2/J2：按输入区标记位置把正文/引用/图片/文件交织成有序 parts（⟦引用N⟧/⟦图片N⟧/⟦文件N⟧ 占位）；
+  // 无标记的旧式引用兼容前置，未定位的图片/文件后置
+  const buildMessageParts = useCallback(
+    (rawInput: string, refs: ChatReference[], imgs: ImageAttachment[], fas: FileAttachment[]) => {
+      const parts: any[] = [];
+      const usedRefNums = new Set<number>();
+      const usedImgNums = new Set<number>();
+      const usedFileNums = new Set<number>();
+      const pushText = (segment: string) => {
+        const trimmed = segment.trim();
+        if (trimmed) parts.push({ type: "text", text: trimmed });
+      };
+      // 文件附件 → quote part：inline 注入全文；ref 登记路径与读取指引
+      const pushFilePart = (f: FileAttachment, source: string) => {
+        if (f.mode === "inline") {
+          parts.push({ type: "quote", text: `【附件：${f.name}】\n${f.content}`, source, id: f.id });
+        } else {
+          parts.push({
+            type: "quote",
+            text: `【附件已登记：${f.name}（${formatAttachmentSize(f.size)}）】\n文件已保存到：${f.absPath ?? f.attachmentRef ?? ""}\n需要时用 readLocalFile 读取该文件（大文件请分段续读），不要凭文件名猜测内容。`,
+            source,
+            id: f.id,
+          });
         }
-      } else {
-        const img = imgs.find((i) => i.markerNum === num);
-        if (img) {
-          usedImgNums.add(num);
-          parts.push({ type: "file", mediaType: img.mediaType, url: img.dataUrl, filename: img.name });
+      };
+      const markerRe = /⟦(引用|图片|文件)(\d+)⟧/g;
+      let last = 0;
+      for (let match = markerRe.exec(rawInput); match; match = markerRe.exec(rawInput)) {
+        pushText(rawInput.slice(last, match.index));
+        const num = Number(match[2]);
+        if (match[1] === "引用") {
+          const ref = refs.find((r) => r.markerNum === num);
+          if (ref) {
+            usedRefNums.add(num);
+            parts.push({ type: "quote", text: ref.text, source: `引用${num}`, id: ref.id });
+          }
+        } else if (match[1] === "图片") {
+          const img = imgs.find((i) => i.markerNum === num);
+          if (img) {
+            usedImgNums.add(num);
+            parts.push({ type: "file", mediaType: img.mediaType, url: img.dataUrl, filename: img.name });
+          }
+        } else {
+          const fa = fas.find((f) => f.markerNum === num);
+          if (fa) {
+            usedFileNums.add(num);
+            pushFilePart(fa, `附件${num}`);
+          }
         }
+        last = match.index + match[0].length;
       }
-      last = match.index + match[0].length;
-    }
-    pushText(rawInput.slice(last));
-    // 兼容层：未插标记的引用（旧链路/弹窗直发）前置；未定位的图片后置
-    refs
-      .filter((r) => r.markerNum == null || !usedRefNums.has(r.markerNum))
-      .forEach((ref, index) => {
-        parts.unshift({ type: "quote", text: ref.text, source: `引用${index + 1}`, id: ref.id });
-      });
-    imgs
-      .filter((img) => !usedImgNums.has(img.markerNum))
-      .forEach((img) => parts.push({ type: "file", mediaType: img.mediaType, url: img.dataUrl, filename: img.name }));
-    return parts;
-  }, []);
+      pushText(rawInput.slice(last));
+      // 兼容层：未插标记的引用（旧链路/弹窗直发）前置；未定位的图片/文件后置
+      refs
+        .filter((r) => r.markerNum == null || !usedRefNums.has(r.markerNum))
+        .forEach((ref, index) => {
+          parts.unshift({ type: "quote", text: ref.text, source: `引用${index + 1}`, id: ref.id });
+        });
+      imgs
+        .filter((img) => !usedImgNums.has(img.markerNum))
+        .forEach((img) => parts.push({ type: "file", mediaType: img.mediaType, url: img.dataUrl, filename: img.name }));
+      fas.filter((f) => !usedFileNums.has(f.markerNum)).forEach((f, index) => pushFilePart(f, `附件${index + 1}`));
+      return parts;
+    },
+    [],
+  );
 
   const handleSubmit = useCallback(
     async (overrideInput?: string) => {
@@ -691,6 +793,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
 
       const referenceSnapshot = references.map((reference) => ({ ...reference }));
       const imageSnapshot = images.map((img) => ({ ...img }));
+      const fileSnapshot = files.map((f) => ({ ...f }));
       // D4 图片一次性：附件先落盘，消息里只存 attachment:// 引用（threads/L2/备份不再携带 base64；
       // 首轮流内真图由 transport 按需物化，落盘失败回退 dataUrl 直存保可用）
       await Promise.all(
@@ -702,7 +805,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           }
         }),
       );
-      const messageParts = buildMessageParts(trimmedInput, referenceSnapshot, imageSnapshot);
+      const messageParts = buildMessageParts(trimmedInput, referenceSnapshot, imageSnapshot, fileSnapshot);
       // 纯文本 + 无附件的提交不成立（只有标记占位也算空）
       if (messageParts.length === 0) return;
 
@@ -722,6 +825,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       setInput("");
       setReferences([]);
       setImages([]);
+      setFiles([]);
 
       try {
         await sendMessage({ parts: messageParts });
@@ -867,6 +971,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
     images,
     handleRemoveImage,
     handleAddImageFiles,
+    files,
+    handleRemoveFile,
+    handleAddFiles,
     registerInputEl,
     displayError,
     showThreads,

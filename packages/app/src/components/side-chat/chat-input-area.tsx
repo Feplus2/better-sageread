@@ -1,10 +1,12 @@
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import { Button } from "@/components/ui/button";
+import { formatAttachmentSize } from "@/hooks/use-chat-state";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { type AgentScope, useQuickCommandStore } from "@/store/quick-command-store";
-import type { ChatReference, ImageAttachment } from "@/types/message";
-import { ArrowUp, Paperclip, Quote, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import type { ChatReference, FileAttachment, ImageAttachment } from "@/types/message";
+import { readFile } from "@tauri-apps/plugin-fs";
+import { ArrowUp, FileText, Paperclip, Quote, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { getCommandIcon } from "./command-icons";
 import { ContextPopover } from "./context-popover";
 import { ReasoningLevelSelector } from "./reasoning-level-selector";
@@ -28,6 +30,10 @@ interface ChatInputAreaProps {
   images?: ImageAttachment[];
   onRemoveImage?: (id: string) => void;
   onAddImageFiles?: (files: File[]) => void;
+  /** Phase A 通用文件附件（⟦文件N⟧ chip + 原生拖拽） */
+  files?: FileAttachment[];
+  onRemoveFile?: (id: string) => void;
+  onAddFiles?: (files: File[]) => void;
   onInputEl?: (el: HTMLTextAreaElement | null) => void;
 
   setInput: (value: string) => void;
@@ -48,6 +54,9 @@ export function ChatInputArea({
   images = [],
   onRemoveImage,
   onAddImageFiles,
+  files = [],
+  onRemoveFile,
+  onAddFiles,
   onInputEl,
 
   setActiveBookId,
@@ -58,6 +67,54 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptBoxRef = useRef<HTMLDivElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Phase A：Tauri 原生拖拽（给真实路径；多面板共存时按落点归属，只有命中的面板接收）
+  useEffect(() => {
+    if (!onAddFiles) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      const scale = await win.scaleFactor();
+      if (cancelled) return;
+      unlisten = await win.onDragDropEvent(async (event) => {
+        const box = promptBoxRef.current;
+        if (!box) return;
+        const payload = event.payload;
+        // position 为物理像素，getBoundingClientRect 为逻辑像素——按 scaleFactor 换算
+        const inside = (pos: { x: number; y: number }) => {
+          const r = box.getBoundingClientRect();
+          const x = pos.x / scale;
+          const y = pos.y / scale;
+          return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        };
+        if (payload.type === "enter" || payload.type === "over") {
+          setDragOver(inside(payload.position));
+        } else if (payload.type === "leave") {
+          setDragOver(false);
+        } else if (payload.type === "drop") {
+          setDragOver(false);
+          if (!inside(payload.position) || payload.paths.length === 0) return;
+          const dropped: File[] = [];
+          for (const p of payload.paths) {
+            try {
+              const bytes = await readFile(p);
+              dropped.push(new File([bytes.buffer as ArrayBuffer], p.split(/[\\/]/).pop() ?? p));
+            } catch (error) {
+              console.warn("读取拖入文件失败（目录或不可读）:", p, error);
+            }
+          }
+          if (dropped.length > 0) void onAddFiles(dropped);
+        }
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [onAddFiles]);
   // 引用区限高滚动：新增引用时自动滚到底（最新引用优先可见）；删除不扰动滚动位置
   const refsBoxRef = useRef<HTMLDivElement>(null);
   const prevRefsLenRef = useRef(0);
@@ -150,8 +207,39 @@ export function ChatInputArea({
           onSubmit={() => {
             void onSubmit();
           }}
-          className="relative z-10 w-full rounded-2xl border bg-background shadow-around dark:bg-neutral-800"
+          className={`relative z-10 w-full rounded-2xl border bg-background shadow-around dark:bg-neutral-800 ${
+            dragOver ? "ring-2 ring-primary/60 ring-offset-1" : ""
+          }`}
         >
+          {/* Phase A 文件附件 chips（⟦文件N⟧ 标记在正文中定位；删 chip 同步清标记） */}
+          {files.length > 0 && (
+            <div className="my-1 flex flex-wrap gap-1.5">
+              {files.map((f) => (
+                <div
+                  key={f.id}
+                  title={`${f.name}（${formatAttachmentSize(f.size)}）· ⟦文件${f.markerNum}⟧`}
+                  className="group flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-muted/70 py-1 pr-1 pl-2 text-xs dark:border-neutral-700 dark:bg-neutral-700/70"
+                >
+                  <FileText className="size-3.5 flex-shrink-0 text-neutral-500 dark:text-neutral-300" />
+                  <span className="max-w-40 truncate">{f.name}</span>
+                  <span className="flex-shrink-0 text-neutral-400">{formatAttachmentSize(f.size)}</span>
+                  <span className="flex-shrink-0 text-neutral-400 dark:text-neutral-500">
+                    {f.mode === "inline" ? "已注入" : "已登记"}
+                  </span>
+                  <button
+                    type="button"
+                    className="flex size-4 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-300 hover:text-neutral-600 dark:hover:bg-neutral-600 dark:hover:text-neutral-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRemoveFile?.(f.id);
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {isChatPage && (
             <div className="flex items-center justify-between gap-2 py-2">
               <div className="flex items-center gap-2">
@@ -258,15 +346,14 @@ export function ChatInputArea({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/*"
                 className="hidden"
                 onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length > 0) onAddImageFiles?.(files);
+                  const picked = Array.from(e.target.files ?? []);
+                  if (picked.length > 0) (onAddFiles ?? onAddImageFiles)?.(picked);
                   e.target.value = "";
                 }}
               />
-              <PromptInputAction tooltip="上传图片">
+              <PromptInputAction tooltip="上传附件（图片/文档/文本，可拖入）">
                 <Button
                   variant="outline"
                   size="icon"
