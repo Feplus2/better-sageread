@@ -6,4 +6,4 @@ __pycache__/
 smoke*.docx
 smoke-out*.md
 smoke-exe-out.md
-e2e-test.pdf
+e2e-*.pdf
