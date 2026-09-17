@@ -1,0 +1,9 @@
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+smoke*.docx
+smoke-out*.md
+smoke-exe-out.md
+e2e-test.pdf

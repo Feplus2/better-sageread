@@ -8,6 +8,7 @@ import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
 import { useTextEventHandler } from "@/hooks/use-text-event";
 import { recordAiUsage } from "@/services/ai-usage-service";
 import { attachmentToAbsPath, saveFileAttachment, saveImageAttachment } from "@/services/attachment-service";
+import { convertWithMarkitdown, isMarkitdownCandidate } from "@/services/markitdown-service";
 import { createThread, editThread, getLatestThreadBybookId, getThreadById } from "@/services/thread-service";
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { useChatDraftStore } from "@/store/chat-draft-store";
@@ -16,6 +17,7 @@ import { useThreadStore } from "@/store/thread-store";
 import type { ChatReference, FileAttachment, ImageAttachment, MessageMetadata } from "@/types/message";
 import type { Thread, ThreadSummary } from "@/types/thread";
 import { useQueryClient } from "@tanstack/react-query";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -689,6 +691,95 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           continue;
         }
 
+        // Phase B：PDF/Office/EPUB 等 → MarkItDown sidecar 转 md（空产出/失败退回 ref 登记并备注）
+        if (isMarkitdownCandidate(file.name)) {
+          const toastId = toast.loading(`MarkItDown 转换中：${file.name}`);
+          try {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const attachmentRef = await saveFileAttachment(id, file.name, bytes);
+            const origPath = (await attachmentToAbsPath(attachmentRef)) ?? undefined;
+            if (!origPath) throw new Error("附件路径解析失败");
+            const mdPath = `${origPath}.md`;
+            const outcome = await convertWithMarkitdown(origPath, mdPath);
+            const empty = outcome.warnings?.includes("empty-output") || !outcome.chars;
+            if (outcome.ok && !empty) {
+              const mdText = await readTextFile(mdPath);
+              if (mdText.length <= INLINE_ATTACHMENT_BYTES) {
+                setFiles((prev) => [
+                  ...prev,
+                  { id, markerNum, name: file.name, size: file.size, mode: "inline", content: mdText, via: "MarkItDown" },
+                ]);
+              } else {
+                setFiles((prev) => [
+                  ...prev,
+                  {
+                    id,
+                    markerNum,
+                    name: file.name,
+                    size: file.size,
+                    mode: "ref",
+                    content: "",
+                    attachmentRef,
+                    absPath: mdPath,
+                    origPath,
+                    via: "MarkItDown",
+                  },
+                ]);
+              }
+              toast.success(`「${file.name}」已转换为 Markdown`, { id: toastId });
+            } else {
+              setFiles((prev) => [
+                ...prev,
+                {
+                  id,
+                  markerNum,
+                  name: file.name,
+                  size: file.size,
+                  mode: "ref",
+                  content: "",
+                  attachmentRef,
+                  absPath: origPath,
+                  via: "MarkItDown",
+                  note: empty ? "empty" : (outcome.error ?? "failed"),
+                },
+              ]);
+              toast.warning(`「${file.name}」MarkItDown ${empty ? "提取为空（可能是扫描件）" : "转换失败"}，已按原文件登记`, {
+                id: toastId,
+              });
+            }
+            insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
+          } catch (error) {
+            console.warn("MarkItDown 转换失败:", error);
+            toast.error(`「${file.name}」转换失败，已按原文件登记`, { id: toastId });
+            // 转换链路故障兜底：仍按原文件 ref 登记（note 标明原因）
+            try {
+              const bytes = new Uint8Array(await file.arrayBuffer());
+              const attachmentRef = await saveFileAttachment(id, file.name, bytes);
+              const absPath = (await attachmentToAbsPath(attachmentRef)) ?? undefined;
+              setFiles((prev) => [
+                ...prev,
+                {
+                  id,
+                  markerNum,
+                  name: file.name,
+                  size: file.size,
+                  mode: "ref",
+                  content: "",
+                  attachmentRef,
+                  absPath,
+                  via: "MarkItDown",
+                  note: error instanceof Error ? error.message : String(error),
+                },
+              ]);
+              insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
+            } catch (e2) {
+              console.warn("附件落盘失败:", e2);
+              toast.error(`「${file.name}」保存失败，未添加`);
+            }
+          }
+          continue;
+        }
+
         // ref 模式：复制进 attachments/ 并登记绝对路径（保存失败给提示但不阻塞）
         try {
           const bytes = new Uint8Array(await file.arrayBuffer());
@@ -729,14 +820,27 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       // 文件附件 → quote part：inline 注入全文；ref 登记路径与读取指引
       const pushFilePart = (f: FileAttachment, source: string) => {
         if (f.mode === "inline") {
-          parts.push({ type: "quote", text: `【附件：${f.name}】\n${f.content}`, source, id: f.id });
-        } else {
           parts.push({
             type: "quote",
-            text: `【附件已登记：${f.name}（${formatAttachmentSize(f.size)}）】\n文件已保存到：${f.absPath ?? f.attachmentRef ?? ""}\n需要时用 readLocalFile 读取该文件（大文件请分段续读），不要凭文件名猜测内容。`,
+            text: `【附件：${f.name}${f.via ? `（${f.via} 转换）` : ""}】\n${f.content}`,
             source,
             id: f.id,
           });
+        } else {
+          const lines = [`【附件已登记：${f.name}（${formatAttachmentSize(f.size)}${f.via ? `，${f.via} 已处理` : ""}）】`];
+          if (f.via === "MarkItDown" && f.absPath?.endsWith(".md")) {
+            lines.push(`Markdown 版（用 readLocalFile 分段读取）：${f.absPath}`);
+            if (f.origPath) lines.push(`原始文件：${f.origPath}`);
+          } else {
+            lines.push(`文件已保存到：${f.absPath ?? f.attachmentRef ?? ""}`);
+          }
+          if (f.note === "empty") {
+            lines.push("注意：MarkItDown 对该文件提取为空（可能是扫描件/图片型文档）——如需内容请如实告知，不要凭文件名猜测。");
+          } else if (f.note) {
+            lines.push(`注意：MarkItDown 转换失败（${f.note}），已按原文件登记。`);
+          }
+          lines.push("需要时用 readLocalFile 读取（大文件请分段续读），不要凭文件名猜测内容。");
+          parts.push({ type: "quote", text: lines.join("\n"), source, id: f.id });
         }
       };
       const markerRe = /⟦(引用|图片|文件)(\d+)⟧/g;

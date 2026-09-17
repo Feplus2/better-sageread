@@ -32,8 +32,14 @@ export interface FileAttachment {
   content: string;
   /** ref 模式：attachment:// 引用（可解出 attachments/ 内绝对路径） */
   attachmentRef?: string;
-  /** ref 模式：attachments/ 内绝对路径（登记给 Agent 用工具读取） */
+  /** ref 模式：attachments/ 内绝对路径（登记给 Agent 用工具读取；MarkItDown 转换件指向 .md） */
   absPath?: string;
+  /** MarkItDown 转换件的原始文件绝对路径（Agent 需要原文时用） */
+  origPath?: string;
+  /** 处理引擎标识（chip 与消息文案用，如 "MarkItDown"） */
+  via?: string;
+  /** 异常备注："empty" = 提取为空（扫描件特征）；其余为失败原因 */
+  note?: string;
 }
 
 /**

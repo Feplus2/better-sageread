@@ -144,7 +144,8 @@
     "externalBin": [
       "binaries/woff2_compress",
       "binaries/books_converter",
-      "binaries/papers_converter"
+      "binaries/papers_converter",
+      "binaries/sageread_markitdown"
     ],
     "resources": [
       "resources/fonts/*"

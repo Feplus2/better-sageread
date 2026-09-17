@@ -46,6 +46,7 @@ use crate::core::{
     },
     database,
     converter::{cancel_convert, convert_pdf_to_epub, ConverterState},
+    markitdown::convert_file_markitdown,
     paper_converter::{
         cancel_paper_convert, clear_paper_convert_pending_done, convert_paper_pdf,
         paper_convert_status, PaperConverterState,
@@ -378,6 +379,7 @@ pub fn run() {
             sciverse_search,
             // converter (PDF → EPUB)
             convert_pdf_to_epub,
+            convert_file_markitdown,
             cancel_convert,
             // paper converter (单篇 PDF → paper.md)
             convert_paper_pdf,

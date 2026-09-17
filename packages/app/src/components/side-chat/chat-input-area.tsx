@@ -224,7 +224,7 @@ export function ChatInputArea({
                   <span className="max-w-40 truncate">{f.name}</span>
                   <span className="flex-shrink-0 text-neutral-400">{formatAttachmentSize(f.size)}</span>
                   <span className="flex-shrink-0 text-neutral-400 dark:text-neutral-500">
-                    {f.mode === "inline" ? "已注入" : "已登记"}
+                    {f.note === "empty" ? "提取为空" : f.via === "MarkItDown" ? "已转换" : f.mode === "inline" ? "已注入" : "已登记"}
                   </span>
                   <button
                     type="button"
