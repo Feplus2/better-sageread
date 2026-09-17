@@ -2,8 +2,9 @@ import { createUtilityModelInstance, getUtilityModel, utilityTaskProviderOptions
 import { recordAuxUsage } from "@/services/ai-usage-service";
 import { type UIMessage, generateText } from "ai";
 
-// 防御性长度上限，prompt 中要求的是 10 字以内
-const MAX_TITLE_LENGTH = 20;
+// 防御性长度上限，prompt 中要求的是 10 字以内（20 曾把 "readBookSection与RAG工具测试"
+// 这类技术标题拦腰切成 "…RAG工"；放宽到 30 + 拉丁词边界退让，防御性质不变）
+const MAX_TITLE_LENGTH = 30;
 
 function extractText(message: UIMessage | undefined, limit: number): string {
   if (!message) return "";
@@ -124,5 +125,13 @@ function sanitizeTitle(rawText: string): string | null {
     .replace(/[。！？!?.…；;，,、：:]+$/g, "")
     .trim();
   if (!cleaned) return null;
-  return cleaned.slice(0, MAX_TITLE_LENGTH);
+  if (cleaned.length <= MAX_TITLE_LENGTH) return cleaned;
+  const cut = cleaned.slice(0, MAX_TITLE_LENGTH);
+  // 截断点落在拉丁词中间时退到词边界（半词标题比短标题更难看）
+  const tailRun = cut.match(/[A-Za-z0-9]+$/)?.[0];
+  if (tailRun && /[A-Za-z0-9]/.test(cleaned[MAX_TITLE_LENGTH] ?? "")) {
+    const backed = cut.slice(0, cut.length - tailRun.length).trim();
+    if (backed) return backed;
+  }
+  return cut;
 }
