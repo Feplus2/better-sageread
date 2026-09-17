@@ -88,7 +88,14 @@ export function ChatInputArea({
         const payload = event.payload;
         // position 为物理像素，getBoundingClientRect 为逻辑像素——按 scaleFactor 换算
         const inside = (pos: { x: number; y: number }) => {
+          // 保活层去重：隐藏面板（visibility:hidden）与面板 rect 与前台几乎重合，
+          // 不看可见性会让同一次 drop 被多个面板各处理一遍（toast/chip 双份实测）
+          const s = getComputedStyle(zone);
+          if (s.visibility !== "visible" || s.display === "none" || s.opacity === "0") return false;
           const r = zone.getBoundingClientRect();
+          if (r.right <= 0 || r.left >= window.innerWidth || r.bottom <= 0 || r.top >= window.innerHeight) {
+            return false;
+          }
           const x = pos.x / scale;
           const y = pos.y / scale;
           return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
