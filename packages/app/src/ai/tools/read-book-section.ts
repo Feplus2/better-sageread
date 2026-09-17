@@ -29,8 +29,13 @@ function flattenToc(items: TocEntry[] | undefined, out: { label: string; href: s
   return out;
 }
 
+/** 取标签/查询的前导小节号（"5.6 Renormalization" → "5.6"） */
+const leadingNumber = (s: string) => normalize(s).match(/^\d+(\.\d+)*/)?.[0] ?? null;
+
 /** 匹配语义（E5 根修：要 5 章给 5.9 的病）：精确 > 前缀 > 包含，逐级短路；
- *  查无命中且查询形如小节号（5.5.1）时逐级退化到父级号（5.5）——深层小节常无目录项 */
+ *  文本全败但查询带小节号时，按号精确命中（模型看到的注入目录可能被转义/截断，
+ *  复述出的标题文本对不上，但小节号通常是对的——以号为准并在 message 里明示）；
+ *  号也无命中时逐级退化到父级号（深层小节常无目录项） */
 function matchTocEntry(entries: { label: string; href: string }[], query: string) {
   const q = normalize(query);
   if (!q) return { kind: "none" as const };
@@ -46,12 +51,15 @@ function matchTocEntry(entries: { label: string; href: string }[], query: string
       candidates: [...contains].sort((a, b) => a.label.length - b.label.length).slice(0, 20),
       total: contains.length,
     };
-  // 小节号逐级退化：'5.5.1' → '5.5' → '5'（仅数字点号查询启用，防普通关键词误退）
-  if (/^\d+(\.\d+)*$/.test(q.replace(/\s.*$/, ""))) {
-    const segs = q.split(".");
+  // 小节号通道：号码相等才算命中（防 "5.6" 撞 "5.61"）；再逐级退化父级号
+  const qNum = leadingNumber(q);
+  if (qNum) {
+    const byNum = entries.filter((e) => leadingNumber(e.label) === qNum);
+    if (byNum.length) return { kind: "number" as const, entry: byNum[0]!, matchedQuery: qNum };
+    const segs = qNum.split(".");
     for (let k = segs.length - 1; k >= 1; k--) {
       const parent = segs.slice(0, k).join(".");
-      const hit = entries.filter((e) => normalize(e.label).startsWith(parent));
+      const hit = entries.filter((e) => leadingNumber(e.label) === parent);
       if (hit.length) return { kind: "fallback" as const, entry: hit[0]!, matchedQuery: parent };
     }
   }
@@ -147,9 +155,13 @@ export const createReadBookSectionTool = (activeBookId: string | undefined) =>
             meta: { reasoning, chapterTitle },
           };
         }
-        if (m.kind === "hit" || m.kind === "fallback") {
+        if (m.kind === "hit" || m.kind === "fallback" || m.kind === "number") {
           const fallbackNote =
-            m.kind === "fallback" ? `（查询的小节号无目录项，已从最近的父级「${m.matchedQuery}」起读）` : "";
+            m.kind === "fallback"
+              ? `（查询的小节号无目录项，已从最近的父级「${m.matchedQuery}」起读）`
+              : m.kind === "number"
+                ? `（目录中无此标题文本，已按小节号 ${m.matchedQuery} 匹配——注：注入目录的标题可能被转义损坏，以此返回的目录标题为准）`
+                : "";
           const resolved = resolveHref(bookDoc, m.entry.href);
           if (resolved) {
             const section = (bookDoc as any).sections[resolved.spineIndex];
