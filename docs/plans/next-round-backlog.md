@@ -306,7 +306,7 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 ## 🆕 2026-09-13 阅读器渲染/位置/Agent 内容保真 —— 本轮挂账
 
 本轮已修并提交（local 分支）：h5/h6 字号下限、foliate HMR 防重守卫、TOC 打瞌睡/误判章末、公式横向导轨、表格单元格防污染。
-进行中（用户已批准方案）：A 章节定位偶掉章末（悬句层污染 getVisibleRange）、D 超宽表格外框阈值+双向导轨、E 系列小修（工具折叠/0 results/describeTool 死循环/rag 报错误导）、C+B Agent 内容保真（JS 读取层重写：LaTeX/Markdown 结构化提取 + startOffset 续读 + 深层小节直读）、E6 对话自动命名、E7 历史对话当前项高亮。
+~~进行中~~ **全部已完工（2026-09-16）**：A 章节定位（5f8669c，用户复验通过）、D 表格滚动框+双导轨（用户复验通过）、E1 工具折叠（1cabad2）、E2 results 计数（同）、E3 describeTool（8959e3d）、E4 rag 报错翻译+门控（e5fc02e）、C+B readBookSection JS 读取层重写 + 公式 LaTeX 化（1de2abd/151c104）、E6 对话自动命名（e400cd2）、E7 历史对话高亮（a785156）。除模型映射表热更新外均已经用户验收。
 
 ### 🔴 转换器侧治本（用户明确要求，勿忘）
 
@@ -323,20 +323,27 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 
 ---
 
-## 🆕 模型映射表热更新（用户提议，2026-09-15 挂账）
+## 模型映射表热更新 —— ✅ 已落地（2026-09-16，b56b620，待用户验收）
 
 **动机**：`vision-map.ts` / `reasoning-map.ts` 两张模型映射表随厂商发模频繁更新，但每次都要随软件发版才能触达用户。
 
-**方案（远程优先 + 本地兜底，复用现有官网/COS 基建）**：
-1. 两张表抽出为 JSON（`maps/v1/vision-map.json` / `reasoning-map.json`，保留每条的"核实日期/来源"审计字段），放 `site/maps/`（push 自动部署 EdgeOne Pages）或 COS 下载通道；带 `schemaVersion` + `minAppVersion`。
-2. 客户端新增 provider-map 服务：启动时 + 每 6h 静默拉取（etag/304）；成功 → zod 校验 + schemaVersion 检查 → 写 appDataDir 缓存并即时生效（映射消费点改读服务层）；失败/离线 → 用上次缓存；缓存也没有 → 用打包内置版（仍随版本发布作 floor）；`minAppVersion` 不满足则忽略（防新字段坑老客户端）。
-3. 纯数据不执行代码；https 固定域名 + 严格 schema 校验。
-4. 消费点：vision-map / reasoning-map 的查询函数改走"远程优先"解析层。
-
-**效果**：更新映射 = 改 site/maps 下 JSON 推一次，客户端 6h 内自动生效，零发版。优先级待用户排（当前排在 C+B/E6/E7 之后）。
+**落地口径（与原方案的差异）**：表体迁为 `packages/app/src/ai/providers/maps/*.json` 唯一事实源（构建期打包兜底）；`services/model-maps-service.ts` 启动后异步拉 `https://www.bettersageread.cn/maps/*.json`（tauri http 出网绕 CORS，5s 超时，`_ts` 防 CDN 陈旧，失败静默）；`maps/map-runtime.ts` 三级生效链（打包表 → localStorage 缓存 `visionMapCache`/`reasoningMapCache` → 远程），`updatedAt` 严格更晚才整表替换（不逐行合并，防远程删除的过期行残留）；空表/非法形状显式拒绝。同步查询 API 签名不变。维护流程：改表 = 改 app 内 JSON 递增 updatedAt + 同步 `site/maps/` 推送。**远程生效待站点部署；本地兜底即时可用。**
 
 - **转换器表格漏转残留**：Feeling Great（英文版）chapter_002 有一个表格未被转换成 HTML，以 Markdown 表格纯文本（`|---|` 管道符）留在 `<p>` 里渲染。阅读器无法补救（内容问题），需转换器侧排查该表格的提取路径。
 
-- **库卡片 hover 光效**（用户提议 2026-09-16）：论文库文献条目 + 图书馆书籍卡片，鼠标悬浮时平滑 hover + 边缘呈现主题色柔和光影（soft glow，主题色驱动）。注意与"动效模式"设置兼容（动效关闭时降级为无动画的简单高亮）。
+- ~~**库卡片 hover 光效**~~ ✅ 已落地（2026-09-16，77945d7，用户已验收）：`.book-card`/`.paper-entry-card` 主题色柔光，与 .chat-thread-card 同口径（颜色过渡走动效 token，位移+光影仅 full 档）。
 
-- **剪切板图片 Ctrl+V 直发**（用户提议 2026-09-16）：聊天输入框支持直接粘贴剪切板图片（截图工具/复制图片 → Ctrl+V），作为附件随消息发送给助手。注意复用现有图片附件管线（attachments / attachment:// 引用按需解析，与 J2 图片附件 D4 同一契约），大图先压缩再入件。
+- ~~**剪切板图片 Ctrl+V 直发**~~ ✅ 已落地（2026-09-16，606053e，用户已验收）：输入区 onPaste 拦剪贴板图片进附件链路（与上传按钮同一视觉闸门），三面板共用组件一并生效。
+
+### 通用附件上传（回形针扩展，用户 2026-09-16 提出）—— 方案待拍板
+
+**现状**：回形针只收图片（`accept="image/*"`，过视觉模型闸门）；Agent 读本地文件只能靠 readLocalFile 等工具按路径访问（权限允许时）。
+
+**方案**：
+1. **支持范围与双通道接入**：
+   - 小文本类（.md/.txt/.py/.json/.csv/.log 等，≤256KB）→ **内容注入**：读全文作为消息 part（类似 quote 形态），附文件名标注；
+   - 大文件与二进制（PDF/EPUB/docx/表格/压缩包等）→ **路径登记**：复制到 `attachments/` 后在消息里登记路径，Agent 按需用 readLocalFile/searchFiles 自取（不占上下文）；
+   - 图片维持现有链路（视觉闸门不变）。
+2. **阈值**：文本直读 ≤256KB；单文件硬上限 50MB；单次 ≤10 个。超限给明确提示并降级路径登记。
+3. **交互**：拖拽入输入区（dragover 高亮）+ 回形针 accept 扩宽；附件区图片显缩略图、文件显图标+名称+大小。
+4. **风险点**：AI SDK 的 file part 只稳支持 image/PDF 媒体类型，任意文本文件走 file part 可能被模型商拒——故文本走 text/quote 注入或路径登记最稳；PDF 是否做内容解析（复用论文管线）留待拍板，一期可先路径登记。
