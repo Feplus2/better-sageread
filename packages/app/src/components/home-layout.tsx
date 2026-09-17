@@ -11,6 +11,7 @@ import SkillsPage from "@/pages/skills";
 import StatisticsPage from "@/pages/statistics";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { useConvertProgressStore } from "@/store/convert-progress-store";
+import { useLayoutStore } from "@/store/layout-store";
 import { useLibraryStore } from "@/store/library-store";
 import { useLlamaStore } from "@/store/llama-store";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -99,10 +100,14 @@ const HomeLayout = () => {
   const { isSettingsDialogOpen, toggleSettingsDialog } = useAppSettingsStore();
   const insets = useSafeAreaInsets();
   const { importBookPaths } = useBookUpload();
-  // 书籍拖入导入只在图书馆相关页与转换器页生效（其他页面各自接管拖放，如文献库的 PDF 解析导入）
+  // 书籍拖入导入只在图书馆相关页与转换器页生效（其他页面各自接管拖放，如文献库的 PDF 解析导入）；
+  // 且必须是主页层在前台——书籍/论文 reader tab 激活时（isHomeActive=false，URL 仍是 "/"）
+  // 本监听同样不得抢拖放（实测：reader 页拖附件被误判成"书籍导入"，弹'未找到支持的文件'）
   const location = useLocation();
+  const isHomeActive = useLayoutStore((state) => state.isHomeActive);
   const bookDropEnabled =
-    location.pathname === "/" || location.pathname === "/trash" || location.pathname === "/converter";
+    isHomeActive &&
+    (location.pathname === "/" || location.pathname === "/trash" || location.pathname === "/converter");
   const openBookConvertDialog = useConvertProgressStore((s) => s.openBookConvertDialog);
 
   const [dragOver, setDragOver] = useState(false);

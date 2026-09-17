@@ -513,12 +513,18 @@ export default function PapersPage() {
   // 页面级拖放导入：拖 PDF 到文献库页任意位置直接开始解析（弹窗开启时落入候选区）。
   // 用 Tauri onDragDropEvent（HTML5 drop 拿不到文件路径，sidecar 需要路径）；
   // 书籍拖入已由 home-layout 限定在图书馆页，本页无冲突。
+  // 保活层注意：本组件常驻挂载，监听必须按"事件时刻本页真在前台"放行——
+  // reader tab 激活时（isHomeActive=false）抢拖放会误弹"只支持 PDF / XML"
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    const isPapersForeground = () =>
+      window.location.hash.replace(/^#/, "").split("?")[0] === "/papers" &&
+      useLayoutStore.getState().isHomeActive;
     getCurrentWebviewWindow()
       .onDragDropEvent((event) => {
         const payload = event.payload;
+        if (!isPapersForeground()) return;
         if (payload.type === "enter" || payload.type === "over") {
           setPdfDragOver(true);
         } else if (payload.type === "leave") {

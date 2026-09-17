@@ -82,10 +82,13 @@ export function ChatInputArea({
       unlisten = await win.onDragDropEvent(async (event) => {
         const box = promptBoxRef.current;
         if (!box) return;
+        // 落点归属 = 整个聊天面板（侧栏任意位置拖入都可上传），不只是输入框；
+        // 多面板共存时各自判定自己的 rect，只有命中的面板接收
+        const zone = box.closest("[data-region='chat-panel'], #paper-chat-panel, #chat-sidebar") ?? box;
         const payload = event.payload;
         // position 为物理像素，getBoundingClientRect 为逻辑像素——按 scaleFactor 换算
         const inside = (pos: { x: number; y: number }) => {
-          const r = box.getBoundingClientRect();
+          const r = zone.getBoundingClientRect();
           const x = pos.x / scale;
           const y = pos.y / scale;
           return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
