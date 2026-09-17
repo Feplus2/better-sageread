@@ -12,7 +12,7 @@
 - **shared（三 scope 通用，15 个，`registry.ts:106-206`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage
 - **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
 - **central 专属（23 个，`registry.ts:191-335`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes
-- **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底）、manageNotes（绑定当前书）
+- **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底；匹配语义 精确>前缀>包含>小节号相等>父级退化——号通道防注入目录损坏/模型幻觉标题）、manageNotes（绑定当前书）
 - **paper（:358-373，需 paperId）**：基础层 6 个常驻——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getCitations/getFigures + manageNotes；增强层 paperSearch/paperContext 向量门控
 - **MCP 工具不在静态组装里**，由 transport 在发请求时合并（:375-377 注释，见第 5 节）
 
@@ -103,6 +103,7 @@
 
 - `constants/prompt.ts:15-24` 按 `agentScope` 路由到三个构建器。2026-09 分层重构后，每个构建器的产出都是同一个三层结构：**风格层**（激活预设 ?? `agent-styles.ts` 的内置默认风格；全局助手暂无预设恒用默认）+ **通用规范**（`shared-policy.ts`）+ **系统策略段**（`prompt.ts` 的 `buildReaderPolicy` / `paper-prompt.ts` 的 `PAPER_POLICY_*` / `central-prompt.ts` 的 `CENTRAL_POLICY`，检索能力按 `hasVectorCapability()` 分档拼接）；之后照旧叠加激活技能清单与书籍/论文元数据。预设只替换风格层，够不到策略段
 - transport 内的最终拼装顺序：buildPrompt + 目录牌（D8，条件触发）+ 工作区段 + memory.md 段 + 动态状态段（【当前阅读章节】/【当前阅读小节】）+ 前情摘要（`custom-chat-transport.ts:213-224`）
+- 书籍【当前阅读图书元信息与目录】的目录段：优先用 EPUB 原生 TOC 整段替换（`ChatContext.bookTocMd` 由阅读面板从 foliate `bookDoc.toc` 构建下发，`prompt.ts` 的 `replaceTocSection`）——metadata.md 的目录由转换器生成、段号曾被 markdown 转义吃掉（"5.6"→"5.\."，转换器侧待修见 `docs/plans/books-converter-optimizations.md` 第 2 条）
 - **提示词预设**（`prompt_presets` 表）：reader/paper 的命名风格预设，同 scope 内 `is_active` 互斥，无激活行时用内置默认风格（`database.rs:243-259`、`core/prompts/models.rs:7-19`）；与技能是两套东西，别混淆
 
 **Agent 工作区**：默认根 `{appData}/agent-workspace/`（`core/agent_ws/mod.rs:7-16`），其中的 `memory.md` 由 Agent 通过文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）自管理，作为跨会话记忆注入 system prompt（注入点在 `custom-chat-transport.ts:164-169` 的拼装段）。界内/界外判定统一走 Rust `agent_resolve_path`（canonicalize + 根前缀，`agent_ws/commands.rs:69-77`）——**路径守卫只有这一处实现**，前端守卫只是它的调用方；同文件 :9-14 还定义了读取限额常量（防 Agent 一次读爆上下文）。
@@ -139,6 +140,8 @@
 4. `convertToModelMessages(..., { tools, ignoreIncompleteToolCalls: true })`——容忍中断的工具调用
 
 **工具的 UI 展示**：工具名即 UI 名的映射表 `TOOL_NAME_MAP` 在 `components/side-chat/chat-messages.tsx:38`，未收录的工具 fallback 显示原始名（:516）；MCP 工具显示名带 `[server名]` 前缀。
+
+**附件上传管线**（2026-09-17，三层 + 引擎兜底）：入口 = 回形针（全类型）/ Tauri 原生拖拽（落点按"面板 rect 包含 + 可见性 + 视口相交"归属——保活面板 rect 重叠，不看可见性会被多面板重复处理）/ Ctrl+V 图片。分流在 `use-chat-state.ts` 的 `handleAddFiles`：图片走 J2 视觉闸；文本类 ≤32KB inline 注入 quote part；`isMarkitdownCandidate`（pdf/docx/pptx/xlsx/epub/html 等）→ sageread_markitdown sidecar 转 md 后 inline/ref（阈值同）；空产出/失败且为 PDF → `ocr_pdf_for_attachment`（MinerU 优先、PaddleOCR 兜底，token 读 `converter-store`，未配置则保留登记 + 文案引导）；其余复制进 `attachments/files/` 登记绝对路径（⟦文件N⟧ 标记 + quote part 附 readLocalFile 指引）。落盘同 D4 图片契约（attachment:// 引用按需物化，threads 表不吃字节）。
 
 **MCP 配置版本迁移**：`store/mcp-store.ts:69-90`——persist v1→v2 把 scope 单值升成数组、补 headers/source 字段；UI 入口在 AI Hub 第四个 tab（`pages/skills/`），市场安装弹窗为 `tabs/mcp-market-dialog.tsx`。
 

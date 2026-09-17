@@ -81,6 +81,7 @@
 - `llama/` — llamacpp 本地向量服务（版本常量 `LLAMA_CPP_VERSION` b6692，`llama/mod.rs:5-10`）
 - `zotero.rs` — Zotero 7 本地库扫描、去重键、导入状态
 - `converter.rs` / `paper_converter.rs` — 两个转换器 sidecar 的 spawn 与进度事件转发（见 `05-papers-pipeline.md`）
+- `markitdown.rs` — 附件转换 sidecar（sageread_markitdown，PyInstaller 单文件包，源码与重打见 `sidecars/markitdown/`）：`convert_file_markitdown` 一次性 文件→md（PDF/Office/EPUB 等，空产出打 empty-output 标）；`ocr_pdf_for_attachment` 复用 papers_converter 做扫描件引擎兜底（MinerU 优先、PaddleOCR 兜底，不走论文导入流）；均挂全局 Job Object 防孤儿
 - `database.rs` — SQLite 初始化：:41 执行内嵌 `schema.sql`、:55 起 fork 专属迁移、:267/:456 播种 `default-skills.json`
 - `state.rs` — AppState（sqlx 连接池 + 备份进行中标志）；`proxy.rs` — 应用级代理三档（off/custom/follow-env），作用于全部 Rust reqwest 请求；`web_search.rs` — 搜索 provider（内置 HTML 爬取 Bing/百度/DuckDuckGo + Tavily/Serper/SearXNG API）；`fonts/` — 字体上传/转换
 
