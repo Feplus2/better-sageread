@@ -348,6 +348,6 @@ scope 最新一条（即本次对话），返回 buildThreadMarkdown 文本。�
 1. 文本类（.md/.txt/.py/.json/.csv/.log 等 ≤32KB）→ 直读注入消息（不过 sidecar，零延迟）【阈值 256KB→32KB：256KB 直注入 ≈6 万+ token 且随每轮请求重复计费，Phase A 实施时收紧】；
 2. PDF/Office/EPUB 等 → MarkItDown sidecar 转 .md 后注入（>8000 字符截断 + 转存文件路径供 Agent 续读）；
 3. 超大（>50MB）/转换失败/纯二进制 → 路径登记（复制入 `attachments/`，消息里登记路径，Agent 用 readLocalFile/searchFiles 自取）。
-**扫描版 PDF 分流（用户 2026-09-17 补充）**：① 当前模型支持视觉 → PDF 页栅格化喂图（保真最高；按页烧 token，需页数上限+"大文件先问一句"闸门）；② 文本模型 → 复用论文管线 MinerU sidecar 提取（纯复用不新造；依赖本地模型权重/embedding 配置，未配置不可用属预期，按需触发而非主通道——MarkItDown 提取为空/乱码时才建议/自动走）；③ 均不可用 → 路径登记 + 明确提示，不静默失败。
+**扫描版/复杂版 PDF 分流（2026-09-17 二轮拍板）**：不走多模态栅格化单开路线，**直接复用设置页已有的 PDF 转换引擎——MinerU 优先、PaddleOCR 兜底（用户原话："有哪个用哪个，优先 MinerU"）**。触发时机：MarkItDown 提取为空/乱码（扫描件特征）或用户指定；引擎不可用（未安装/未配置）→ 路径登记 + 明确提示，不静默失败。
 阈值：单文件 ≤50MB、单次 ≤10 个；交互：原生拖拽 + 回形针 accept 扩宽，附件区文件 chip 显图标+名称+大小。
-**施工分期**：A. app 侧附件基建（文件 chip/拖拽/文本注入/路径登记/消息渲染/提示词指引）；B. MarkItDown sidecar 打包接入；C. 扫描件分流（多模态栅格化 + MinerU 复用）。
+**施工分期**：A. app 侧附件基建 ✅（dc8d2bb，E2E 过）；B. MarkItDown sidecar 打包接入 ✅（df210cf，E2E 过：PDF/DOCX 自动转 md 注入）；C. 扫描件分流 ✅（本轮，E2E 过：扫描版 PDF → MarkItDown 空 → MinerU 引擎 16s 解析成功，OCR 全文注入）。**附件上传三期全部完工（2026-09-17）**。
