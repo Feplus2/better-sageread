@@ -92,6 +92,13 @@ git push
 30 分钟内自动更新（做了缓存，防止 GitHub API 限流）。想立刻看到变化，
 用无痕窗口打开网页即可。
 
+**Release Notes 双写教训（2026-09-20 v0.4.0 实测）**：更新弹窗里给用户看的
+notes 来自 **`latest.json` 的 `notes` 字段**，而不是 GitHub Release 正文——
+tauri-action 在**构建时**按当时的 draft 正文生成 latest.json。若在 CI 跑完后才
+补写 Release 正文，用户看到的就是上一版 notes。正确姿势：**打 tag 前把
+Release Notes 写进草稿/发布说明**；补救姿势：改 latest.json 的 notes → 删旧
+资产重传 → `workflow_dispatch` 重跑 cos-sync（本版即按补救链修复）。
+
 ## 5. 下载计数（仅 GitHub 口径）
 
 网页上的「累计下载」数字 = GitHub Release 资产的真实 `download_count`（自动拉取，
