@@ -75,7 +75,14 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     if (!pendingUpdate || get().isUpdating) return;
     set({ isUpdating: true });
     try {
+      // Windows：插件 install 后直接退出进程拉起 NSIS 安装器，事后的 toast 来不及显示——
+      // 提前告知「安装器接管 + 可能弹 UAC 授权框」，避免用户对着消失的应用发愣（2026-09-10）
+      toast.info("即将下载并安装更新", {
+        description: "下载完成后安装器将自动接管（可能弹出系统授权框），应用会随之关闭并启动新版本",
+        duration: 15000,
+      });
       await pendingUpdate.downloadAndInstall();
+      // 以下两行仅在 install 能正常返回的平台（如 macOS）到达；Windows 上是死代码，保留无害
       set({ pendingUpdate: null, availableUpdate: null });
       toast.success("更新已下载", {
         description: "请重启应用以完成更新",

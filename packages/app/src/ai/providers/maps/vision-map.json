@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-10",
+  "updatedAt": "2026-09-20",
   "models": {
     "gpt-6-astra": true,
     "gpt-5.6-sol": true,
@@ -252,6 +252,9 @@
     "hunyuan-turbo": false,
     "hunyuan-pro": false,
     "hunyuan-standard": false,
+    "step-5-preview": true,
+    "step-3.7-flash": true,
+    "step-3.5-flash": false,
     "doubao-seed-2-1-pro": true,
     "doubao-seed-2-1-turbo": true,
     "doubao-seed-2-0-pro": true,
