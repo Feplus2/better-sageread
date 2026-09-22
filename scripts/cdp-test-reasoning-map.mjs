@@ -74,6 +74,12 @@ const expression = `
   check("Kimi k2.7-code 思考常开→不下发（传 disabled 400）", bp("custom", "https://api.moonshot.cn/v1", "kimi-k2.7-code", "off") === null, "");
   check("Kimi k2.7-code-highspeed→不下发", bp("custom", "https://api.kimi.com/v1", "kimi-k2.7-code-highspeed", "high") === null, "");
   check("Kimi K2.x off→disabled", applyPatch(bp("custom", "https://api.moonshot.cn/v1", "kimi-k2.5", "off")).thinking?.type === "disabled", "");
+  // ---- MiMo（api.xiaomimimo.com）：官方深度思考文档 thinking:{type} 开关，默认开启 ----
+  check("MiMo V2.6 off→thinking.disabled", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.6-pro", "off")).thinking?.type === "disabled", "");
+  check("MiMo V2.6 on→thinking.enabled", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.6-flash", "on")).thinking?.type === "enabled", "");
+  check("MiMo V2.6 off→不再发 enable_thinking", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.6-pro-ultraspeed", "off")).enable_thinking === undefined, "");
+  check("MiMo V2.6 UI 档位 off/on", JSON.stringify(m.getReasoningOptions("mimo-v2.6-pro")) === JSON.stringify(["off", "on"]), "");
+  check("MiMo v2.5 存量 budget 行数字档保留", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.5", "8192")).thinking_budget === 8192, "");
   check("不认识端点→null", bp("custom", "https://example.com", "x", "off") === null, "");
 
   return checks;

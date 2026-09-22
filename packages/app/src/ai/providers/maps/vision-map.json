@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-20",
+  "updatedAt": "2026-09-22",
   "models": {
     "gpt-6-astra": true,
     "gpt-5.6-sol": true,
@@ -190,6 +190,9 @@
     "mimo-v2.5": true,
     "mimo-v2.5-pro": true,
     "mimo-v2-omni": true,
+    "mimo-v2.6-pro": true,
+    "mimo-v2.6-flash": true,
+    "mimo-v2.6-pro-ultraspeed": true,
     "mimo-vl": true,
     "mimo-7b": false,
     "agnes-2.5-pro-alpha": true,

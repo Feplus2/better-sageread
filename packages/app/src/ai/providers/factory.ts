@@ -90,10 +90,11 @@ function thinkingOffPatch(
       body.thinking = { type: "disabled" };
     };
   }
-  // MiMo（小米）：enable_thinking:false（与 chatReasoningBodyPatch 的 off 分支同口径）
-  if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi"))
+  // MiMo（小米 api.xiaomimimo.com）：官方深度思考文档口径 thinking:{type:"disabled"}
+  // （与 chatReasoningBodyPatch 的 off 分支同口径；旧 host 检查 mimo.mi.com 不匹配官方端点）
+  if (host.includes("xiaomimimo.com") || host.includes("mimo.mi.com") || host.includes("mimo.xiaomi"))
     return (body) => {
-      body.enable_thinking = false;
+      body.thinking = { type: "disabled" };
     };
   return null;
 }

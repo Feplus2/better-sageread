@@ -118,6 +118,13 @@ const expression = `
   check("openrouter openai/gpt-5.2 放行", v("openrouter", "openai/gpt-5.2") === true, "");
   check("openrouter 未知作者默认放行", v("openrouter", "someone/some-model") === true, "");
 
+  // ---- 小米 MiMo：V2.6 全系全模态（2026-09-22 官方模型页：输入 文本/图像/视频/音频） ----
+  check("xiaomi mimo-v2.6-pro 放行", v("xiaomi", "mimo-v2.6-pro") === true, "");
+  check("xiaomi mimo-v2.6-flash 放行", v("xiaomi", "mimo-v2.6-flash") === true, "");
+  check("xiaomi mimo-v2.6-pro-ultraspeed 放行", v("xiaomi", "mimo-v2.6-pro-ultraspeed") === true, "");
+  check("xiaomi mimo-v2.5 放行", v("xiaomi", "mimo-v2.5") === true, "");
+  check("xiaomi mimo-7b 拦截（纯文本）", v("xiaomi", "mimo-7b") === false, "");
+
   // ---- 自定义/未知端点：默认放行（维持现状原则） ----
   check("custom 自定义端点默认放行", v("custom", "my-model") === true, "");
   check("未知型号命名启发式兜底（新视觉命名）", v("deepseek", "deepseek-v9-vision-x") === true, "");

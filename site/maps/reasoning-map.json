@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-10",
+  "updatedAt": "2026-09-22",
   "models": {
     "o1": {
       "alwaysOn": false,
@@ -509,6 +509,24 @@
       "levels": ["off", "low", "medium", "high"],
       "transport": "budget",
       "maxBudget": 32768
+    },
+    "mimo-v2.6-pro": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "mimo-v2.6-flash": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
+    },
+    "mimo-v2.6-pro-ultraspeed": {
+      "alwaysOn": false,
+      "offParam": "thinking:disabled",
+      "levels": [],
+      "transport": "switch"
     },
     "gpt-4o": {
       "alwaysOn": false,

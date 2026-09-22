@@ -1,5 +1,5 @@
 /**
- * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，最近更新 2026-09-10）。
+ * 聊天思考强度映射表 —— 枚举制（2026-08-28 定稿，最近更新 2026-09-22）。
  *
  * 用户可见档位 = 模型原生档位（不再经过 off/low/medium/high 四档映射）：
  * grok-4.6 支持 none/low/medium/high/xhigh → UI 直接呈现这五项；
@@ -311,12 +311,15 @@ export function chatReasoningBodyPatch(
       };
     return null;
   }
-  // MiMo — budget 型同 Qwen
-  if (host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
+  // MiMo（api.xiaomimimo.com）——官方深度思考文档：thinking:{type:enabled|disabled} 开关，
+  // 默认开启（V2.6 全系/V2.5 同口径）。旧 host 检查 mimo.mi.com 不匹配官方端点 api.xiaomimimo.com，
+  // 补上前表里的 mimo 行是死条目（与混元/豆包同款缺口，2026-09-22 随 V2.6 入表修复）。
+  // 数字档保留 enable_thinking+thinking_budget，兼容存量 budget 行（v2.5 系）。
+  if (host.includes("xiaomimimo.com") || host.includes("mimo.mi.com") || host.includes("mimo.xiaomi")) {
     const budget = Number.parseInt(level, 10);
     if (budget === 0 || level === "off" || level === "none") {
       return (body) => {
-        body.enable_thinking = false;
+        body.thinking = { type: "disabled" };
       };
     }
     if (Number.isFinite(budget) && budget > 0) {
@@ -327,7 +330,7 @@ export function chatReasoningBodyPatch(
     }
     if (level === "on") {
       return (body) => {
-        body.enable_thinking = true;
+        body.thinking = { type: "enabled" };
       };
     }
     return null;
