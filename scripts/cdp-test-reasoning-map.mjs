@@ -80,6 +80,13 @@ const expression = `
   check("MiMo V2.6 off→不再发 enable_thinking", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.6-pro-ultraspeed", "off")).enable_thinking === undefined, "");
   check("MiMo V2.6 UI 档位 off/on", JSON.stringify(m.getReasoningOptions("mimo-v2.6-pro")) === JSON.stringify(["off", "on"]), "");
   check("MiMo v2.5 存量 budget 行数字档保留", applyPatch(bp("xiaomi", "https://api.xiaomimimo.com/v1", "mimo-v2.5", "8192")).thinking_budget === 8192, "");
+  // ---- 2026-09-23 批次：GPT-6 Sol/Luna（effort 六档含 none/max）、Grok 4.7（五档） ----
+  check("openai gpt-6-sol max→max", po("openai", "gpt-6-sol", "max")?.openai?.reasoningEffort === "max", "");
+  check("openai gpt-6-luna none→none", po("openai", "gpt-6-luna", "none")?.openai?.reasoningEffort === "none", "");
+  check("gpt-6-sol 档位六档含 none/max", JSON.stringify(m.getReasoningOptions("gpt-6-sol")) === JSON.stringify(["none", "low", "medium", "high", "xhigh", "max"]), "");
+  check("grok-4.7 xhigh→xhigh", po("grok", "grok-4.7", "xhigh")?.openai?.reasoningEffort === "xhigh", "");
+  check("grok-4.7 档位五档", JSON.stringify(m.getReasoningOptions("grok-4.7")) === JSON.stringify(["none", "low", "medium", "high", "xhigh"]), "");
+  check("claude-opus-5-5 无思考行（anthropic 通道未分派，不加行防死档位）", m.getReasoningOptions("claude-opus-5-5").length === 0 && po("anthropic", "claude-opus-5-5", "high") === undefined, "");
   check("不认识端点→null", bp("custom", "https://example.com", "x", "off") === null, "");
 
   return checks;

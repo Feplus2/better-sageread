@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-22",
+  "updatedAt": "2026-09-23",
   "models": {
     "o1": {
       "alwaysOn": false,
@@ -121,6 +121,18 @@
       "levels": ["low", "medium", "high", "xhigh", "max"],
       "transport": "effort"
     },
+    "gpt-6-sol": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh", "max"],
+      "transport": "effort"
+    },
+    "gpt-6-luna": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh", "max"],
+      "transport": "effort"
+    },
     "gemini-2.5-pro": {
       "alwaysOn": false,
       "offParam": "budget:0",
@@ -212,6 +224,12 @@
       "transport": "effort"
     },
     "grok-4.6": {
+      "alwaysOn": false,
+      "offParam": "none",
+      "levels": ["none", "low", "medium", "high", "xhigh"],
+      "transport": "effort"
+    },
+    "grok-4.7": {
       "alwaysOn": false,
       "offParam": "none",
       "levels": ["none", "low", "medium", "high", "xhigh"],

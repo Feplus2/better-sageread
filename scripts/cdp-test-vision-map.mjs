@@ -125,6 +125,12 @@ const expression = `
   check("xiaomi mimo-v2.5 放行", v("xiaomi", "mimo-v2.5") === true, "");
   check("xiaomi mimo-7b 拦截（纯文本）", v("xiaomi", "mimo-7b") === false, "");
 
+  // ---- 2026-09-23 批次：Opus 5.5 / GPT-6 Sol·Luna / Grok 4.7（官方型号页+OpenRouter 目录核实图像输入） ----
+  check("anthropic claude-opus-5-5 放行", v("anthropic", "claude-opus-5-5") === true, "");
+  check("openai gpt-6-sol 放行", v("openai", "gpt-6-sol") === true, "");
+  check("openai gpt-6-luna 放行", v("openai", "gpt-6-luna") === true, "");
+  check("grok grok-4.7 放行", v("grok", "grok-4.7") === true, "");
+
   // ---- 自定义/未知端点：默认放行（维持现状原则） ----
   check("custom 自定义端点默认放行", v("custom", "my-model") === true, "");
   check("未知型号命名启发式兜底（新视觉命名）", v("deepseek", "deepseek-v9-vision-x") === true, "");

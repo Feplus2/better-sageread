@@ -12,6 +12,7 @@
 - `THEMING.md` — 全局主题开发指南
 - `format-strategy-and-paper-module.md` — 格式策略与论文模块边界裁定
 - `living-library-vision.md` — 活的向量库愿景（方向性文档）
+- `model-maps-maintenance.md` — 模型表（视觉/思考）维护工作流：三处副本、改表流程、核实来源
 - `paper-format-contract.md` — Papers Converter ↔ 文献库格式契约
 - `papers-converter-integration.md` — Papers_Converter 整合交接（含事故与遗留台账）
 - `refactoring-lessons.md` — 代码重构方法论
