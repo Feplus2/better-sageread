@@ -1,0 +1,367 @@
+# SageRead Agent 评测题库 · 第一批（Phase 0 基线）
+# 冻结日期：2026-10-22 · 状态：G0 待评审
+# 用法：旧工具集跑 3 次 → 人工/Lead 判分 → 落盘 .tmp-eval-runs/<ts>/；Phase 2 再扩到 40–50 并接 rubric judge。
+# 说明：gold.anchors 用协议 v0 语法（docs/design/anchor-protocol.md）；旧工具集没有 anchor 概念，判分时按「文档 + 章节/图号/引用号」核对。
+version: 1
+frozen_at: "2026-10-22"
+status: "g0-pending"
+
+fixtures:
+  book_foucault: "9f1820c6dcc62250458da69162b72e5d"   # 牛津通识读本：福柯（中文版），EPUB，已索引 288 chunks
+  book_civil: "718a0d5d6514980ce87dd8b0d39ad2dc"      # 民法总论，EPUB，未索引，无 mdbook
+  paper_rational: "a27b187c6bd02d3c"                  # Rational design...，MARKDOWN，已索引 84 chunks
+  paper_prussian: "43f3adfdea61b6d4"                  # Dehydration-induced CN- defects...，MARKDOWN，未索引
+  paper_interface: "09515f7218b81d7f"                 # Environmentally stable interface...，MARKDOWN，已索引 140 chunks
+  paper_scale: "5c33d4493541c1f7"                     # At-Scale Data-Driven Exploration...，MARKDOWN，未索引
+
+fixture_meta:
+  "9f1820c6dcc62250458da69162b72e5d": { kind: "book", title: "牛津通识读本：福柯（中文版）" }
+  "718a0d5d6514980ce87dd8b0d39ad2dc": { kind: "book", title: "民法总论" }
+  "a27b187c6bd02d3c": { kind: "paper", title: "Rational design of layered oxide materials for sodium-ion batteries" }
+  "43f3adfdea61b6d4": { kind: "paper", title: "Dehydration-induced CN- defects enable adaptive water regulation in Prussian blue cathodes" }
+  "09515f7218b81d7f": { kind: "paper", title: "Environmentally stable interface of layered oxide cathodes" }
+  "5c33d4493541c1f7": { kind: "paper", title: "At-Scale Data-Driven Exploration of High-Voltage Cathode-Active Materials" }
+  "9cb0c0d36b71df5c": { kind: "paper", title: "Review of cathode materials for sodium-ion batteries" }
+
+harness:
+  model: "deepseek-flash"           # 实际以 provider 配置为准，运行时记录 provider/model
+  model_pin:                        # 评测期强制统一模型，跑完恢复用户选择
+    providerId: "deepseek"
+    providerName: "DeepSeek"
+    modelId: "deepseek-flash"
+    modelName: "deepseek-flash"
+  temperature: 0
+  repeats: 3
+  max_steps: 20
+  max_tokens_per_task: 40000
+  scoring: "Phase 0 人工判分（Lead），Phase 2 换固定 rubric judge + 人工抽检"
+  position_pin:
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    target: "第二章 文学 开头"
+    procedure: "备份 book_status.location → UI 打开书并跳到第二章开头 → 记录 ReadingPositionSnapshot → 跑完恢复"
+  current_doc_setup:
+    book_tasks: "UI 打开对应书（reader scope）"
+    paper_tasks: "UI 打开对应论文（paper scope）"
+
+tasks:
+  - id: "book-locate-ch3"
+    category: "locate"
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    prompt: |
+      这本书第三章主要讲了什么？用 3–5 句话概括，并告诉我章节标题。
+    gold:
+      anchors:
+        - "book:9f1820c6dcc62250458da69162b72e5d/text/part0007.md#第三章"
+      facts:
+        - "第三章标题是「政治学」"
+        - "围绕福柯与萨特的政治立场分歧展开（普遍型知识分子 vs 专才/批判知识分子）"
+        - "讨论福柯与马克思主义、法国共产党的关系"
+        - "提到 1968 年五月风暴/突尼斯时期福柯与布朗肖的传闻"
+        - "福柯拒绝固定政治身份，称自己在政治棋盘每个格子里都留下脚印"
+      must_not:
+        - "把第三章主题说成「作者功能」或「文学」（那是第二章）"
+        - "把第三章说成「疯癫」或「系谱学」"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "章节锚点命中 且 facts 命中 ≥3 且 must_not 违例 = 0"
+      rubric: "章节正确 1 分；每条事实 1 分；编造/错章一票否决"
+    budget: { max_steps: 12, max_tokens: 30000 }
+    golden_trace:
+      - tool: "outline"
+        args: { doc: "book:9f1820c6dcc62250458da69162b72e5d" }
+      - tool: "read"
+        args: { anchor: "book:9f1820c6dcc62250458da69162b72e5d/text/part0007.md#第三章", after: 6000 }
+      - tool: "read"
+        args: { anchor: "<上一步 next>" }
+    old_tool_hint: ["ragToc", "readBookSection", "ragSearch"]
+    notes: "part0007.md 共 7944 字符，需要 1–2 个窗口。"
+
+  - id: "paper-figure-3-rational"
+    category: "figure"
+    doc: "paper:a27b187c6bd02d3c"
+    prompt: |
+      这篇论文的图 3 说明了什么？请说出图号、它对应的设计策略，以及图中 A–D 四个面板分别展示什么。
+    gold:
+      anchors:
+        - "figure:a27b187c6bd02d3c:3"
+      facts:
+        - "图 3 标题是 Designing a P2-type oxide（设计 P2 型氧化物）"
+        - "(A) Na-Li-Mn-O 氧化物的阳离子势（cationic potential）分析"
+        - "(B) NaLi1/3Ti1/6Mn1/2O2 与 Na5/6Li5/18Mn13/18O2 的 XRD 图谱"
+        - "(C) Na5/6Li5/18Mn13/18O2 的 Rietveld 精修"
+        - "(D) [Li5/18Mn13/18]O2 层板中 Li/Mn 有序排布的示意图"
+        - "设计策略是用阳离子势预测 P2/O3 堆叠，再通过成分设计得到 P2 型"
+      must_not:
+        - "把图 3 说成图 1 的相图或图 2 的 O3 型设计"
+        - "编造具体容量/循环圈数数值"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "图号锚点命中 且 facts 命中 ≥4 且 must_not 违例 = 0"
+      rubric: "图号正确 1 分；四个面板各 1 分；策略 1 分；编造一票否决"
+    budget: { max_steps: 12, max_tokens: 30000 }
+    golden_trace:
+      - tool: "list_figures"
+        args: { doc: "paper:a27b187c6bd02d3c" }
+      - tool: "read"
+        args: { anchor: "figure:a27b187c6bd02d3c:3" }
+      - tool: "view"
+        args: { anchor: "figure:a27b187c6bd02d3c:3" }
+    old_tool_hint: ["getFigures", "readPaperSection（只能看图注，看不到图）"]
+    notes: "P0 的核心验收题：新实现应能真正看图，而不是靠图注猜。"
+
+  - id: "paper-figure-2-prussian"
+    category: "figure"
+    doc: "paper:43f3adfdea61b6d4"
+    prompt: |
+      这篇论文的图 2 展示了哪些表征或实验？它想说明什么？
+    gold:
+      anchors:
+        - "figure:43f3adfdea61b6d4:2"
+      facts:
+        - "原位真空热脱水 + 吸湿过程的 2D contour 与 3D XRD 图"
+        - "原位 TG-FTIR 光谱"
+        - "PB-1 / PB-3 的 HTEM、SAED、GPA 表征"
+        - "正电子湮没寿命谱（positron annihilation lifetime）"
+        - "单颗粒压碎强度与粉末单轴压缩测试"
+        - "区分脱水产生的 CN− 缺陷与合成过程产生的 [Fe(CN)6]4− 缺陷"
+        - "意图：证明脱水会诱发 CN− 缺陷并改变水–骨架相互作用"
+      must_not:
+        - "说图 2 是电化学循环性能图（那是图 3）"
+        - "编造具体容量保持率数值"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "图号锚点命中 且 facts 命中 ≥4 且 must_not 违例 = 0"
+      rubric: "图号正确 1 分；表征种类每条 1 分；结论 1 分"
+    budget: { max_steps: 14, max_tokens: 32000 }
+    golden_trace:
+      - tool: "list_figures"
+        args: { doc: "paper:43f3adfdea61b6d4" }
+      - tool: "read"
+        args: { anchor: "figure:43f3adfdea61b6d4:2" }
+      - tool: "view"
+        args: { anchor: "figure:43f3adfdea61b6d4:2" }
+    old_tool_hint: ["getFigures", "readPaperSection（未索引论文，且看不到大图）"]
+    notes: "图 2 是 4.83MB PNG，验证 view 的降采样；论文未索引，验证 list_figures 不依赖向量。"
+
+  - id: "position-summary-ch2"
+    category: "position-summary"
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    requires:
+      open_doc: "book:9f1820c6dcc62250458da69162b72e5d"
+      position: "第二章 文学 开头"
+    prompt: |
+      我现在读到的地方在讲什么？用 5 句话总结这一节，并告诉我这是哪一章。
+    gold:
+      anchors:
+        - "position:book:9f1820c6dcc62250458da69162b72e5d"
+      facts:
+        - "这是第二章「文学」"
+        - "开头句是「我梦想成为布朗肖」"
+        - "核心概念是「作者功能」（author function）"
+        - "作者身份不是自然身份，而是社会建构，因文化与历史时期而异"
+        - "一个文本存在多个自我，作者功能分散这些自我"
+        - "福柯试图通过写作逃避任何固定的身份"
+      must_not:
+        - "把这一节说成第三章「政治学」"
+        - "编造福柯与布朗肖实际会面的确定事实"
+    grader:
+      type: "anchor+facts+position"
+      pass_rule: "位置锚点命中 且 章节名正确 且 facts 命中 ≥3 且 must_not 违例 = 0"
+      rubric: "章节正确 1 分；开头句 1 分；作者功能 1 分；社会建构 1 分；多自我 1 分"
+    budget: { max_steps: 12, max_tokens: 30000 }
+    golden_trace:
+      - tool: "(注入)"
+        args: { note: "【当前阅读位置】每轮注入，指向第二章开头" }
+      - tool: "read"
+        args: { anchor: "position:book:9f1820c6dcc62250458da69162b72e5d", after: 6000 }
+      - tool: "read"
+        args: { anchor: "<上一步 next>" }
+    old_tool_hint: ["getReadingPosition", "readAtReadingPosition"]
+    notes: "part0006.md 共 6944 字符。位置由 harness 固定；首次运行记录 snapshot 并把「第二章」/进度冻结进 gold。"
+
+  - id: "cross-doc-interface-design"
+    category: "cross-doc"
+    docs:
+      - "paper:a27b187c6bd02d3c"
+      - "paper:09515f7218b81d7f"
+    prompt: |
+      比较《Rational design of layered oxide materials for sodium-ion batteries》和《Environmentally stable interface of layered oxide cathodes for sodium-ion batteries》两篇论文：它们在「钠离子层状氧化物正极设计」上的思路差异是什么？各自解决什么问题、用什么设计手段、证据是什么？
+    gold:
+      anchors:
+        - "paper:a27b187c6bd02d3c"
+        - "paper:09515f7218b81d7f"
+      facts:
+        - "论文 A（Rational design）关注体相堆叠结构：用阳离子势预测 P2/O3 堆叠，设计 Na-Li-Mn(Ti)-O 体系"
+        - "论文 C（Environmentally stable interface）关注界面环境稳定性：表面富集 Ti 形成类尖晶石 Ti(III) 氧化物界面"
+        - "两篇都针对钠离子层状氧化物（锰基层状正极）"
+        - "A 的证据：阳离子势相图 + XRD/Rietveld + 电化学性能"
+        - "C 的证据：SEM/XRD/SAED/EELS + 循环性能/界面稳定性"
+        - "设计杠杆不同：A 是体相成分/堆叠设计，C 是表面/界面化学设计"
+      must_not:
+        - "把两篇的设计手段互换（说 A 用 Ti 表面富集、C 用阳离子势）"
+        - "声称两篇是同一课题组或同一材料体系"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "两篇文档都命中 且 facts 命中 ≥4 且 must_not 违例 = 0"
+      rubric: "两篇各自问题/手段/证据各 1 分；对比结论 1 分；混淆一票否决"
+    budget: { max_steps: 16, max_tokens: 40000 }
+    golden_trace:
+      - tool: "search"
+        args: { query: "layered oxide cathode design strategy interface stability", scope: "all", types: ["text"], top_k: 8 }
+      - tool: "read"
+        args: { anchor: "<A 命中锚点>", after: 4000 }
+      - tool: "read"
+        args: { anchor: "<C 命中锚点>", after: 4000 }
+    old_tool_hint: ["paperSearch（全库）", "readPaperSection 两篇"]
+    notes: "两篇都已索引（84 / 140 chunks），用来测跨文献检索 + 双文档阅读；旧工具集需要切文档或开全库搜索。"
+
+  - id: "methods-dataset-scale"
+    category: "methods"
+    doc: "paper:5c33d4493541c1f7"
+    prompt: |
+      这篇论文的数据集是怎么构建和筛选的？用了哪些数据库和工具？最后怎么做验证？
+    gold:
+      anchors:
+        - "paper:5c33d4493541c1f7#2.1. Database Construction and Curation"
+      facts:
+        - "从四个数据库收集：Materials Project、AFLOW、OQMD、GNoME"
+        - "通过 MAPI/pymatgen、OPTIMADE API、AFLUX REST、Google Cloud Storage 获取结构"
+        - "只用充电态（charged-only）结构构建数据集，而不是充放电对"
+        - "用 ET / GB / RF / XGB 四个机器学习模型组成委员会预测电压与比容量"
+        - "对排名靠前的候选做高通量第一性原理（DFT）验证：电压曲线、相稳定性、结构稳定性、电子性质"
+      must_not:
+        - "说只用了 Materials Project 一个数据库"
+        - "说训练数据是充放电对（charged/discharged pairs）"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "方法节锚点命中 且 facts 命中 ≥4 且 must_not 违例 = 0"
+      rubric: "数据库 1 分；工具/API 1 分；charged-only 1 分；ML 1 分；DFT 验证 1 分"
+    budget: { max_steps: 12, max_tokens: 30000 }
+    golden_trace:
+      - tool: "outline"
+        args: { doc: "paper:5c33d4493541c1f7" }
+      - tool: "read"
+        args: { anchor: "paper:5c33d4493541c1f7#2.1. Database Construction and Curation", after: 6000 }
+    old_tool_hint: ["readPaperSection（按标题）"]
+    notes: "论文 63KB、未索引，方法节完整；用来测长文结构定位。"
+
+  - id: "citation-ref-12"
+    category: "citation"
+    doc: "paper:43f3adfdea61b6d4"
+    prompt: |
+      这篇论文的参考文献第 12 条是什么？给出作者、标题、期刊/年份和 DOI。
+    gold:
+      anchors:
+        - "cite:43f3adfdea61b6d4:12"
+      facts:
+        - "作者：Gao Q, Li T, Liu C, Sun J, Liu Y, Hou L, Yuan C"
+        - "标题：Hierarchically porous N-doped carbon framework with enlarged interlayer spacing as dual-carbon electrodes for potassium ion hybrid capacitors"
+        - "期刊：Carbon Neutrality，2023，2(1):18"
+        - "DOI：10.1007/s43979-023-00057-5"
+      must_not:
+        - "把第 12 条说成第 13 条（Song 等，JACS 2015）"
+        - "编造不存在的 DOI"
+    grader:
+      type: "citation-exact"
+      pass_rule: "编号正确 且 标题命中 且 DOI 正确"
+      rubric: "编号 1 分；作者/标题 1 分；期刊年份 1 分；DOI 1 分"
+    budget: { max_steps: 10, max_tokens: 20000 }
+    golden_trace:
+      - tool: "get_citations"
+        args: { doc: "paper:43f3adfdea61b6d4", n: 12 }
+    old_tool_hint: ["getCitations（能读 paper.md 的 References 小节）"]
+    notes: "参考文献小节有 <a id=ref-12> 锚点；旧工具集理论上可完成，用于比步数/token。"
+
+  - id: "unindexed-book-meaning"
+    category: "fallback"
+    doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc"
+    prompt: |
+      《民法总论》里关于「意思表示」的论述主要在哪一章？找到「意思表示的构成」这一节，并概括它的核心观点。
+    gold:
+      anchors:
+        - "book:718a0d5d6514980ce87dd8b0d39ad2dc#第九章 法律行为与意思表示的一般原理/第二节 意思表示的构成"
+      facts:
+        - "在第九章「法律行为与意思表示的一般原理」"
+        - "对应第二节「意思表示的构成」"
+        - "意思表示 = 表意人将发生特定法律效果的意思表达于外部的行为"
+        - "包含主观构成要件与客观构成要件"
+        - "主观方面（雷曼三分）：行为意思、表示意识、效果意思"
+        - "行为意思不可或缺；表示意识通说不是构成要件（参考「储蓄所保证案」）"
+      must_not:
+        - "说在「第五章 法人」或「第十章 法律行为的成立与生效」"
+        - "把三要素说成「目的意思 / 效果意思 / 表示行为」"
+    grader:
+      type: "anchor+facts+rubric"
+      pass_rule: "章节+节锚点命中 且 facts 命中 ≥4 且 must_not 违例 = 0"
+      rubric: "章 1 分；节 1 分；定义 1 分；主观三要素 1 分；通说结论 1 分"
+    budget: { max_steps: 14, max_tokens: 32000 }
+    golden_trace:
+      - tool: "outline"
+        args: { doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }
+      - tool: "read"
+        args: { anchor: "book:718a0d5d6514980ce87dd8b0d39ad2dc#第九章 法律行为与意思表示的一般原理/第二节 意思表示的构成", after: 6000 }
+    old_tool_hint: ["readBookSection（无 mdbook，走 EPUB 解析；目录匹配可能失败）"]
+    notes: "书 B 无 mdbook、未索引；这是「无索引兜底 + EPUB TOC 匹配」的核心题。"
+
+  - id: "refusal-quantum"
+    category: "refusal"
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    prompt: |
+      《福柯》这本书里有没有讨论量子色动力学？如果有，在第几章？
+    gold:
+      anchors: []
+      facts:
+        - "明确回答：没有 / 未找到"
+        - "说明本书主题是福柯的思想（文学、政治学、考古学、系谱学等），不涉及物理学"
+        - "可以建议换书或换关键词，或说明检索范围"
+      must_not:
+        - "声称书中某章讨论了量子色动力学"
+        - "编造页码、章节或引文"
+    grader:
+      type: "refusal"
+      pass_rule: "明确否定 且 无编造内容"
+      rubric: "明确说没有 1 分；给出合理范围说明 1 分；任何编造一票否决"
+    budget: { max_steps: 10, max_tokens: 20000 }
+    golden_trace:
+      - tool: "search"
+        args: { query: "量子色动力学", scope: "current", types: ["text"], top_k: 8 }
+      - tool: "(判定)"
+        args: { note: "EMPTY_RESULT → 直接拒答，不要反复换词重试" }
+    old_tool_hint: ["ragSearch（返回空）"]
+    notes: "已核实全书 76,226 字符不含「量子」。旧工具集可能因空结果继续翻书，用于测「停手」能力。"
+
+  - id: "position-where-ch2"
+    category: "position"
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    requires:
+      open_doc: "book:9f1820c6dcc62250458da69162b72e5d"
+      position: "第二章 文学 开头"
+    prompt: |
+      我读到哪了？把当前这一节的开头原文给我，并说明是第几章、大概进度。
+    gold:
+      anchors:
+        - "position:book:9f1820c6dcc62250458da69162b72e5d"
+      facts:
+        - "第二章「文学」"
+        - "原文开头：「我梦想成为布朗肖。」"
+        - "进度以运行时 snapshot 为准（harness 固定到第二章开头后记录）"
+      must_not:
+        - "报成第一章/第三章"
+        - "引用不存在的原文"
+    grader:
+      type: "position-anchor+quote"
+      pass_rule: "章节名正确 且 原文引文命中 且 无编造"
+      rubric: "章节 1 分；开头原文 2 分；进度可核验 1 分"
+    budget: { max_steps: 10, max_tokens: 20000 }
+    golden_trace:
+      - tool: "(注入)"
+        args: { note: "【当前阅读位置】已指向第二章开头" }
+      - tool: "read"
+        args: { anchor: "position:book:9f1820c6dcc62250458da69162b72e5d", before: 100, after: 1500 }
+    old_tool_hint: ["getReadingPosition", "readAtReadingPosition"]
+    notes: "与 position-summary-ch2 共用同一个位置固定；旧工具集可能重复读同一段，用于测「位置已注入」后的重复调用。"
+
+# G0 备注
+# 1. 前 9 题都有明确的「旧工具集可做/难做」判断；第 2/3 题是旧工具集真正缺口（看不到图）。
+# 2. position 两题的 gold 百分比与章节需要在 Phase 0E 首次运行后按 snapshot 冻结。
+# 3. 每题 max_steps 是「正常路径」上限，超过视为失败（但保留轨迹用于分析）。
