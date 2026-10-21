@@ -113,4 +113,5 @@
 - 2026-10-22：0D 走查完成（修掉 TOC 标题 vs 文本层 heading 的匹配坑；跨文献题改为显式点名两篇论文）；
 - 2026-10-22：0E 完成——UI 驱动 harness 跑通（打开文档/固定位置/新对话/发送/落库/提取轨迹/删评测线程/恢复位置），10 题 × 3 次基线完成；
 - 2026-10-22：**G1 基线建立**——内容通过 29/30、干净通过 27/30、均值 40.5k token / 5.1 步 / 10.4 s；跨文献 1/3 空答案（撞 20 步上限）、2/3 靠外部搜索兜底、26.8% 工具调用是目录牌。详见 docs/audits/agent-baseline-g1-2026-10-22.md；
-- 下一步：P0（本地 read_image、getFigures 绝对路径、库地图注入、guidance 单源、步骤上限兜底），每步复跑 10 题对比 G1。
+- 2026-10-22：**P0 完成**——本地 readImage(path/maxEdge)、getFigures 绝对路径、文献库约定注入、看图成本策略、步数收口（prepareStep）。L1 12/12 通过；10 题冒烟全过，均值 token 40.5k→30.4k、步数 5.1→3.4。详见 docs/audits/agent-p0-smoke-2026-10-22.md。
+- 下一步：P1——read_document(anchor)/search_library 统一入口、DocRef、paperSearch scope 显式化；补 1-2 道「视觉事实只在图里」的题验证视觉闭环。

@@ -258,13 +258,21 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const reasoningLevel = useChatSettingsStore.getState().reasoningLevel;
     const providerOptions = sel ? chatReasoningProviderOptions(sel.providerId, sel.modelId, reasoningLevel) : undefined;
 
+    // P0 可靠性：步数预算临近上限时强制收口，避免 20 步截断导致空答案（G1 跨文献 rep1）
+    const STEP_LIMIT = 20;
+    const FORCE_FINAL_ANSWER_AT = STEP_LIMIT - 2;
+    const forcedFinalInstructions = `${systemPrompt}\n\n【步骤预算】已接近本轮工具调用上限，不要再调用任何工具；请立即基于已获得的信息给出最终答案，并明确说明还有哪些信息没拿到。`;
     const result = streamText({
       model,
       messages: timestampedMessages,
       abortSignal: options.abortSignal,
       toolChoice: "auto",
-      stopWhen: isStepCount(20),
+      stopWhen: isStepCount(STEP_LIMIT),
       tools,
+      prepareStep: ({ stepNumber }) =>
+        stepNumber >= FORCE_FINAL_ANSWER_AT
+          ? { toolChoice: "none" as const, instructions: forcedFinalInstructions }
+          : undefined,
       // v7：system 更名 instructions（语义不变，逐字节兼容缓存）
       instructions: systemPrompt,
       onEnd: () => {

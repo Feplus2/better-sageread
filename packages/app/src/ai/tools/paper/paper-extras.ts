@@ -1,3 +1,4 @@
+import { appDataDir } from "@tauri-apps/api/path";
 import { tool } from "ai";
 import { z } from "zod";
 import { readPaperMarkdown } from "./shared";
@@ -132,12 +133,12 @@ export const createGetFiguresTool = (paperId: string | undefined) =>
 • 需要定位某个图表所在小节时
 
 📊 **返回内容**：
-[{image, caption, captionFrom, section}]，最多 ${MAX_FIGURES} 条。
+[{image, image_path, caption, captionFrom, section}]，最多 ${MAX_FIGURES} 条。
+image=Markdown 里的相对路径；image_path=绝对路径，可直接传给 readImage 看原图。
 captionFrom 标注图注来源："alt"=Markdown 图片 alt；"block"=图片下方正文里的图注段落（Figure N. / 图 N 开头）；null=没找到图注。
 message 会报告游离图注数（有编号文本但附近没有图片，可能是图丢失的残注）。
 
-⚠️ **什么时候别用**：
-• 用户想理解某张图的具体内容——本工具只返回路径与图注，不能"看"图；应结合 readPaperSection 读图注附近的正文`,
+📌 **看图**：要理解图片内容，直接调用 readImage(path=image_path)；没有真正调用 readImage 时，不要只凭图注猜图中细节。`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想浏览论文中的所有图片'"),
     }),
@@ -146,6 +147,7 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
         throw new Error("未找到当前论文，请先在文献库中打开一篇论文");
       }
 
+      const baseDir = (await appDataDir()).replace(/\\/g, "/");
       const markdown = await readPaperMarkdown(paperId);
       const lines = markdown.split("\n");
 
@@ -157,8 +159,13 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
       const IMG_ONLY_RE = /^\s*(!\[[^\]]*\]\([^)]*\)\s*)+$/;
       const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
 
-      const figures: { image: string; caption: string; captionFrom: "alt" | "block" | null; section: string | null }[] =
-        [];
+      const figures: {
+        image: string;
+        image_path: string;
+        caption: string;
+        captionFrom: "alt" | "block" | null;
+        section: string | null;
+      }[] = [];
       const usedCaptionLines = new Set<number>();
       let lastHeading: string | null = null;
       let truncated = false;
@@ -199,7 +206,13 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
               break;
             }
           }
-          figures.push({ image: src, caption, captionFrom, section: lastHeading });
+          figures.push({
+            image: src,
+            image_path: `${baseDir}/books/${paperId}/${src}`,
+            caption,
+            captionFrom,
+            section: lastHeading,
+          });
         }
         if (truncated) break;
       }

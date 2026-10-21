@@ -1,3 +1,4 @@
+import { buildLibraryGuide } from "@/ai/prompts/library-guide";
 import { DEFAULT_READER_STYLE } from "@/constants/agent-styles";
 import { buildCentralPrompt } from "@/constants/central-prompt";
 import { buildPaperPrompt } from "@/constants/paper-prompt";
@@ -14,16 +15,14 @@ import { exists, readTextFile } from "@tauri-apps/plugin-fs";
  */
 export async function buildPrompt(chatContext: ChatContext | undefined): Promise<string> {
   const agentScope = chatContext?.agentScope ?? "reader";
-
-  if (agentScope === "central") {
-    return await buildCentralPrompt();
-  }
-
-  if (agentScope === "paper") {
-    return await buildPaperPrompt(chatContext);
-  }
-
-  return await buildReadingPrompt(chatContext);
+  const base =
+    agentScope === "central"
+      ? await buildCentralPrompt()
+      : agentScope === "paper"
+        ? await buildPaperPrompt(chatContext)
+        : await buildReadingPrompt(chatContext);
+  // P0：文献库导航约定（根/布局/探索顺序/图片/只读边界）三 scope 共用，静态段（缓存友好）
+  return `${base}\n\n${await buildLibraryGuide()}`;
 }
 
 /**

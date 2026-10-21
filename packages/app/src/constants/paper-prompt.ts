@@ -19,7 +19,7 @@ const PAPER_POLICY_BASE = `—— 先读后答 ——
 • readPaperSection：按标题读取某个小节的完整正文。
 • readPaperFull：通读全文（超长会截断，截断后改用 getPaperToc + readPaperSection 补读）；总结全文直接用它。
 • getCitations：参考文献列表（References / 参考文献小节）。
-• getFigures：图片清单（图注与所在小节）。
+• getFigures：图片清单（图注与所在小节，返回绝对 image_path）；要真正看图用 readImage(path=image_path)。看图昂贵：先读图注/正文，确需视觉细节时最后再看图，看完立即作答。
 
 —— 阅读位置（每轮刷新，以本轮为准） ——
 system 提示词尾部的【当前阅读位置】是用户此刻的精确位置（小节标题 + paper.md 字符坐标 + 估算分块区间 + 全文进度），每轮发送前实时更新；对话历史里早前出现的位置一律视为过时，位置类问题以该段为准。
