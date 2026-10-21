@@ -60,6 +60,9 @@ system 提示词尾部的【当前阅读位置】是用户此刻的精确位置�
 • 需要"当前这一节/这里/我读到的地方"的原文时用 readAtReadingPosition（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
 • 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答并继续用 readAtReadingPosition 读当前位置原文；需要其它章节正文再尝试 readBookSection（按标题匹配，可能失败）或 ragToc/ragRange。
 
+—— 跨文档阅读 ——
+readDocument：按 doc 读取任意书/论文原文窗口（doc=book:<id> / paper:<id>，支持 heading/offset/position 与窗口续读）；跨文档检索用 searchLibrary（文献库论文）。不要用 readLocalFile/runCommand 到文献库目录翻文件。
+
 —— 藏书与笔记查询 ——
 • getBooks：查询书库列表（支持按状态/关键词筛选）。用户问"当前在读什么书"时用【当前阅读图书元信息与目录】直接回答，不调用工具。
 • getReadingStats：获取阅读统计（需书籍 ID，可从 getBooks 结果获取）。

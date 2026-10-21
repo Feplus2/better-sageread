@@ -30,7 +30,7 @@ export async function buildLibraryGuide(): Promise<string> {
     "图片：Markdown 里的相对路径不是本地文件路径。先取图片清单（getFigures）拿到 image_path，再用 readImage 看内容；没有真正调用 readImage 时，不要声称自己看过图。",
     "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；看完立即作答，一轮最多看 1-2 张；默认 maxEdge=1024，小字看不清再升到 1536-2048。",
     "文献库只读：不要用 runCommand/dir/python 到文献库目录里翻文件。找文档用元数据/检索工具，读正文用原文读取工具；导入、删除、翻译、向量化属于全局助手的事务，引导用户去全局助手。",
-    "跨文档：reader/paper scope 只有当前文档。需要看库里其它书/论文时，用全库检索工具（如 paperSearch 的全库范围）或请用户切到对应文档，不要绕过工具硬读路径。",
+    "跨文档：reader/paper scope 只有当前文档，但 readDocument 可直接读任意文档（doc=paper:<id> / book:<id>，配合 heading/offset）；检索库内论文用 searchLibrary(scope=all)。不要用 readLocalFile/runCommand 到文献库目录翻文件，也不要绕过工具硬读路径。",
     "引用规范：正文引用给章节标题；图表引用给图号/表号；参考文献给编号；不得编造页码或图中不存在的细节。",
   ].join("\n");
 }

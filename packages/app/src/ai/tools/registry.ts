@@ -41,6 +41,9 @@ import {
   vectorizeBookTool,
   writeFileTool,
 } from "./central";
+import { createGetDocumentInfoTool } from "./document/get-document-info";
+import { createReadDocumentTool } from "./document/read-document";
+import { createSearchLibraryTool } from "./document/search-library";
 import {
   createGetCitationsTool,
   createGetFiguresTool,
@@ -396,6 +399,11 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     // 阅读位置桥（常驻；不依赖向量能力——无索引时按位置读 mdbook 原文仍可用）
     tools.getReadingPosition = createGetReadingPositionTool("reader", context.bookId) as Tool;
     tools.readAtReadingPosition = createReadAtReadingPositionTool("reader", context.bookId) as Tool;
+    // P1 通用阅读原语（DocRef + 锚点）：可读任意书/论文；searchLibrary 覆盖论文库
+    const readerDocCtx = { scope: "reader" as const, currentId: context.bookId, paperScopeIds: context.paperScopeIds };
+    tools.readDocument = createReadDocumentTool(readerDocCtx) as Tool;
+    tools.getDocumentInfo = createGetDocumentInfoTool(readerDocCtx) as Tool;
+    tools.searchLibrary = createSearchLibraryTool(readerDocCtx) as Tool;
     // 笔记面板（绑定当前书；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.bookId) as Tool;
   }
@@ -411,6 +419,11 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.getPaperInfo = createPaperInfoTool(context.paperId) as Tool;
     tools.getCitations = createGetCitationsTool(context.paperId) as Tool;
     tools.getFigures = createGetFiguresTool(context.paperId) as Tool;
+    // P1 通用阅读原语（DocRef + 锚点）：可读任意论文/书籍；searchLibrary 显式 scope
+    const paperDocCtx = { scope: "paper" as const, currentId: context.paperId, paperScopeIds: context.paperScopeIds };
+    tools.readDocument = createReadDocumentTool(paperDocCtx) as Tool;
+    tools.getDocumentInfo = createGetDocumentInfoTool(paperDocCtx) as Tool;
+    tools.searchLibrary = createSearchLibraryTool(paperDocCtx) as Tool;
     // 笔记面板（绑定当前论文；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.paperId) as Tool;
 
@@ -426,6 +439,14 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
   if (agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
     tools.paperSearch = createPaperSearchTool(null, "central") as Tool;
     tools.paperContext = createPaperContextTool() as Tool;
+  }
+
+  // 5.5 P1 通用文档原语（central 无默认文档，必须显式传 doc）
+  if (agentScope === "central") {
+    const centralDocCtx = { scope: "central" as const };
+    tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
+    tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;
+    tools.searchLibrary = createSearchLibraryTool(centralDocCtx) as Tool;
   }
 
   // 6. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求

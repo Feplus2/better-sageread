@@ -114,4 +114,6 @@
 - 2026-10-22：0E 完成——UI 驱动 harness 跑通（打开文档/固定位置/新对话/发送/落库/提取轨迹/删评测线程/恢复位置），10 题 × 3 次基线完成；
 - 2026-10-22：**G1 基线建立**——内容通过 29/30、干净通过 27/30、均值 40.5k token / 5.1 步 / 10.4 s；跨文献 1/3 空答案（撞 20 步上限）、2/3 靠外部搜索兜底、26.8% 工具调用是目录牌。详见 docs/audits/agent-baseline-g1-2026-10-22.md；
 - 2026-10-22：**P0 完成**——本地 readImage(path/maxEdge)、getFigures 绝对路径、文献库约定注入、看图成本策略、步数收口（prepareStep）。L1 12/12 通过；10 题冒烟全过，均值 token 40.5k→30.4k、步数 5.1→3.4。详见 docs/audits/agent-p0-smoke-2026-10-22.md。
-- 下一步：P1——read_document(anchor)/search_library 统一入口、DocRef、paperSearch scope 显式化；补 1-2 道「视觉事实只在图里」的题验证视觉闭环。
+- 2026-10-22：**P1-1 完成**——readDocument / getDocumentInfo / searchLibrary 三原语落地（reader/paper/central），L1 19/19；跨文献轨迹首次用 searchLibrary(all)+readDocument 读第二篇，不再 readLocalFile/runCommand 翻库。详见 docs/audits/agent-p1-document-tools-2026-10-22.md。
+- 观察：新旧工具并存阶段 10 题冒烟均值 42.1k token / 4.6 步（P0 30.4k / 3.4）——加法不成立，必须做可见性切换。
+- 下一步 P1-2：文档工具模式开关（new/legacy/both）+ new 模式隐藏被替代的旧工具 + searchLibrary 命中带 heading/引导目录 → 10 题 × 3 次正式 A/B。
