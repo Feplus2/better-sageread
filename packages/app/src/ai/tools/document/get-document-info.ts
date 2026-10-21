@@ -7,6 +7,8 @@ import { z } from "zod";
 import { type AgentDocScope, bookIndexed, docDir, docRefString, readDocMetadata, resolveDocRef } from "./shared";
 
 const MAX_OUTLINE_ITEMS = 80;
+/** 书籍目录注入上限：EPUB TOC 可能上百条，注入 35 条一级/二级即可，避免挤占上下文 */
+const BOOK_TOC_MAX = 35;
 
 function countFigureLines(markdown: string): number {
   return markdown.split("\n").filter((line) => line.trim().startsWith("![") && line.includes("images/")).length;
@@ -105,6 +107,9 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
           tocSource = "none";
         }
       }
+      const tocTotal = tocItems.length;
+      const tocTruncated = tocItems.length > BOOK_TOC_MAX;
+      if (tocTruncated) tocItems = tocItems.slice(0, BOOK_TOC_MAX);
       const indexed = await bookIndexed(doc.id);
       return {
         doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
@@ -115,13 +120,13 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
         },
         index: { status: indexed ? "indexed" : "not_indexed" },
         outline: {
-          total: tocItems.length,
+          total: tocTotal,
           items: tocItems.map((item) => ({
             level: item.level,
             heading: item.heading,
             anchor: `${docRefString(doc)}#${item.heading}`,
           })),
-          truncated: false,
+          truncated: tocTruncated,
           source: tocSource,
           note: tocItems.length === 0 ? "没有可用目录；可直接用 readDocument 的 heading 尝试匹配 EPUB 目录" : undefined,
         },

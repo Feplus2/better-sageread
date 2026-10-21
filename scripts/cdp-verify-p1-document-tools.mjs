@@ -47,7 +47,7 @@ const checks = await evalJS(`(async () => {
 
   const civilTools = registry.getToolsForScope("reader", { bookId: "718a0d5d6514980ce87dd8b0d39ad2dc" });
   const infoCivil = await civilTools.getDocumentInfo.execute({ reasoning: "L1", doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }, { toolCallId: "p5b", messages: [] });
-  check("getDocumentInfo(未索引书) 有目录（EPUB TOC 回退）", infoCivil.outline.total >= 5, infoCivil.outline.total + "/" + infoCivil.outline.source);
+  check("getDocumentInfo(未索引书) 目录 5-35 条（EPUB TOC 回退）", infoCivil.outline.total >= 5 && infoCivil.outline.items.length <= 35, infoCivil.outline.total + "/" + infoCivil.outline.source + "/items=" + infoCivil.outline.items.length);
 
   window.__SAGEREAD_DOC_TOOL_MODE__ = "new";
   const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
