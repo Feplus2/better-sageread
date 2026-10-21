@@ -44,6 +44,18 @@ const checks = await evalJS(`(async () => {
   check("getDocumentInfo(book) indexed", infoBook.index.status === "indexed", infoBook.index.status);
   check("getDocumentInfo(book) toc>=10", infoBook.outline.total >= 10, infoBook.outline.total);
 
+  const civilTools = registry.getToolsForScope("reader", { bookId: "718a0d5d6514980ce87dd8b0d39ad2dc" });
+  const infoCivil = await civilTools.getDocumentInfo.execute({ reasoning: "L1", doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }, { toolCallId: "p5b", messages: [] });
+  check("getDocumentInfo(未索引书) 有目录（EPUB TOC 回退）", infoCivil.outline.total >= 5, infoCivil.outline.total + "/" + infoCivil.outline.source);
+
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "new";
+  const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
+  check("new 模式隐藏旧读工具", !newModeTools.readPaperSection && !newModeTools.getPaperToc && !newModeTools.paperSearch && !!newModeTools.readDocument, Object.keys(newModeTools).length);
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
+  const legacyModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
+  check("legacy 模式隐藏新原语", !legacyModeTools.readDocument && !!legacyModeTools.readPaperSection, Object.keys(legacyModeTools).length);
+  delete window.__SAGEREAD_DOC_TOOL_MODE__;
+
   const search = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "environmentally stable interface layered oxide cathode", scope: "all" }, { toolCallId: "p6", messages: [] });
   check("searchLibrary(all) 命中", search.total >= 1, search.total);
   check("searchLibrary 片段<=405", (search.results || []).every((r) => String(r.snippet).length <= 405), (search.results || []).map((r) => String(r.snippet).length).join(","));

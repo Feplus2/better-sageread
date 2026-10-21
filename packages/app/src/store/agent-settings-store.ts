@@ -19,15 +19,21 @@ export type AgentWorkspaceScope = "central" | "reader" | "paper";
 /** 按助手覆盖的工作区根；缺项/空串 = 跟随共享根（2026-08-05 拍板：共享根 + 按助手覆盖） */
 export type PerAgentRoots = Partial<Record<AgentWorkspaceScope, string>>;
 
+/** 文档工具模式：both=新旧并存（过渡默认）；new=只暴露通用文档原语；legacy=旧工具（回退位） */
+export type DocumentToolMode = "both" | "new" | "legacy";
+
 interface AgentSettingsState {
   safetyMode: AgentSafetyMode;
   /** 共享工作区根；null = 默认 {appData}/agent-workspace */
   workspaceRoot: string | null;
   /** 按助手覆盖根；留空跟随共享根。记忆随根走：覆盖了根即独立 memory.md，否则共享 */
   perAgentRoots: PerAgentRoots;
+  /** P1-2 文档工具可见性开关 */
+  documentToolMode: DocumentToolMode;
   setSafetyMode: (mode: AgentSafetyMode) => void;
   setWorkspaceRoot: (root: string | null) => void;
   setPerAgentRoot: (scope: AgentWorkspaceScope, root: string | null) => void;
+  setDocumentToolMode: (mode: DocumentToolMode) => void;
 }
 
 export const useAgentSettingsStore = create<AgentSettingsState>()(
@@ -36,6 +42,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
       safetyMode: "strict",
       workspaceRoot: null,
       perAgentRoots: {},
+      documentToolMode: "both",
       // 移动端 Agent 权限收敛（M3-g 裁定）：只保留严格模式——无 shell/子进程能力，
       // 完全访问在手机上无意义且风险放大；同步过来的桌面配置可能带 full，写入侧一律拦回 strict
       setSafetyMode: (safetyMode) => set({ safetyMode: isMobile ? "strict" : safetyMode }),
@@ -43,6 +50,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
         if (isMobile) return; // 手机工作区恒为 app 私有目录，不开放自选
         set({ workspaceRoot });
       },
+      setDocumentToolMode: (documentToolMode) => set({ documentToolMode }),
       setPerAgentRoot: (scope, root) =>
         set((state) => {
           const next = { ...state.perAgentRoots };
@@ -61,6 +69,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
         safetyMode: state.safetyMode,
         workspaceRoot: state.workspaceRoot,
         perAgentRoots: state.perAgentRoots,
+        documentToolMode: state.documentToolMode,
       }),
       // 移动端水合兜底：同步/备份恢复过来的 full/relaxed 一律压回 strict（M3-g）
       merge: (persisted, current) => {
@@ -70,6 +79,13 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
           merged.safetyMode = "strict";
           merged.workspaceRoot = null;
           merged.perAgentRoots = {};
+        }
+        if (
+          merged.documentToolMode !== "new" &&
+          merged.documentToolMode !== "legacy" &&
+          merged.documentToolMode !== "both"
+        ) {
+          merged.documentToolMode = "both";
         }
         return merged;
       },

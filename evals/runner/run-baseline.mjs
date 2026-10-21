@@ -18,7 +18,7 @@ const TASKS_FILE = path.join(ROOT, "evals/tasks/baseline-10.yaml");
 const tasksDoc = yaml.load(fs.readFileSync(TASKS_FILE, "utf8"));
 
 function parseArgs(argv) {
-  const out = { tasks: "all", repeats: null, dry: false, keepThreads: false, out: null };
+  const out = { tasks: "all", repeats: null, dry: false, keepThreads: false, out: null, docMode: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry") out.dry = true;
@@ -26,6 +26,7 @@ function parseArgs(argv) {
     else if (a === "--tasks") out.tasks = argv[++i];
     else if (a === "--repeats") out.repeats = Number(argv[++i]);
     else if (a === "--out") out.out = argv[++i];
+    else if (a === "--doc-mode") out.docMode = argv[++i];
   }
   return out;
 }
@@ -100,12 +101,18 @@ async function pageRunner(cfg) {
   let openedTabIds = [];
   let before = null;
   let modelBefore = null;
+  let settingsStore = null;
+  let docModeBefore = null;
   let originalCfi = null;
   let originalView = null;
   try {
     const layout = await import(modUrl('/src/store/layout-store.ts'));
     const provider = await import(modUrl('/src/store/provider-store.ts'));
     const threadSvc = await import(modUrl('/src/services/thread-service.ts'));
+    if (cfg.docMode) {
+      window.__SAGEREAD_DOC_TOOL_MODE__ = cfg.docMode;
+      result.docMode = cfg.docMode;
+    }
     const ls = layout.useLayoutStore;
     const st0 = ls.getState();
     before = { activeTabId: st0.activeTabId, tabIds: st0.tabs.map((t) => t.id) };
@@ -335,6 +342,7 @@ async function pageRunner(cfg) {
         const provider = await import(modUrl('/src/store/provider-store.ts'));
         provider.useProviderStore.getState().setSelectedModel(modelBefore);
       }
+      try { delete window.__SAGEREAD_DOC_TOOL_MODE__; } catch (e) {}
     } catch (e) { result.cleanupError = String(e); }
   }
 }
@@ -349,6 +357,7 @@ async function runOne(task, rep) {
     prompt: task.prompt,
     positionHeading: task.requires && task.requires.position ? task.requires.position : null,
     modelPin, keepThreads: args.keepThreads,
+    docMode: args.docMode || null,
     dry: args.dry,
   };
   const expr = "(" + pageRunnerSrc + ")(" + JSON.stringify(payload) + ")";
@@ -367,7 +376,7 @@ async function runOne(task, rep) {
   return rec;
 }
 
-console.log("runner: out=" + outDir + " tasks=" + selected.length + " repeats=" + repeats + " dry=" + args.dry);
+console.log("runner: out=" + outDir + " tasks=" + selected.length + " repeats=" + repeats + " dry=" + args.dry + " docMode=" + (args.docMode || "current"));
 for (const task of selected) {
   for (let rep = 1; rep <= repeats; rep++) {
     try { await runOne(task, rep); }

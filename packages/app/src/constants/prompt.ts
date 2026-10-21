@@ -1,4 +1,5 @@
 import { buildLibraryGuide } from "@/ai/prompts/library-guide";
+import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_READER_STYLE } from "@/constants/agent-styles";
 import { buildCentralPrompt } from "@/constants/central-prompt";
 import { buildPaperPrompt } from "@/constants/paper-prompt";
@@ -22,7 +23,16 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
         ? await buildPaperPrompt(chatContext)
         : await buildReadingPrompt(chatContext);
   // P0：文献库导航约定（根/布局/探索顺序/图片/只读边界）三 scope 共用，静态段（缓存友好）
-  return `${base}\n\n${await buildLibraryGuide()}`;
+  const libraryGuide = await buildLibraryGuide();
+  // P1-2：按文档工具模式提示可用工具面（new 模式隐藏旧工具，避免模型调用不存在的旧工具）
+  const docMode = getDocumentToolMode();
+  const docModeNote =
+    docMode === "new"
+      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。"
+      : docMode === "legacy"
+        ? "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。"
+        : "";
+  return `${base}\n\n${libraryGuide}${docModeNote}`;
 }
 
 /**

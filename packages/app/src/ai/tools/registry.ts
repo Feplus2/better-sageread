@@ -42,6 +42,7 @@ import {
   writeFileTool,
 } from "./central";
 import { createGetDocumentInfoTool } from "./document/get-document-info";
+import { getDocumentToolMode } from "./document/mode";
 import { createReadDocumentTool } from "./document/read-document";
 import { createSearchLibraryTool } from "./document/search-library";
 import {
@@ -360,6 +361,10 @@ registerTools([
  */
 export function getToolsForScope(agentScope: AgentScope, context?: ToolContext): Record<string, Tool> {
   const tools: Record<string, Tool> = {};
+  // P1-2 文档工具可见性：both=过渡（新旧并存）；new=只暴露通用原语；legacy=旧工具（回退位）
+  const docToolMode = getDocumentToolMode();
+  const useLegacyDocTools = docToolMode !== "new";
+  const useNewDocTools = docToolMode !== "legacy";
 
   // 1. 注入共享工具
   for (const reg of registry) {
@@ -389,60 +394,75 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     const bookIndexed =
       useLibraryStore.getState().booksWithStatus.find((b) => b.id === context.bookId)?.status?.metadata?.vectorization
         ?.status === "success";
-    if (hasVectorCapability && bookIndexed) {
-      tools.ragSearch = createRagSearchTool(context.bookId) as Tool;
-      tools.ragToc = createRagTocTool(context.bookId) as Tool;
-      tools.ragContext = createRagContextTool(context.bookId) as Tool;
-      tools.ragRange = createRagRangeTool(context.bookId) as Tool;
+    if (useLegacyDocTools) {
+      if (hasVectorCapability && bookIndexed) {
+        tools.ragSearch = createRagSearchTool(context.bookId) as Tool;
+        tools.ragToc = createRagTocTool(context.bookId) as Tool;
+        tools.ragContext = createRagContextTool(context.bookId) as Tool;
+        tools.ragRange = createRagRangeTool(context.bookId) as Tool;
+      }
+      tools.readBookSection = createReadBookSectionTool(context.bookId) as Tool;
+      tools.readAtReadingPosition = createReadAtReadingPositionTool("reader", context.bookId) as Tool;
     }
-    tools.readBookSection = createReadBookSectionTool(context.bookId) as Tool;
-    // 阅读位置桥（常驻；不依赖向量能力——无索引时按位置读 mdbook 原文仍可用）
+    // 阅读位置桥（常驻；new 模式作为结构化字段的逃生口）
     tools.getReadingPosition = createGetReadingPositionTool("reader", context.bookId) as Tool;
-    tools.readAtReadingPosition = createReadAtReadingPositionTool("reader", context.bookId) as Tool;
     // P1 通用阅读原语（DocRef + 锚点）：可读任意书/论文；searchLibrary 覆盖论文库
-    const readerDocCtx = { scope: "reader" as const, currentId: context.bookId, paperScopeIds: context.paperScopeIds };
-    tools.readDocument = createReadDocumentTool(readerDocCtx) as Tool;
-    tools.getDocumentInfo = createGetDocumentInfoTool(readerDocCtx) as Tool;
-    tools.searchLibrary = createSearchLibraryTool(readerDocCtx) as Tool;
+    if (useNewDocTools) {
+      const readerDocCtx = {
+        scope: "reader" as const,
+        currentId: context.bookId,
+        paperScopeIds: context.paperScopeIds,
+      };
+      tools.readDocument = createReadDocumentTool(readerDocCtx) as Tool;
+      tools.getDocumentInfo = createGetDocumentInfoTool(readerDocCtx) as Tool;
+      tools.searchLibrary = createSearchLibraryTool(readerDocCtx) as Tool;
+    }
     // 笔记面板（绑定当前书；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.bookId) as Tool;
   }
 
   // 4. 论文助手专属：基础层结构工具（始终可用，直接读 paper.md）+ 增强层语义检索（向量能力门控）
   if (agentScope === "paper" && context?.paperId) {
-    tools.getPaperToc = createPaperTocTool(context.paperId) as Tool;
-    tools.readPaperSection = createPaperSectionTool(context.paperId) as Tool;
-    // 阅读位置桥（常驻；按 paper.md 坐标取当前位置原文，不依赖向量能力）
+    if (useLegacyDocTools) {
+      tools.getPaperToc = createPaperTocTool(context.paperId) as Tool;
+      tools.readPaperSection = createPaperSectionTool(context.paperId) as Tool;
+      tools.readAtReadingPosition = createReadAtReadingPositionTool("paper", context.paperId) as Tool;
+      tools.readPaperFull = createPaperFullTool(context.paperId) as Tool;
+      tools.getPaperInfo = createPaperInfoTool(context.paperId) as Tool;
+    }
+    // 阅读位置桥（常驻；new 模式作为结构化字段的逃生口）
     tools.getReadingPosition = createGetReadingPositionTool("paper", context.paperId) as Tool;
-    tools.readAtReadingPosition = createReadAtReadingPositionTool("paper", context.paperId) as Tool;
-    tools.readPaperFull = createPaperFullTool(context.paperId) as Tool;
-    tools.getPaperInfo = createPaperInfoTool(context.paperId) as Tool;
+    // 领域锚点工具保留（图片/引用不是通用原语能替代的）
     tools.getCitations = createGetCitationsTool(context.paperId) as Tool;
     tools.getFigures = createGetFiguresTool(context.paperId) as Tool;
     // P1 通用阅读原语（DocRef + 锚点）：可读任意论文/书籍；searchLibrary 显式 scope
-    const paperDocCtx = { scope: "paper" as const, currentId: context.paperId, paperScopeIds: context.paperScopeIds };
-    tools.readDocument = createReadDocumentTool(paperDocCtx) as Tool;
-    tools.getDocumentInfo = createGetDocumentInfoTool(paperDocCtx) as Tool;
-    tools.searchLibrary = createSearchLibraryTool(paperDocCtx) as Tool;
+    if (useNewDocTools) {
+      const paperDocCtx = { scope: "paper" as const, currentId: context.paperId, paperScopeIds: context.paperScopeIds };
+      tools.readDocument = createReadDocumentTool(paperDocCtx) as Tool;
+      tools.getDocumentInfo = createGetDocumentInfoTool(paperDocCtx) as Tool;
+      tools.searchLibrary = createSearchLibraryTool(paperDocCtx) as Tool;
+    }
     // 笔记面板（绑定当前论文；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.paperId) as Tool;
 
-    const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
-    if (hasVectorCapability) {
-      tools.paperSearch = createPaperSearchTool(context.paperScopeIds ?? null) as Tool;
-      tools.paperContext = createPaperContextTool() as Tool;
+    if (useLegacyDocTools) {
+      const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
+      if (hasVectorCapability) {
+        tools.paperSearch = createPaperSearchTool(context.paperScopeIds ?? null) as Tool;
+        tools.paperContext = createPaperContextTool() as Tool;
+      }
     }
   }
 
   // 5. 全局助手：文献库语义检索下放 central（P4-3；向量能力门控，全库范围——
   // central 无「当前论文」上下文，paperIds 恒 null，返回自带篇目标题供引用标注）
-  if (agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
+  if (useLegacyDocTools && agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
     tools.paperSearch = createPaperSearchTool(null, "central") as Tool;
     tools.paperContext = createPaperContextTool() as Tool;
   }
 
   // 5.5 P1 通用文档原语（central 无默认文档，必须显式传 doc）
-  if (agentScope === "central") {
+  if (useNewDocTools && agentScope === "central") {
     const centralDocCtx = { scope: "central" as const };
     tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
     tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;

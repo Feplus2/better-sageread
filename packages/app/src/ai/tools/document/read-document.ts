@@ -154,7 +154,7 @@ async function readBookWindow(doc: DocRef, args: ReadArgs) {
 export const createReadDocumentTool = (ctx: AgentDocScope) =>
   tool({
     description:
-      "按文档 + 锚点读取原文窗口（通用阅读原语）。\n\n📖 **使用场景**：\n• 跨文献：直接读库里另一篇论文/另一本书，不需要先打开它\n• 任意文档的小节/位置/字符窗口读取，支持分页续读\n\n🎯 **参数**：\n• doc：book:<id> 或 paper:<id>；省略 = 当前文档\n• heading：按标题定位（先 getDocumentInfo 拿目录）\n• offset：从文档字符偏移开始（论文按去掉 frontmatter 的正文计）\n• position：从当前阅读位置开始（仅当前打开的文档）\n• before/after：窗口大小（默认 after=6000）\n\n📊 **返回**：{doc, anchor, text, total_chars, next_offset, truncated}；next_offset 用于续读。\n\n🚫 **不要**用 readLocalFile/runCommand 到文献库目录翻文件；用 doc 参数直接读。",
+      "按文档 + 锚点读取原文窗口（通用阅读原语）。\n\n📖 **使用场景**：\n• 跨文献：直接读库里另一篇论文/另一本书，不需要先打开它\n• 任意文档的小节/位置/字符窗口读取，支持分页续读\n\n🎯 **参数**：\n• doc：book:<id> 或 paper:<id>；省略 = 当前文档\n• heading：按标题定位（先 getDocumentInfo 拿目录）\n• offset：从文档字符偏移开始（论文按去掉 frontmatter 的正文计）\n• position：从当前阅读位置开始（仅当前打开的文档）\n• before/after：窗口大小（默认 after=6000）\n\n📌 **用法**：先 getDocumentInfo 拿目录；能按 heading 精读就别用 offset 从头连续读全文（总结全文除外）；单窗默认 6000 字符，信息够用就停。\n\n📊 **返回**：{doc, anchor, text, total_chars, next_offset, truncated}；next_offset 用于续读。\n\n🚫 **不要**用 readLocalFile/runCommand 到文献库目录翻文件；用 doc 参数直接读。",
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的"),
       doc: z.string().optional().describe("文档引用：book:<id> 或 paper:<id>；省略 = 当前文档"),

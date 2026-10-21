@@ -1,5 +1,6 @@
 import { readPaperMarkdown } from "@/ai/tools/paper/shared";
 import { parsePaperSections } from "@/pages/paper-reader/markdown-sections";
+import { openBookDocument } from "@/services/book-translation/book-translation-service";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
@@ -82,6 +83,28 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
       } catch {
         tocItems = [];
       }
+      // 未索引书没有 metadata.md：回退解析 EPUB 原生 TOC（new 模式必须给目录，否则模型会盲翻全文）
+      let tocSource = tocItems.length > 0 ? "metadata.md" : "none";
+      if (tocItems.length === 0) {
+        try {
+          const { bookDoc } = await openBookDocument(doc.id);
+          const flat: { level: number; heading: string }[] = [];
+          const walk = (items: unknown, depth: number) => {
+            for (const raw of (items as { label?: string; subitems?: unknown }[] | undefined) ?? []) {
+              if (raw?.label) flat.push({ level: depth + 1, heading: raw.label });
+              if (raw?.subitems) walk(raw.subitems, depth + 1);
+              if (flat.length >= MAX_OUTLINE_ITEMS) return;
+            }
+          };
+          walk((bookDoc as { toc?: unknown }).toc, 0);
+          if (flat.length > 0) {
+            tocItems = flat;
+            tocSource = "epub-toc";
+          }
+        } catch {
+          tocSource = "none";
+        }
+      }
       const indexed = await bookIndexed(doc.id);
       return {
         doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
@@ -99,10 +122,8 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
             anchor: `${docRefString(doc)}#${item.heading}`,
           })),
           truncated: false,
-          note:
-            tocItems.length === 0
-              ? "没有 metadata.md 目录；可直接用 readDocument 的 heading 尝试匹配 EPUB 目录"
-              : undefined,
+          source: tocSource,
+          note: tocItems.length === 0 ? "没有可用目录；可直接用 readDocument 的 heading 尝试匹配 EPUB 目录" : undefined,
         },
         counts: { figures: null, citations: null },
         meta: { reasoning: args.reasoning },
