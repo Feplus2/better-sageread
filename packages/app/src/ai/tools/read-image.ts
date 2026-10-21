@@ -6,12 +6,13 @@ import { tool } from "ai";
 import { z } from "zod";
 import { modelSupportsVision } from "../providers/vision-map";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, loadLocalImageAsDataUrl } from "../utils/local-image";
+import { IMAGE_BUDGET_COST, takeReadBudget } from "./document/read-budget";
 
 /**
  * P0：readImage 从「只看聊天附件」升级为通用看图片原语。
  * - attachment:// 引用：保持原有重看能力；
  * - 本地绝对路径：文献库插图（getFigures 的 image_path）、工作区图片；
- * - 魔数嗅探 + 20MB/2048px 限制 + 非视觉模型明确报错（不静默丢图）。
+ * - 魔数嗅探 + 20MB/1024px 限制 + 非视觉模型明确报错（不静默丢图）。
  */
 
 const errorText = (value: string) => ({ type: "error-text" as const, value });
@@ -57,7 +58,7 @@ function imageEnvelope(params: {
 
 export const readImageTool = tool({
   description:
-    "查看图片内容：支持聊天图片附件（attachment:// 引用）与本地绝对路径（文献库插图、工作区图片）。\n\n📖 **使用场景**：\n• 用户问「图 3 说明了什么」「这张图里有什么」\n• getFigures 返回了 image_path，需要真正看图而不是只读图注\n• 历史消息里的图片存根（⟦可用 readImage 重看⟧）需要重新查看\n\n📊 **返回内容**：图片本体（多模态通道）+ 信封（路径/类型/尺寸/是否降采样）。\n\n⚠️ **成本**：图片会进入上下文并在后续每一步重复发送。先读图注/正文，确需视觉细节时再看图；看完立即作答，不要在多步之间反复看图。\n⚠️ **限制**：单图 ≤20MB；长边默认压到 1024px（maxEdge 可调到 2048，但更贵）；当前模型不支持视觉时返回明确错误。\n\n🚫 **相对路径不可用**：请使用 getFigures 返回的 image_path（绝对路径）。",
+    "查看图片内容：支持聊天图片附件（attachment:// 引用）与本地绝对路径（文献库插图、工作区图片）。\n\n📖 **使用场景**：\n• 用户问「图 3 说明了什么」「这张图里有什么」\n• getFigures 返回了 image_path，需要真正看图而不是只读图注\n• 历史消息里的图片存根（⟦可用 readImage 重看⟧）需要重新查看\n\n📊 **返回内容**：图片本体（多模态通道）+ 信封（路径/类型/尺寸/是否降采样）。\n\n⚠️ **成本**：图片会进入上下文并在后续每一步重复发送。先读图注/正文，确需视觉细节时再看图；看完立即作答，不要在多步之间反复看图。\n⚠️ **限制**：单图 ≤20MB；长边上限 1024px（图片按字符重复计费，放大不划算）；当前模型不支持视觉时返回明确错误。\n\n🚫 **相对路径不可用**：请使用 getFigures 返回的 image_path（绝对路径）。",
   inputSchema: z.object({
     ref: z.string().min(1).optional().describe("聊天图片附件引用，形如 attachment://img-xxx.png"),
     path: z.string().min(1).optional().describe("本地图片绝对路径；通常直接来自 getFigures 的 image_path"),
@@ -65,9 +66,9 @@ export const readImageTool = tool({
       .number()
       .int()
       .min(512)
-      .max(2048)
+      .max(1024)
       .optional()
-      .describe("长边像素上限，默认 1024；只有小字/细节看不清时才升到 1536-2048（更贵）"),
+      .describe("长边像素上限，默认与上限都是 1024（图片会按字符重复计费，放大不划算）"),
   }),
   execute: async ({ ref, path, maxEdge }: { ref?: string; path?: string; maxEdge?: number }) => {
     const target = path ?? ref;
@@ -75,6 +76,10 @@ export const readImageTool = tool({
       return errorText("需要提供 ref（聊天附件引用）或 path（本地图片绝对路径）之一");
     }
 
+    const imageBudget = takeReadBudget(IMAGE_BUDGET_COST);
+    if (imageBudget < IMAGE_BUDGET_COST) {
+      return errorText("本轮读取预算不足，无法再看图；请基于已读图注/正文回答，或让用户发新消息重置预算。");
+    }
     const selected = useProviderStore.getState().selectedModel;
     if (selected && !modelSupportsVision(selected.providerId, selected.modelId)) {
       return errorText(

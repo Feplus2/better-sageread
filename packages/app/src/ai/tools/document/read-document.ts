@@ -8,6 +8,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
+import { takeReadBudget } from "./read-budget";
 import { type AgentDocScope, type DocRef, docRefString, readDocMetadata, resolveDocRef } from "./shared";
 
 const DEFAULT_WINDOW = 6000;
@@ -112,7 +113,8 @@ async function readPaperWindow(doc: DocRef, args: ReadArgs) {
 }
 
 async function readBookWindow(doc: DocRef, args: ReadArgs) {
-  const after = clampWindow(args.after);
+  // 书籍章节可能极长：单窗上限压到 8000，避免连续扩读把上下文打满
+  const after = Math.min(clampWindow(args.after), 8000);
   const before = clampBefore(args.before);
 
   if (args.heading) {
@@ -154,7 +156,7 @@ async function readBookWindow(doc: DocRef, args: ReadArgs) {
 export const createReadDocumentTool = (ctx: AgentDocScope) =>
   tool({
     description:
-      "按文档 + 锚点读取原文窗口（通用阅读原语）。\n\n📖 **使用场景**：\n• 跨文献：直接读库里另一篇论文/另一本书，不需要先打开它\n• 任意文档的小节/位置/字符窗口读取，支持分页续读\n\n🎯 **参数**：\n• doc：book:<id> 或 paper:<id>；省略 = 当前文档\n• heading：按标题定位（先 getDocumentInfo 拿目录）\n• offset：从文档字符偏移开始（论文按去掉 frontmatter 的正文计）\n• position：从当前阅读位置开始（仅当前打开的文档）\n• before/after：窗口大小（默认 after=6000）\n\n📌 **用法**：先 getDocumentInfo 拿目录；能按 heading 精读就别用 offset 从头连续读全文（总结全文除外）；单窗默认 6000 字符，信息够用就停。\n\n📊 **返回**：{doc, anchor, text, total_chars, next_offset, truncated}；next_offset 用于续读。\n\n🚫 **不要**用 readLocalFile/runCommand 到文献库目录翻文件；用 doc 参数直接读。",
+      "按文档 + 锚点读取原文窗口（通用阅读原语）。\n\n📖 **使用场景**：\n• 跨文献：直接读库里另一篇论文/另一本书，不需要先打开它\n• 任意文档的小节/位置/字符窗口读取，支持分页续读\n\n🎯 **参数**：\n• doc：book:<id> 或 paper:<id>；省略 = 当前文档\n• heading：按标题定位（先 getDocumentInfo 拿目录）\n• offset：从文档字符偏移开始（论文按去掉 frontmatter 的正文计）\n• position：从当前阅读位置开始（仅当前打开的文档）\n• before/after：窗口大小（默认 after=6000）\n\n📌 **用法**：先 getDocumentInfo 拿目录；能按 heading 精读就别用 offset 从头连续读全文（总结全文除外）。单窗默认 6000 字符（书籍上限 8000）；同一节最多读 1-2 窗，信息够用立刻作答，不要连续扩读 3 次以上。\n\n📊 **返回**：{doc, anchor, text, total_chars, next_offset, truncated}；next_offset 用于续读。\n\n🚫 **不要**用 readLocalFile/runCommand 到文献库目录翻文件；用 doc 参数直接读。",
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的"),
       doc: z.string().optional().describe("文档引用：book:<id> 或 paper:<id>；省略 = 当前文档"),
@@ -168,14 +170,21 @@ export const createReadDocumentTool = (ctx: AgentDocScope) =>
       const doc = resolveDocRef(args.doc, ctx);
       const metadata = await readDocMetadata(doc);
       const window = doc.kind === "paper" ? await readPaperWindow(doc, args) : await readBookWindow(doc, args);
+      // 单轮读取预算：超出后只返回剩余部分，并提示停止扩读
+      const requested = window.text.length;
+      const granted = takeReadBudget(requested);
+      const budgetNote =
+        granted < requested
+          ? `本轮读取预算已到上限，本次只返回前 ${granted} 字符；请基于已有信息作答，不要再扩读。`
+          : "";
       return {
         doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
         anchor: window.anchor,
-        text: window.text,
+        text: window.text.slice(0, granted),
         total_chars: window.totalChars,
         next_offset: window.nextOffset,
-        truncated: window.truncated,
-        note: window.note || undefined,
+        truncated: window.truncated || granted < requested,
+        note: [window.note, budgetNote].filter(Boolean).join("；") || undefined,
         meta: { reasoning: args.reasoning },
       };
     },

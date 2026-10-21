@@ -17,6 +17,7 @@ const checks = await evalJS(`(async () => {
   const PAPER_C = "09515f7218b81d7f";
   const BOOK = "9f1820c6dcc62250458da69162b72e5d";
   const registry = await import("/src/ai/tools/registry.ts");
+  const lazy = await import("/src/ai/tools/lazy-toolset.ts");
   const paperTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
   check("paper scope 含 readDocument/getDocumentInfo/searchLibrary", !!paperTools.readDocument && !!paperTools.getDocumentInfo && !!paperTools.searchLibrary, Object.keys(paperTools).join(","));
 
@@ -51,6 +52,10 @@ const checks = await evalJS(`(async () => {
   window.__SAGEREAD_DOC_TOOL_MODE__ = "new";
   const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
   check("new 模式隐藏旧读工具", !newModeTools.readPaperSection && !newModeTools.getPaperToc && !newModeTools.paperSearch && !!newModeTools.readDocument, Object.keys(newModeTools).length);
+  check("new 模式工具数 <= 18", Object.keys(newModeTools).length <= 18, Object.keys(newModeTools).length);
+  const newChars = lazy.estimateToolsChars(newModeTools);
+  check("new 模式退出目录牌（schema<12k）", lazy.shouldUseDirectoryMode(newModeTools) === false, newChars + " chars");
+  check("new 模式隐藏工作区命令工具", !newModeTools.runCommand && !newModeTools.writeFile && !newModeTools.readLocalFile, Object.keys(newModeTools).length);
   window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
   const legacyModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
   check("legacy 模式隐藏新原语", !legacyModeTools.readDocument && !!legacyModeTools.readPaperSection, Object.keys(legacyModeTools).length);
@@ -61,6 +66,16 @@ const checks = await evalJS(`(async () => {
   check("searchLibrary 片段<=405", (search.results || []).every((r) => String(r.snippet).length <= 405), (search.results || []).map((r) => String(r.snippet).length).join(","));
   check("searchLibrary doc 锚点", (search.results || []).every((r) => String(r.doc).startsWith("paper:")), "");
   check("searchLibrary 无 citation_guide", !("citation_guide" in search), Object.keys(search).join(","));
+
+  const budgetMod = await import("/src/ai/tools/document/read-budget.ts");
+  budgetMod.resetReadBudget();
+  let budgetHit = false;
+  for (let i = 0; i < 4; i++) {
+    const r = await paperTools.readDocument.execute({ reasoning: "L1", doc: "paper:" + PAPER_A, offset: i * 2000, after: 12000 }, { toolCallId: "p8-" + i, messages: [] });
+    if (String(r.note || "").includes("预算")) budgetHit = true;
+  }
+  check("单轮读取预算生效", budgetHit, "");
+  budgetMod.resetReadBudget();
 
   const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "collection" }, { toolCallId: "p7", messages: [] });
   check("searchLibrary(collection) 只查面板范围", (scoped.results || []).every((r) => r.doc === "paper:" + PAPER_C), (scoped.results || []).map((r) => r.doc).join(","));

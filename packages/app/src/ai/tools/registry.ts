@@ -366,9 +366,13 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
   const useLegacyDocTools = docToolMode !== "new";
   const useNewDocTools = docToolMode !== "legacy";
 
-  // 1. 注入共享工具
+  // 1. 注入共享工具（new 模式：reader/paper 隐藏工作区/命令类工具，压 schema、退出目录牌）
+  const NEW_MODE_HIDDEN_SHARED = new Set(["readLocalFile", "writeFile", "editFile", "searchFiles", "runCommand"]);
   for (const reg of registry) {
     if (reg.scope === "shared") {
+      if (docToolMode === "new" && agentScope !== "central" && NEW_MODE_HIDDEN_SHARED.has(reg.name)) {
+        continue;
+      }
       tools[reg.name] = reg.tool;
     }
   }

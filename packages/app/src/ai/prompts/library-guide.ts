@@ -30,7 +30,7 @@ export async function buildLibraryGuide(): Promise<string> {
     "• 论文：<paper_id>/paper.md + images/。",
     "探索顺序：目录/元信息 → 检索（语义问题用检索工具；精确术语可先查工作区文件）→ 按锚点读原文窗口 → 需要看图时用 readImage(path=绝对路径)。",
     "图片：Markdown 里的相对路径不是本地文件路径。先取图片清单（getFigures）拿到 image_path，再用 readImage 看内容；没有真正调用 readImage 时，不要声称自己看过图。",
-    "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；看完立即作答，一轮最多看 1-2 张；默认 maxEdge=1024，小字看不清再升到 1536-2048。",
+    "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；看完立即作答，一轮最多看 1-2 张；长边固定上限 1024（再大只会更贵）；小字看不清时改用图注/正文回答。",
     "文献库只读：不要用 runCommand/dir/python 到文献库目录里翻文件。找文档用元数据/检索工具，读正文用原文读取工具；导入、删除、翻译、向量化属于全局助手的事务，引导用户去全局助手。",
     docMode === "legacy"
       ? "跨文档：reader/paper scope 只有当前文档；跨论文检索用 paperSearch（全库范围）或请用户切到对应文档，不要用 readLocalFile/runCommand 到文献库目录翻文件。"

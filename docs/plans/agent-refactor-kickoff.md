@@ -117,4 +117,5 @@
 - 2026-10-22：**P1-1 完成**——readDocument / getDocumentInfo / searchLibrary 三原语落地（reader/paper/central），L1 19/19；跨文献轨迹首次用 searchLibrary(all)+readDocument 读第二篇，不再 readLocalFile/runCommand 翻库。详见 docs/audits/agent-p1-document-tools-2026-10-22.md。
 - 观察：新旧工具并存阶段 10 题冒烟均值 42.1k token / 4.6 步（P0 30.4k / 3.4）——加法不成立，必须做可见性切换。
 - 2026-10-22：**P1-2 完成**——documentToolMode（both/new/legacy）+ registry 可见性切换 + prompt/library guide 模式提示 + harness `--doc-mode`；L1 22/22；未索引书补 EPUB TOC 回退。首轮单次 A/B：new 47.8k token vs legacy 60.7k（−21%），但单次方差大、未索引书回归（92k→251k），需 3 次重复与书籍定位修复。详见 docs/audits/agent-p1-ab-2026-10-22.md。
-- 下一步 P1-3：修书籍 heading 节内偏移语义、加单题读取总量预算、3 次重复 new-vs-legacy A/B；达标后默认模式切 new。
+- 2026-10-22：**P1-3 进行中**——new 模式工具面 29→17（schema 9.8k，退出目录牌）、单轮读取预算 32k、书籍窗口 8k、图片硬上限 1024；L1 26/26。methods 从 142k/12 降到 63.9k/5。期间 dev webview 因大图长请求卡死一次，已重启 dev stack 恢复（生产实例未动）。详见 docs/audits/agent-p1-3-budget-2026-10-22.md。
+- 下一步：目录注入瘦身（81→35 条内）→ 10 题 × 3 次 new-vs-legacy 正式 A/B → 达标后默认模式切 new。

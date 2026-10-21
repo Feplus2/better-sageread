@@ -138,6 +138,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const activeBookId = chatContext?.activeBookId;
     const agentScope = chatContext?.agentScope ?? "reader";
 
+    const { resetReadBudget } = await import("./tools/document/read-budget");
+    resetReadBudget();
     const sel = useProviderStore.getState().selectedModel;
 
     // J2：当前模型不支持多模态时，剔除全部 file part（含历史图片）——

@@ -118,6 +118,13 @@ async function pageRunner(cfg) {
     before = { activeTabId: st0.activeTabId, tabIds: st0.tabs.map((t) => t.id) };
 
     if (cfg.modelPin) {
+      // 刚启动/刚重载时 provider store 的持久化水合是异步的：等它填好再 pin
+      const waitDeadline = Date.now() + 10000;
+      while (Date.now() < waitDeadline) {
+        const snapshot = provider.useProviderStore.getState();
+        if (snapshot.selectedModel && snapshot.modelProviders.length > 0) break;
+        await sleep(300);
+      }
       const ps = provider.useProviderStore.getState();
       modelBefore = ps.selectedModel ? Object.assign({}, ps.selectedModel) : null;
       if (!modelBefore || modelBefore.providerId !== cfg.modelPin.providerId || modelBefore.modelId !== cfg.modelPin.modelId) {

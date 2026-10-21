@@ -3,7 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 /** P0 本地图片读取：路径 → 魔数嗅探 → 尺寸/体积限制 → 超长边降采样 → dataUrl。 */
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-export const MAX_IMAGE_EDGE = 2048;
+export const MAX_IMAGE_EDGE = 1024;
 /** 默认长边：图片会作为 dataUrl 进入上下文并在后续每一步重复发送，默认压到 1024 控制成本 */
 export const DEFAULT_IMAGE_EDGE = 1024;
 const JPEG_QUALITY = 0.82;
