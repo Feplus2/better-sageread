@@ -9,6 +9,7 @@ import {
 } from "@/services/reading-position/position-service";
 import { buildTimestampLookup, composeDynamicTail, withMessageTimestamps } from "@/services/time-awareness";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
+import { resolveContextBudget } from "./providers/context-window";
 import { wrapToolsForNativeImages } from "./providers/native-tool-output";
 import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
 import { useProviderStore } from "@/store/provider-store";
@@ -172,8 +173,18 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     }
 
     const processedMessages = processQuoteMessages(await resolveImageAttachmentsForRequest(messagesForProcess));
-    // token 双水位活塞：≤点火线(256k)零压缩；超过则泄压到 128k 以内，最近 10 条永不压缩
-    const { kept: budgetedMessages, dropped } = selectMessagesWithinBudget(processedMessages);
+    // 上下文预算按所选模型真实窗口计算：触发线 = 窗口×80%，压缩到触发线的 50%，最近 10 条保底；
+    // 窗口来自模型列表接口（context_length 等）优先、内置家族表兜底（见 providers/context-window.ts）
+    const budgetProvider = sel
+      ? useProviderStore.getState().modelProviders.find((provider) => provider.provider === sel.providerId)
+      : undefined;
+    const budgetModel = sel ? budgetProvider?.models.find((model) => model.id === sel.modelId) : undefined;
+    const contextBudget = resolveContextBudget(sel?.modelId, budgetModel?.contextWindow, budgetModel?.maxOutputTokens);
+    const { kept: budgetedMessages, dropped } = selectMessagesWithinBudget(processedMessages, {
+      budget: contextBudget.highWater,
+      lowWater: contextBudget.lowWater,
+      floor: contextBudget.floor,
+    });
     // D5 L2 存根活塞：十进位轮次块批处理降级老轮次 RAG 结果（引用位冻结 + clear_at_least）；
     // 置于水位活塞之后——已被泄压丢弃的消息无需再处理
     const selectedMessages = compactAgedRagResults(budgetedMessages);
@@ -188,6 +199,10 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         droppedCount: dropped.length,
         keptCount: selectedMessages.length,
         hasSummary: !!summaryText,
+        contextWindow: contextBudget.contextWindow,
+        windowSource: contextBudget.source,
+        highWater: contextBudget.highWater,
+        lowWater: contextBudget.lowWater,
       });
     }
 

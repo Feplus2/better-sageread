@@ -56,12 +56,21 @@
 4. **智谱 Coding Plan 用户**：如要用 Anthropic 端点做工具图片，需在设置里手动切端点（默认已改 OpenAI 兼容）。
 5. **UI 文案**（接口端点选择器/请求路径预览）仍需主人过目。
 
-## 4. 已知但本轮未修（发版不阻塞，建议 0.5.x 跟进）
-- **书籍插图在 reader/central 新模式无合法读取路径**：getFigures 仅 paper 有；readDocument 返回的图片仍是 `images/xxx` 相对路径，readImage 拒收相对路径。建议 readDocument 输出时把图片链接重写为绝对路径（或给 reader 只读 getFigures）。
-- **MCP 工具结果图片/base64 未统一剥除**：@ai-sdk/mcp 的 image part 可能整段进上下文/落库（省 token/DB 膨胀），建议在 mcp-manager 包装 execute 统一转信封+缓存。
-- **上下文水位硬编码 256k/128k**，不读模型 context window；token 估算不计 file part/dataUrl 与 dynamic-tool 输出。长线程/MCP 大结果有超限风险。
-- **provider P2**：apiStyle 协议下拉仍有不可行的组合（未 fail-fast）；粘贴与预设同址但不同协议的端点显示可能不同步；删除 provider 不删 keyring 密钥；模型刷新无超时；编辑 baseUrl/apiStyle 后已选模型实例不重建（需重选模型）；Cargo/package 版本 0.1.0 与 tauri 0.4.2 不一致（UI 取 tauri，用户不可见）。
-- **发布/评估卫生**：evals baseline-10 的 golden_trace 仍引用不存在的 outline/read/view 工具名；MCP package-lock 版本/许可证与 package.json 不一致。
+## 4. 2026-10-22 深夜第二轮：剩余项清除情况
+
+已修（本轮）：
+- **MCP 工具图片/base64 全链路**：mcp-manager 包 execute 统一转信封+缓存；lazy-toolset / tool-result-slimming / native-tool-output 全覆盖（含 L1 截断与 2 批/6 张回灌）；新增 34 断言单测。
+- **书籍/论文插图读取**：readDocument 输出把可解析的 markdown/HTML 图片相对路径重写为绝对路径（幂等、不改 schema），reader/central 现在能真正 readImage；新增 26 断言单测。
+- **上下文水位去硬编码**：改为按所选模型真实窗口自动 compact（公式对齐 DSH/Cherry，实现与调研见 docs/plans/context-compaction-research.md；含 P0 回归修复与 20 断言单测）；模型列表的 context_window/max_output_tokens 会被解析并优先使用（DeepSeek 实测 1M/393k）；token 估算补齐长文本外推、图片、dynamic-tool；保留段若超线会自动缩小最近消息 floor。
+- **provider P2**：协议下拉按预置端点过滤不可行组合；auto 模式端点显示不再错配；删除 provider 清 keyring；模型刷新 15s 超时；设置里改 baseUrl/apiStyle 后模型实例重建；版本号 Cargo/package 对齐 0.4.2。
+- **评估卫生**：baseline-10 的 golden_trace 工具名映射为实际工具（并注明是人工参考、非自动回放）。
+
+仍未做（不阻塞发版，建议 0.5.x）：
+- **上下文溢出恢复**：捕获 provider context-length 错误 → 强制压缩一次重试（DSH maxOverflowRetries=1）。
+- **pruneMessages 廉价第一刀**：压缩前先做确定性裁剪，减少摘要调用（AI SDK 原生能力）。
+- **独立压缩模型/摘要 input 上限**：目前复用 utilityModel（Cherry 口径 (compressorW−maxOut)×0.85 未实现）。
+- 长会话前缀摘要重复计费（Cherry foldCache 类优化）。
+- 手册/wiki 更新时间点：**发版前必做**（用户固定动作），本轮只记录了待更新点。
 
 ## 5. 代码/文档落点
 - 安全：`ai/tools/image-shared.ts`、`ai/tools/central/extract-zip.ts`、`ai/utils/tool-guard.ts`

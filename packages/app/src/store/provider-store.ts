@@ -96,6 +96,10 @@ export const useProviderStore = create<ProviderState>()(
         // 辅助模型同样不能悬挂：否则 createUtilityModelInstance 会抛 "Provider not found"
         const newUtilityModel = utilityModel && utilityModel.providerId === providerId ? null : utilityModel;
 
+        // 删除提供商时清掉 OS 凭据管理器里的密钥，避免 keyring 孤儿
+        void import("@/services/secret-service")
+          .then((m) => m.secretDelete("model-provider", providerId))
+          .catch(() => {});
         set({ modelProviders: updatedProviders, selectedModel: newSelectedModel, utilityModel: newUtilityModel });
       },
       setSelectedModel: (selectedModel: SelectedModel | null) => set({ selectedModel }),

@@ -6,8 +6,11 @@ import {
   shortMdPath,
 } from "@/services/reading-position/position-service";
 import { invoke } from "@tauri-apps/api/core";
+import { appDataDir } from "@tauri-apps/api/path";
+import { exists, readDir } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
+import { type DocImageContext, type DocImageFs, rewriteDocumentImagePaths } from "./image-paths";
 import {
   type AgentDocScope,
   type DocRef,
@@ -49,7 +52,7 @@ function clampBefore(value: number | undefined): number {
   return Math.min(Math.max(value ?? 0, 0), MAX_BEFORE);
 }
 
-async function readPaperWindow(doc: DocRef, args: ReadArgs) {
+async function readPaperWindowRaw(doc: DocRef, args: ReadArgs) {
   const markdown = await readPaperMarkdown(doc.id);
   const parsed = parsePaperSections(markdown);
   const body = parsed.body;
@@ -120,7 +123,7 @@ async function readPaperWindow(doc: DocRef, args: ReadArgs) {
   };
 }
 
-async function readBookWindow(doc: DocRef, args: ReadArgs) {
+async function readBookWindowRaw(doc: DocRef, args: ReadArgs) {
   // 书籍章节可能极长：单窗上限压到 8000，避免连续扩读把上下文打满
   const after = Math.min(clampWindow(args.after), 8000);
   const before = clampBefore(args.before);
@@ -150,6 +153,8 @@ async function readBookWindow(doc: DocRef, args: ReadArgs) {
     const window = await readPositionWindow(snapshot, { before, after });
     return {
       anchor: { kind: "position", label: snapshot.label, md_file: shortMdPath(snapshot.mdRelPath) },
+      // 仅供图片相对路径解析用（不进入工具返回结构）
+      mdRelPath: snapshot.mdRelPath,
       text: window.text,
       totalChars: window.totalLength,
       nextOffset: window.nextOffset,
@@ -159,6 +164,49 @@ async function readBookWindow(doc: DocRef, args: ReadArgs) {
   }
 
   throw new Error("书籍文档需要 heading 或 position 锚点：请先传章节标题（可先用 getDocumentInfo 看目录）");
+}
+
+/** 读原文时探测图片用的文件系统适配（Tauri 插件；失败一律当作不存在）。 */
+const DOC_IMAGE_FS: DocImageFs = {
+  exists: (path: string) => exists(path).catch(() => false),
+  listDir: async (path: string) => {
+    try {
+      const entries = await readDir(path);
+      return entries.filter((entry) => entry.isDirectory).map((entry) => entry.name);
+    } catch {
+      return [];
+    }
+  },
+};
+
+/**
+ * new 模式读原文后，把 Markdown/HTML 图片引用里的相对路径重写为绝对路径
+ * （readImage 只收绝对路径：书在 mdbook src/图片目录、论文在 paper 目录 images/）。
+ * 解析不到或文件不存在时保留原文，不编造；不改变返回结构（只改 text 内容）。
+ */
+async function withResolvedImagePaths(text: string, doc: DocRef, mdRelPath?: string): Promise<string> {
+  if (!text || (!text.includes("![") && !/<img/i.test(text))) return text;
+  try {
+    const appData = (await appDataDir()).replace(/\\/g, "/");
+    const ctx: DocImageContext = { kind: doc.kind, docDir: `${appData}/books/${doc.id}`, mdRelPath };
+    return await rewriteDocumentImagePaths(text, ctx, DOC_IMAGE_FS);
+  } catch (error) {
+    console.warn("[readDocument] 图片相对路径解析失败，保留原文:", error);
+    return text;
+  }
+}
+
+async function readPaperWindow(doc: DocRef, args: ReadArgs) {
+  const window = await readPaperWindowRaw(doc, args);
+  return { ...window, text: await withResolvedImagePaths(window.text, doc) };
+}
+
+async function readBookWindow(doc: DocRef, args: ReadArgs) {
+  const window = await readBookWindowRaw(doc, args);
+  return {
+    ...window,
+    text: await withResolvedImagePaths(window.text, doc, "mdRelPath" in window ? window.mdRelPath : undefined),
+  };
 }
 
 export const createReadDocumentTool = (ctx: AgentDocScope) =>

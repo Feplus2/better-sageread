@@ -1,5 +1,6 @@
 import { auditToolCatalogCall } from "@/ai/utils/tool-catalog-audit";
 import { type CachedToolImage, cacheToolImages } from "@/ai/utils/tool-image-cache";
+import { imagePlaceholderText, toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
 import { type Tool, asSchema, tool as defineTool } from "ai";
 import { z } from "zod";
 
@@ -95,10 +96,12 @@ function stripToolImages(
   seq: { count: number } = { count: 0 },
 ): unknown {
   if (typeof node === "string") {
-    if (node.startsWith("data:image/")) {
-      images.push({ dataUrl: node, mediaType: "image/jpeg" });
+    // 裸 dataUrl（含 MCP 服务端直回 dataUrl 的写法）：MIME 从 dataUrl 头取，别再写死 jpeg
+    const imageBytes = toolImageBytesFromNode(node);
+    if (imageBytes) {
+      images.push(imageBytes);
       seq.count += 1;
-      return `[图片 #${seq.count} 内容已交给模型，base64 不写入聊天记录]`;
+      return imagePlaceholderText(seq.count);
     }
     const matched = /<path>([^<]+)<\/path>/.exec(node);
     if (matched?.[1]) paths.push(matched[1].trim());
@@ -107,11 +110,13 @@ function stripToolImages(
   if (Array.isArray(node)) return node.map((item) => stripToolImages(item, images, paths, seq));
   if (node && typeof node === "object") {
     const record = node as Record<string, unknown>;
-    const url = typeof record.url === "string" ? record.url : null;
-    if (record.type === "file" && url?.startsWith("data:image/")) {
-      images.push({ dataUrl: url, mediaType: typeof record.mediaType === "string" ? record.mediaType : "image/jpeg" });
+    // 统一识别：MCP image content（{type:"image",data,mimeType}）/ AI SDK 官方 file-data /
+    // SageRead 旧 file-url——目录牌转发 MCP 工具时同样不能把 base64 交给 UI/落库
+    const imageBytes = toolImageBytesFromNode(record);
+    if (imageBytes) {
+      images.push(imageBytes);
       seq.count += 1;
-      return { type: "text", text: `[图片 #${seq.count} 内容已交给模型，base64 不写入聊天记录]` };
+      return { type: "text", text: imagePlaceholderText(seq.count) };
     }
     const next: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) next[key] = stripToolImages(value, images, paths, seq);

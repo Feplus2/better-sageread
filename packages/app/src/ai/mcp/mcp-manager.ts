@@ -17,6 +17,7 @@
  *
  * 批次 D：stdio 传输经 Rust 子进程桥（TauriStdioMcpTransport），启动前按安全模式弹确认卡。
  */
+import { sanitizeMcpToolResultImages } from "@/ai/utils/tool-result-slimming";
 import { secretResolveBatch } from "@/services/secret-service";
 import { useAgentConfirmStore } from "@/store/agent-confirm-store";
 import { useAgentSettingsStore } from "@/store/agent-settings-store";
@@ -149,6 +150,29 @@ async function connectServer(server: McpServer): Promise<McpClient> {
 }
 
 /**
+ * MCP 工具结果图片收口（2026-10-22）：MCP server 的图片 content 是 @ai-sdk/mcp 的原始形状
+ * { type:"image", data:"<裸base64>", mimeType }，若原样进 UI/线程 JSON/模型上下文会：
+ * ① base64 永久写进线程与备份（DB 无界增长）；② 以文本形式进模型上下文（数十万 token）。
+ * 这里在 execute 返回处把图片摘成占位文本并按 toolCallId 写入内存缓存——目录牌 useTool、
+ * native toModelOutput、chat 图片桥都用同一 toolCallId 恢复给模型；文本型 MCP 结果零改动。
+ */
+function wrapMcpToolImageOutput(tool: Tool): Tool {
+  const originalExecute = tool.execute;
+  if (typeof originalExecute !== "function") return tool;
+  return {
+    ...tool,
+    execute: async (args: any, options: any) => {
+      const result = await originalExecute(args, options);
+      // 参数校验失败/服务端 isError 结果等非图片输出原样返回（引用相等=零拷贝）
+      return sanitizeMcpToolResultImages(
+        result,
+        typeof options?.toolCallId === "string" ? options.toolCallId : undefined,
+      );
+    },
+  } as Tool;
+}
+
+/**
  * 连接当前 scope 下全部启用的 MCP server，聚合工具集。
  * 单个 server 失败不阻塞其他 server（降级进 failures，由调用方提示）。
  */
@@ -183,8 +207,10 @@ export async function getMcpToolsForScope(scope: AgentScope): Promise<McpScopeRe
         const toolSet = await withTimeout(client.tools(), CONNECT_TIMEOUT_MS, `拉取「${server.name}」工具列表`);
         const prefix = `mcp_${sanitizeServerKey(server.name)}_`;
         for (const [toolName, tool] of Object.entries(toolSet)) {
+          // 先包图片收口（保留 MCP Tool 的 toModelOutput，native 通道文本型结果行为不变）
+          const wrapped = wrapMcpToolImageOutput(tool as Tool);
           tools[`${prefix}${toolName}`] = {
-            ...tool,
+            ...wrapped,
             description: `[${server.name}] ${tool.description ?? ""}`,
           } as Tool;
         }

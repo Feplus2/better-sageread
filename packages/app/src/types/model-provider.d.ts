@@ -8,6 +8,10 @@ type Model = {
   description?: string;
   capabilities?: string[];
   manual?: boolean;
+  /** 模型上下文窗口（tokens）。来源优先级：模型列表接口返回 > 内置家族表 > 保守默认值 */
+  contextWindow?: number;
+  /** 模型单次最大输出（tokens），用于压缩水位的输出预留；来源：模型列表接口 */
+  maxOutputTokens?: number;
 };
 
 /** 模型 API 协议（Base URL 只决定端点，协议必须显式声明或按 provider 推断） */

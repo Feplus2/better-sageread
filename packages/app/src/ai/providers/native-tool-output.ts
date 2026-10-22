@@ -8,6 +8,10 @@
  *
  * 本模块在 transport 组装工具后按协议包一层 toModelOutput；chat 通道不启用，继续走图片桥。
  *
+ * MCP 工具（2026-10-22 图片收口）：mcp_ 工具结果里的图片已被 mcp-manager 摘成占位并按 toolCallId
+ * 进内存缓存，这里按同一预算把缓存图回灌成官方 file part；直接调用（非目录牌）时也识别
+ * MCP 原始 image content 形状，避免把 base64 当文本喂给模型。
+ *
  * 历史图回灌预算（2026-10-22 晚纠偏）：图片字节落库时已剥离，toModelOutput 只能从内存缓存
  * （tool-image-cache，40 条 LRU）恢复历史工具图。原实现对每个历史 toolCallId 全量恢复并重发，
  * 多图长对话会让每轮请求无限膨胀（native 通道又没有 chat 桥的 700k 预算兜底）。
@@ -15,8 +19,9 @@
  * 更早的历史图不重发——占位文案提示模型按路径重新 readImage/viewImages。
  */
 
-import type { Tool } from "ai";
 import { getCachedToolImages, isRecentToolImageEntry, listCachedToolImageEntries } from "@/ai/utils/tool-image-cache";
+import { toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
+import type { Tool } from "ai";
 
 /** 目录牌模式下模型实际调用的是 useTool，图片结果也可能由缓存恢复 */
 const NATIVE_IMAGE_TOOL_NAMES = new Set(["readImage", "viewImages", "useTool"]);
@@ -71,24 +76,11 @@ function walk(node: unknown, out: CollectedOutput): void {
     out.texts.push(record.text);
     return;
   }
-  if (record.type === "file") {
-    if (isDataImageUrl(record.url)) {
-      out.images.push({
-        dataUrl: record.url,
-        mediaType: typeof record.mediaType === "string" ? record.mediaType : undefined,
-      });
-      return;
-    }
-    // 已经是官方 data 形态：保留给上层再次处理
-    const data = record.data as { type?: string; data?: unknown } | undefined;
-    const mediaType = typeof record.mediaType === "string" ? record.mediaType : undefined;
-    if (data?.type === "data" && typeof data.data === "string" && mediaType) {
-      out.images.push({
-        dataUrl: "data:" + mediaType + ";base64," + data.data,
-        mediaType,
-      });
-      return;
-    }
+  // 图片节点统一识别：MCP image content（{type:"image",data,mimeType}）/ AI SDK 官方
+  // file-data（{type:"file",mediaType,data:{type:"data",data}}）/ SageRead 旧 file-url
+  const imageBytes = toolImageBytesFromNode(record);
+  if (imageBytes) {
+    out.images.push({ dataUrl: imageBytes.dataUrl, mediaType: imageBytes.mediaType });
     return;
   }
   for (const value of Object.values(record)) walk(value, out);
@@ -179,20 +171,35 @@ function toNativeToolOutput(output: unknown, toolCallId: string | undefined, bud
   };
 }
 
-/** 给图片类工具（含目录牌 useTool）补官方 toModelOutput；其它工具原样返回。 */
+/** 需要官方 toModelOutput 的工具：内置图片工具 + 所有 MCP 工具（mcp_ 前缀，图片走缓存回灌） */
+function isNativeImageCapableTool(name: string): boolean {
+  return NATIVE_IMAGE_TOOL_NAMES.has(name) || name.startsWith("mcp_");
+}
+
+/** 给图片类工具（含目录牌 useTool 与 MCP 工具）补官方 toModelOutput；其它工具原样返回。 */
 export function wrapToolsForNativeImages<T extends Record<string, Tool>>(tools: T): T {
   // 预算跟随本次请求：历史转换与当轮多步工具调用共用同一份
   const budget = createReplayBudget();
   const wrapped: Record<string, Tool> = {};
   for (const [name, tool] of Object.entries(tools)) {
-    if (!NATIVE_IMAGE_TOOL_NAMES.has(name)) {
+    if (!isNativeImageCapableTool(name)) {
       wrapped[name] = tool;
       continue;
     }
+    // MCP Tool 自带 mcpToModelOutput（content → text parts）；文本型结果没有图时应沿用，
+    // 不能退化成 JSON.stringify（保持文本型 MCP 工具行为不变）
+    const originalToModelOutput = (tool as any).toModelOutput as
+      | ((opts: { output: unknown; toolCallId?: string }) => unknown)
+      | undefined;
     wrapped[name] = {
       ...tool,
-      toModelOutput: ({ output, toolCallId }: { output: unknown; toolCallId?: string }) =>
-        toNativeToolOutput(output, toolCallId, budget),
+      toModelOutput: ({ output, toolCallId }: { output: unknown; toolCallId?: string }) => {
+        const nativeOutput = toNativeToolOutput(output, toolCallId, budget);
+        if (name.startsWith("mcp_") && nativeOutput.type === "text" && originalToModelOutput) {
+          return originalToModelOutput({ output, toolCallId });
+        }
+        return nativeOutput;
+      },
     } as Tool;
   }
   return wrapped as T;

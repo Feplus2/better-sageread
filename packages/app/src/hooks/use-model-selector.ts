@@ -8,8 +8,13 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
 
   // 当前选中 provider 的 apiKey（响应式）：keyring 异步载入 key 后 updateProvider 会变更 modelProviders，
   // 需据此重建模型实例，否则实例会攥住创建时捕获的空 key（401）不放
-  const currentApiKey = selectedModel
-    ? (modelProviders.find((p) => p.provider === selectedModel.providerId)?.apiKey ?? "")
+  const currentProvider = selectedModel
+    ? modelProviders.find((p) => p.provider === selectedModel.providerId)
+    : undefined;
+  const currentApiKey = currentProvider?.apiKey ?? "";
+  // 设置页改 baseUrl/apiStyle 也要重建实例（此前只在切模型/换 key 时重建，改了端点后请求仍走旧实例）
+  const currentEndpointKey = currentProvider
+    ? `${currentProvider.baseUrl ?? ""}|${currentProvider.apiStyle ?? "auto"}`
     : "";
 
   useEffect(() => {
@@ -69,7 +74,7 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
       console.error("Failed to create model instance:", error);
       return null;
     }
-  }, [selectedModel, currentApiKey]);
+  }, [selectedModel, currentApiKey, currentEndpointKey]);
 
   const handleModelSelect = useCallback(
     (model: SelectedModel) => {

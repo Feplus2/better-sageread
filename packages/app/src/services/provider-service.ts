@@ -1,13 +1,55 @@
 import { getPresetProvider } from "@/utils/provider-endpoint";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 
+/** 模型列表条目：id + 可选上下文窗口（部分厂商 /models 会带 context_length 等字段） */
+export interface ProviderModelInfo {
+  id: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+}
+
+const CONTEXT_WINDOW_FIELDS = [
+  "context_length",
+  "context_window",
+  "max_context_length",
+  "max_input_tokens",
+  "max_model_len",
+  "inputTokenLimit",
+];
+
+function pickContextWindow(record: any): number | undefined {
+  for (const key of CONTEXT_WINDOW_FIELDS) {
+    const value = record?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return undefined;
+}
+
+function pickMaxOutputTokens(record: any): number | undefined {
+  for (const key of ["max_output_tokens", "maxOutputTokens", "max_tokens", "outputTokenLimit"]) {
+    const value = record?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return undefined;
+}
+
+function toModelInfo(record: any, id: string): ProviderModelInfo {
+  const contextWindow = pickContextWindow(record);
+  const maxOutputTokens = pickMaxOutputTokens(record);
+  return {
+    id,
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(maxOutputTokens ? { maxOutputTokens } : {}),
+  };
+}
+
 /**
- * Fetches models from a provider's API endpoint
- * Always uses Tauri's HTTP client to bypass CORS issues
- * @param provider The provider object containing baseUrl and apiKey
- * @returns Promise<string[]> Array of model IDs
+ * 拉取模型列表（含窗口等元数据，供上下文预算使用）。
+ * Always uses Tauri's HTTP client to bypass CORS issues.
  */
-export const fetchModelsFromProvider = async (provider: ModelProvider): Promise<string[]> => {
+export const fetchModelCatalog = async (provider: ModelProvider): Promise<ProviderModelInfo[]> => {
   if (!provider.baseUrl) {
     throw new Error("Provider must have baseUrl configured");
   }
@@ -36,6 +78,10 @@ export const fetchModelsFromProvider = async (provider: ModelProvider): Promise<
   throw lastError instanceof Error ? lastError : new Error(message);
 };
 
+/** 兼容旧调用：只返回模型 ID */
+export const fetchModelsFromProvider = async (provider: ModelProvider): Promise<string[]> =>
+  (await fetchModelCatalog(provider)).map((entry) => entry.id);
+
 /** 模型列表候选地址：当前 baseUrl 优先，其后是预置的 OpenAI 兼容根 */
 function modelListBaseUrls(provider: ModelProvider, isGemini: boolean): string[] {
   const urls = [provider.baseUrl?.replace(/\/+$/, "") ?? ""].filter(Boolean);
@@ -49,7 +95,11 @@ function modelListBaseUrls(provider: ModelProvider, isGemini: boolean): string[]
   return [...new Set(urls)];
 }
 
-async function fetchModelsAt(provider: ModelProvider, baseUrl: string, isGemini: boolean): Promise<string[]> {
+async function fetchModelsAt(
+  provider: ModelProvider,
+  baseUrl: string,
+  isGemini: boolean,
+): Promise<ProviderModelInfo[]> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -68,7 +118,7 @@ async function fetchModelsAt(provider: ModelProvider, baseUrl: string, isGemini:
     ? `${/(\/v1(beta)?)$/.test(baseUrl) ? baseUrl : `${baseUrl}/v1beta`}/models?key=${encodeURIComponent(provider.apiKey!)}`
     : `${baseUrl}/models`;
 
-  const response = await fetchTauri(modelsUrl, { method: "GET", headers });
+  const response = await fetchWithTimeout(modelsUrl, { method: "GET", headers }, MODEL_LIST_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
   }
@@ -77,31 +127,54 @@ async function fetchModelsAt(provider: ModelProvider, baseUrl: string, isGemini:
 
   // Handle different response formats that providers might use
   if (data.data && Array.isArray(data.data)) {
-    // OpenAI format: { data: [{ id: "model-id" }, ...] }
-    return data.data.map((model: { id: string }) => model.id).filter(Boolean);
+    // OpenAI format: { data: [{ id: "model-id", context_length?: 128000 }, ...] }
+    return data.data
+      .filter((model: any) => typeof model?.id === "string" && model.id)
+      .map((model: any) => toModelInfo(model, model.id));
   }
 
   if (Array.isArray(data)) {
-    // Direct array format: ["model-id1", "model-id2", ...]
-    return data.filter(Boolean).map((model) => (typeof model === "object" && "id" in model ? model.id : model));
+    // Direct array format: ["model-id", { id, context_length }]
+    return data
+      .map((model: any) => {
+        if (typeof model === "string") return { id: model } as ProviderModelInfo;
+        if (typeof model?.id === "string") return toModelInfo(model, model.id);
+        return undefined;
+      })
+      .filter((entry: ProviderModelInfo | undefined): entry is ProviderModelInfo => !!entry?.id);
   }
 
   if (data.models && Array.isArray(data.models)) {
-    // Alternative format: { models: [...] }
+    // Alternative format: { models: [{ name: "models/gemini-2.5-pro", inputTokenLimit }, ...] }
     return data.models
       .map((model: any) => {
-        if (typeof model === "string") return model;
-        if (typeof model.id === "string") return model.id;
-        if (typeof model.name === "string") {
-          return model.name.replace(/^models\//, "");
-        }
+        if (typeof model === "string") return { id: model } as ProviderModelInfo;
+        if (typeof model?.id === "string") return toModelInfo(model, model.id);
+        if (typeof model?.name === "string") return toModelInfo(model, model.name.replace(/^models\//, ""));
         return undefined;
       })
-      .filter(Boolean);
+      .filter((entry: ProviderModelInfo | undefined): entry is ProviderModelInfo => !!entry?.id);
   }
 
   console.warn("Unexpected response format from provider API:", data);
   return [];
+}
+
+/** 模型列表请求超时：防止坏 provider/代理让设置页刷新永远转圈 */
+const MODEL_LIST_TIMEOUT_MS = 15_000;
+
+function fetchWithTimeout(
+  url: string,
+  init: Parameters<typeof fetchTauri>[1],
+  timeoutMs: number,
+): ReturnType<typeof fetchTauri> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`fetch timeout (${timeoutMs}ms)`)), timeoutMs);
+  });
+  return Promise.race([fetchTauri(url, init), timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as ReturnType<typeof fetchTauri>;
 }
 
 /** 本地服务的原生管理 API 根地址（去掉 /v1 后缀） */

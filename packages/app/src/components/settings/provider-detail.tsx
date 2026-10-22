@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { fetchModelsFromProvider, filterChatModels } from "@/services/provider-service";
+import { fetchModelCatalog, filterChatModels } from "@/services/provider-service";
 import { useProviderStore } from "@/store/provider-store";
 import { isLocalEndpoint } from "@/utils/provider-url";
 import { throttle } from "@/utils/throttle";
@@ -162,11 +162,18 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
     setRefreshError(null);
 
     try {
-      const rawModelIds = await fetchModelsFromProvider({
+      const catalog = await fetchModelCatalog({
         ...provider,
         apiKey: provider.apiKey,
         baseUrl: provider.baseUrl,
       });
+      const rawModelIds = catalog.map((entry) => entry.id);
+      const contextWindowById = new Map(
+        catalog.filter((entry) => entry.contextWindow).map((entry) => [entry.id, entry.contextWindow as number]),
+      );
+      const maxOutputById = new Map(
+        catalog.filter((entry) => entry.maxOutputTokens).map((entry) => [entry.id, entry.maxOutputTokens as number]),
+      );
 
       // 只保留对话模型（Ollama 会把 embedding 模型一起列出来；LM Studio 过滤 embeddings）
       const modelIds = await filterChatModels(rawModelIds, provider);
@@ -184,6 +191,8 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
 
       const fetchedModels: Model[] = fetchedIds.map((id) => {
         const existing = existingModelMap.get(id);
+        const contextWindow = contextWindowById.get(id) ?? existing?.contextWindow;
+        const maxOutputTokens = maxOutputById.get(id) ?? existing?.maxOutputTokens;
         return {
           id,
           name: existing?.name?.trim() || id,
@@ -191,6 +200,8 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
           description: existing?.description ?? "",
           capabilities: existing?.capabilities ?? [],
           manual: existing?.manual ?? false,
+          ...(contextWindow ? { contextWindow } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
         };
       });
 

@@ -1,7 +1,10 @@
 # SageRead Agent 评测题库 · 第一批（Phase 0 基线）
 # 冻结日期：2026-10-22 · 状态：G0 待评审
 # 用法：旧工具集跑 3 次 → 人工/Lead 判分 → 落盘 .tmp-eval-runs/<ts>/；Phase 2 再扩到 40–50 并接 rubric judge。
-# 说明：gold.anchors 用协议 v0 语法（docs/design/anchor-protocol.md）；旧工具集没有 anchor 概念，判分时按「文档 + 章节/图号/引用号」核对。
+# 说明：gold.anchors 用协议 v0 语法（docs/design/anchor-protocol.md）；判分时按「文档 + 章节/图号/引用号」核对。
+# golden_trace 是人工对照参考（不是自动回放）：2026-10-22 已把设计期抽象名映射为实际工具名——
+#   outline→getDocumentInfo / read→readDocument / list_figures→getFigures / view→readImage /
+#   search→searchLibrary / get_citations→getCitations。旧工具模式请对应 ragToc/readBookSection/paperSearch。
 version: 1
 frozen_at: "2026-10-22"
 status: "g0-pending"
@@ -67,11 +70,11 @@ tasks:
       rubric: "章节正确 1 分；每条事实 1 分；编造/错章一票否决"
     budget: { max_steps: 12, max_tokens: 30000 }
     golden_trace:
-      - tool: "outline"
+      - tool: "getDocumentInfo"
         args: { doc: "book:9f1820c6dcc62250458da69162b72e5d" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "book:9f1820c6dcc62250458da69162b72e5d/text/part0007.md#第三章", after: 6000 }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "<上一步 next>" }
     old_tool_hint: ["ragToc", "readBookSection", "ragSearch"]
     notes: "part0007.md 共 7944 字符，需要 1–2 个窗口。"
@@ -100,11 +103,11 @@ tasks:
       rubric: "图号正确 1 分；四个面板各 1 分；策略 1 分；编造一票否决"
     budget: { max_steps: 12, max_tokens: 30000 }
     golden_trace:
-      - tool: "list_figures"
+      - tool: "getFigures"
         args: { doc: "paper:a27b187c6bd02d3c" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "figure:a27b187c6bd02d3c:3" }
-      - tool: "view"
+      - tool: "readImage"
         args: { anchor: "figure:a27b187c6bd02d3c:3" }
     old_tool_hint: ["getFigures", "readPaperSection（只能看图注，看不到图）"]
     notes: "P0 的核心验收题：新实现应能真正看图，而不是靠图注猜。"
@@ -134,11 +137,11 @@ tasks:
       rubric: "图号正确 1 分；表征种类每条 1 分；结论 1 分"
     budget: { max_steps: 14, max_tokens: 32000 }
     golden_trace:
-      - tool: "list_figures"
+      - tool: "getFigures"
         args: { doc: "paper:43f3adfdea61b6d4" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "figure:43f3adfdea61b6d4:2" }
-      - tool: "view"
+      - tool: "readImage"
         args: { anchor: "figure:43f3adfdea61b6d4:2" }
     old_tool_hint: ["getFigures", "readPaperSection（未索引论文，且看不到大图）"]
     notes: "图 2 是 4.83MB PNG，验证 view 的降采样；论文未索引，验证 list_figures 不依赖向量。"
@@ -172,9 +175,9 @@ tasks:
     golden_trace:
       - tool: "(注入)"
         args: { note: "【当前阅读位置】每轮注入，指向第二章开头" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "position:book:9f1820c6dcc62250458da69162b72e5d", after: 6000 }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "<上一步 next>" }
     old_tool_hint: ["getReadingPosition", "readAtReadingPosition"]
     notes: "part0006.md 共 6944 字符。位置由 harness 固定；首次运行记录 snapshot 并把「第二章」/进度冻结进 gold。"
@@ -206,11 +209,11 @@ tasks:
       rubric: "两篇各自问题/手段/证据各 1 分；对比结论 1 分；混淆一票否决"
     budget: { max_steps: 16, max_tokens: 40000 }
     golden_trace:
-      - tool: "search"
+      - tool: "searchLibrary"
         args: { query: "layered oxide cathode design strategy interface stability", scope: "all", types: ["text"], top_k: 8 }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "<A 命中锚点>", after: 4000 }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "<C 命中锚点>", after: 4000 }
     old_tool_hint: ["paperSearch（全库）", "readPaperSection 两篇"]
     notes: "两篇都已索引（84 / 140 chunks），用来测跨文献检索 + 双文档阅读；旧工具集需要切文档或开全库搜索。"
@@ -238,9 +241,9 @@ tasks:
       rubric: "数据库 1 分；工具/API 1 分；charged-only 1 分；ML 1 分；DFT 验证 1 分"
     budget: { max_steps: 12, max_tokens: 30000 }
     golden_trace:
-      - tool: "outline"
+      - tool: "getDocumentInfo"
         args: { doc: "paper:5c33d4493541c1f7" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "paper:5c33d4493541c1f7#2.1. Database Construction and Curation", after: 6000 }
     old_tool_hint: ["readPaperSection（按标题）"]
     notes: "论文 63KB、未索引，方法节完整；用来测长文结构定位。"
@@ -267,7 +270,7 @@ tasks:
       rubric: "编号 1 分；作者/标题 1 分；期刊年份 1 分；DOI 1 分"
     budget: { max_steps: 10, max_tokens: 20000 }
     golden_trace:
-      - tool: "get_citations"
+      - tool: "getCitations"
         args: { doc: "paper:43f3adfdea61b6d4", n: 12 }
     old_tool_hint: ["getCitations（能读 paper.md 的 References 小节）"]
     notes: "参考文献小节有 <a id=ref-12> 锚点；旧工具集理论上可完成，用于比步数/token。"
@@ -296,9 +299,9 @@ tasks:
       rubric: "章 1 分；节 1 分；定义 1 分；主观三要素 1 分；通说结论 1 分"
     budget: { max_steps: 14, max_tokens: 32000 }
     golden_trace:
-      - tool: "outline"
+      - tool: "getDocumentInfo"
         args: { doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "book:718a0d5d6514980ce87dd8b0d39ad2dc#第九章 法律行为与意思表示的一般原理/第二节 意思表示的构成", after: 6000 }
     old_tool_hint: ["readBookSection（无 mdbook，走 EPUB 解析；目录匹配可能失败）"]
     notes: "书 B 无 mdbook、未索引；这是「无索引兜底 + EPUB TOC 匹配」的核心题。"
@@ -323,7 +326,7 @@ tasks:
       rubric: "明确说没有 1 分；给出合理范围说明 1 分；任何编造一票否决"
     budget: { max_steps: 10, max_tokens: 20000 }
     golden_trace:
-      - tool: "search"
+      - tool: "searchLibrary"
         args: { query: "量子色动力学", scope: "current", types: ["text"], top_k: 8 }
       - tool: "(判定)"
         args: { note: "EMPTY_RESULT → 直接拒答，不要反复换词重试" }
@@ -356,7 +359,7 @@ tasks:
     golden_trace:
       - tool: "(注入)"
         args: { note: "【当前阅读位置】已指向第二章开头" }
-      - tool: "read"
+      - tool: "readDocument"
         args: { anchor: "position:book:9f1820c6dcc62250458da69162b72e5d", before: 100, after: 1500 }
     old_tool_hint: ["getReadingPosition", "readAtReadingPosition"]
     notes: "与 position-summary-ch2 共用同一个位置固定；旧工具集可能重复读同一段，用于测「位置已注入」后的重复调用。"

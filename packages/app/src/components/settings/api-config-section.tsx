@@ -25,6 +25,16 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
   const currentEndpoint = findCurrentEndpoint(provider);
   const hasPresetEndpoints = endpointOptions.length > 0;
   const preview = buildRequestPathPreview(provider.baseUrl, provider.apiStyle ?? "auto");
+  // 预置 provider 只列出它确实预填了地址的协议，避免选到 factory 不支持的组合；
+  // 自定义 provider 无预置端点时仍给出全部协议（用户自建代理可能支持任意格式）
+  const allowedProtocols = hasPresetEndpoints ? new Set(endpointOptions.map((option) => option.protocol)) : null;
+  const protocolItems: Array<{ value: string; label: string }> = [
+    { value: "auto", label: "自动（按提供商/已知网关推断）" },
+    { value: "openai-chat", label: "OpenAI Chat Completions" },
+    { value: "openai-responses", label: "OpenAI Responses API" },
+    { value: "anthropic-messages", label: "Anthropic Messages（含兼容端点）" },
+    { value: "gemini", label: "Gemini 原生（v1beta）" },
+  ].filter((item) => !allowedProtocols || item.value === "auto" || allowedProtocols.has(item.value as ChatProtocol));
   // 预置端点命中时不再让用户选协议（端点即协议）；手改地址/自定义 provider 才显示协议选择
   const showProtocolSelect = !hasPresetEndpoints || !currentEndpoint;
 
@@ -152,11 +162,11 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
               <SelectValue placeholder="自动" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">自动（按提供商/已知网关推断）</SelectItem>
-              <SelectItem value="openai-chat">OpenAI Chat Completions</SelectItem>
-              <SelectItem value="openai-responses">OpenAI Responses API</SelectItem>
-              <SelectItem value="anthropic-messages">Anthropic Messages（含兼容端点）</SelectItem>
-              <SelectItem value="gemini">Gemini 原生（v1beta）</SelectItem>
+              {protocolItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {nativeImageHint(provider.apiStyle ?? "auto") && (

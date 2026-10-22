@@ -48,9 +48,11 @@ export function findCurrentEndpoint(provider: ModelProvider): ProviderEndpointOp
     );
     if (matched) return matched;
   }
-  // apiStyle 是 auto 或缺省时，按地址唯一命中
+  // apiStyle 是 auto 或缺省时，只认"默认端点"的地址命中：
+  // 避免粘贴同址的其它协议端点时下拉显示某协议、实际请求却按 auto 推断到另一个协议
   const byUrl = options.filter((o) => normalizeUrl(o.baseUrl) === normalizeUrl(provider.baseUrl));
-  return byUrl.length === 1 ? byUrl[0] : null;
+  const defaultMatch = byUrl.find((option) => option.isDefault);
+  return byUrl.length === 1 && defaultMatch ? defaultMatch : null;
 }
 
 export function getEndpointOptions(provider: ModelProvider): ProviderEndpointOption[] {

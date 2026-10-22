@@ -1,5 +1,6 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { estimateTokens } from "./token-estimator";
+import { cacheToolImages } from "./tool-image-cache";
 
 /**
  * D5+D6 工具结果两层瘦身（2026-08-21 定稿，业界对照 microcompact/context editing）：
@@ -67,6 +68,138 @@ const IMAGE_TOOLS = new Set(["readImage", "viewImages"]);
 const IMAGE_BYTES_PLACEHOLDER =
   "[历史图片未随本轮重发（字节不落库；重启/较早轮次后模型看不到原图），需要重看时用 readImage/viewImages 按路径重取]";
 
+// ==================== 工具图片形状统一识别（2026-10-22 MCP 图片收口） ====================
+// MCP server 返回的图片是 @ai-sdk/mcp 的原始 content part（{type:"image",data,mimeType}），
+// 与 SageRead 旧形状（file+url）和 AI SDK v7 官方形状（file+data）都不同；四个消费点
+// （MCP execute 收口 / 目录牌 useTool / 落库 L1 / native toModelOutput）统一走这里的识别器，
+// 避免各写一套正则导致某条路径漏剥 base64。
+
+/** 工具结果里的图片字节（dataUrl 自带 MIME 前缀与 base64） */
+export interface ToolImageBytes {
+  dataUrl: string;
+  mediaType: string;
+}
+
+/** 图片占位文案（目录牌 useTool 与 MCP execute 共用；#N 与缓存里的图片顺序一一对应） */
+export function imagePlaceholderText(seq: number): string {
+  return `[图片 #${seq} 内容已交给模型，base64 不写入聊天记录]`;
+}
+
+function dataUrlMediaType(dataUrl: string): string {
+  const matched = /^data:([^;]+);base64,/i.exec(dataUrl);
+  return matched?.[1] ?? "image/jpeg";
+}
+
+function isImageDataUrl(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:image/");
+}
+
+/**
+ * 识别工具结果里的图片节点（三种真实形状）：
+ * 1) MCP / AI SDK raw image content：{ type:"image", data:"<裸base64>", mimeType:"image/png" }
+ *    （@ai-sdk/mcp 的 execute 直接返回 CallToolResult，图片就是这个形状）
+ * 2) AI SDK v7 官方 file-data：{ type:"file", mediaType:"image/*", data:{ type:"data", data:"<base64>" } }
+ * 3) SageRead 旧 file-url：{ type:"file", mediaType:"image/*", url:"data:image/..." }
+ * 4) 裸 dataUrl 字符串（部分工具直接返回整串）
+ * 非图片节点（文本/JSON 结构）返回 null——调用方据此保证文本型工具结果零改动。
+ */
+export function toolImageBytesFromNode(node: unknown): ToolImageBytes | null {
+  if (isImageDataUrl(node)) return { dataUrl: node, mediaType: dataUrlMediaType(node) };
+  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+  const record = node as Record<string, unknown>;
+  if (record.type === "image") {
+    if (typeof record.data !== "string" || record.data.length === 0) return null;
+    const declaredType =
+      typeof record.mimeType === "string"
+        ? record.mimeType
+        : typeof record.mediaType === "string"
+          ? record.mediaType
+          : "image/jpeg";
+    // MCP ImageContent.data 是裸 base64；也兼容服务端直接回 dataUrl 的写法
+    if (record.data.startsWith("data:")) {
+      return { dataUrl: record.data, mediaType: dataUrlMediaType(record.data) };
+    }
+    return { dataUrl: `data:${declaredType};base64,${record.data}`, mediaType: declaredType };
+  }
+  if (record.type === "file") {
+    if (isImageDataUrl(record.url)) {
+      return {
+        dataUrl: record.url,
+        mediaType: typeof record.mediaType === "string" ? record.mediaType : dataUrlMediaType(record.url),
+      };
+    }
+    const data = record.data as { type?: string; data?: unknown } | undefined;
+    if (data?.type === "data" && typeof data.data === "string" && data.data.length > 0) {
+      const mediaType = typeof record.mediaType === "string" ? record.mediaType : "";
+      // 只认图片：官方 file part 也可能是 PDF/文本，误当图片会破坏文本型结果
+      if (!mediaType.startsWith("image/")) return null;
+      return { dataUrl: `data:${mediaType};base64,${data.data}`, mediaType };
+    }
+  }
+  return null;
+}
+
+interface ImageWalkResult {
+  value: unknown;
+  changed: boolean;
+}
+
+/** 递归把图片节点换成带序号占位；只改副本（无图片返回原引用，保证文本型结果零开销） */
+function replaceImageBytesWalk(node: unknown, images: ToolImageBytes[], seq: { count: number }): ImageWalkResult {
+  const image = toolImageBytesFromNode(node);
+  if (image) {
+    images.push(image);
+    seq.count += 1;
+    return { value: { type: "text", text: imagePlaceholderText(seq.count) }, changed: true };
+  }
+  if (Array.isArray(node)) {
+    let changed = false;
+    const value = node.map((item) => {
+      const walked = replaceImageBytesWalk(item, images, seq);
+      if (walked.changed) changed = true;
+      return walked.value;
+    });
+    return { value: changed ? value : node, changed };
+  }
+  if (node && typeof node === "object") {
+    let changed = false;
+    const value: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(node as Record<string, unknown>)) {
+      const walked = replaceImageBytesWalk(item, images, seq);
+      value[key] = walked.value;
+      if (walked.changed) changed = true;
+    }
+    return { value: changed ? value : node, changed };
+  }
+  return { value: node, changed: false };
+}
+
+/**
+ * 摘掉工具结果里的图片字节并换文本占位（供 MCP execute 包装用）。
+ * 返回 null = 没有图片（文本型 MCP 工具保持零改动）；有图片返回新副本 + 图片字节，
+ * 调用方负责按 toolCallId 写入 tool-image-cache（模型侧经图片桥 / native toModelOutput 恢复）。
+ */
+export function stripToolImageBytes(node: unknown): { output: unknown; images: ToolImageBytes[] } | null {
+  const images: ToolImageBytes[] = [];
+  const walked = replaceImageBytesWalk(node, images, { count: 0 });
+  if (!walked.changed) return null;
+  return { output: walked.value, images };
+}
+
+/**
+ * MCP 工具结果图片统一收口（getMcpToolsForScope 的 execute 包装调用；导出供单测）：
+ * - 图片 → 文本占位 + 按 toolCallId 进内存缓存；无图片 → 原对象引用返回（文本型工具行为不变）；
+ * - 即使 toolCallId 缺失也剥离图片（绝不把 base64 交给 UI/落库），只是无法再回灌给模型。
+ */
+export function sanitizeMcpToolResultImages(result: unknown, toolCallId: string | undefined): unknown {
+  const stripped = stripToolImageBytes(result);
+  if (!stripped) return result;
+  if (toolCallId && stripped.images.length > 0) {
+    cacheToolImages(toolCallId, stripped.images);
+  }
+  return stripped.output;
+}
+
 /** L2 纳入存根的 RAG 工具 */
 const L2_RAG_TOOLS = new Set(["ragSearch", "ragContext", "ragRange"]);
 
@@ -118,7 +251,8 @@ function stripImagePayloads(node: unknown): unknown | null {
   }
   if (node && typeof node === "object") {
     const record = node as Record<string, unknown>;
-    if (record.type === "file" && typeof record.url === "string" && record.url.startsWith("data:image/")) {
+    // 图片节点（旧 file-url / AI SDK 官方 file-data / MCP image content）：落库前统一换占位
+    if (toolImageBytesFromNode(record)) {
       return { type: "text", text: IMAGE_BYTES_PLACEHOLDER };
     }
     let changed = false;
@@ -164,32 +298,40 @@ export function truncateToolResultsForStorage(messages: UIMessage[]): UIMessage[
       }
       const name = toolNameOf(part);
       if (!name) return part;
-      // 图片类工具：落库前把 dataUrl 换成文本占位（含 useTool 转发；信封里的路径/尺寸保留）
-      const effectiveName = name === "useTool" ? forwardedToolName(part) : name;
-      if (effectiveName && IMAGE_TOOLS.has(effectiveName)) {
+      // MCP 工具（含 dynamic-tool 形态与目录牌 useTool 转发）：图片收口 + L1 截断都要覆盖，
+      // 否则 MCP 的 base64 / 大文本会原样进线程 JSON（2026-10-22 图片链路收口）
+      const forwarded = name === "useTool" ? forwardedToolName(part) : null;
+      const isMcpPart = name.startsWith("mcp_") || part.type === "dynamic-tool" || !!forwarded?.startsWith("mcp_");
+      // 图片类工具：落库前把 dataUrl / MCP 图片 part 换成文本占位（含 useTool 转发；信封路径保留）
+      const effectiveName = name === "useTool" ? forwarded : name;
+      let workingPart = part;
+      if ((effectiveName && IMAGE_TOOLS.has(effectiveName)) || isMcpPart) {
         if (part.state && part.state !== "output-available") return part;
-        if (part.output == null) return part;
-        const stripped = stripImagePayloads(part.output);
-        if (stripped === null) return part;
-        touched = true;
-        return { ...part, output: stripped };
+        if (part.output != null) {
+          const stripped = stripImagePayloads(part.output);
+          if (stripped !== null) {
+            touched = true;
+            workingPart = { ...part, output: stripped };
+          }
+        }
+        // 内置 readImage/viewImages 保持原行为（摘完直接返回）；MCP 摘图后继续走 L1 文本截断
+        if (!isMcpPart) return workingPart;
       }
-      if (!L1_CONTENT_TOOLS.has(name)) return part;
+      if (!L1_CONTENT_TOOLS.has(name) && !isMcpPart) return part;
       // useTool 转发：还原原始工具名再判定——转给 UI 消费型工具（如 mindmap）的结果不截；
       // 原始名缺失的转发按内容型兜底截断（白名单收录 useTool 即为此）。output 即真实工具的原始
       // 结果结构，头部截断天然保住 chunk_id/来源坐标（引用标转跳依赖，见 citation-source.ts）
-      if (name === "useTool") {
-        const forwarded = forwardedToolName(part);
-        if (forwarded && !L1_CONTENT_TOOLS.has(forwarded)) return part;
+      if (name === "useTool" && !isMcpPart && forwarded && !L1_CONTENT_TOOLS.has(forwarded)) return part;
+      if (workingPart.state && workingPart.state !== "output-available") return part;
+      if (workingPart.output == null) return part;
+      if (workingPart.output && typeof workingPart.output === "object" && (workingPart.output as any).__slimPreview) {
+        return workingPart; // 幂等（图片已摘但文本小：返回摘好的副本）
       }
-      if (part.state && part.state !== "output-available") return part;
-      if (part.output == null) return part;
-      if (part.output && typeof part.output === "object" && (part.output as any).__slimPreview) return part; // 幂等
-      const text = stringifyOutput(part.output);
-      if (text.length <= TOOL_RESULT_PREVIEW_CHARS) return part;
+      const text = stringifyOutput(workingPart.output);
+      if (text.length <= TOOL_RESULT_PREVIEW_CHARS) return workingPart;
       touched = true;
       return {
-        ...part,
+        ...workingPart,
         output: {
           __slimPreview: true,
           originalChars: text.length,

@@ -1,12 +1,20 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { resolveContextBudget } from "@/ai/providers/context-window";
 import { estimateMessageTokens, estimateMessagesTokens } from "./token-estimator";
 
-/** 模型上下文上限参考值（现代模型 1M 起步）：与点火线同值 */
+/**
+ * @deprecated 2026-10-22 晚起压缩水位按所选模型窗口动态计算（见 ai/providers/context-window.ts），
+ * 这里仅保留常量给旧引用/测试；新代码请用 resolveContextBudget()。
+ */
 export const HISTORY_TOKEN_BUDGET = 256_000;
-/** 活塞点火线：历史 token 超过此值才触发压缩（避免每轮频繁点火；2026-08-09 用户拍板 256k） */
+/** @deprecated 见 resolveContextBudget() */
 export const COMPRESS_HIGH_WATER = 256_000;
-/** 活塞泄压线：点火后从最新向前保留到此值以内，腾出约一半空间后才需下次点火（点火线的 1/2） */
+/** @deprecated 见 resolveContextBudget() */
 export const COMPRESS_LOW_WATER = 128_000;
+/** 未传预算时的保守默认（未知模型 128k 窗口）；transport 会传模型真实预算 */
+const DEFAULT_BUDGET = resolveContextBudget(undefined);
+const DEFAULT_HIGH_WATER = DEFAULT_BUDGET.highWater;
+const DEFAULT_LOW_WATER = DEFAULT_BUDGET.lowWater;
 /** 保底保留的最近消息条数（单位：条，user/assistant 各算一条）：泄压时这些永不压缩，
  * 保证 Agent 不忘最近邻对话（2026-08-09 由 40 调为 10：40 过多，真正兜底只需最近几轮） */
 export const RECENT_MESSAGE_FLOOR = 10;
@@ -118,8 +126,8 @@ export function selectMessagesWithinBudget(
   const lastUserIndex = messages.findLastIndex((msg) => msg.role === "user");
   if (lastUserIndex === -1) return { kept: [], dropped: [] };
 
-  const highWater = options?.budget ?? COMPRESS_HIGH_WATER;
-  const lowWater = options?.lowWater ?? COMPRESS_LOW_WATER;
+  const highWater = options?.budget ?? DEFAULT_HIGH_WATER;
+  const lowWater = options?.lowWater ?? DEFAULT_LOW_WATER;
   const floor = options?.floor ?? RECENT_MESSAGE_FLOOR;
 
   const fallback = (): BudgetSelection => ({
@@ -144,12 +152,17 @@ export function selectMessagesWithinBudget(
     accumulated += tokens;
   }
 
-  // 三约束取最宽：泄压容量、floor 保底、必须含最后一条 user
-  let splitAt = Math.min(budgetSplit, Math.max(messages.length - floor, 0), lastUserIndex);
-
-  // 对齐到 user 消息（lastUserIndex 本身是 user，最多前进到那里）
-  while (splitAt < messages.length && messages[splitAt].role !== "user") {
-    splitAt++;
+  // 三约束取最宽：泄压容量、floor 保底、必须含最后一条 user。
+  // floor 条本身可能就超线（最近 10 条全是巨型工具结果）：逐级缩小 floor 到 4/2 条，
+  // 保证压缩后的保留段确实落回触发线以内，否则下一轮会立刻再次点火。
+  let floorToUse = floor;
+  let splitAt = 0;
+  for (;;) {
+    splitAt = Math.min(budgetSplit, Math.max(messages.length - floorToUse, 0), lastUserIndex);
+    while (splitAt < messages.length && messages[splitAt].role !== "user") splitAt++;
+    const keptTokens = estimateMessagesTokens(messages.slice(splitAt));
+    if (keptTokens <= highWater || floorToUse <= 2) break;
+    floorToUse = floorToUse <= 4 ? 2 : 4;
   }
 
   if (splitAt === 0) {

@@ -2,8 +2,10 @@ import type { UIMessage } from "@ai-sdk/react";
 
 /** 单条消息的固定结构开销（role/分隔等），经验值 */
 const MESSAGE_OVERHEAD_TOKENS = 8;
-/** 单个字符串叶子计入估算的长度上限（截断采样），防超长文本拖慢估算 */
-const PART_TEXT_CAP = 10_000;
+/** 字符串采样长度：超过则按采样密度外推，避免大工具结果/大 base64 被截断低估 */
+const PART_TEXT_SAMPLE = 4_000;
+/** 图片 part 的估算 token：厂商按 tile 计费，通常 1-2k；比按 base64 字符数估更接近真实 */
+export const IMAGE_PART_TOKENS = 1_500;
 
 // CJK 统一表意文字（U+4E00-U+9FFF、扩展A U+3400-U+4DBF、兼容区 U+F900-U+FAFF）
 // + 日文假名（U+3040-U+30FF）+ 韩文音节（U+AC00-U+D7A3）
@@ -18,6 +20,14 @@ export function estimateTokens(text: string): number {
   const cjkCount = (text.match(CJK_RE) || []).length;
   const otherCount = text.length - cjkCount;
   return Math.ceil(cjkCount + otherCount / 4);
+}
+
+/** 文本 token 估算（超长文本按前 4k 字符的密度外推，量级正确且不冻结主线程） */
+export function estimateTextTokensFull(text: string): number {
+  if (!text) return 0;
+  if (text.length <= PART_TEXT_SAMPLE) return estimateTokens(text);
+  const sampleTokens = estimateTokens(text.slice(0, PART_TEXT_SAMPLE));
+  return Math.ceil((sampleTokens * text.length) / PART_TEXT_SAMPLE);
 }
 
 /** 结构探针单次估算最多访问的节点数（防巨型 tool 结果拖慢估算） */
@@ -37,7 +47,7 @@ function probeTokens(value: unknown, depth: number, budget: { left: number }): n
   budget.left -= 1;
   if (value == null) return 1;
   const t = typeof value;
-  if (t === "string") return estimateTokens((value as string).slice(0, PART_TEXT_CAP));
+  if (t === "string") return estimateTextTokensFull(value as string);
   if (t === "number" || t === "boolean") return 2;
   if (t !== "object") return 1;
   if (depth <= 0) return 64;
@@ -62,13 +72,24 @@ function probeTokens(value: unknown, depth: number, budget: { left: number }): n
   return total <= visited ? sum : Math.ceil((sum / Math.max(visited, 1)) * total);
 }
 
-/** 估算单个 part 的 token 占用（tool 部分按输入/输出做结构探针估算） */
+/** 文件/图片 part 的 token 估算：图片按固定经验值，其它按 dataUrl/文本长度折算 */
+function estimateFilePartTokens(p: Record<string, unknown>): number {
+  const mediaType = String(p.mediaType ?? "");
+  const url = typeof p.url === "string" ? p.url : "";
+  const data = p.data as { type?: string; data?: unknown } | undefined;
+  const payloadLength = typeof data?.data === "string" ? data.data.length : url.length;
+  if (mediaType.startsWith("image") || url.startsWith("data:image")) return IMAGE_PART_TOKENS;
+  return Math.ceil(payloadLength / 4);
+}
+
+/** 估算单个 part 的 token 占用（tool/dynamic-tool 按输入/输出做结构探针估算） */
 function estimatePartTokens(part: unknown): number {
   if (!part || typeof part !== "object") return 0;
   const p = part as Record<string, unknown>;
-  if (typeof p.text === "string") return estimateTokens(p.text.slice(0, PART_TEXT_CAP));
-  // tool-* parts：输入/输出才是大头
-  if (typeof p.type === "string" && p.type.startsWith("tool-")) {
+  if (typeof p.text === "string") return estimateTextTokensFull(p.text);
+  if (p.type === "file") return estimateFilePartTokens(p);
+  // tool-* / dynamic-tool parts：输入/输出才是大头（MCP 工具是 dynamic-tool）
+  if (typeof p.type === "string" && (p.type.startsWith("tool-") || p.type === "dynamic-tool")) {
     try {
       return (
         probeTokens(p.input, PROBE_MAX_DEPTH, { left: PROBE_NODE_BUDGET }) +
