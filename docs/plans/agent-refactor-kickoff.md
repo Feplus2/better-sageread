@@ -131,4 +131,5 @@
 - 2026-10-22（P2-1）：**跨库统一检索落地**——Rust `search_all_books_db`（一次 embedding fan-out 所有已索引书）+ central `searchLibrary(scope=all)` 书库/论文库 RRF 合并（结果带 kind、book_total/paper_total）；L1 **38/38**（含跨库 8 book / 8 paper）。
 - 2026-10-22（P2-2）：**引用图谱落地**——`getCitationGraph`（paper/central）：读目标论文 References 与库内其它论文按 DOI/标题匹配，返回「引用了库内谁 / 被库内谁引用」；L1 **41/41**。
 - 2026-10-22（P2-3）：**子代理评估完成**——调研 Harness subagent seam（provider/lifecycle/容量/结算/权限），结论是 P2 暂不做（单 agent 已达标，成本高、收益无证据），保留 P3 最小 one-shot 方案。详见 docs/audits/subagent-evaluation-2026-10-22.md。
-- 下一步：P2 收尾检查 → 全量回归（L1 + 10 题 ×3 + 3 探针）→ 发版评审。
+- 2026-10-22（最终回归）：L1 41/41；10 题 ×3 **30/30 内容通过、30/30 干净通过**（均值 47,957 / 中位 32,097 / 5.73 步 / 12.4s）；能力探针 3/3；单图/双图视觉探针 PASS。部分旧门槛（跨文献 ≤10 步、中位 ≤25k）仍超，已在报告中如实保留。详见 docs/audits/agent-final-regression-2026-10-22.md。
+- 状态：Agent 大更新工程项完成（P0/P1/P2），发版待用户决定；默认 new、旧工具可回退。
