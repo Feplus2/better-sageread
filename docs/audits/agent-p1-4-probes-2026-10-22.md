@@ -28,3 +28,12 @@
 - 根因：图片桥把每张图挂在**各自 tool 消息之后**的 user 消息里；两个并行工具调用时消息序列变成 `assistant(tool_calls) → tool A → user(图片) → tool B`，违反 OpenAI 协议「tool 响应必须紧邻 tool_calls」，端点直接挂起。
 - 修复：把同一组连续 tool 消息的图片**聚合到最后一个 tool 消息之后的一条 user 消息**。两张 16KB 合成图探针：6.0s、15.3k token、读完两张图（字符串/形状全对）；单张真实 figure 任务 16.4s、49.9k token。
 - 新增 `scripts/cdp-verify-two-images.mjs` 作为回归探针（两张合成图、内容已知）。
+## 最终结果（多图修复后，probes-2）
+
+| 探针 | 结果 | 步数/耗时 | token | 说明 |
+|---|---|---|---|---|
+| probe-multi-figure | ✅ | 8 / 21.4s | 62,218 | 真正读了两张图，正确对比 O3/P2 设计、四联图面板与结构差异 |
+| probe-deep-research | ✅ | 7 / 16.5s | 46,361 | 三章标题/主题/方法均正确、有原文引用 |
+| probe-cross-doc-3 | ✅ | 25 calls / 42.3s | 192,588 | 三篇路线/证据/边界完整（token 高但不设门槛；步数受 20-step 上限约束） |
+
+另：`scripts/cdp-verify-two-images.mjs` 双小图探针 6.0s / 15.3k token 全对，作为图片通道回归检查。

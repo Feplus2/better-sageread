@@ -62,7 +62,8 @@ const out = await evalJS(`(async () => {
   const lastA = assistants[assistants.length - 1];
   const usage = lastA && lastA.metadata ? lastA.metadata.totalUsage : null;
   const bridgeLog = (window.__sagereadImageBridgeLog || []).slice(-12);
-  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, usage, model: selected && selected.modelId, bridgeLog };
+  const threadJsonLen = thread ? JSON.stringify(thread.messages || []).length : 0;
+  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, usage, model: selected && selected.modelId, bridgeLog, threadJsonLen };
   if (thread) { try { await threadSvc.deleteThread(thread.id); } catch (e) {} }
   delete window.__SAGEREAD_DOC_TOOL_MODE__;
   delete window.__SAGEREAD_DISABLE_DIRECTORY__;
@@ -75,7 +76,7 @@ const hasString = ans.includes("SAGEREAD-VISION-42");
 const hasTriangle = /三角|triangle/i.test(ans);
 const hasCircle = /圆|circle/i.test(ans);
 const hasReadImage = (out.toolCalls || []).some((t) => t.name === "readImage" || (t.name === "useTool" && t.input && t.input.tool === "readImage"));
-console.log(JSON.stringify({ mode: process.argv[2], keepDirectory: KEEP_DIRECTORY, done: out.done, elapsedMs: out.elapsedMs, hasReadImage, hasString, hasTriangle, hasCircle, tokens: out.usage && out.usage.totalTokens, answer: ans.slice(0, 600), calls: (out.toolCalls || []).map((t) => t.name), bridgeLog: out.bridgeLog }, null, 2));
+console.log(JSON.stringify({ mode: process.argv[2], keepDirectory: KEEP_DIRECTORY, threadJsonLen: out.threadJsonLen, done: out.done, elapsedMs: out.elapsedMs, hasReadImage, hasString, hasTriangle, hasCircle, tokens: out.usage && out.usage.totalTokens, answer: ans.slice(0, 600), calls: (out.toolCalls || []).map((t) => t.name), bridgeLog: out.bridgeLog }, null, 2));
 const pass = out.done && hasReadImage && hasString && hasTriangle && hasCircle;
 console.log(pass ? "PASS vision probe" : "FAIL vision probe");
 ws.close();
