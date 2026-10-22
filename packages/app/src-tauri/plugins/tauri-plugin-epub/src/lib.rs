@@ -50,6 +50,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::index_wiki,
             commands::index_paper,
             commands::search_papers_db,
+            commands::search_all_books_db,
             commands::get_paper_chunk_context,
             commands::tokenize_zh,
             position::resolve_reading_position,

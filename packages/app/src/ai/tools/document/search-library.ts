@@ -6,6 +6,16 @@ import { z } from "zod";
 import { withRagErrorTranslation } from "../rag-error";
 import { type AgentDocScope, clipSnippet } from "./shared";
 
+interface BookSearchHit {
+  bookId: string;
+  bookTitle: string;
+  content: string;
+  similarity: number;
+  chapter: string;
+  chunkId: number;
+  mdFilePath: string;
+}
+
 interface PaperSearchItem {
   paper_id: string;
   book_title: string;
@@ -18,7 +28,7 @@ interface PaperSearchItem {
 export const createSearchLibraryTool = (ctx: AgentDocScope) =>
   tool({
     description:
-      "在文献库（论文）或指定文档内部做语义+关键词混合检索，返回「文档锚点 + 有界片段」，不是全文。命中后建议先 getDocumentInfo(doc) 看目录，再用 readDocument(doc, heading/offset) 精读，不要一次读全文。\n\n📖 **使用场景**：\n• 跨论文主题检索、找哪篇论文讨论过某个方法\n• 在某本书内部找某个概念/人物（doc=book:<id>，需要该书已建索引）\n• 定位到片段后，用 readDocument(doc, heading/offset) 精读\n\n🎯 **scope**：current=当前论文；collection=面板选定范围（默认）；all=全部文献。跨文献比较时用 all。\n\n📄 **doc**：可选，指定在单篇文档内检索：paper:<id> / book:<id>；省略时按 scope 搜论文库。\n\n📊 **返回**：{results:[{doc, title, snippet(≤400 字符), chapter?, chunk_id, similarity}], total}；引用要注明文档标题/章节。\n\n🔍 论文正文为英文，请用英文术语构造 query；复杂问题拆 2-3 个子查询。",
+      "在文献库（论文）或指定文档内部做语义+关键词混合检索，返回「文档锚点 + 有界片段」，不是全文。命中后建议先 getDocumentInfo(doc) 看目录，再用 readDocument(doc, heading/offset) 精读，不要一次读全文。\n\n📖 **使用场景**：\n• 跨论文主题检索、找哪篇论文讨论过某个方法\n• 在中央助手（central）用 scope=all 时：书库 + 论文库跨库合并检索（RRF 融合），返回两条来源的混合结果\n• 在某本书内部找某个概念/人物（doc=book:<id>，需要该书已建索引）\n• 定位到片段后，用 readDocument(doc, heading/offset) 精读\n\n🎯 **scope**：current=当前论文；collection=面板选定范围（默认）；all=全部文献。跨文献比较时用 all。\n\n📄 **doc**：可选，指定在单篇文档内检索：paper:<id> / book:<id>；省略时按 scope 搜论文库。\n\n📊 **返回**：{results:[{doc, title, snippet(≤400 字符), chapter?, chunk_id, similarity}], total}；引用要注明文档标题/章节。\n\n🔍 论文正文为英文，请用英文术语构造 query；复杂问题拆 2-3 个子查询。",
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的"),
       query: z.string().min(1).describe("检索问题（英文术语命中率更高）"),
@@ -118,30 +128,78 @@ export const createSearchLibraryTool = (ctx: AgentDocScope) =>
       }
       try {
         const config = await getCurrentVectorModelConfig();
-        const raw = (await invoke("plugin:epub|search_papers_db", {
-          query: args.query,
-          paperIds,
-          topK: args.topK ?? 6,
-          vectorWeight: 0.7,
-          bm25Weight: 0.3,
-          includeReferences: false,
-          embeddingsUrl: config.embeddingsUrl,
-          model: config.model,
-          apiKey: config.apiKey,
-        })) as PaperSearchItem[];
-        const results = raw.map((item) => ({
+        // 中央助手 + scope=all：书库 + 论文库跨库合并（RRF 融合；书库一次 embedding fan-out）
+        const includeBooks = ctx.scope === "central" && scope === "all" && !requestedPaperId;
+        const bookSearchPromise: Promise<BookSearchHit[]> = includeBooks
+          ? (
+              invoke("plugin:epub|search_all_books_db", {
+                query: args.query,
+                limit: 8,
+                perBookLimit: 4,
+                embeddingsUrl: config.embeddingsUrl,
+                model: config.model,
+                apiKey: config.apiKey,
+              }) as Promise<BookSearchHit[]>
+            ).catch(() => [])
+          : Promise.resolve([]);
+        const [raw, rawBooks] = await Promise.all([
+          invoke("plugin:epub|search_papers_db", {
+            query: args.query,
+            paperIds,
+            topK: args.topK ?? 6,
+            vectorWeight: 0.7,
+            bm25Weight: 0.3,
+            includeReferences: false,
+            embeddingsUrl: config.embeddingsUrl,
+            model: config.model,
+            apiKey: config.apiKey,
+          }) as Promise<PaperSearchItem[]>,
+          bookSearchPromise,
+        ]);
+        const paperResults = raw.map((item) => ({
           doc: `paper:${item.paper_id}`,
           title: item.book_title,
           snippet: clipSnippet(item.content, 400),
           chunk_id: item.chunk_id,
           similarity: Number.parseFloat((item.similarity * 100).toFixed(1)),
         }));
+        if (includeBooks) {
+          const bookResults = rawBooks.map((item) => ({
+            doc: `book:${item.bookId}`,
+            title: item.bookTitle,
+            chapter: item.chapter || null,
+            snippet: clipSnippet(item.content, 400),
+            chunk_id: item.chunkId,
+            similarity: Number.parseFloat((item.similarity * 100).toFixed(1)),
+          }));
+          const merged = [
+            ...paperResults.map((item, index) => ({ ...item, kind: "paper" as const, rank: index + 1 })),
+            ...bookResults.map((item, index) => ({ ...item, kind: "book" as const, rank: index + 1 })),
+          ]
+            .map((item) => ({ ...item, rrf: 1 / (60 + item.rank) }))
+            .sort((left, right) => right.rrf - left.rrf)
+            .slice(0, args.topK ?? 8)
+            .map(({ rank, rrf, ...item }) => item);
+          return {
+            query: args.query,
+            scope: `${scopeLabel} + 书库`,
+            results: merged,
+            total: merged.length,
+            book_total: bookResults.length,
+            paper_total: paperResults.length,
+            note:
+              merged.length === 0
+                ? "跨库没有命中：换关键词，或分别用 doc=book:<id> / doc=paper:<id> 指定文档检索"
+                : undefined,
+            meta: { reasoning: args.reasoning },
+          };
+        }
         return {
           query: args.query,
           scope: scopeLabel,
-          results,
-          total: results.length,
-          note: results.length === 0 ? "没有命中：换英文关键词，或把 scope 改为 all 再试" : undefined,
+          results: paperResults,
+          total: paperResults.length,
+          note: paperResults.length === 0 ? "没有命中：换英文关键词，或把 scope 改为 all 再试" : undefined,
           meta: { reasoning: args.reasoning },
         };
       } catch (error) {

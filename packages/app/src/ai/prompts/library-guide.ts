@@ -36,6 +36,7 @@ export async function buildLibraryGuide(): Promise<string> {
       ? "跨文档：reader/paper scope 只有当前文档；跨论文检索用 paperSearch（全库范围）或请用户切到对应文档，不要用 readLocalFile/runCommand 到文献库目录翻文件。"
       : "跨文档：reader/paper scope 只有当前文档，但 readDocument 可直接读任意文档（doc=paper:<id> / book:<id>，配合 heading/offset）；检索论文用 searchLibrary(scope=all)，在某本书内部找内容用 searchLibrary(doc=book:<id>, query=...)（需该书已建索引）。不要用 readLocalFile/runCommand 到文献库目录翻文件，也不要绕过工具硬读路径。",
     "未索引文档：getDocumentInfo 的 index.status=not_indexed 表示没有向量索引，只能按目录/原文读取；正常读、不要拒答。阅读策略：先 getDocumentInfo 拿目录 → 只读目标小节/位置的 1-2 个窗口 → 作答，不要整章通读。回答开头或结尾必须明确说一句：「本书/本篇尚未建立向量索引，按原文读取较慢；在设置里向量化后可显著提速」。",
+    "跨库检索：中央助手的 searchLibrary(scope=all) 会同时检索书库 + 论文库（RRF 融合），结果带 kind=book/paper 标记；reader/paper scope 下 scope=all 只查论文库，查单本书用 doc=book:<id>。",
     "引用规范：正文引用给章节标题；图表引用给图号/表号；参考文献给编号；不得编造页码或图中不存在的细节。",
   ].join("\n");
 }

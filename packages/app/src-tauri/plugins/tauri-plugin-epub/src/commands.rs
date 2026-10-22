@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use crate::database::VectorDatabase;
 use crate::epub::EpubReader;
 use crate::pipeline::{process_epub_to_db, process_manual_to_db, process_paper_to_db};
+use crate::text::TextVectorizer;
 use crate::models::ProgressUpdate;
 use crate::state::EpubState;
 use crate::epub::{parse_toc_file, find_toc_ncx_in_mdbook, flatten_toc};
@@ -276,6 +277,106 @@ pub async fn search_db<R: Runtime>(
             global_chunk_index: r.global_chunk_index,
         })
         .collect())
+}
+
+/// 跨书库检索结果（一次 query 只算一次 embedding，逐本已索引书籍混合检索后按相似度合并）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookSearchHitDto {
+    pub book_id: String,
+    pub book_title: String,
+    pub content: String,
+    pub similarity: f32,
+    pub chapter: String,
+    pub chunk_id: i64,
+    pub md_file_path: String,
+}
+
+/// 跨书库统一检索：一次 embedding，fan-out 到所有已有 vectors.sqlite 的书。
+#[tauri::command]
+pub async fn search_all_books_db<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    query: String,
+    limit: Option<usize>,
+    per_book_limit: Option<usize>,
+    embeddings_url: String,
+    model: String,
+    api_key: Option<String>,
+) -> Result<Vec<BookSearchHitDto>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let books_dir = app_data_dir.join("books");
+    if !books_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let vectorizer = TextVectorizer::new(VectorizerConfig {
+        embeddings_url,
+        model_name: model,
+        api_key,
+        usage_db: usage_db_path(&app),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let actual_dimension = vectorizer
+        .detect_embedding_dimension()
+        .await
+        .map_err(|e| e.to_string())?;
+    let embedding = vectorizer
+        .vectorize_text(&query)
+        .await
+        .map_err(|e| e.to_string())?;
+    let config = crate::config::get_smart_hybrid_config(&query);
+    let per_book = per_book_limit.unwrap_or(4).clamp(1, 10);
+
+    let mut hits: Vec<BookSearchHitDto> = Vec::new();
+    let entries = std::fs::read_dir(&books_dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let db_path = dir.join("vectors.sqlite");
+        if !db_path.is_file() {
+            continue;
+        }
+        let book_id = dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let db = match VectorDatabase::open_for_search(&db_path, actual_dimension) {
+            Ok(db) => db,
+            Err(_) => continue,
+        };
+        let results = match db.search_with_mode_filtered(&query, Some(&embedding), per_book, &config, None, false) {
+            Ok(results) => results,
+            Err(_) => continue,
+        };
+        for item in results {
+            let title = if item.book_title.is_empty() {
+                book_id.clone()
+            } else {
+                item.book_title
+            };
+            hits.push(BookSearchHitDto {
+                book_id: book_id.clone(),
+                book_title: title,
+                content: item.chunk_text,
+                similarity: item.similarity_score,
+                chapter: item.related_chapter_titles,
+                chunk_id: item.chunk_id,
+                md_file_path: item.md_file_path,
+            });
+        }
+    }
+    hits.sort_by(|left, right| {
+        right
+            .similarity
+            .partial_cmp(&left.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(limit.unwrap_or(8).clamp(1, 20));
+    Ok(hits)
 }
 
 /// Get chunk with context by chunk ID

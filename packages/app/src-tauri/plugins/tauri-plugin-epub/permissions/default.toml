@@ -16,6 +16,7 @@ permissions = [
     "allow-index-wiki",
     "allow-index-paper",
     "allow-search-papers-db",
+    "allow-search-all-books-db",
     "allow-get-paper-chunk-context",
     "allow-tokenize-zh",
     "allow-resolve-reading-position",

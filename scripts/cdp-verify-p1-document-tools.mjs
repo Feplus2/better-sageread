@@ -101,6 +101,12 @@ const checks = await evalJS(`(async () => {
   const paperDocSearch = await paperTools.searchLibrary.execute({ reasoning: "L1", doc: "paper:" + PAPER_C, query: "interface stability" }, { toolCallId: "p12", messages: [] });
   check("searchLibrary(doc=paper) 只查该论文", (paperDocSearch.results || []).every((r) => r.doc === "paper:" + PAPER_C), (paperDocSearch.results || []).map((r) => r.doc).join(","));
   check("searchLibrary(collection) 只查面板范围", (scoped.results || []).every((r) => r.doc === "paper:" + PAPER_C), (scoped.results || []).map((r) => r.doc).join(","));
+  const centralTools = registry.getToolsForScope("central");
+  const mergedBooks = await centralTools.searchLibrary.execute({ reasoning: "L1", query: "政治 权力 知识分子", scope: "all", topK: 8 }, { toolCallId: "p13", messages: [] });
+  check("searchLibrary(central,all) 跨库含书库结果", (mergedBooks.book_total ?? 0) >= 1, (mergedBooks.book_total ?? 0) + " book / " + (mergedBooks.paper_total ?? 0) + " paper");
+  const mergedPapers = await centralTools.searchLibrary.execute({ reasoning: "L1", query: "layered oxide cathode interface stability", scope: "all", topK: 8 }, { toolCallId: "p14", messages: [] });
+  check("searchLibrary(central,all) 跨库含论文结果", (mergedPapers.paper_total ?? 0) >= 1, (mergedPapers.paper_total ?? 0) + " paper / " + (mergedPapers.book_total ?? 0) + " book");
+  check("searchLibrary(central,all) 结果带 kind 来源标记", (mergedPapers.results || []).every((r) => r.kind === "book" || r.kind === "paper"), (mergedPapers.results || []).map((r) => r.kind).join(","));
   return out;
 })()`);
 
