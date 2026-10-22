@@ -94,8 +94,16 @@ function ensureDir(dir) {
     else { imgs[dir][0] = im0; }
   };
   im0.src = frameSrc(dir, 0);
+  // 粗粒度优先：先加载每隔 4 帧的关键帧（0,4,8…），再补 2 帧、最后补奇数帧。
+  // 这样用户快速滚动时任意位置都能就近找到一帧，不会因为"附近全没加载"而黑屏/卡住。
   var jobs = [];
-  for (var i = 1; i < N; i++) jobs.push([dir, i]);
+  var seen = {};
+  var pushJob = function (i) {
+    if (i > 0 && i < N && !seen[i]) { seen[i] = 1; jobs.push([dir, i]); }
+  };
+  for (var i4 = 4; i4 < N; i4 += 4) pushJob(i4);
+  for (var i2 = 2; i2 < N; i2 += 4) pushJob(i2);
+  for (var i1 = 1; i1 < N; i1 += 2) pushJob(i1);
   queue = jobs.concat(queue); // 新激活 tab 的段插队优先
   pump();
 }
@@ -115,14 +123,19 @@ function pump() {
     })(job[0], job[1]);
   }
 }
-function pick(arr, i) { /* 邻近帧兜底：±24 帧内找已加载的 */
+function pick(arr, i) { /* 邻近帧兜底：±24 帧内找已加载的；再退一步全局找最近帧，避免黑屏卡住 */
   if (!arr) return null;
   for (var d = 0; d <= 24; d++) {
     var a = arr[i + d], b = arr[i - d];
     if (a && a.naturalWidth) return a;
     if (b && b.naturalWidth) return b;
   }
-  return null;
+  var best = null, bestD = 1e9;
+  for (var j = 0; j < arr.length; j++) {
+    var im = arr[j];
+    if (im && im.naturalWidth && Math.abs(j - i) < bestD) { best = im; bestD = Math.abs(j - i); }
+  }
+  return best;
 }
 
 /* ---------- 画布 ---------- */
