@@ -181,3 +181,12 @@ M3 已知欠账（M2 实测发现）：字体 URL 双重编码导致安卓字体
 - 同一 monorepo；`src-tauri/gen/android/` 随仓库提交（Tauri 官方建议，签名等定制都在里面）
 - 桌面/移动共享 `tauri.conf.json` version；Release 同 tag 多资产
 - 桌面专属代码一律 `cfg` 门控隔离，**不得**为移动端删桌面功能
+
+## 2026-10-22 环境复核（准备「电脑开发、手机验收」）
+
+- 新增一键自检：node scripts/check-mobile-env.mjs（只读），当前 **7/9 通过**。
+- 已核实就绪：.tools/jdk-21.0.12.1+1、Android SDK（platform-tools / NDK 30.0.16138531 / cmdline-tools / emulator）、adb 1.0.41、四个 Rust Android 目标、src-tauri/gen/android 与 tauri.android.conf.json。
+- 仅缺：**当前没有连接设备**、**没有创建 AVD**（SDK 无 system-image）。真机链路在 2026-09-07 已用 Huawei Pura 70 Pro 跑通过（驱动 oem279 自签方案，见附 A），换端口/重插会自动绑定；若现在设备列表为空，优先检查手机侧「USB 调试 + USB 调试（安全设置）」是否仍开、线是否换过。
+- 日常开发/验收流程见 [mobile-dev-loop.md](./mobile-dev-loop.md)：手机通过 adb reverse tcp:1420 tcp:1420 加载电脑 dev server，**前端改动走 Vite HMR，只需首次安装一次**；只有改 Rust/Android 原生代码才需要再次 tauri android dev 构建安装。
+- 华为每次安装都要点确认时，先关开发者选项里的「监控 ADB 安装应用」；仍不行再用 adb install -r -d --user 0 覆盖安装，并检查应用市场安装安全检测/外部来源安装授权。
+- AVD 路线：需先用 sdkmanager 下载 system-image（数 GB）再 avdmanager 创建；本机建议优先真机。
