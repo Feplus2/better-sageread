@@ -55,6 +55,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             position::resolve_reading_position,
             position::resolve_paper_position,
             position::read_position_window,
+            position::paper_index_status,
         ])
         .setup(|app, _api| {
             // Initialize and manage plugin state

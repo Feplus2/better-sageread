@@ -1,6 +1,7 @@
 import { readPaperMarkdown } from "@/ai/tools/paper/shared";
 import { parsePaperSections } from "@/pages/paper-reader/markdown-sections";
 import { openBookDocument } from "@/services/book-translation/book-translation-service";
+import { invoke } from "@tauri-apps/api/core";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
@@ -56,6 +57,24 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
       if (doc.kind === "paper") {
         const markdown = await readPaperMarkdown(doc.id);
         const parsed = parsePaperSections(markdown);
+        let paperIndex: { status: "indexed" | "not_indexed"; chunk_count?: number; note: string } = {
+          status: "not_indexed",
+          note: "未能读取论文索引状态（按未索引处理）：只能按原文读取；如确有索引，可改用 searchLibrary 语义检索。",
+        };
+        try {
+          const status = await invoke<{ indexed: boolean; chunkCount: number }>("plugin:epub|paper_index_status", {
+            paperId: doc.id,
+          });
+          paperIndex = status.indexed
+            ? { status: "indexed", chunk_count: status.chunkCount, note: "已建向量索引" }
+            : {
+                status: "not_indexed",
+                chunk_count: status.chunkCount,
+                note: "这篇论文未建向量索引（论文向量库中没有它的分块），只能按原文读取（较慢）；回答时提醒用户可在设置中向量化后再检索。",
+              };
+        } catch {
+          // 保持保守状态
+        }
         const items = parsed.headings.slice(0, MAX_OUTLINE_ITEMS).map((heading) => ({
           level: heading.level,
           heading: heading.text,
@@ -70,7 +89,7 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
             published: metadata.published ?? null,
             language: metadata.language ?? null,
           },
-          index: { status: "unknown", note: "论文检索走全局向量库，单篇索引状态暂未暴露" },
+          index: paperIndex,
           outline: { total: parsed.headings.length, items, truncated: parsed.headings.length > items.length },
           counts: { figures: countFigureLines(markdown), citations: countCitationEntries(markdown) },
           meta: { reasoning: args.reasoning },

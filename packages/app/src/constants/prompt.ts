@@ -28,7 +28,7 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
   const docMode = getDocumentToolMode();
   const docModeNote =
     docMode === "new"
-      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。"
+      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
       : docMode === "legacy"
         ? "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。"
         : "";
@@ -156,9 +156,13 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   // 静态优先布局（D3）：稳定的元信息与目录段在 system prompt 内殿后。
   // D2 保守档：目录按当前章裁剪（一级平铺 + 当前章子树），深层内容走检索/直读工具按需获取。
   if (metadataMd && metadataMd.trim().length > 0) {
-    const tocHint = hasVectorCapability
-      ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；ragToc 可按章标题取整章正文，readBookSection 支持按标题模糊直读小节）"
-      : "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；readBookSection 按标题模糊直读原文）";
+    const docModeForToc = getDocumentToolMode();
+    const tocHint =
+      docModeForToc === "new"
+        ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；需要原文用 getDocumentInfo 看完整目录，再用 readDocument 按 heading 读小节）"
+        : hasVectorCapability
+          ? "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；ragToc 可按章标题取整章正文，readBookSection 支持按标题模糊直读小节）"
+          : "（目录已按当前章节裁剪，仅保留一级章节与当前章子树；readBookSection 按标题模糊直读原文）";
     // 目录段优先用 EPUB 原生 TOC（metadata.md 的目录由转换器生成，段号被转义吃掉）
     const md = chatContext?.bookTocMd ? replaceTocSection(metadataMd, chatContext.bookTocMd) : metadataMd;
     const trimmed = trimMetadataForPrompt(md, chatContext?.activeSectionLabel, tocHint);

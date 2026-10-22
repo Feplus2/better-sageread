@@ -519,7 +519,27 @@ fn book_chunk_stats(book_dir: &Path, md_abs: &Path) -> Option<ChunkStats> {
     }
 }
 
-fn paper_chunk_stats(app_data: &Path, paper_id: &str) -> Option<ChunkStats> {
+/// 论文单篇索引状态（Agent getDocumentInfo 用；不依赖 RAG 查询即可判断能否语义检索）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaperIndexStatus {
+    pub indexed: bool,
+    pub chunk_count: usize,
+}
+
+#[tauri::command]
+pub async fn paper_index_status<R: Runtime>(
+    app: AppHandle<R>,
+    paper_id: String,
+) -> Result<PaperIndexStatus, String> {
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(match paper_chunk_stats(&app_data, &paper_id) {
+        Some(stats) => PaperIndexStatus { indexed: stats.count > 0, chunk_count: stats.count },
+        None => PaperIndexStatus { indexed: false, chunk_count: 0 },
+    })
+}
+
+pub(crate) fn paper_chunk_stats(app_data: &Path, paper_id: &str) -> Option<ChunkStats> {
     let db_path = app_data.join("papers").join("vectors.sqlite");
     if !db_path.is_file() {
         return None;

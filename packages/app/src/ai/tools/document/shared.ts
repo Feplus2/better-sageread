@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 
@@ -79,6 +80,18 @@ export async function readDocMetadata(doc: DocRef): Promise<DocMetadata> {
 export async function bookIndexed(docId: string): Promise<boolean> {
   try {
     return await exists(`${await docDir(docId)}/vectors.sqlite`);
+  } catch {
+    return false;
+  }
+}
+
+/** 论文是否已建向量索引（全局 papers/vectors.sqlite 中是否有该 paper_id 的分块）。 */
+export async function paperIndexed(paperId: string): Promise<boolean> {
+  try {
+    const status = await invoke<{ indexed: boolean; chunkCount: number }>("plugin:epub|paper_index_status", {
+      paperId,
+    });
+    return status.indexed;
   } catch {
     return false;
   }

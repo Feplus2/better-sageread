@@ -8,7 +8,15 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
-import { type AgentDocScope, type DocRef, docRefString, readDocMetadata, resolveDocRef } from "./shared";
+import {
+  type AgentDocScope,
+  type DocRef,
+  bookIndexed,
+  docRefString,
+  paperIndexed,
+  readDocMetadata,
+  resolveDocRef,
+} from "./shared";
 
 const DEFAULT_WINDOW = 6000;
 const MAX_WINDOW = 12000;
@@ -169,8 +177,16 @@ export const createReadDocumentTool = (ctx: AgentDocScope) =>
       const doc = resolveDocRef(args.doc, ctx);
       const metadata = await readDocMetadata(doc);
       const window = doc.kind === "paper" ? await readPaperWindow(doc, args) : await readBookWindow(doc, args);
+      const indexed = doc.kind === "paper" ? await paperIndexed(doc.id) : await bookIndexed(doc.id);
+      const indexInfo = indexed
+        ? { status: "indexed" as const }
+        : {
+            status: "not_indexed" as const,
+            note: "本篇/本书未建向量索引，本次按原文读取（较慢）；如果用户在意速度，可在回答里提醒向量化后可提速。",
+          };
       return {
         doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
+        index: indexInfo,
         anchor: window.anchor,
         text: window.text,
         total_chars: window.totalChars,

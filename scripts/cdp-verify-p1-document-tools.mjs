@@ -26,6 +26,11 @@ const checks = await evalJS(`(async () => {
   check("getDocumentInfo(paper) outline>=4", info.outline.total >= 4, info.outline.total);
   check("getDocumentInfo(paper) figures=4", info.counts.figures === 4, info.counts.figures);
   check("getDocumentInfo(paper) citations>0", info.counts.citations > 0, info.counts.citations);
+  check("getDocumentInfo(已索引论文) index.status=indexed", info.index.status === "indexed", info.index.status);
+  const infoUnindexedPaper = await paperTools.getDocumentInfo.execute({ reasoning: "L1", doc: "paper:" + PAPER_B }, { toolCallId: "p1b", messages: [] });
+  check("getDocumentInfo(未索引论文) index.status=not_indexed", infoUnindexedPaper.index.status === "not_indexed", infoUnindexedPaper.index.status + "/" + (infoUnindexedPaper.index.chunk_count ?? ""));
+  const unindexedRead = await paperTools.readDocument.execute({ reasoning: "L1", doc: "paper:" + PAPER_B, offset: 0, after: 1200 }, { toolCallId: "p1c", messages: [] });
+  check("readDocument(未索引论文) 返回 index=not_indexed", unindexedRead.index && unindexedRead.index.status === "not_indexed", unindexedRead.index && unindexedRead.index.status);
 
   const cross = await paperTools.readDocument.execute({ reasoning: "L1", doc: "paper:" + PAPER_B, heading: "Results and discussion", after: 3000 }, { toolCallId: "p2", messages: [] });
   check("readDocument 跨论文标题", String(cross.doc.title || "").includes("Dehydration"), cross.doc.title);
