@@ -1,4 +1,5 @@
 import { auditToolCatalogCall } from "@/ai/utils/tool-catalog-audit";
+import { type CachedToolImage, cacheToolImages } from "@/ai/utils/tool-image-cache";
 import { type Tool, asSchema, tool as defineTool } from "ai";
 import { z } from "zod";
 
@@ -81,6 +82,32 @@ function serializeSchema(schema: unknown): string {
     parts.push(`【连接器 ${serverKey}】\n${lines.join("\n")}`);
   }
   return parts.join("\n\n");
+}
+
+/** 递归把工具输出里的图片 dataUrl 摘成占位文本，并收集起来放进内存缓存（供图片桥恢复给模型）。 */
+function stripToolImages(node: unknown, images: CachedToolImage[], paths: string[]): unknown {
+  if (typeof node === "string") {
+    if (node.startsWith("data:image/")) {
+      images.push({ dataUrl: node, mediaType: "image/jpeg" });
+      return "[图片内容已交给模型，base64 不写入聊天记录]";
+    }
+    const matched = /<path>([^<]+)<\/path>/.exec(node);
+    if (matched?.[1]) paths.push(matched[1].trim());
+    return node;
+  }
+  if (Array.isArray(node)) return node.map((item) => stripToolImages(item, images, paths));
+  if (node && typeof node === "object") {
+    const record = node as Record<string, unknown>;
+    const url = typeof record.url === "string" ? record.url : null;
+    if (record.type === "file" && url?.startsWith("data:image/")) {
+      images.push({ dataUrl: url, mediaType: typeof record.mediaType === "string" ? record.mediaType : "image/jpeg" });
+      return { type: "text", text: "[图片内容已交给模型，base64 不写入聊天记录]" };
+    }
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) next[key] = stripToolImages(value, images, paths);
+    return next;
+  }
+  return node;
 }
 
 /**
@@ -182,7 +209,19 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
             parsedArgs = validation.value;
           }
         }
-        return await real.execute(parsedArgs, options);
+        const rawResult = await real.execute(parsedArgs, options);
+        // 图片类结果：dataUrl 留在内存缓存（图片桥按 toolCallId 恢复给模型），记录里只留占位文本
+        const foundImages: CachedToolImage[] = [];
+        const foundPaths: string[] = [];
+        const sanitized = stripToolImages(rawResult, foundImages, foundPaths);
+        if (foundImages.length > 0) {
+          const firstPath = foundPaths[0];
+          cacheToolImages(
+            String(options?.toolCallId ?? ""),
+            foundImages.map((image) => ({ ...image, path: firstPath })),
+          );
+        }
+        return sanitized;
       } catch (error) {
         return {
           success: false,

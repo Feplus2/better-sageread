@@ -6,6 +6,8 @@
  * 并只保留最近 IMAGE_KEEP_LAST 张；更早的图片替换成带可读路径的占位文本（可用 readImage 重看）。
  */
 
+import { getCachedToolImages } from "@/ai/utils/tool-image-cache";
+
 const IMAGE_KEEP_LAST = 3;
 const TOOL_IMAGE_MARK = "[工具读取的图片";
 const INLINE_IMAGE_TEXT = "[图片已附在随后的用户消息中]";
@@ -114,7 +116,11 @@ function transformBody(bodyText: string): string {
     if (record.role !== "tool") return;
     debugLog(`tool[${index}] content=${String(record.content).slice(0, 160)}`);
     const extracted = extractToolImages(record.content);
-    if (extracted) extractions.set(index, extracted);
+    const toolCallId = typeof record.tool_call_id === "string" ? record.tool_call_id : null;
+    const cached = toolCallId ? getCachedToolImages(toolCallId) : undefined;
+    const images = extracted && extracted.images.length > 0 ? extracted.images : (cached ?? []);
+    if (images.length === 0) return;
+    extractions.set(index, { content: extracted ? extracted.content : String(record.content ?? ""), images });
   });
   if (extractions.size === 0) {
     debugLog("no tool images extracted");
@@ -136,9 +142,26 @@ function transformBody(bodyText: string): string {
   });
 
   const nextMessages: unknown[] = [];
+  // OpenAI 协议要求 tool 响应紧邻 assistant 的 tool_calls：多张图要等这一组 tool 消息全部结束后，
+  // 再插一条 user 消息统一附图；否则 user 消息夹在 tool 消息之间会让请求挂起（实测两张图必挂）。
+  let pendingImages: ExtractedImage[] = [];
+  let pendingNotes: string[] = [];
+  const flushPending = () => {
+    if (pendingImages.length === 0) return;
+    nextMessages.push({
+      role: "user",
+      content: [
+        { type: "text", text: pendingNotes.join("\n") },
+        ...pendingImages.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } })),
+      ],
+    });
+    pendingImages = [];
+    pendingNotes = [];
+  };
   messages.forEach((message, index) => {
     const extraction = extractions.get(index);
     if (!extraction) {
+      flushPending();
       nextMessages.push(message);
       return;
     }
@@ -148,16 +171,14 @@ function transformBody(bodyText: string): string {
     const content = extraText ? `${extraction.content}\n${extraText}` : extraction.content;
     nextMessages.push({ ...record, content });
     const keptImages = kept.get(index) ?? [];
-    if (keptImages.length > 0) {
-      nextMessages.push({
-        role: "user",
-        content: [
-          { type: "text", text: keptImages.map((image) => imageNoteText(image)).join("\n") },
-          ...keptImages.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } })),
-        ],
-      });
+    for (const image of keptImages) {
+      pendingImages.push(image);
+      pendingNotes.push(imageNoteText(image));
     }
+    const next = messages[index + 1] as Record<string, unknown> | undefined;
+    if (!next || next.role !== "tool") flushPending();
   });
+  flushPending();
 
   body.messages = nextMessages;
   return JSON.stringify(body);
@@ -168,7 +189,7 @@ export function wrapOpenAICompatToolImagesFetch(baseFetch: typeof fetch): typeof
   return async (input, init) => {
     const body = init?.body;
     debugLog(`fetch: bodyType=${typeof body} hasImage=${typeof body === "string" && body.includes("data:image/")}`);
-    if (typeof body !== "string" || !body.includes("data:image/") || !body.includes('"role":"tool"')) {
+    if (typeof body !== "string" || !body.includes('"role":"tool"')) {
       return baseFetch(input, init);
     }
     try {
