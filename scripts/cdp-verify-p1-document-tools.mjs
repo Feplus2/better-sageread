@@ -95,6 +95,11 @@ const checks = await evalJS(`(async () => {
   check("文本读取无每轮硬上限", readsOk === 5, readsOk + "/5");
 
   const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "collection" }, { toolCallId: "p7", messages: [] });
+  const bookSearch = await readerTools.searchLibrary.execute({ reasoning: "L1", doc: "book:" + BOOK, query: "政治 知识分子" }, { toolCallId: "p11", messages: [] });
+  check("searchLibrary(doc=book) 本书检索命中", bookSearch.total >= 1, bookSearch.total + "/" + String(bookSearch.note || "").slice(0, 60));
+  check("searchLibrary(doc=book) 结果锚点是书", (bookSearch.results || []).every((r) => String(r.doc).startsWith("book:")), (bookSearch.results || []).map((r) => r.doc).join(","));
+  const paperDocSearch = await paperTools.searchLibrary.execute({ reasoning: "L1", doc: "paper:" + PAPER_C, query: "interface stability" }, { toolCallId: "p12", messages: [] });
+  check("searchLibrary(doc=paper) 只查该论文", (paperDocSearch.results || []).every((r) => r.doc === "paper:" + PAPER_C), (paperDocSearch.results || []).map((r) => r.doc).join(","));
   check("searchLibrary(collection) 只查面板范围", (scoped.results || []).every((r) => r.doc === "paper:" + PAPER_C), (scoped.results || []).map((r) => r.doc).join(","));
   return out;
 })()`);

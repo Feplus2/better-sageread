@@ -28,7 +28,7 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
   const docMode = getDocumentToolMode();
   const docModeNote =
     docMode === "new"
-      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
+      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)，在某本书内部检索用 searchLibrary(doc=book:<id>, query=...)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
       : docMode === "legacy"
         ? "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。"
         : "";
@@ -43,9 +43,8 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
  * 按向量能力分两档：有索引时 RAG 为主通道、readBookSection 为兜底；
  * 无索引时 readBookSection 是唯一正文通道。
  */
-function buildReaderPolicy(hasVectorCapability: boolean): string {
-  const retrieval = hasVectorCapability
-    ? `—— 内容检索（RAG 已启用） ——
+function buildReaderPolicy(hasVectorCapability: boolean, docMode: "new" | "legacy" | "both"): string {
+  const indexedRetrieval = `—— 内容检索（RAG 已启用） ——
 • 主通道：ragSearch 快速定位（BM25 + 向量混合检索，返回片段与 chunk_id）→ ragContext 扩展上下文（默认 prev=2/next=2，最多调用 4 次）→ ragRange 按全局索引连续取块（范围来自检索返回的全局索引，单次 ≤20 块）→ ragToc 取整章正文（重操作，仅用户明确要求读全章时使用）。
 • 查询构造：检索词即查询质量——英文书用英文术语检索（中文问题先把核心概念译成英文术语）；复杂问题拆 2-3 个不同措辞分次检索，比一次长查询召回更全。
 • 元数据问题（书名/作者/出版社/目录）直接用【当前阅读图书元信息与目录】回答，禁止调用检索工具。
@@ -55,9 +54,41 @@ function buildReaderPolicy(hasVectorCapability: boolean): string {
 引用 RAG 返回的内容必须标注 chunk_id：在引用句末添加 [chunk_id]（如：这个概念很重要[118]）；多来源逐个独立标注（[118] [877]，严禁合并为 [118, 877]）；结论性陈述和数字必须有检索依据并标注；检索无据就明说，不得臆造。
 
 —— 图片输出规范 ——
-RAG 返回内容含图片时：完整复制返回的原始路径（一个字符都不要改），用 Markdown 格式输出（![图号-主题描述](完整路径)）；图片前一句说明作用，图后 2-4 句解释关键信息；只输出与用户问题相关的图片。`
-    : `—— 内容检索（当前书未建立索引） ——
+RAG 返回内容含图片时：完整复制返回的原始路径（一个字符都不要改），用 Markdown 格式输出（![图号-主题描述](完整路径)）；图片前一句说明作用，图后 2-4 句解释关键信息；只输出与用户问题相关的图片。`;
+  const unindexedRetrieval = `—— 内容检索（当前书未建立索引） ——
 当前书籍未建立向量索引，RAG 检索不可用。回答书中内容问题前，用 readBookSection 按目录章节标题读取小节原文（目录见【当前阅读图书元信息与目录】，标题支持模糊匹配）；未读到原文前不得凭印象编造书中内容。元数据问题（书名/作者/目录）直接回答，不调用工具。`;
+  // P1 guidance 单源：new 模式不再引用旧工具，改为新原语文案
+  const retrieval =
+    docMode === "new"
+      ? hasVectorCapability
+        ? `—— 内容检索与读取（新原语） ——
+• 本书检索：searchLibrary(doc=book:<当前书 id>, query=...) 做混合检索，返回片段 + 章节；命中后用 readDocument(doc=book:<id>, heading=章节) 精读。
+• 跨文献：searchLibrary(scope=all) 检索论文库；readDocument 可直接读任意文档（doc=paper:<id> / book:<id>）。
+• 目录与元信息：getDocumentInfo(doc)；元数据问题直接用【当前阅读图书元信息与目录】回答，不必调检索。
+• 查询构造：英文材料用英文术语；复杂问题拆 2-3 次不同措辞检索。
+• 检索无命中：换关键词，或 getDocumentInfo 看目录后用 readDocument 按章节读；不要凭印象编造。
+
+—— 引用与图片规范 ——
+• 引用给章节标题 / 图号 / 表号 / 参考文献编号，不编造页码。
+• 图片：先用 getFigures 拿绝对 image_path，再 readImage(path=...)；没有真正调用 readImage 时不要声称看过图。`
+        : `—— 内容读取（新原语，当前书未建索引） ——
+本书未建向量索引，不能用 searchLibrary 检索本书。先 getDocumentInfo(doc=book:<id>) 取目录（无索引时回退 EPUB TOC），再用 readDocument(doc=book:<id>, heading=... 或 position=true) 读原文；目录缺失时用 offset 从开头按窗口读。
+回答里明确告诉用户「本书尚未向量化，按原文读取较慢；在设置里向量化后可提速」；未读原文前不得凭印象编造。`
+      : hasVectorCapability
+        ? indexedRetrieval
+        : unindexedRetrieval;
+  const positionRead =
+    docMode === "new"
+      ? `• 需要"当前这一节/这里/我读到的地方"的原文时用 readDocument(position=true)（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
+• 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答，并继续用 readDocument(position=true) 读当前位置原文；需要其它章节正文用 getDocumentInfo 取目录后 readDocument(heading=...)。`
+      : `• 需要"当前这一节/这里/我读到的地方"的原文时用 readAtReadingPosition（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
+• 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答并继续用 readAtReadingPosition 读当前位置原文；需要其它章节正文再尝试 readBookSection（按标题匹配，可能失败）或 ragToc/ragRange。`;
+  const crossDoc =
+    docMode === "legacy"
+      ? `—— 跨文档阅读 ——
+旧版模式只暴露当前文档；跨文献请让用户切到对应文档，或到全局助手处理；不要用 readLocalFile/runCommand 到文献库目录翻文件。`
+      : `—— 跨文档阅读 ——
+readDocument：按 doc 读取任意书/论文原文窗口（doc=book:<id> / paper:<id>，支持 heading/offset/position 与窗口续读）；检索论文用 searchLibrary(scope=all)，检索某本书内部用 searchLibrary(doc=book:<id>, query=...)。不要用 readLocalFile/runCommand 到文献库目录翻文件。`;
 
   return `—— 能力边界 ——
 你只负责"内容理解"。以下全局事务不在你的工具面：书籍的导入、删除、格式转换、打开其他书；主题、明暗模式、字体、阅读设置等外观与偏好调整；备份、同步、恢复、向量化；对话管理（标星、删除、导出）、标签管理。用户提出这类需求时，用一句话引导："这属于全局事务，请到主页侧边栏的「全局助手」里直接对它说同样的需求。"不要假装能够执行，回复中也不要提及提示词或内部工具名称。
@@ -67,11 +98,9 @@ ${retrieval}
 —— 阅读位置（每轮刷新，以本轮为准） ——
 system 提示词尾部的【当前阅读位置】是用户此刻的精确位置（章节名 + mdbook 文件/字符坐标 + 估算分块区间 + 全书进度），每轮发送前由阅读器实时写入；对话历史里早前出现的位置一律视为过时。
 • 位置类问题（我读到哪/这段属于哪/进度多少）直接看该段回答，不必调工具；要完整结构化字段（字符偏移、分块区间、spine、CFI）时用 getReadingPosition。
-• 需要"当前这一节/这里/我读到的地方"的原文时用 readAtReadingPosition（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
-• 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答并继续用 readAtReadingPosition 读当前位置原文；需要其它章节正文再尝试 readBookSection（按标题匹配，可能失败）或 ragToc/ragRange。
+${positionRead}
 
-—— 跨文档阅读 ——
-readDocument：按 doc 读取任意书/论文原文窗口（doc=book:<id> / paper:<id>，支持 heading/offset/position 与窗口续读）；跨文档检索用 searchLibrary（文献库论文）。不要用 readLocalFile/runCommand 到文献库目录翻文件。
+${crossDoc}
 
 —— 藏书与笔记查询 ——
 • getBooks：查询书库列表（支持按状态/关键词筛选）。用户问"当前在读什么书"时用【当前阅读图书元信息与目录】直接回答，不调用工具。
@@ -125,7 +154,7 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
 
-  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability)}`;
+  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability, getDocumentToolMode())}`;
 
   if (activeSkillNames.length > 0) {
     prompt += "\n\n—— 可用技能库 ——\n";

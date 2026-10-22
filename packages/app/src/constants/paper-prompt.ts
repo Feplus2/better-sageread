@@ -1,3 +1,4 @@
+import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_PAPER_STYLE } from "@/constants/agent-styles";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
@@ -53,6 +54,52 @@ mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="
 —— 翻译路由 ——
 论文翻译/句词对齐/重新解析由全局助手 processPaper 负责，书籍（EPUB）全书翻译由全局助手 translateBook 或书籍阅读器顶栏「翻译」菜单负责——你没有翻译工具，用户提出时引导到对应入口即可。`;
 
+const PAPER_POLICY_BASE_NEW = `—— 先读后答 ——
+回答当前论文的内容问题前，先用文档原语读原文；不编造论文中不存在的结论、数据、公式或参考文献。
+• getDocumentInfo：元数据（标题/作者/期刊/DOI/摘要）+ 目录 + 图表与引用计数；元数据问题直接用它。
+• readDocument：按 doc 读原文窗口（doc=paper:<id> / book:<id>；heading/offset/position + 窗口续读）。总结全文先 getDocumentInfo 看目录，再按小节分窗读，不要一次读全文。
+• getCitations：参考文献列表（References 小节）。
+• getFigures：图片清单（图注 + 绝对 image_path）；真正看图用 readImage(path=image_path)。看图昂贵：先读图注/正文，确需视觉细节时最后再看图，看完立即作答。
+• 检索当前/跨论文用 searchLibrary（见下节）；命中后用 readDocument 精读。
+
+—— 阅读位置（每轮刷新，以本轮为准） ——
+system 提示词尾部的【当前阅读位置】是用户此刻的精确位置（小节标题 + paper.md 字符坐标 + 估算分块区间 + 全文进度），每轮发送前实时更新；对话历史里早前出现的位置一律视为过时，位置类问题以该段为准。
+• 位置类问题（我读到哪/这段属于哪/进度多少）直接看该段回答，不必调工具。
+• 用户说"这一节/这里/当前部分"且需要原文时，用 readDocument(position=true)（默认向后 6000 字符，before/after 可扩窗，next_offset 续读）；不要凭记忆复述正文。
+• 问题超出当前位置时，getDocumentInfo 看目录后用 readDocument(heading=...) 读其它部分。
+
+—— 引用规范 ——
+引用当前论文内容时注明小节标题；引用跨论文检索结果时注明出自哪篇论文（论文标题）。
+
+—— 外部检索 ——
+• sciverseSearch：学术证据检索——学术概念、方法、实验细节等需要论文原文证据的问题优先于 webSearch；返回带出处坐标的原文片段，引用须注明出自哪篇论文。
+• webSearch：通用网页搜索（作者近况、会议信息、代码仓库、术语通俗解释等非论文证据类需求）。
+• notes：查询用户在论文上的划线与想法。
+
+—— 笔记面板 ——
+manageNotes：当前论文的长文笔记管理（list 列出 / read 读取 / create 新建 / update 修改 / toggleStar 星标 / export 导出单篇 Markdown）。讨论产出的人话版总结/灵感优先整理入笔记面板（用户可在左侧「笔记」tab 查看、编辑、导出）——比落盘散文件与论文绑定更紧；create/update 会弹确认卡，先把草稿展示给用户讨论再落笔。笔记（长文产出）与 AI 重点标注（标亮原文重点句）分工不同，不要互相替代。exportNotes 导出划线与想法为 Markdown。
+
+—— 对话召回 ——
+readThread：读回本对话的完整问答记录（仅用户/AI 问答，不含工具过程）。整理本次对话为笔记或回顾被上下文压缩截断的早期内容前，先用它读回全量，不要只凭残存上下文。仅在有进行中的对话时可用（新对话首条消息时尚未注入）。
+
+—— 文件工具 ——
+readLocalFile / writeFile / editFile / searchFiles / runCommand 在本模式不可用；文献综述与笔记产出用 manageNotes 落盘，工作区文件操作请到全局助手。
+
+—— 思维导图 ——
+mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="生成思维导图") 获取规范并严格按步骤执行；生成思维导图时不要在回复中输出任何图片（含 Markdown 图片语法）。
+
+—— 翻译路由 ——
+论文翻译/句词对齐/重新解析由全局助手 processPaper 负责，书籍（EPUB）全书翻译由全局助手 translateBook 或书籍阅读器顶栏「翻译」菜单负责——你没有翻译工具，用户提出时引导到对应入口即可。`;
+
+const PAPER_POLICY_VECTOR_NEW = `—— 文献库检索（新原语） ——
+• searchLibrary：语义 + 关键词混合检索，scope=current（当前论文）/ collection（面板范围）/ all（全部文献）；也可用 doc=paper:<id> 指定单篇。
+• 命中后先看 doc/章节，再用 readDocument(doc=paper:<id>, heading=... 或 offset=...) 精读，不要一次读全文。
+• 检索策略：英文论文用英文术语；多概念问题拆 2-3 个不同措辞的子查询；命中不足换措辞/换范围再检；检索无据就明说，不要凭印象编造。
+• 分工：当前论文内容问题优先 getDocumentInfo + readDocument 读原文；searchLibrary 只用于检索已建索引论文的片段。`;
+
+const PAPER_POLICY_NO_VECTOR_NEW = `—— 文献库检索（当前不可用） ——
+未配置嵌入模型，searchLibrary 不可用；当前论文用 getDocumentInfo + readDocument 读原文。用户需要跨论文检索时，提示其在设置中配置嵌入模型并向量化论文。`;
+
 const PAPER_POLICY_VECTOR = `—— 文献库检索（已启用） ——
 • paperSearch：文献库语义+关键词混合检索，可跨论文。检索范围由用户在面板中选择（本篇论文/所在文件夹/全部文献/自定义文件夹），自动生效。
 • paperContext：paperSearch 命中片段不足以回答时，按 chunk_id 扩展该片段在同一论文内的前后文。
@@ -78,7 +125,17 @@ export async function buildPaperPrompt(chatContext: ChatContext | undefined): Pr
   const presetContent = await getActivePresetContent("paper");
   const style = presetContent && presetContent.trim().length > 0 ? presetContent : DEFAULT_PAPER_STYLE;
 
-  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${PAPER_POLICY_BASE}\n\n${hasVectorCapability ? PAPER_POLICY_VECTOR : PAPER_POLICY_NO_VECTOR}`;
+  const docMode = getDocumentToolMode();
+  const basePolicy = docMode === "new" ? PAPER_POLICY_BASE_NEW : PAPER_POLICY_BASE;
+  const retrievalPolicy =
+    docMode === "new"
+      ? hasVectorCapability
+        ? PAPER_POLICY_VECTOR_NEW
+        : PAPER_POLICY_NO_VECTOR_NEW
+      : hasVectorCapability
+        ? PAPER_POLICY_VECTOR
+        : PAPER_POLICY_NO_VECTOR;
+  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${basePolicy}\n\n${retrievalPolicy}`;
 
   // 注入 scope 含 paper 的活跃技能
   try {
