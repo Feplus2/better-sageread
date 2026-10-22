@@ -11,10 +11,10 @@
 |---|---|---|
 | deepseek（文本） | @ai-sdk/deepseek 原生 | 无 |
 | deepseek（视觉） | openai-compatible chat + fetch 层图片桥 | 工具结果图片靠 user 消息注入；固定留 3 张 |
-| openai | @ai-sdk/openai 默认（chat completions） | 没用 Responses API；工具图片无法原生回传 |
+| openai | @ai-sdk/openai：`provider(modelId)` 在 ai@7 返回 **Responses 模型**（d.ts 核实；`chat()` 才显式走 chat completions） | 协议本身已是新一代；问题在工具结果仍是旧自定义 content 结构，AI SDK 不会当原生多模态处理 |
 | anthropic | **createOpenAICompatible 指向 api.anthropic.com/v1** | 假适配：Anthropic 没有 OpenAI chat completions 端点，属于历史遗留 |
 | gemini/google | @ai-sdk/google 原生 | 无 |
-| grok | @ai-sdk/openai（chat completions） | 无原生多模态工具结果 |
+| grok | @ai-sdk/openai（provider(modelId) 同样指向 Responses 模型） | xAI 是否支持 Responses 端点未验证；需固定为支持的通道，否则可能 404 |
 | openrouter | @openrouter/ai-sdk-provider | 无原生多模态工具结果 |
 | 自定义/custom-* | openai-compatible + 图片桥 | 工具图片只能走桥 |
 
@@ -26,6 +26,7 @@
 - OpenAI provider 实例同时提供 `chat()` 与 `responses()`；Responses 是支持工具结果图片的通道。
 - 我们现有工具（readImage 等）返回的是旧格式 `{type:'file', mediaType, url: dataUrl}`（自定义 content），AI SDK 未把它当原生多模态工具结果，因此 openai-compatible 会 JSON 序列化成 base64 文本——这就是图片 bug 的根因。
 - 结论：**协议现代化不需要重写，现有依赖已具备；主要是 provider 路由 + 工具结果格式 + capability 判定 + 验证。**
+- 追加核实（2026-10-22 晚）：OpenAI 实际已经在用 Responses（不是 chat completions）；真正需要“升级”的是 **Anthropic 原生通道 + 所有原生 provider 的工具图片结果格式（toModelOutput）**，以及 grok/自定义代理的通道确认。
 
 ## 2. 目标架构
 
@@ -47,12 +48,12 @@ createModelInstance(providerId, modelId)
 
 ### WP1 provider capability 路由（约 0.5–1 天）
 - 新文件 `ai/providers/protocol.ts`：provider/model/baseURL → protocol + capability；纯函数、可单测。
-- `factory.ts`：openai 官方走 `openai.responses(...)`；anthropic 改为 `createAnthropic`；deepseek 视觉保持 chat 桥；chat-only provider 保持桥。
+- `factory.ts`：openai 保持现有 Responses 模型（显式 `openai.responses(...)` 便于读代码）；**anthropic 改为 `createAnthropic`**；deepseek 视觉保持 chat 桥；chat-only provider 保持桥；grok 固定为官方支持的通道。
 - 注意：自定义 baseURL（用户填的代理）默认 chat，避免误发 Responses 导致 404。
 - 兼容：旧 provider 配置无需迁移（按 providerId + baseURL 判定）。
 
 ### WP2 工具结果格式（约 0.5 天）
-- `readImage`（以及 image 类的 getFigures/viewImages 输出）改为官方 `toModelOutput` 格式；UI 侧仍用 sanitize/cache 剥掉 base64。
+- `readImage`（以及 image 类的 getFigures/viewImages 输出）改为官方 `toModelOutput` 格式；UI 侧仍用 sanitize/cache 剥掉 base64。\n- 关键：原生 provider（OpenAI Responses / Anthropic / Gemini 3）需要 `{type:'file', mediaType, data:{type:'data',data:base64}}`；现有 `{type:'file', mediaType, url:dataUrl}` 不满足，需要在 transport 侧按 capability 包一层 `toModelOutput`（不改 UI 输出）。
 - 桥的 walkImages 兼容旧格式与新格式（data 形式）。
 - 保持 chat 通道行为不变。
 
@@ -69,7 +70,7 @@ createModelInstance(providerId, modelId)
 ### WP5 遗留清理（v0.5.0 后，v0.6 执行）
 - 删旧 rag 工具集、documentToolMode both/legacy、旧 prompt 分支、旧 alias。
 - 删图片桥（当所有在用的视觉 provider 都走原生后）。
-- 删 anthropic 假适配与 openai chat 默认路径（保留自定义 baseURL 兼容）。
+- 删 anthropic 假适配；保留自定义 baseURL 的 chat-compatible 通道。
 
 ## 4. 风险
 
@@ -81,7 +82,7 @@ createModelInstance(providerId, modelId)
 
 ## 5. 工作量结论
 
-- 代码本身：中等（约 3–5 个聚焦工作日；文件面 ~10–15 个，1 个新 provider 路由模块 + 工具输出改造 + transport 参数迁移）。
+- 代码本身：中等偏小（核实 OpenAI 已是 Responses 后，约 **2–4 个聚焦工作日**；文件面 ~8–12 个，主要是 Anthropic 原生 + capability 包装 + toModelOutput 改造 + transport 参数）。
 - 真正成本在**验证**：provider 矩阵、视觉探针、回归评测；若只验证 DeepSeek + 自定义网关，1–2 天可完成；要覆盖 OpenAI Responses / Anthropic 原生 / Gemini，需要对应 key 和 1–2 天额外回归。
 - 不是重写、无数据迁移；AI SDK 已装好，主要改“路由与格式”。
 - 建议：与 v0.5.0 一起做，但用 `protocol=auto` 默认 + `compat` 回退；验证不过就先默认 compat 发版，native 随 v0.5.x 打开。
