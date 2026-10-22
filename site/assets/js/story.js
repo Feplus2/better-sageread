@@ -165,6 +165,7 @@ function drawSeg(spec, si, pos) {
 
 /* ---------- 状态 ---------- */
 var cur = "sageread", spec = TABS.sageread;
+var blockStyle = {}, lastVeilOp = null, lastHintOp = null;
 var track = $("#track"), veil = $("#veil"), hint = $("#hint");
 var target = 0, curP = 0, switching = false;
 var lastSi = 0, lastPos = 0;
@@ -189,12 +190,18 @@ function render(p) {
     var el = document.getElementById(b.el);
     var rise = b.hold ? -26 * seg01(p, b.outA, b.outB)
       : 22 * (1 - seg01(p, b.inA, b.inB)) - 18 * seg01(p, b.outA, b.outB);
+    // 只在数值真的变化时才写样式：滚动 scrub 时每帧都写 opacity/transform 会引发不必要的样式重算
+    var prev = blockStyle[b.el];
+    if (prev && Math.abs(prev.op - op) < 0.004 && Math.abs(prev.rise - rise) < 0.35) return;
+    blockStyle[b.el] = { op: op, rise: rise };
     el.style.opacity = op;
     el.style.visibility = op <= 0.01 ? "hidden" : "visible";
     el.style.transform = "translateY(calc(-50% + " + rise.toFixed(1) + "px))";
   });
-  veil.style.opacity = (0.25 + 0.75 * maxOp).toFixed(3);
-  hint.style.opacity = String(1 - seg01(p, .005, .03));
+  var veilOp = (0.25 + 0.75 * maxOp).toFixed(3);
+  if (lastVeilOp !== veilOp) { veil.style.opacity = veilOp; lastVeilOp = veilOp; }
+  var hintOp = String(1 - seg01(p, .005, .03));
+  if (lastHintOp !== hintOp) { hint.style.opacity = hintOp; lastHintOp = hintOp; }
 }
 
 /* ---------- 滚动 ---------- */
@@ -257,6 +264,7 @@ function switchTab(name) {
     applyTrack();
     spec.dirs.forEach(ensureDir);
     scrollTo(0, 0); target = curP = 0; lastSi = 0; lastPos = 0; lastKey = ""; lastRenderedP = -1;
+    blockStyle = {}; lastVeilOp = null; lastHintOp = null;
     render(0);
     switching = false;
   });

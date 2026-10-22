@@ -32,7 +32,7 @@ a:hover{text-decoration:underline}
 #tabrail{
   position:absolute;left:2.2vw;top:6vh;z-index:20;display:flex;gap:2px;
   align-items:stretch;user-select:none;
-  background:rgba(243,236,222,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  background:rgba(243,236,222,.90); /* 不用 backdrop-filter：它会在 canvas 每帧变化时重算模糊，是滚动掉帧的常见来源 */
   border:1px solid rgba(216,205,180,.55);border-radius:10px;padding:6px 8px;
 }
 #tabrail .brandtab{
