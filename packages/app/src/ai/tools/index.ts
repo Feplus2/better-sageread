@@ -11,6 +11,7 @@ export { mindmapTool } from "./mindmap";
 export { webSearchTool } from "./web-search";
 export { sciverseSearchTool } from "./sciverse-search";
 export { readImageTool } from "./read-image";
+export { viewImagesTool } from "./view-images";
 export {
   createGetCitationGraphTool,
   createGetCitationsTool,

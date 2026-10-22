@@ -7,76 +7,35 @@ import { ChatInputArea } from "@/components/side-chat/chat-input-area";
 import { ChatMessages } from "@/components/side-chat/chat-messages";
 import { ChatThreads } from "@/components/side-chat/chat-threads";
 import ModelSelector from "@/components/side-chat/model-selector";
+import { RetrievalScopeSelect } from "@/components/side-chat/retrieval-scope-select";
 import { SelectionExportBar } from "@/components/side-chat/selection-export-bar";
 import { useMessageSelection } from "@/components/side-chat/use-message-selection";
 import { MindmapDialog } from "@/components/tools/mindmap-dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatState } from "@/hooks/use-chat-state";
 import { exportMessagesToHtml } from "@/lib/export-thread-html";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessagesToMarkdown } from "@/lib/export-thread-markdown";
-import { type Folder, type FolderTreeNode, type PaperFolderEntry, buildFolderTree } from "@/services/paper-service";
+import { useRetrievalScopeFor } from "@/store/retrieval-scope-store";
 import { useThemeStore } from "@/store/theme-store";
 import type { Thread } from "@/types/thread";
-import { FileText, Folder as FolderIcon, History, ListChecks, MessageCirclePlus } from "lucide-react";
+import { FileText, History, ListChecks, MessageCirclePlus } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-
-/** 聊天检索作用域：本篇论文 / 某个所属文件夹（含子文件夹）/ 全部文献 / 自定义文件夹集合 */
-type PaperChatScope =
-  | { kind: "paper" }
-  | { kind: "folder"; folderId: string }
-  | { kind: "all" }
-  | { kind: "custom"; folderIds: string[] };
-
-/** 收集文件夹及其全部后代 id（父链防御环：每个 id 只入集合一次，循环必然收敛） */
-function collectFolderTreeIds(rootId: string, folders: Folder[]): Set<string> {
-  const ids = new Set<string>([rootId]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const folder of folders) {
-      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
-        ids.add(folder.id);
-        grew = true;
-      }
-    }
-  }
-  return ids;
-}
-
-/** 挂在给定文件夹集合内的全部论文 id（去重） */
-function paperIdsInFolders(folderIds: Set<string>, members: PaperFolderEntry[]): string[] {
-  const result = new Set<string>();
-  for (const member of members) {
-    if (folderIds.has(member.folderId)) {
-      result.add(member.paperId);
-    }
-  }
-  return [...result];
-}
-
-/** 树形铺平（自定义文件夹对话框用，全部展开，带缩进深度） */
-const flattenTree = (nodes: FolderTreeNode[], depth = 0): { node: FolderTreeNode; depth: number }[] =>
-  nodes.flatMap((node) => [{ node, depth }, ...flattenTree(node.children, depth + 1)]);
 
 const PAPER_PROMPT_SUGGESTIONS = ["这篇论文讲了什么？", "总结当前这一节", "论文的创新点和局限是什么？"] as const;
 
 interface PaperChatPanelProps {
   paperId: string;
   paperTitle: string;
-  folders: Folder[];
-  members: PaperFolderEntry[];
 }
 
-/** 论文助手聊天面板：头部（模型/作用域选择器 + 对话操作）+ 对话区 + 输入区（agentScope="paper"） */
-export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperChatPanelProps) {
+/** 论文助手聊天面板：头部（模型/检索范围选择器 + 对话操作）+ 对话区 + 输入区（agentScope="paper"） */
+export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
   const { autoScroll } = useThemeStore();
   const [currentThread, setCurrentThread] = useState<Thread | null>(null);
-  const [scope, setScope] = useState<PaperChatScope>({ kind: "paper" });
+  // 用户划定的检索范围（按论文持久化；默认本篇）。同时约束向量检索与文档直读。
+  const retrievalScope = useRetrievalScopeFor("paper", paperId);
   // StickToBottom 上下文 ref：随 ChatContainerRoot contextRef 下发并透传 ChatMessages（命令式读
   // scrollToBottom，避免 context 值对象重建把整条消息列表拖入切 tab 重渲，见 chat-messages.tsx 注释）
   const stickContextRef = useRef<any>(null);
@@ -85,8 +44,6 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
     () => ({ kind: "paper", paperId, title: paperTitle }),
     [paperId, paperTitle],
   );
-  const [customDialogOpen, setCustomDialogOpen] = useState(false);
-  const [customChecked, setCustomChecked] = useState<Set<string>>(new Set());
   // 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款 MindmapDialog）
   const [toolDetail, setToolDetail] = useState<any>(null);
   const [showToolDetailDialog, setShowToolDetailDialog] = useState(false);
@@ -101,34 +58,11 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
     setShowToolDetailDialog(true);
   }, []);
 
-  /** 当前论文直接所属的文件夹（"所在文件夹"选项；一篇论文可属多个文件夹） */
-  const containingFolders = useMemo(() => {
-    const ids = new Set(members.filter((m) => m.paperId === paperId).map((m) => m.folderId));
-    return folders.filter((f) => ids.has(f.id));
-  }, [members, folders, paperId]);
-
-  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
-
-  /** 作用域 → paperSearch 的 paper_ids：本篇=[paperId]；文件夹/自定义=含后代的全部成员；全部=null */
+  /** 旧版论文工具 paperSearch 的范围映射：本篇=[paperId]；论文库/论文库+图书馆=null（全部论文）。
+   *  旧工具集无法表达"论文库+图书馆"里的书籍部分，故旧模式只部分生效（该模式下下拉隐藏）。 */
   const paperScopeIds = useMemo((): string[] | null => {
-    switch (scope.kind) {
-      case "paper":
-        return [paperId];
-      case "all":
-        return null;
-      case "folder":
-        return paperIdsInFolders(collectFolderTreeIds(scope.folderId, folders), members);
-      case "custom": {
-        const all = new Set<string>();
-        for (const folderId of scope.folderIds) {
-          for (const id of collectFolderTreeIds(folderId, folders)) {
-            all.add(id);
-          }
-        }
-        return paperIdsInFolders(all, members);
-      }
-    }
-  }, [scope, paperId, folders, members]);
+    return retrievalScope === "current" ? [paperId] : null;
+  }, [retrievalScope, paperId]);
 
   const {
     input,
@@ -167,6 +101,7 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
       // 阅读位置改由活位置注册表注入提示词（PaperReader 写 setLiveReadingPosition），
       // 不再随 chatContext 传"当前小节正文/标题"——避免每滚一次就整面板重渲 + 正文重复注入
       agentScope: "paper",
+      retrievalScope,
       paperScopeIds,
     },
     setActiveBookId: () => {},
@@ -181,29 +116,6 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
     title: `${currentThread?.title || paperTitle || "未命名对话"}-节选`,
     bookId: currentThread?.book_id ?? paperId ?? null,
   });
-
-  const scopeValue = scope.kind === "folder" ? `folder:${scope.folderId}` : scope.kind;
-
-  const handleScopeChange = (value: string) => {
-    if (value === "custom") {
-      setCustomChecked(new Set(scope.kind === "custom" ? scope.folderIds : []));
-      setCustomDialogOpen(true);
-      return;
-    }
-    if (value.startsWith("folder:")) {
-      setScope({ kind: "folder", folderId: value.slice("folder:".length) });
-    } else if (value === "all") {
-      setScope({ kind: "all" });
-    } else {
-      setScope({ kind: "paper" });
-    }
-  };
-
-  const handleCustomConfirm = () => {
-    if (customChecked.size === 0) return;
-    setScope({ kind: "custom", folderIds: [...customChecked] });
-    setCustomDialogOpen(false);
-  };
 
   const EmptyState = () => (
     <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2 pb-8">
@@ -243,8 +155,8 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
   return (
     <CitationFallbackContext.Provider value={citationFallback}>
       <main id="paper-chat-panel" data-region="chat-panel" className="relative flex h-full flex-col overflow-hidden">
-        {/* 头部：模型/检索作用域选择器 + 对话操作（结构与书籍 SideChat 头部一致；
-          面板折叠开关由 PaperHeaderBar 统一负责，书籍同款） */}
+        {/* 头部：模型/检索范围选择器 + 对话操作（结构与书籍 SideChat 头部一致；
+          面板折叠开关由 PaperHeaderBar 统一负责，书籍同款；旧版文档工具模式下范围下拉自动隐藏） */}
         <div className="ml-1 flex-shrink-0 border-neutral-300 dark:border-neutral-700">
           <div className="flex h-8 items-center justify-between">
             <div className="flex min-w-0 items-center gap-2 pl-0.5">
@@ -253,28 +165,7 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
                 onModelSelect={setSelectedModel}
                 className="z-40 w-[10rem] min-w-0 flex-shrink"
               />
-              <Select value={scopeValue} onValueChange={handleScopeChange}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <SelectTrigger className="h-7 w-[9.5rem] min-w-0 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">paperSearch 的检索范围（需已向量化）</TooltipContent>
-                </Tooltip>
-                <SelectContent>
-                  <SelectItem value="paper">本篇论文</SelectItem>
-                  {containingFolders.map((folder) => (
-                    <SelectItem key={folder.id} value={`folder:${folder.id}`}>
-                      文件夹：{folder.name}（含子文件夹）
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="all">全部文献</SelectItem>
-                  <SelectItem value="custom">
-                    自定义文件夹…{scope.kind === "custom" ? `（已选 ${scope.folderIds.length}）` : ""}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <RetrievalScopeSelect role="paper" docId={paperId} />
             </div>
             <div className="flex flex-shrink-0 items-center gap-0">
               {messages.length > 0 && !showThreads && (
@@ -405,56 +296,6 @@ export function PaperChatPanel({ paperId, paperTitle, folders, members }: PaperC
 
         {/* 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款） */}
         <MindmapDialog open={showToolDetailDialog} onOpenChange={setShowToolDetailDialog} toolPart={toolDetail} />
-
-        {/* 自定义文件夹对话框（复选，含后代文件夹） */}
-        <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>自定义检索范围</DialogTitle>
-            </DialogHeader>
-            <p className="px-4 pt-2 text-neutral-500 text-xs dark:text-neutral-400">
-              勾选一个或多个文件夹，检索范围为其中全部论文（含子文件夹）
-            </p>
-            <div className="max-h-72 overflow-y-auto px-2 py-2">
-              {folderTree.length === 0 ? (
-                <p className="py-6 text-center text-neutral-400 text-sm">还没有文件夹，请先在文献库列表页创建</p>
-              ) : (
-                flattenTree(folderTree).map(({ node, depth }) => (
-                  <label
-                    key={node.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-                    style={{ marginInlineStart: `${depth * 16}px` }}
-                  >
-                    <Checkbox
-                      checked={customChecked.has(node.id)}
-                      onCheckedChange={(checked) => {
-                        setCustomChecked((prev) => {
-                          const next = new Set(prev);
-                          if (checked === true) {
-                            next.add(node.id);
-                          } else {
-                            next.delete(node.id);
-                          }
-                          return next;
-                        });
-                      }}
-                    />
-                    <FolderIcon className="size-3.5 shrink-0 text-neutral-400" />
-                    <span className="truncate">{node.name}</span>
-                  </label>
-                ))
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCustomDialogOpen(false)}>
-                取消
-              </Button>
-              <Button onClick={handleCustomConfirm} disabled={customChecked.size === 0}>
-                确定
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </main>
     </CitationFallbackContext.Provider>
   );

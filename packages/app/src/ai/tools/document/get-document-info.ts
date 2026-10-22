@@ -5,7 +5,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
-import { type AgentDocScope, bookIndexed, docDir, docRefString, readDocMetadata, resolveDocRef } from "./shared";
+import {
+  type AgentDocScope,
+  assertDocInRetrievalScope,
+  bookIndexed,
+  docDir,
+  docRefString,
+  readDocMetadata,
+  resolveDocRef,
+} from "./shared";
 
 const MAX_OUTLINE_ITEMS = 80;
 /** 书籍目录注入上限：EPUB TOC 可能上百条，注入 35 条一级/二级即可，避免挤占上下文 */
@@ -46,13 +54,15 @@ function tocItemsFromMetadataMd(markdown: string): { level: number; heading: str
 export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
   tool({
     description:
-      "获取文档信息与目录（通用原语）：标题/作者/来源/索引状态/目录/图与引用计数。\n\n📖 **使用场景**：\n• 回答结构类问题（有哪些章节、目录、多少张图）\n• 调用 readDocument 前先拿准确标题与目录\n• 跨文档时先确认库里有哪些内容\n\n🎯 **参数**：doc：book:<id> 或 paper:<id>；省略 = 当前文档。\n\n📊 **返回**：{doc, metadata, index, outline:{total,items:[{level,heading,anchor}]}, counts}。",
+      "获取文档信息与目录（通用原语）：标题/作者/来源/索引状态/目录/图与引用计数。\n\n📖 **使用场景**：\n• 回答结构类问题（有哪些章节、目录、多少张图）\n• 调用 readDocument 前先拿准确标题与目录\n• 跨文档时先确认圈内有哪些内容\n\n🚫 **范围约束**：只能查看用户当前选择范围内的文档；越界 doc 会被明确拒绝。需要更广范围时请用户切侧栏下拉。\n\n🎯 **参数**：doc：book:<id> 或 paper:<id>；省略 = 当前文档。\n\n📊 **返回**：{doc, metadata, index, outline:{total,items:[{level,heading,anchor}]}, counts}。",
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的"),
       doc: z.string().optional().describe("文档引用：book:<id> 或 paper:<id>；省略 = 当前文档"),
     }),
     execute: async (args: { reasoning: string; doc?: string }) => {
       const doc = resolveDocRef(args.doc, ctx);
+      // 用户划圈优先：圈外文档连元信息/目录都不读
+      assertDocInRetrievalScope(doc, ctx);
       const metadata = await readDocMetadata(doc);
       if (doc.kind === "paper") {
         const markdown = await readPaperMarkdown(doc.id);

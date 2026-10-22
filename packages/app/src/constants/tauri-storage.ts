@@ -8,4 +8,5 @@ export const tauriStorageKey = {
   mcpServers: "mcp-servers",
   agentSettings: "agent-settings",
   chatSettings: "chat-settings",
+  retrievalScope: "retrieval-scope",
 } as const;

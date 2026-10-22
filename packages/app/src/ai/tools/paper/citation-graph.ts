@@ -1,3 +1,4 @@
+import { type AgentDocScope, assertDocInRetrievalScope, resolveRetrievalScope } from "@/ai/tools/document/shared";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readDir } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
@@ -142,10 +143,10 @@ async function listLibraryPapers(excludeId: string): Promise<string[]> {
   return paperIds;
 }
 
-export const createGetCitationGraphTool = (ctx: { scope: "paper" | "central"; currentId?: string }) =>
+export const createGetCitationGraphTool = (ctx: AgentDocScope) =>
   tool({
     description:
-      "查看论文在「库内」的引用关系：\n• 它引用了文献库里哪些论文（reference → paper）\n• 文献库里哪些论文引用了它（paper → cited by）\n按 DOI / 标题匹配 References 小节，不需要向量索引。\n\n📖 **使用场景**：\n• 「这篇论文和库里哪些论文有引用关系」「谁引用了这篇」\n• 做相关工作梳理、判断文献库里的上下游关系\n\n📊 **返回**：{doc, title, doi, references:{total, in_library:[{ref_index, paper, title, entry(≤180 字符)}]}, cited_by:{total_papers, papers:[{paper, title, ref_indexes, entries}]}, note}；只覆盖库内论文，不查外部数据库。",
+      "查看论文在「库内」的引用关系：\n• 它引用了文献库里哪些论文（reference → paper）\n• 文献库里哪些论文引用了它（paper → cited by）\n按 DOI / 标题匹配 References 小节，不需要向量索引。该工具会扫描论文库里的其它论文，因此只能在「论文库」及以上范围使用；「本篇」范围会明确提示切换，不会静默缩小结果。\n\n📖 **使用场景**：\n• 「这篇论文和库里哪些论文有引用关系」「谁引用了这篇」\n• 做相关工作梳理、判断文献库里的上下游关系\n\n📊 **返回**：{doc, title, doi, references:{total, in_library:[{ref_index, paper, title, entry(≤180 字符)}]}, cited_by:{total_papers, papers:[{paper, title, ref_indexes, entries}]}, note}；只覆盖库内论文，不查外部数据库。",
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的"),
       doc: z.string().optional().describe("目标论文：paper:<id>；省略 = 当前论文"),
@@ -163,6 +164,16 @@ export const createGetCitationGraphTool = (ctx: { scope: "paper" | "central"; cu
       if (!targetId) {
         return {
           error: rawDoc ? "引用图谱只支持论文（doc=paper:<id>）" : "缺少目标论文：请传 doc=paper:<id>",
+          meta: { reasoning: args.reasoning },
+        };
+      }
+      // 目标论文必须在用户圈内；圈外 doc 直接明确报错
+      assertDocInRetrievalScope({ kind: "paper", id: targetId }, ctx);
+      // 引用图谱要扫描文献库其它论文的 References；「本篇」圈不下这个动作，先请用户扩大范围
+      if (resolveRetrievalScope(ctx) === "current") {
+        return {
+          error:
+            "引用图谱需要扫描文献库中的其它论文，超出当前「本篇论文」范围。请让用户把侧栏顶部的检索范围切到「论文库」或「论文库+图书馆」后再试；不要用 readDocument 逐篇绕过。",
           meta: { reasoning: args.reasoning },
         };
       }

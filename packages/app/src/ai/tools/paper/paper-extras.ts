@@ -1,3 +1,4 @@
+import { type AgentDocScope, assertDocInRetrievalScope } from "@/ai/tools/document/shared";
 import { appDataDir } from "@tauri-apps/api/path";
 import { tool } from "ai";
 import { z } from "zod";
@@ -123,8 +124,9 @@ export const createGetCitationsTool = (paperId: string | undefined) =>
     },
   });
 
-/** 提取当前论文的图片清单（基础层工具，直接读 paper.md，无需向量能力） */
-export const createGetFiguresTool = (paperId: string | undefined) =>
+/** 提取当前论文的图片清单（基础层工具，直接读 paper.md，无需向量能力）。
+ *  只读绑定论文、不接收 doc；仍走统一门禁兜底（绑定论文必须在用户圈内）。 */
+export const createGetFiguresTool = (paperId: string | undefined, scopeCtx?: AgentDocScope) =>
   tool({
     description: `提取当前论文中的图片清单（含图注与所在小节）。
 
@@ -146,6 +148,8 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
       if (!paperId) {
         throw new Error("未找到当前论文，请先在文献库中打开一篇论文");
       }
+      // 直读门禁：本篇图片清单只属于绑定论文；若调用上下文异常（绑定论文不在圈内）明确报错
+      if (scopeCtx) assertDocInRetrievalScope({ kind: "paper", id: paperId }, scopeCtx);
 
       const baseDir = (await appDataDir()).replace(/\\/g, "/");
       const markdown = await readPaperMarkdown(paperId);

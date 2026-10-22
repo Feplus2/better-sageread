@@ -33,13 +33,7 @@ import {
   parseReferencesJson,
   serializeReferences,
 } from "@/services/paper-reference-service";
-import {
-  type Folder,
-  type PaperFolderEntry,
-  getPaperFolderMap,
-  getPaperSourceStatus,
-  listFolders,
-} from "@/services/paper-service";
+import { getPaperSourceStatus } from "@/services/paper-service";
 import {
   type PaperTranslatedMeta,
   type PaperTranslationFile,
@@ -106,8 +100,6 @@ function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderVi
   const [paperDir, setPaperDir] = useState<string | null>(null);
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [members, setMembers] = useState<PaperFolderEntry[]>([]);
   // 面板开关默认值与书籍阅读区一致：左侧笔记面板默认收起、右侧 AI 面板默认展开
   const [notesOpen, setNotesOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
@@ -557,16 +549,6 @@ function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderVi
     return () => clearLiveReadingPosition("paper", paperId);
   }, [paperId]);
 
-  // 论文助手的作用域选择器需要文件夹与成员关系（加载失败时降级为仅"本篇论文/全部文献"）
-  useEffect(() => {
-    Promise.all([listFolders(), getPaperFolderMap()])
-      .then(([folderList, memberList]) => {
-        setFolders(folderList);
-        setMembers(memberList);
-      })
-      .catch((error) => console.warn("加载论文文件夹信息失败:", error));
-  }, []);
-
   const handleSearchQueryChange = useCallback((query: string) => {
     setSearchQuery(query);
     setActiveMatchIndex(0);
@@ -803,7 +785,7 @@ function PaperReaderView({ paperId, title, viewSleeping = false }: PaperReaderVi
             swapSidebars ? `mr-1 ${sidebarHeightClass} rounded-md` : `m-1 mt-0 ${sidebarHeightClass} rounded-md`
           }
         >
-          <PaperChatPanel paperId={paperId} paperTitle={title} folders={folders} members={members} />
+          <PaperChatPanel paperId={paperId} paperTitle={title} />
         </div>
       </Resizable>
     </MotionSidebar>

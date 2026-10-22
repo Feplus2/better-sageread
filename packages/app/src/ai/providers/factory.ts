@@ -1,4 +1,6 @@
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { type LanguageModel } from "ai";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -6,6 +8,11 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
+import {
+  normalizeAnthropicBaseUrl,
+  normalizeOpenAIBaseUrl,
+  resolveProviderProtocol,
+} from "./protocol";
 import { wrapOpenAICompatToolImagesFetch } from "./tool-image-bridge";
 import { VISION_NAME_RE, modelSupportsVision } from "./vision-map";
 
@@ -173,6 +180,7 @@ function wrapChatReasoningFetch(
  */
 export function createProviderInstance(config: ProviderConfig) {
   const { providerId, apiKey, baseUrl, disableThinking, modelId, reasoningLevelRef } = config;
+  const protocol = resolveProviderProtocol({ providerId, baseUrl, modelId });
   // 关闭思考补丁：仅轻量任务（disableThinking）且端点认识时生效
   const patch = disableThinking ? thinkingOffPatch(providerId, baseUrl, modelId) : null;
   // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
@@ -222,12 +230,21 @@ export function createProviderInstance(config: ProviderConfig) {
       });
 
     case "anthropic":
+      // 2026-10-22 修复历史遗留：Anthropic 没有 OpenAI chat-completions 端点，
+      // 之前用 createOpenAICompatible 指向 api.anthropic.com/v1 是假适配。
+      if (protocol === "anthropic-messages") {
+        return createAnthropic({
+          apiKey: apiKey || "",
+          baseURL: normalizeAnthropicBaseUrl(baseUrl),
+        });
+      }
+      // 显式 chat 兼容（用户自建 Anthropic 兼容代理且只支持 chat 时）保留旧路径
       return createOpenAICompatible({
         apiKey: apiKey || "",
-        baseURL: baseUrl || "https://api.anthropic.com/v1",
+        baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.anthropic.com/v1",
         includeUsage: true,
         name: "OpenAI Compatible",
-        fetch: fetchTauri,
+        fetch: maybeWrap(fetchTauri) ?? fetchTauri,
       });
 
     case "gemini":
@@ -238,20 +255,43 @@ export function createProviderInstance(config: ProviderConfig) {
       });
 
     case "grok":
-      // Grok 使用 OpenAI 兼容的 API
+      // Grok 使用 OpenAI 兼容的 chat completions，不走 Responses
       return createOpenAI({
         apiKey: apiKey || "",
-        baseURL: baseUrl || "https://api.x.ai/v1",
+        baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.x.ai/v1",
       });
 
-    default:
+    default: {
+      // 自定义 / 国内兼容端点：按协议能力选通道。
+      // openai-responses / openai-chat：用官方 OpenAI SDK（前者走 Responses，后者显式 chat()）
+      if (protocol === "openai-responses" || protocol === "openai-chat") {
+        return createOpenAI({
+          apiKey: apiKey || "",
+          baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
+        });
+      }
+      if (protocol === "anthropic-messages") {
+        return createAnthropic({
+          apiKey: apiKey || "",
+          baseURL: normalizeAnthropicBaseUrl(baseUrl),
+        });
+      }
+      if (protocol === "gemini") {
+        return createGoogleGenerativeAI({
+          apiKey: apiKey || "",
+          baseURL: baseUrl,
+        });
+      }
+      // chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）
+      const chatFetch = wrapOpenAICompatToolImagesFetch(maybeWrap(fetchTauri) ?? fetchTauri);
       return createOpenAICompatible({
         apiKey: apiKey || "",
-        baseURL: baseUrl || "https://api.openai.com/v1",
+        baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
         includeUsage: true,
         name: "OpenAI Compatible",
-        fetch: maybeWrap(fetchTauri) ?? fetchTauri,
+        fetch: chatFetch,
       });
+    }
   }
 }
 
@@ -262,7 +302,7 @@ export function createModelInstance(
   providerId: string,
   modelId: string,
   opts?: { disableThinking?: boolean; reasoningLevelRef?: () => ReasoningLevel },
-) {
+): LanguageModel {
   // 从store获取提供商配置
   const { modelProviders } = useProviderStore.getState();
   const provider = modelProviders.find((p) => p.provider === providerId);
@@ -290,8 +330,23 @@ export function createModelInstance(
     reasoningLevelRef: opts?.reasoningLevelRef,
   });
 
-  // 返回模型实例
-  return providerInstance(modelId);
+  // 返回模型实例：按协议选择 Responses / chat / Messages 入口
+  const protocol = resolveProviderProtocol({
+    providerId,
+    baseUrl: provider.baseUrl,
+    modelId,
+  });
+  const providerAny = providerInstance as unknown as {
+    responses?: (id: string) => LanguageModel;
+    chat?: (id: string) => LanguageModel;
+  };
+  if (protocol === "openai-responses" && typeof providerAny.responses === "function") {
+    return providerAny.responses(modelId);
+  }
+  if (protocol === "openai-chat" && typeof providerAny.chat === "function") {
+    return providerAny.chat(modelId);
+  }
+  return providerInstance(modelId) as LanguageModel;
 }
 
 /**

@@ -3,6 +3,7 @@ import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_READER_STYLE } from "@/constants/agent-styles";
 import { buildCentralPrompt } from "@/constants/central-prompt";
 import { buildPaperPrompt } from "@/constants/paper-prompt";
+import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope } from "@/constants/retrieval-scope";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
 import { getActivePresetContent, migrateLegacyReaderBaseIfNeeded } from "@/services/prompt-preset-service";
@@ -28,7 +29,7 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
   const docMode = getDocumentToolMode();
   const docModeNote =
     docMode === "new"
-      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（可跨文档、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索文献库论文用 searchLibrary(scope=current/collection/all)，在某本书内部检索用 searchLibrary(doc=book:<id>, query=...)。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
+      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（只能在用户圈定范围内读、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索用 searchLibrary（scope 只能在用户圈定范围内收窄，详见【检索范围】段）。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
       : docMode === "legacy"
         ? "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。"
         : "";
@@ -63,7 +64,7 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
       ? hasVectorCapability
         ? `—— 内容检索与读取（新原语） ——
 • 本书检索：searchLibrary(doc=book:<当前书 id>, query=...) 做混合检索，返回片段 + 章节；命中后用 readDocument(doc=book:<id>, heading=章节) 精读。
-• 跨文献：searchLibrary(scope=all) 检索论文库；readDocument 可直接读任意文档（doc=paper:<id> / book:<id>）。
+• 跨文献：只能在用户圈定范围内跨文档（见【检索范围】段）；searchLibrary/readDocument 的越界参数会被拒绝，不要自行扩大范围。
 • 目录与元信息：getDocumentInfo(doc)；元数据问题直接用【当前阅读图书元信息与目录】回答，不必调检索。
 • 查询构造：英文材料用英文术语；复杂问题拆 2-3 次不同措辞检索。
 • 检索无命中：换关键词，或 getDocumentInfo 看目录后用 readDocument 按章节读；不要凭印象编造。
@@ -88,7 +89,7 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
       ? `—— 跨文档阅读 ——
 旧版模式只暴露当前文档；跨文献请让用户切到对应文档，或到全局助手处理；不要用 readLocalFile/runCommand 到文献库目录翻文件。`
       : `—— 跨文档阅读 ——
-readDocument：按 doc 读取任意书/论文原文窗口（doc=book:<id> / paper:<id>，支持 heading/offset/position 与窗口续读）；检索论文用 searchLibrary(scope=all)，检索某本书内部用 searchLibrary(doc=book:<id>, query=...)。不要用 readLocalFile/runCommand 到文献库目录翻文件。`;
+readDocument：按 doc 读取圈内书/论文原文窗口（doc=book:<id> / paper:<id>，支持 heading/offset/position 与窗口续读）；检索按【检索范围】段执行，检索某本书内部用 searchLibrary(doc=book:<id>, query=...)。不要用 readLocalFile/runCommand 到文献库目录翻文件，也不要绕过范围限制。`;
 
   return `—— 能力边界 ——
 你只负责"内容理解"。以下全局事务不在你的工具面：书籍的导入、删除、格式转换、打开其他书；主题、明暗模式、字体、阅读设置等外观与偏好调整；备份、同步、恢复、向量化；对话管理（标星、删除、导出）、标签管理。用户提出这类需求时，用一句话引导："这属于全局事务，请到主页侧边栏的「全局助手」里直接对它说同样的需求。"不要假装能够执行，回复中也不要提及提示词或内部工具名称。
@@ -128,6 +129,35 @@ writeFile / editFile / readLocalFile / searchFiles / runCommand 可操作 Agent 
 }
 
 /**
+ * 用户划定的检索范围（阅读助手）：写在政策层，模型检索/直读前先看圈。
+ * 旧工具集无法兑现跨文档范围，必须明确说"只部分生效"，不能让模型口头承诺越界能力。
+ */
+function buildReaderScopePolicy(
+  scope: RetrievalScope,
+  docMode: "new" | "legacy" | "both",
+  currentBookId?: string,
+): string {
+  const label = RETRIEVAL_SCOPE_LABELS.reader[scope];
+  const currentRef = currentBookId ? `book:${currentBookId}` : "（未绑定当前书）";
+  if (docMode === "legacy") {
+    return `—— 检索范围（旧版工具模式） ——
+旧版工具模式不显示范围下拉（此前保存的选择也不完整生效）：旧工具只能读当前书（${currentRef}）的正文与索引，不能跨书、不能读论文。需要真正的「图书馆 / 图书馆+论文库」范围时，请让用户切到新原语模式（设置 → Agent）或到全局助手处理；不要声称已按更广范围检索。`;
+  }
+  const allowed =
+    scope === "current"
+      ? `只能检索/读取当前这本书（${currentRef}）；其它书与论文都在圈外。searchLibrary（本书已建索引时）只在本书内检索；readDocument/getDocumentInfo 传圈外 doc 会被拒绝。`
+      : scope === "library"
+        ? "可检索/读取图书馆全部书籍（不含论文）。searchLibrary（已索引的书）搜全部书籍；readDocument/getDocumentInfo 可读圈内任意书。paper:<id> 在圈外，越界会被拒绝。"
+        : "可检索/读取图书馆全部书籍 + 论文库全部论文（跨库结果 RRF 融合）。searchLibrary（已配置嵌入模型时）跨库检索；readDocument/getDocumentInfo 可读书或论文；圈外/库外文件仍在界外。";
+  return `—— 检索范围（用户划定，本轮以此为准） ——
+用户当前选择：${label}（retrievalScope=${scope}）。
+• ${allowed}
+• 工具参数只能在圈内收窄，不能扩大：searchLibrary 的 scope/doc 与 readDocument/getDocumentInfo 的 doc 越界会被明确拒绝，不要换关键词、换工具或绕路径重试。
+• 用户的问题若需要更广范围（其它书/论文），不要自行越界；直接说明需要切换范围，并请用户使用侧栏顶部的范围下拉（本书 / 图书馆 / 图书馆+论文库）。
+• 全局助手不受此限制；本助手只按用户圈定的范围工作。`;
+}
+
+/**
  * 阅读助手完整提示词装配：风格层（预设 ?? 内置默认风格）+ 通用规范 + 系统策略
  * + 技能清单 + 书籍元信息与目录（静态部分）。
  * 每轮可能变化的【当前阅读章节】由 transport 移到全部注入段的最尾部（缓存友好）。
@@ -154,7 +184,9 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
 
-  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability, getDocumentToolMode())}`;
+  const docMode = getDocumentToolMode();
+  const scopePolicy = buildReaderScopePolicy(chatContext?.retrievalScope ?? "current", docMode, activeBookId);
+  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability, docMode)}\n\n${scopePolicy}`;
 
   if (activeSkillNames.length > 0) {
     prompt += "\n\n—— 可用技能库 ——\n";

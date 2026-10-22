@@ -7,6 +7,7 @@ import { exportMessagesToImage } from "@/lib/export-thread-image";
 import { exportMessagesToMarkdown } from "@/lib/export-thread-markdown";
 import { useReaderStore } from "@/pages/reader/components/reader-provider";
 import { clearLiveReadingPosition, setLiveReadingPosition } from "@/services/reading-position/live-position";
+import { useRetrievalScopeFor } from "@/store/retrieval-scope-store";
 import { useThemeStore } from "@/store/theme-store";
 import {
   CircleQuestionMark,
@@ -27,6 +28,7 @@ import { ChatInputArea } from "./chat-input-area";
 import { ChatMessages } from "./chat-messages";
 import { ChatThreads } from "./chat-threads";
 import ModelSelector from "./model-selector";
+import { RetrievalScopeSelect } from "./retrieval-scope-select";
 import { SelectionExportBar } from "./selection-export-bar";
 import { useMessageSelection } from "./use-message-selection";
 
@@ -47,6 +49,8 @@ function ChatContent({ bookId }: ChatContentProps) {
 
   // 书籍数据（含 bookDoc.toc）：判定 TOC 是否可用，供阅读位置注册表标记 tocAvailable
   const bookData = useReaderStore((state) => state.bookData);
+  // 用户划定的检索范围（按书持久化；默认本书）。同时约束向量检索与文档直读。
+  const retrievalScope = useRetrievalScopeFor("reader", bookId);
 
   // EPUB 原生 TOC → Markdown 列表（注入提示词替换转换器生成的损坏目录，见 ChatContext.bookTocMd）
   const bookToc = useReaderStore((state) => state.bookData?.bookDoc?.toc);
@@ -126,6 +130,7 @@ function ChatContent({ bookId }: ChatContentProps) {
       activeSectionLabel: progress?.sectionLabel,
       bookTocMd,
       agentScope: "reader",
+      retrievalScope,
     },
     setActiveBookId: () => {},
     currentThread: currentThread,
@@ -204,6 +209,7 @@ function ChatContent({ bookId }: ChatContentProps) {
               onModelSelect={setSelectedModel}
               className="z-40 w-[10rem] min-w-0 flex-shrink"
             />
+            <RetrievalScopeSelect role="reader" docId={bookId} />
           </div>
           <div className="flex flex-shrink-0 items-center gap-0">
             {messages.length > 0 && !showThreads && (

@@ -9,6 +9,8 @@ import {
 } from "@/services/reading-position/position-service";
 import { buildTimestampLookup, composeDynamicTail, withMessageTimestamps } from "@/services/time-awareness";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
+import { wrapToolsForNativeImages } from "./providers/native-tool-output";
+import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
 import { useProviderStore } from "@/store/provider-store";
 import type { UIMessage } from "@ai-sdk/react";
 import {
@@ -189,7 +191,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       });
     }
 
-    // 根据 Agent 角色动态组装工具集（paper scope 时 activeBookId 即论文 id，paperScopeIds 为检索范围）
+    // 根据 Agent 角色动态组装工具集（paper scope 时 activeBookId 即论文 id；retrievalScope 为用户划定的检索范围，
+    // paperScopeIds 仅作旧版 paperSearch 的映射）
     // 批次 B3/D：并入当前 scope 启用的 MCP server 工具（连接失败逐个提示，不阻塞本条消息）
     const mcp = await getMcpToolsForScope(agentScope);
     for (const failure of mcp.failures) {
@@ -202,6 +205,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         ...getToolsForScope(agentScope, {
           bookId: activeBookId,
           paperId: activeBookId,
+          retrievalScope: chatContext?.retrievalScope,
           paperScopeIds: chatContext?.paperScopeIds,
           threadId: chatContext?.threadId,
         }),
@@ -223,14 +227,30 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       : forceDirectoryForNewMode || shouldUseDirectoryMode(guardedTools);
     const tools: Record<string, Tool> = directoryMode ? buildLazyToolset(guardedTools) : guardedTools;
 
+    // 协议现代化（2026-10-22）：原生 provider 的工具结果可以按官方格式回传图片；
+    // chat 通道继续走 fetch 层图片桥（factory 已按协议挂桥）。
+    const selectedProvider = sel
+      ? useProviderStore.getState().modelProviders.find((provider) => provider.provider === sel.providerId)
+      : undefined;
+    const providerProtocol = sel
+      ? resolveProviderProtocol({
+          providerId: sel.providerId,
+          baseUrl: selectedProvider?.baseUrl,
+          modelId: sel.modelId,
+        })
+      : "chat";
+    const toolsForModel = supportsNativeToolImages(providerProtocol)
+      ? wrapToolsForNativeImages(tools)
+      : tools;
+
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
     options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });
 
     // sanitizeMessageParts：中断残留的 undefined text part 归一（否则 convert 后 zod 校验报 Invalid prompt）
     // v6 起 convertToModelMessages 为异步（v3 规范），必须 await
-    const modelInputMessages = stripUnknownToolParts(sanitizeMessageParts(selectedMessages), tools);
+    const modelInputMessages = stripUnknownToolParts(sanitizeMessageParts(selectedMessages), toolsForModel);
     const convertedMessages = await convertToModelMessages(modelInputMessages, {
-      tools,
+      tools: toolsForModel,
       ignoreIncompleteToolCalls: true,
     });
 
@@ -275,7 +295,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       abortSignal: options.abortSignal,
       toolChoice: "auto",
       stopWhen: isStepCount(STEP_LIMIT),
-      tools,
+      tools: toolsForModel,
       prepareStep: ({ stepNumber }) =>
         stepNumber >= FORCE_FINAL_ANSWER_AT
           ? { toolChoice: "none" as const, instructions: forcedFinalInstructions }

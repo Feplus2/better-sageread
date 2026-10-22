@@ -33,10 +33,10 @@ export async function buildLibraryGuide(): Promise<string> {
     "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；多图对比可以连续看，但看完尽快作答；默认长边 1024，小字看不清可升到 1536（更大请改用图注/正文，请求会明显变慢）。",
     "文献库只读：不要用 runCommand/dir/python 到文献库目录里翻文件。找文档用元数据/检索工具，读正文用原文读取工具；导入、删除、翻译、向量化属于全局助手的事务，引导用户去全局助手。",
     docMode === "legacy"
-      ? "跨文档：reader/paper scope 只有当前文档；跨论文检索用 paperSearch（全库范围）或请用户切到对应文档，不要用 readLocalFile/runCommand 到文献库目录翻文件。"
-      : "跨文档：reader/paper scope 只有当前文档，但 readDocument 可直接读任意文档（doc=paper:<id> / book:<id>，配合 heading/offset）；检索论文用 searchLibrary(scope=all)，在某本书内部找内容用 searchLibrary(doc=book:<id>, query=...)（需该书已建索引）。不要用 readLocalFile/runCommand 到文献库目录翻文件，也不要绕过工具硬读路径。",
+      ? "跨文档：旧版工具只提供当前文档的直读；论文检索用 paperSearch（范围由用户选择，只支持本篇/全部论文），需要跨书或跨论文直读时请用户切到新原语模式或全局助手，不要用 readLocalFile/runCommand 到文献库目录翻文件。"
+      : "跨文档：readDocument 可读的文档由用户在侧栏选定的检索范围决定（见【检索范围】段）；越界 doc 会被拒绝，不要用 readLocalFile/runCommand 绕过工具硬读路径。全局助手不受范围限制。",
     "未索引文档：getDocumentInfo 的 index.status=not_indexed 表示没有向量索引，只能按目录/原文读取；正常读、不要拒答。阅读策略：先 getDocumentInfo 拿目录 → 只读目标小节/位置的 1-2 个窗口 → 作答，不要整章通读。回答开头或结尾必须明确说一句：「本书/本篇尚未建立向量索引，按原文读取较慢；在设置里向量化后可显著提速」。",
-    "跨库检索：中央助手的 searchLibrary(scope=all) 会同时检索书库 + 论文库（RRF 融合），结果带 kind=book/paper 标记；reader/paper scope 下 scope=all 只查论文库，查单本书用 doc=book:<id>。",
+    "跨库检索：searchLibrary 的检索范围同样受用户选择约束（见【检索范围】）；中央助手范围最大（书库+论文库，RRF 融合），结果带 kind=book/paper 标记。",
     "引用规范：正文引用给章节标题；图表引用给图号/表号；参考文献给编号；不得编造页码或图中不存在的细节。",
   ].join("\n");
 }

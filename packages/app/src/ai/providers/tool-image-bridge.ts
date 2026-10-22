@@ -2,17 +2,23 @@
  * P1-5 工具图片桥：OpenAI-compatible / DeepSeek 聊天接口只允许 user 消息携带 image_url，
  * 工具结果的 file part 会被 JSON.stringify 成 base64 文本（既看不见图，又按文本计费）。
  *
- * 本包装在 fetch 层把「工具结果里的图片」拆出来，改挂到紧随其后的 user 消息里（image_url），
- * 并只保留最近 IMAGE_KEEP_LAST 张；更早的图片替换成带可读路径的占位文本（可用 readImage 重看）。
+ * 本包装在 fetch 层把「工具结果里的图片」拆出来，改挂到紧随其后的 user 消息里（image_url）。
+ *
+ * 2026-10-22 改造（用户批准）：原先硬编码「全请求最近 3 张」——同一批 4 张图会砍掉第 1 张，
+ * 且与单图体积预算脱节。现在改为「按字节预算保留 + 最新工具批优先」：
+ * 1. 从新到旧挑图：最新一次工具批/最新一轮的图片先占预算（同一批多图也会被优先整体保留）；
+ * 2. 预算 = 全部工具图片 dataUrl 字符数之和（默认 700k，见 utils/tool-image-budget，可运行时覆盖）；
+ * 3. 装不下的老图替换成带可读路径的占位（可用 readImage/viewImages 重看），且任何情况至少保留 1 张；
+ * 4. 多图工具结果（viewImages）按图片顺序配对各自的 <path>，占位能指回具体文件而不是第一条路径。
  */
 
+import { getToolImageBudgetChars } from "@/ai/utils/tool-image-budget";
 import { getCachedToolImages } from "@/ai/utils/tool-image-cache";
 
-const IMAGE_KEEP_LAST = 3;
 const TOOL_IMAGE_MARK = "[工具读取的图片";
 const INLINE_IMAGE_TEXT = "[图片已附在随后的用户消息中]";
 
-interface ExtractedImage {
+export interface ExtractedImage {
   dataUrl: string;
   mediaType: string;
   path?: string;
@@ -21,6 +27,11 @@ interface ExtractedImage {
 interface ToolImageExtraction {
   content: string;
   images: ExtractedImage[];
+}
+
+interface FlatImage {
+  messageIndex: number;
+  image: ExtractedImage;
 }
 
 function debugLog(line: string): void {
@@ -83,9 +94,31 @@ function extractToolImages(content: unknown): ToolImageExtraction | null {
   const paths: string[] = [];
   const next = walkImages(parsed, images, paths);
   if (images.length === 0) return null;
-  const firstPath = paths[0];
-  for (const image of images) image.path = firstPath;
+  // 遍历顺序里信封与图片一一对应（readImage 单图、viewImages 多图都是「信封 + file part」交替）；
+  // 数量对不上时退回首条路径，至少不让占位丢路径。
+  const fallbackPath = paths[0];
+  images.forEach((image, index) => {
+    image.path = paths[index] ?? fallbackPath;
+  });
   return { content: JSON.stringify(next), images };
+}
+
+/**
+ * 选图核心（纯函数，导出供 L1 单测）：sizes 为按消息顺序排列（旧→新）的 dataUrl 字符数。
+ * 从最新一张往回装预算——最新工具批/最新一轮天然优先，装不下就留给更老的图；
+ * 任何情况至少保留最新 1 张（即使它单独就超预算）。
+ */
+export function selectKeptIndexes(sizes: number[], budgetChars: number): Set<number> {
+  const kept = new Set<number>();
+  let used = 0;
+  for (let index = sizes.length - 1; index >= 0; index -= 1) {
+    const size = sizes[index] ?? 0;
+    if (kept.size === 0 || used + size <= budgetChars) {
+      kept.add(index);
+      used += size;
+    }
+  }
+  return kept;
 }
 
 function imageNoteText(image: ExtractedImage): string {
@@ -94,8 +127,10 @@ function imageNoteText(image: ExtractedImage): string {
 
 function omittedText(image: ExtractedImage): string {
   const where = image.path ? `：${image.path}` : "";
-  const hint = image.path ? `（如需重看，调用 readImage(path=${image.path})）` : "";
-  return `[较早的图片已省略${where}]${hint}`;
+  const hint = image.path
+    ? `（如需重看，调用 readImage(path=${image.path})，或多图一起用 viewImages）`
+    : "（如需重看，请重新调用 readImage）";
+  return `[图片已省略${where}]${hint}`;
 }
 
 function transformBody(bodyText: string): string {
@@ -114,28 +149,49 @@ function transformBody(bodyText: string): string {
     if (!message || typeof message !== "object") return;
     const record = message as Record<string, unknown>;
     if (record.role !== "tool") return;
-    debugLog(`tool[${index}] content=${String(record.content).slice(0, 160)}`);
-    const extracted = extractToolImages(record.content);
+    const rawContent = typeof record.content === "string" ? record.content : "";
+    const extracted = extractToolImages(rawContent);
     const toolCallId = typeof record.tool_call_id === "string" ? record.tool_call_id : null;
     const cached = toolCallId ? getCachedToolImages(toolCallId) : undefined;
-    const images = extracted && extracted.images.length > 0 ? extracted.images : (cached ?? []);
+    // 目录牌模式：工具结果里的 dataUrl 已被 useTool 摘到内存缓存，这里按 toolCallId 取回
+    const contentPath = extractPath(rawContent);
+    const images = (extracted && extracted.images.length > 0 ? extracted.images : (cached ?? [])).map((image) => ({
+      ...image,
+      path: image.path ?? contentPath,
+    }));
     if (images.length === 0) return;
-    extractions.set(index, { content: extracted ? extracted.content : String(record.content ?? ""), images });
+    extractions.set(index, { content: extracted ? extracted.content : rawContent, images });
   });
   if (extractions.size === 0) {
     debugLog("no tool images extracted");
     return bodyText;
   }
 
-  const flat: { messageIndex: number; image: ExtractedImage }[] = [];
+  // 扁平化后按「最新优先」装预算
+  const flat: FlatImage[] = [];
   for (const [messageIndex, extraction] of extractions) {
     for (const image of extraction.images) flat.push({ messageIndex, image });
   }
-  const keepFrom = Math.max(0, flat.length - IMAGE_KEEP_LAST);
+  const budget = getToolImageBudgetChars();
+  const sizes = flat.map((item) => item.image.dataUrl.length);
+  const keptIndexes = selectKeptIndexes(sizes, budget);
+  let keptChars = 0;
+  for (const index of keptIndexes) keptChars += sizes[index] ?? 0;
+  // 最新一轮（请求末尾连续的 tool 消息组）图片数：用于排查「一批图是否被砍」
+  let latestRoundImages = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const record = messages[index] as Record<string, unknown> | undefined;
+    if (record?.role !== "tool") break;
+    latestRoundImages += extractions.get(index)?.images.length ?? 0;
+  }
+  debugLog(
+    `plan: images=${flat.length} latestRound=${latestRoundImages} kept=${keptIndexes.size} chars=${keptChars}/${budget} omitted=${flat.length - keptIndexes.size}`,
+  );
+
   const kept = new Map<number, ExtractedImage[]>();
   const omitted = new Map<number, ExtractedImage[]>();
   flat.forEach((item, order) => {
-    const target = order >= keepFrom ? kept : omitted;
+    const target = keptIndexes.has(order) ? kept : omitted;
     const list = target.get(item.messageIndex) ?? [];
     list.push(item.image);
     target.set(item.messageIndex, list);
@@ -148,6 +204,11 @@ function transformBody(bodyText: string): string {
   let pendingNotes: string[] = [];
   const flushPending = () => {
     if (pendingImages.length === 0) return;
+    if (pendingImages.length > 1) {
+      // 多图同批：记录每张图对应的路径（排查"占位/提示指错图"），只进内存调试日志
+      const paths = pendingImages.map((image) => image.path ?? "?").join(" | ");
+      debugLog(`flush: images=${pendingImages.length} paths=${paths.slice(0, 400)}`);
+    }
     nextMessages.push({
       role: "user",
       content: [
@@ -181,10 +242,12 @@ function transformBody(bodyText: string): string {
   flushPending();
 
   body.messages = nextMessages;
-  return JSON.stringify(body);
+  const transformed = JSON.stringify(body);
+  debugLog(`done: bodyLen ${bodyText.length} -> ${transformed.length}`);
+  return transformed;
 }
 
-/** 包装 OpenAI-compatible fetch：把工具结果里的图片改挂到 user 消息（保留最近 IMAGE_KEEP_LAST 张）。 */
+/** 包装 OpenAI-compatible fetch：把工具结果里的图片改挂到 user 消息（按字节预算 + 最新工具批优先）。 */
 export function wrapOpenAICompatToolImagesFetch(baseFetch: typeof fetch): typeof fetch {
   return async (input, init) => {
     const body = init?.body;

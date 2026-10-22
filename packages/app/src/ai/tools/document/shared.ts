@@ -1,3 +1,4 @@
+import type { RetrievalScope } from "@/constants/retrieval-scope";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
@@ -14,7 +15,80 @@ export interface DocRef {
 export interface AgentDocScope {
   scope: "reader" | "paper" | "central";
   currentId?: string;
+  /** 用户划定的检索范围；缺省 current。central 恒按 all 处理（全局助手无下拉）。 */
+  retrievalScope?: RetrievalScope;
+  /** 旧版论文工具 paperSearch 的检索范围（仅 legacy 模式；新原语不使用） */
   paperScopeIds?: string[] | null;
+}
+
+/** 越界不是"没搜到"：必须抛给模型一个可复述的明确错误，禁止静默降级。 */
+export class RetrievalScopeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetrievalScopeError";
+  }
+}
+
+/** 解析本轮生效范围：用户圈定值优先；central 恒为 all。 */
+export function resolveRetrievalScope(ctx: AgentDocScope): RetrievalScope {
+  if (ctx.scope === "central") return "all";
+  return ctx.retrievalScope ?? "current";
+}
+
+export function retrievalScopeLabel(scope: AgentDocScope["scope"], value: RetrievalScope): string {
+  if (scope === "central") return "全部（图书馆+论文库）";
+  const readerLabels: Record<RetrievalScope, string> = {
+    current: "本书",
+    library: "图书馆（全部书籍，不含论文）",
+    all: "图书馆+论文库",
+  };
+  const paperLabels: Record<RetrievalScope, string> = {
+    current: "本篇论文",
+    library: "论文库（全部论文，不含书籍）",
+    all: "论文库+图书馆",
+  };
+  return scope === "reader" ? readerLabels[value] : paperLabels[value];
+}
+
+/** 文档是否落在用户圈定范围内（角色决定 kind/current 的边界）。 */
+export function isDocInRetrievalScope(doc: DocRef, ctx: AgentDocScope): boolean {
+  if (ctx.scope === "central") return true;
+  const circle = resolveRetrievalScope(ctx);
+  if (ctx.scope === "reader") {
+    if (circle === "current") return doc.kind === "book" && doc.id === ctx.currentId;
+    if (circle === "library") return doc.kind === "book";
+    return doc.kind === "book" || doc.kind === "paper";
+  }
+  if (circle === "current") return doc.kind === "paper" && doc.id === ctx.currentId;
+  if (circle === "library") return doc.kind === "paper";
+  return doc.kind === "paper" || doc.kind === "book";
+}
+
+/** 直读工具的统一门禁：越界抛 RetrievalScopeError（带"请用户切下拉"的可执行指引）。 */
+export function assertDocInRetrievalScope(doc: DocRef, ctx: AgentDocScope): void {
+  if (isDocInRetrievalScope(doc, ctx)) return;
+  const circle = resolveRetrievalScope(ctx);
+  const currentRef = ctx.currentId
+    ? `${ctx.scope === "reader" ? "book" : "paper"}:${ctx.currentId}`
+    : "（未绑定当前文档）";
+  // 引导语要区分"需要更广同类资料库"还是"需要跨到另一类库"，否则指向的下拉档位仍然越界
+  const next =
+    ctx.scope === "reader"
+      ? doc.kind === "paper"
+        ? "请让用户把侧栏顶部的检索范围下拉切到「图书馆+论文库」后再试"
+        : circle === "current"
+          ? "请让用户把侧栏顶部的检索范围下拉切到「图书馆」或「图书馆+论文库」后再试"
+          : "请让用户把侧栏顶部的检索范围下拉切到「图书馆+论文库」后再试"
+      : doc.kind === "book"
+        ? "请让用户把侧栏顶部的检索范围下拉切到「论文库+图书馆」后再试"
+        : circle === "current"
+          ? "请让用户把侧栏顶部的检索范围下拉切到「论文库」或「论文库+图书馆」后再试"
+          : "请让用户把侧栏顶部的检索范围下拉切到「论文库+图书馆」后再试";
+  throw new RetrievalScopeError(
+    `超出用户划定的检索范围：本轮范围是「${retrievalScopeLabel(ctx.scope, circle)}」，` +
+      `${docRefString(doc)} 在圈外（当前文档 ${currentRef}）。` +
+      `不要自行扩大范围、改用其它工具或绕路径读取；${next}。`,
+  );
 }
 
 /** 解析 doc 参数（book:<id> / paper:<id>）；缺省用当前文档。 */

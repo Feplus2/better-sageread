@@ -2,6 +2,7 @@ import { useChat } from "@/ai/hooks/use-chat";
 import { modelSupportsVision } from "@/ai/providers/vision-map";
 import { repairImageDataUrl, sniffImageMediaType } from "@/ai/utils/media-sniff";
 import { truncateToolResultsForStorage } from "@/ai/utils/tool-result-slimming";
+import type { RetrievalScope } from "@/constants/retrieval-scope";
 import { useForceUpdate } from "@/hooks/use-force-update";
 import { useModelSelector } from "@/hooks/use-model-selector";
 import type { ReasoningTimes } from "@/hooks/use-reasoning-timer";
@@ -123,7 +124,11 @@ export interface ChatContext {
    *  转义吃掉——"5.6"→"5.\."，Agent 看到的子节号码全丢）；有则整段替换注入目录 */
   bookTocMd?: string;
   agentScope?: "central" | "reader" | "paper";
-  /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合；仅 agentScope="paper" 时有效） */
+  /** 用户划定的检索范围（阅读/论文侧栏下拉；按书/按论文持久化，缺省 current）。
+   *  同时约束向量检索与文档直读；全局助手无下拉，不要传（恒为 all）。 */
+  retrievalScope?: RetrievalScope;
+  /** 旧版论文工具 paperSearch 的检索范围（仅由 retrievalScope 映射：current=[当前论文]，library/all=null；
+   *  新原语模式不再使用。旧工具集无法表达"论文库+图书馆"，故该模式下范围只部分生效） */
   paperScopeIds?: string[] | null;
   /** 当前对话 id（滚动压缩摘要按对话持久化用，useChatState 注入，调用方无需传） */
   threadId?: string;

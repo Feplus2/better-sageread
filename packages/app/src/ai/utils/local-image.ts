@@ -8,7 +8,9 @@ export const MAX_IMAGE_EDGE = 1536;
 /** 默认长边：图片会作为 dataUrl 进入上下文并在后续每一步重复发送，默认压到 1024 控制成本 */
 export const DEFAULT_IMAGE_EDGE = 1024;
 /** 编码后 dataUrl 字符数目标：约 420k 字符 ≈ 300KB，超过就降质量/降尺寸，避免请求体过大拖慢模型 */
-const TARGET_DATA_URL_CHARS = 420_000;
+export const DEFAULT_TARGET_DATA_URL_CHARS = 420_000;
+/** 单图目标体积下限：再小基本看不清图注，调用方摊分预算时也不该低过这里 */
+const MIN_TARGET_DATA_URL_CHARS = 20_000;
 const MIN_IMAGE_EDGE = 512;
 const QUALITY_LADDER = [0.82, 0.72, 0.6] as const;
 
@@ -101,11 +103,12 @@ function canvasToImageDataUrl(
 
 /**
  * 读取本地绝对路径图片；体积超限/非图片抛错。
- * 长边按 maxEdge（默认 1024，上限 1536）降采样；并把 dataUrl 控到约 420k 字符内（降质量 → 降尺寸）。
+ * 长边按 maxEdge（默认 1024，上限 1536）降采样；并把 dataUrl 控到 targetDataUrlChars 内
+ * （默认约 420k 字符；批量看图时调用方按张数摊分预算，降质量 → 降尺寸）。
  */
 export async function loadLocalImageAsDataUrl(
   filePath: string,
-  options?: { maxEdge?: number },
+  options?: { maxEdge?: number; targetDataUrlChars?: number },
 ): Promise<LocalImageResult> {
   const assetUrl = convertFileSrc(filePath);
   const response = await fetch(assetUrl);
@@ -126,9 +129,13 @@ export async function loadLocalImageAsDataUrl(
   const width = img.naturalWidth;
   const height = img.naturalHeight;
   const targetEdge = Math.min(Math.max(options?.maxEdge ?? DEFAULT_IMAGE_EDGE, 512), MAX_IMAGE_EDGE);
+  const targetChars = Math.max(
+    MIN_TARGET_DATA_URL_CHARS,
+    Math.floor(options?.targetDataUrlChars ?? DEFAULT_TARGET_DATA_URL_CHARS),
+  );
   const sourceMaxEdge = Math.max(width, height);
 
-  if (sourceMaxEdge <= targetEdge && rawDataUrl.length <= TARGET_DATA_URL_CHARS) {
+  if (sourceMaxEdge <= targetEdge && rawDataUrl.length <= targetChars) {
     return {
       dataUrl: rawDataUrl,
       mediaType: sniffed,
@@ -151,7 +158,7 @@ export async function loadLocalImageAsDataUrl(
       if (!best || dataUrl.length < best.payloadBytes) {
         best = { dataUrl, width: targetWidth, height: targetHeight, payloadBytes: dataUrl.length };
       }
-      if (dataUrl.length <= TARGET_DATA_URL_CHARS) {
+      if (dataUrl.length <= targetChars) {
         return {
           dataUrl,
           mediaType: "image/jpeg",

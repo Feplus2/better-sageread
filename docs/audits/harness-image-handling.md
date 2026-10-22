@@ -60,3 +60,37 @@
   4. runner 支持 `harness.completion_timeout_ms`（探针配置 15 分钟），避免长任务被固定 7 分钟误杀。
 
 经验：视觉成本要卡的是**字节**（请求体/上传延迟）和**上下文重复计费**两个维度，不是张数。
+
+## 7. 追加（2026-10-22 晚）：按字节预算保留 + viewImages 批量看图
+
+### 7.1 问题：硬编码「最近 3 张」与批量看图缺失
+
+- 图片桥原先只保留全请求最近 IMAGE_KEEP_LAST = 3 张：同一批 4 张图会砍掉第 1 张，模型无法一次综合 4 张；
+- readImage 一次只能看 1 张：4 张图要跨 4 步，每步重发历史图片，既慢又容易只答最后一张。
+
+### 7.2 修复
+
+| 项 | 改动 |
+|---|---|
+| 选图规则 | `tool-image-bridge.ts`：从「最近 3 张」改为「按 dataUrl 字符预算 + 最新工具批优先」——从新到旧装预算，最新一轮先占；装不下的老图换成带路径占位（readImage/viewImages 提示）；任何情况至少保留 1 张 |
+| 预算 | `ai/utils/tool-image-budget.ts`：默认 700k 字符（≈500KB base64），运行时可用 `globalThis.__SAGEREAD_IMAGE_BUDGET_CHARS__` 覆盖；下限 60k |
+| 多图路径 | 按 `<path>` 信封与图片同序遍历配对（readImage 单图、viewImages 多图），占位能指回具体文件 |
+| 新工具 | `ai/tools/view-images.ts` 的 `viewImages(paths|refs, maxEdge)`：1–6 张，一个 tool result 返回多个 file part；按张数摊分本轮预算（每张 40k~420k 字符目标）；注册为 shared（reader/paper/central 可用） |
+| 目录牌 | `lazy-toolset.ts`：图片占位带序号（#1/#2…）；缓存按 `foundPaths[index]` 给每张图各自的路径 |
+| 落库 | `tool-result-slimming.ts`：readImage/viewImages（含 useTool 转发）的结果在落库前把 dataUrl 换成文本占位，线程 JSON/L2/备份不再带 base64；内存消息保持原样 |
+
+### 7.3 验证
+
+- **L1 单测** `scripts/test-tool-image-bridge.mjs`（esbuild 打包后直跑，34 断言）：4 图同批全保留、预算裁剪时最新批优先/老图先省略、占位路径正确、至少 1 张、缓存恢复、落库 sanitize 幂等、非图片工具不受影响。
+- **L2 四图探针** `scripts/cdp-verify-vision-4images.mjs`（Pillow 合成 4 张已知图：`ALPHA-731` 红三角 / `BRAVO-264` 绿圆 / `CHARLIE-915` 蓝方 / `DELTA-482` 橙五边形）：
+  - direct（工具直挂）：1 次 `viewImages(paths=4)`，4/4 字符串与形状颜色全对，7.2s，34k tokens，plan `images=4 kept=4 chars=59424/700000`；
+  - directory（new 模式强制目录牌）：`describeTool → useTool(viewImages)`，4/4 全对，8.4s，18k tokens，缓存 4 张图各自路径正确；
+  - 两条路径线程 JSON 分别为 3.5k/5.1k 字符且不含 `data:image/`（修复前 direct 路径 62.9k、含 base64）。
+- **回归**：单图探针 `cdp-verify-vision-probe.mjs`、双图探针 `cdp-verify-two-images.mjs` 均 PASS。
+
+### 7.4 已知限制
+
+- 预算按请求即时计算（不写事件日志）：同一批图超过 700k 时仍会只保留最新部分，占位可重看；
+- viewImages 的「每张摊分预算」受 local-image 最小长边 512 限制：6 张高细节大图可能压缩不到目标，最终由图片桥按预算再裁；
+- 目录牌模式下模型看到的是图片占位文本 + 独立 user 消息里的真图，占位序号与图号信封需按顺序对应（信封含路径）；
+- direct 模式下图片字节在内存消息中保留（落库已 sanitize），进程重启后历史 turn 的图只能按路径重取。

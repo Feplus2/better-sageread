@@ -53,6 +53,11 @@ const L1_CONTENT_TOOLS = new Set([
   "convertPdf",
 ]);
 
+/** 图片类工具：结果里的 dataUrl 一律不落库（2026-10-22，viewImages 一次最多 6 张，base64 会撑爆线程） */
+const IMAGE_TOOLS = new Set(["readImage", "viewImages"]);
+/** 落库占位：字节丢弃，信封（路径/尺寸）仍在，需要重看时按路径重新调用 readImage/viewImages */
+const IMAGE_BYTES_PLACEHOLDER = "[图片字节未落库（在线程里保留），需要重看时用 readImage/viewImages 按路径重取]";
+
 /** L2 纳入存根的 RAG 工具 */
 const L2_RAG_TOOLS = new Set(["ragSearch", "ragContext", "ragRange"]);
 
@@ -84,6 +89,45 @@ function forwardedToolName(part: ToolLikePart): string | null {
   return typeof input?.tool === "string" && input.tool ? input.tool : null;
 }
 
+/**
+ * 递归摘掉工具输出里的图片字节，返回 null 表示没改动（避免无谓拷贝）。
+ * 只用于落库副本：内存里的消息仍保留 dataUrl 供本轮/后续请求经图片桥发送。
+ */
+function stripImagePayloads(node: unknown): unknown | null {
+  if (typeof node === "string") {
+    return node.startsWith("data:image/") ? IMAGE_BYTES_PLACEHOLDER : null;
+  }
+  if (Array.isArray(node)) {
+    let changed = false;
+    const next = node.map((item) => {
+      const replaced = stripImagePayloads(item);
+      if (replaced === null) return item;
+      changed = true;
+      return replaced;
+    });
+    return changed ? next : null;
+  }
+  if (node && typeof node === "object") {
+    const record = node as Record<string, unknown>;
+    if (record.type === "file" && typeof record.url === "string" && record.url.startsWith("data:image/")) {
+      return { type: "text", text: IMAGE_BYTES_PLACEHOLDER };
+    }
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      const replaced = stripImagePayloads(value);
+      if (replaced === null) {
+        next[key] = value;
+      } else {
+        changed = true;
+        next[key] = replaced;
+      }
+    }
+    return changed ? next : null;
+  }
+  return null;
+}
+
 function stringifyOutput(output: unknown): string {
   if (typeof output === "string") return output;
   try {
@@ -110,7 +154,18 @@ export function truncateToolResultsForStorage(messages: UIMessage[]): UIMessage[
         return part;
       }
       const name = toolNameOf(part);
-      if (!name || !L1_CONTENT_TOOLS.has(name)) return part;
+      if (!name) return part;
+      // 图片类工具：落库前把 dataUrl 换成文本占位（含 useTool 转发；信封里的路径/尺寸保留）
+      const effectiveName = name === "useTool" ? forwardedToolName(part) : name;
+      if (effectiveName && IMAGE_TOOLS.has(effectiveName)) {
+        if (part.state && part.state !== "output-available") return part;
+        if (part.output == null) return part;
+        const stripped = stripImagePayloads(part.output);
+        if (stripped === null) return part;
+        touched = true;
+        return { ...part, output: stripped };
+      }
+      if (!L1_CONTENT_TOOLS.has(name)) return part;
       // useTool 转发：还原原始工具名再判定——转给 UI 消费型工具（如 mindmap）的结果不截；
       // 原始名缺失的转发按内容型兜底截断（白名单收录 useTool 即为此）。output 即真实工具的原始
       // 结果结构，头部截断天然保住 chunk_id/来源坐标（引用标转跳依赖，见 citation-source.ts）

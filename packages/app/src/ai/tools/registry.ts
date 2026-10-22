@@ -1,3 +1,4 @@
+import type { RetrievalScope } from "@/constants/retrieval-scope";
 import { useLibraryStore } from "@/store/library-store";
 /**
  * 工具注册框架：按 Agent 角色（central / reader / paper）动态组装工具集。
@@ -67,6 +68,7 @@ import {
   notesTool,
   readImageTool,
   sciverseSearchTool,
+  viewImagesTool,
   webSearchTool,
 } from "./index";
 import { createManageNotesTool } from "./manage-notes";
@@ -90,7 +92,9 @@ export interface ToolContext {
   bookId?: string;
   /** 论文助手：当前论文 id（books 表中 format='MARKDOWN' 的行） */
   paperId?: string;
-  /** 论文助手：paperSearch 的检索范围（null = 全部文献；数组 = 限定论文集合） */
+  /** 用户划定的检索范围（阅读/论文侧栏下拉；按书/按论文持久化）。同时约束向量检索与文档直读。 */
+  retrievalScope?: RetrievalScope;
+  /** 旧版论文工具 paperSearch 的检索范围（null = 全部论文；数组 = 限定论文集合；仅 legacy 模式使用） */
   paperScopeIds?: string[] | null;
   /** 当前对话 id（useChatState 每轮注入；readThread 的缺省锚点。新对话首条消息时为空） */
   threadId?: string;
@@ -208,7 +212,16 @@ registerTools([
     name: "readImage",
     scope: "shared",
     tool: readImageTool as Tool,
-    description: "重看已分析过的图片附件（按 attachment:// 引用取回）",
+    description: "查看单张图片（本地绝对路径 / 聊天附件引用 attachment://）",
+  },
+  // 批量看图（2026-10-22）：一次工具结果返回多张图，模型才能在一次请求里综合 >3 张图。
+  // 三 scope 共享（reader/paper/central 都要看图）；图片字节经 tool-image-cache + 图片桥流转，
+  // 目录牌模式下 UI/DB 只留文本占位。
+  {
+    name: "viewImages",
+    scope: "shared",
+    tool: viewImagesTool as Tool,
+    description: "一次查看多张图片（1–6 张，批量返回，便于多图综合/对比）",
   },
 ]);
 
@@ -416,7 +429,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
       const readerDocCtx = {
         scope: "reader" as const,
         currentId: context.bookId,
-        paperScopeIds: context.paperScopeIds,
+        retrievalScope: context.retrievalScope,
       };
       tools.readDocument = createReadDocumentTool(readerDocCtx) as Tool;
       tools.getDocumentInfo = createGetDocumentInfoTool(readerDocCtx) as Tool;
@@ -428,6 +441,11 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
 
   // 4. 论文助手专属：基础层结构工具（始终可用，直接读 paper.md）+ 增强层语义检索（向量能力门控）
   if (agentScope === "paper" && context?.paperId) {
+    const paperDocCtx = {
+      scope: "paper" as const,
+      currentId: context.paperId,
+      retrievalScope: context.retrievalScope,
+    };
     if (useLegacyDocTools) {
       tools.getPaperToc = createPaperTocTool(context.paperId) as Tool;
       tools.readPaperSection = createPaperSectionTool(context.paperId) as Tool;
@@ -439,14 +457,13 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.getReadingPosition = createGetReadingPositionTool("paper", context.paperId) as Tool;
     // 领域锚点工具保留（图片/引用不是通用原语能替代的）
     tools.getCitations = createGetCitationsTool(context.paperId) as Tool;
-    tools.getFigures = createGetFiguresTool(context.paperId) as Tool;
-    // P1 通用阅读原语（DocRef + 锚点）：可读任意论文/书籍；searchLibrary 显式 scope
+    tools.getFigures = createGetFiguresTool(context.paperId, paperDocCtx) as Tool;
+    // P1 通用阅读原语（DocRef + 锚点）：可读圈内任意论文/书籍；searchLibrary 在用户圈定范围内检索
     if (useNewDocTools) {
-      const paperDocCtx = { scope: "paper" as const, currentId: context.paperId, paperScopeIds: context.paperScopeIds };
       tools.readDocument = createReadDocumentTool(paperDocCtx) as Tool;
       tools.getDocumentInfo = createGetDocumentInfoTool(paperDocCtx) as Tool;
       tools.searchLibrary = createSearchLibraryTool(paperDocCtx) as Tool;
-      tools.getCitationGraph = createGetCitationGraphTool({ scope: "paper", currentId: context.paperId }) as Tool;
+      tools.getCitationGraph = createGetCitationGraphTool(paperDocCtx) as Tool;
     }
     // 笔记面板（绑定当前论文；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.paperId) as Tool;
@@ -473,7 +490,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
     tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;
     tools.searchLibrary = createSearchLibraryTool(centralDocCtx) as Tool;
-    tools.getCitationGraph = createGetCitationGraphTool({ scope: "central" }) as Tool;
+    tools.getCitationGraph = createGetCitationGraphTool(centralDocCtx) as Tool;
   }
 
   // 6. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求

@@ -84,27 +84,37 @@ function serializeSchema(schema: unknown): string {
   return parts.join("\n\n");
 }
 
-/** 递归把工具输出里的图片 dataUrl 摘成占位文本，并收集起来放进内存缓存（供图片桥恢复给模型）。 */
-function stripToolImages(node: unknown, images: CachedToolImage[], paths: string[]): unknown {
+/**
+ * 递归把工具输出里的图片 dataUrl 摘成占位文本，并收集起来放进内存缓存（供图片桥恢复给模型）。
+ * 占位带序号（#1/#2…）——viewImages 一次返回多张时，模型能按顺序对上各自的 <path> 信封。
+ */
+function stripToolImages(
+  node: unknown,
+  images: CachedToolImage[],
+  paths: string[],
+  seq: { count: number } = { count: 0 },
+): unknown {
   if (typeof node === "string") {
     if (node.startsWith("data:image/")) {
       images.push({ dataUrl: node, mediaType: "image/jpeg" });
-      return "[图片内容已交给模型，base64 不写入聊天记录]";
+      seq.count += 1;
+      return `[图片 #${seq.count} 内容已交给模型，base64 不写入聊天记录]`;
     }
     const matched = /<path>([^<]+)<\/path>/.exec(node);
     if (matched?.[1]) paths.push(matched[1].trim());
     return node;
   }
-  if (Array.isArray(node)) return node.map((item) => stripToolImages(item, images, paths));
+  if (Array.isArray(node)) return node.map((item) => stripToolImages(item, images, paths, seq));
   if (node && typeof node === "object") {
     const record = node as Record<string, unknown>;
     const url = typeof record.url === "string" ? record.url : null;
     if (record.type === "file" && url?.startsWith("data:image/")) {
       images.push({ dataUrl: url, mediaType: typeof record.mediaType === "string" ? record.mediaType : "image/jpeg" });
-      return { type: "text", text: "[图片内容已交给模型，base64 不写入聊天记录]" };
+      seq.count += 1;
+      return { type: "text", text: `[图片 #${seq.count} 内容已交给模型，base64 不写入聊天记录]` };
     }
     const next: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(record)) next[key] = stripToolImages(value, images, paths);
+    for (const [key, value] of Object.entries(record)) next[key] = stripToolImages(value, images, paths, seq);
     return next;
   }
   return node;
@@ -215,11 +225,22 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
         const foundPaths: string[] = [];
         const sanitized = stripToolImages(rawResult, foundImages, foundPaths);
         if (foundImages.length > 0) {
+          // 图片与 <path> 信封同序遍历，按下标配对：viewImages 多图时缓存里每张图各有自己的路径，
+          // 图片桥省略较早图片时才能给出正确的 readImage(path=…)
           const firstPath = foundPaths[0];
           cacheToolImages(
             String(options?.toolCallId ?? ""),
-            foundImages.map((image) => ({ ...image, path: firstPath })),
+            foundImages.map((image, index) => ({ ...image, path: image.path ?? foundPaths[index] ?? firstPath })),
           );
+          try {
+            const holder = globalThis as typeof globalThis & { __sagereadLazyImageLog?: string[] };
+            holder.__sagereadLazyImageLog = [
+              ...(holder.__sagereadLazyImageLog ?? []),
+              `cache: tool=${name} images=${foundImages.length} paths=${foundPaths.join(" | ").slice(0, 400)}`,
+            ].slice(-20);
+          } catch {
+            // 调试日志失败不影响主流程
+          }
         }
         return sanitized;
       } catch (error) {

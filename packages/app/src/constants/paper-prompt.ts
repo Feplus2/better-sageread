@@ -1,5 +1,6 @@
 import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_PAPER_STYLE } from "@/constants/agent-styles";
+import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope } from "@/constants/retrieval-scope";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
@@ -57,11 +58,11 @@ mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="
 const PAPER_POLICY_BASE_NEW = `—— 先读后答 ——
 回答当前论文的内容问题前，先用文档原语读原文；不编造论文中不存在的结论、数据、公式或参考文献。
 • getDocumentInfo：元数据（标题/作者/期刊/DOI/摘要）+ 目录 + 图表与引用计数；元数据问题直接用它。
-• readDocument：按 doc 读原文窗口（doc=paper:<id> / book:<id>；heading/offset/position + 窗口续读）。总结全文先 getDocumentInfo 看目录，再按小节分窗读，不要一次读全文。
-• getCitations：参考文献列表（References 小节）。
-• getCitationGraph：库内引用关系——它引用了库内哪些论文 / 库内哪些论文引用了它（按 DOI/标题匹配 References，无需向量索引）。
-• getFigures：图片清单（图注 + 绝对 image_path）；真正看图用 readImage(path=image_path)。看图昂贵：先读图注/正文，确需视觉细节时最后再看图，看完立即作答。
-• 检索当前/跨论文用 searchLibrary（见下节）；命中后用 readDocument 精读。
+• readDocument：按 doc 读原文窗口（doc=paper:<id> / book:<id>；heading/offset/position + 窗口续读），但只能读用户圈定范围内的文档。总结全文先 getDocumentInfo 看目录，再按小节分窗读，不要一次读全文。
+• getCitations：本篇参考文献列表（References 小节）。
+• getCitationGraph：库内引用关系——它引用了库内哪些论文 / 库内哪些论文引用了它（按 DOI/标题匹配 References，无需向量索引）；该工具会扫描论文库其它论文，只有范围在「论文库」及以上时才可用。
+• getFigures：本篇图片清单（图注 + 绝对 image_path）；真正看图用 readImage(path=image_path)。看图昂贵：先读图注/正文，确需视觉细节时最后再看图，看完立即作答。
+• 检索当前/跨论文用 searchLibrary（scope 只能在用户圈内收窄，见【检索范围】段）；命中后用 readDocument 精读。
 
 —— 阅读位置（每轮刷新，以本轮为准） ——
 system 提示词尾部的【当前阅读位置】是用户此刻的精确位置（小节标题 + paper.md 字符坐标 + 估算分块区间 + 全文进度），每轮发送前实时更新；对话历史里早前出现的位置一律视为过时，位置类问题以该段为准。
@@ -93,22 +94,51 @@ mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="
 论文翻译/句词对齐/重新解析由全局助手 processPaper 负责，书籍（EPUB）全书翻译由全局助手 translateBook 或书籍阅读器顶栏「翻译」菜单负责——你没有翻译工具，用户提出时引导到对应入口即可。`;
 
 const PAPER_POLICY_VECTOR_NEW = `—— 文献库检索（新原语） ——
-• searchLibrary：语义 + 关键词混合检索，scope=current（当前论文）/ collection（面板范围）/ all（全部文献）；也可用 doc=paper:<id> 指定单篇。
+• searchLibrary：语义 + 关键词混合检索；scope=current（当前论文）/ library（论文库全部论文）/ all（论文库+图书馆），也可用 doc=paper:<id> 在圈内指定单篇。scope/doc 只能收窄用户圈定范围，不能放大。
 • 命中后先看 doc/章节，再用 readDocument(doc=paper:<id>, heading=... 或 offset=...) 精读，不要一次读全文。
-• 检索策略：英文论文用英文术语；多概念问题拆 2-3 个不同措辞的子查询；命中不足换措辞/换范围再检；检索无据就明说，不要凭印象编造。
+• 检索策略：英文论文用英文术语；多概念问题拆 2-3 个不同措辞的子查询；命中不足换措辞/在圈内换范围再检；检索无据就明说，不要凭印象编造。
 • 分工：当前论文内容问题优先 getDocumentInfo + readDocument 读原文；searchLibrary 只用于检索已建索引论文的片段。`;
 
 const PAPER_POLICY_NO_VECTOR_NEW = `—— 文献库检索（当前不可用） ——
 未配置嵌入模型，searchLibrary 不可用；当前论文用 getDocumentInfo + readDocument 读原文。用户需要跨论文检索时，提示其在设置中配置嵌入模型并向量化论文。`;
 
 const PAPER_POLICY_VECTOR = `—— 文献库检索（已启用） ——
-• paperSearch：文献库语义+关键词混合检索，可跨论文。检索范围由用户在面板中选择（本篇论文/所在文件夹/全部文献/自定义文件夹），自动生效。
+• paperSearch：文献库语义+关键词混合检索，可跨论文。检索范围由用户在面板中选择（本篇/论文库/论文库+图书馆）；旧版工具只支持论文（本篇或全部论文），无法包含书籍，属部分生效。
 • paperContext：paperSearch 命中片段不足以回答时，按 chunk_id 扩展该片段在同一论文内的前后文。
 • 检索策略：英文论文用英文术语检索（中文提问先把核心概念译成英文，拿不准就中英各检一次）；多概念问题拆 2-3 个不同措辞的子查询分次检索；命中不足 → paperContext 扩前后文 → 仍不足换措辞/换范围再检；检索无据就明说，不要凭印象编造。
 • 分工：当前论文的内容问题优先基础层读原文；检索层只用于跨论文的主题对比与文献调研。`;
 
 const PAPER_POLICY_NO_VECTOR = `—— 文献库检索（当前不可用） ——
 未配置嵌入模型，跨论文语义检索不可用。如用户需要跨论文检索，提示其在设置中配置嵌入模型并向量化论文。`;
+
+/**
+ * 用户划定的检索范围（论文助手）：写在政策层，模型检索/直读前先看圈。
+ * 旧工具集只能表达论文范围（本篇/全部论文），必须明确说"书籍部分不生效"。
+ */
+function buildPaperScopePolicy(
+  scope: RetrievalScope,
+  docMode: "new" | "legacy" | "both",
+  currentPaperId?: string,
+): string {
+  const label = RETRIEVAL_SCOPE_LABELS.paper[scope];
+  const currentRef = currentPaperId ? `paper:${currentPaperId}` : "（未绑定当前论文）";
+  if (docMode === "legacy") {
+    return `—— 检索范围（旧版工具模式） ——
+旧版工具模式不显示范围下拉（此前保存的选择只部分生效）：paperSearch 只能是「本篇」（paperIds=[当前论文]）或「全部论文」（不含书籍）；readDocument / getCitationGraph 等新原语不可用，${currentRef} 之外的直读也做不到。需要真正的「论文库+图书馆」范围时，请让用户切到新原语模式（设置 → Agent）或到全局助手处理；不要声称检索过书籍。`;
+  }
+  const allowed =
+    scope === "current"
+      ? `只能检索/读取当前这篇论文（${currentRef}）；其它论文与书籍都在圈外。searchLibrary（若已配置嵌入模型）只在本篇内检索；readDocument/getDocumentInfo 传圈外 doc 会被拒绝；getFigures/getCitations 也只读本篇。getCitationGraph 需要扫描论文库其它论文，在当前范围会要求用户切换范围。`
+      : scope === "library"
+        ? "可检索/读取论文库全部论文（不含书籍）。searchLibrary（若已配置嵌入模型）搜全部论文；readDocument/getDocumentInfo/getCitationGraph 可跨论文；book:<id> 在圈外，越界会被拒绝。"
+        : "可检索/读取论文库全部论文 + 图书馆全部书籍（跨库结果 RRF 融合）。searchLibrary（若已配置嵌入模型）跨库检索；readDocument/getDocumentInfo/getCitationGraph 可读论文，readDocument/getDocumentInfo 也可读书；圈外/库外文件仍在界外。";
+  return `—— 检索范围（用户划定，本轮以此为准） ——
+用户当前选择：${label}（retrievalScope=${scope}）。
+• ${allowed}
+• 工具参数只能在圈内收窄，不能扩大：searchLibrary 的 scope/doc 与 readDocument/getDocumentInfo/getCitationGraph 的 doc 越界会被明确拒绝，不要换关键词、换工具或绕路径重试。
+• 用户的问题若需要更广范围（其它论文/书籍），不要自行越界；直接说明需要切换范围，并请用户使用侧栏顶部的范围下拉（本篇 / 论文库 / 论文库+图书馆）。
+• 全局助手不受此限制；本助手只按用户圈定的范围工作。`;
+}
 
 /**
  * 构建论文助手的完整系统提示词：风格层（预设 ?? 内置默认风格）+ 通用规范
@@ -136,7 +166,8 @@ export async function buildPaperPrompt(chatContext: ChatContext | undefined): Pr
       : hasVectorCapability
         ? PAPER_POLICY_VECTOR
         : PAPER_POLICY_NO_VECTOR;
-  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${basePolicy}\n\n${retrievalPolicy}`;
+  const scopePolicy = buildPaperScopePolicy(chatContext?.retrievalScope ?? "current", docMode, paperId);
+  let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${basePolicy}\n\n${retrievalPolicy}\n\n${scopePolicy}`;
 
   // 注入 scope 含 paper 的活跃技能
   try {

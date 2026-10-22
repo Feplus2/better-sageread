@@ -92,3 +92,36 @@ createModelInstance(providerId, modelId)
 - MCP 0.3.0 未发布，是收口最佳窗口：默认精简现代集（约 18 个），旧工具 `SAGEREAD_MCP_LEGACY_TOOLS=1` 暂留一版。
 - 新增 `search_library` 统一检索；`get_document_info/read_document/get_citation_graph` 为主入口。
 - 原因：MCP 客户端动态发现工具不会硬报错，但工具净增加会让外部 Agent 上下文变大、选择困难、重复能力互相抢；精简正交优于数量。
+
+## 7. 实测（2026-10-22 晚，用 CherryIN 中转 key）
+
+前提：用户没有 OpenAI/Anthropic/Gemini 官方 key，但允许使用密钥库中的 CHERRYIN_API_KEY；CherryIN 文档确认支持：
+- https://open.cherryin.net/v1/chat/completions（OpenAI chat）
+- https://open.cherryin.net/v1/responses（Responses，GPT-5.x）
+- https://open.cherryin.net/v1/messages（Anthropic Messages；Claude Code 同款配置）
+
+curl 实测三条通道均 200。
+
+### 7.1 协议层原生多模态工具结果（独立 SDK 探针）
+用 @ai-sdk/openai 的 responses() 与 @ai-sdk/anthropic 原生 Messages，各跑一次“工具返回合成图片”的 generateText：
+- 合成图内容：SAGEREAD-NATIVE-42 + 蓝三角 + 红圆；
+- OpenAI Responses：PASS，模型准确读出字符串与颜色形状；8.2s / 566 tokens；
+- Anthropic Messages：PASS，同样读对；7.2s / 1,780 tokens；
+- 关键：模型确实看到了像素，而不是只看到工具文本/图注。
+
+结论：provider-native 工具图片在可用网关上已经实际打通；AI SDK + 原生协议路径成立。
+
+### 7.2 应用侧实现
+- ai/providers/protocol.ts：provider/model/baseURL → responses / anthropic / gemini / chat；CherryIN 网关按模型前缀路由（openai/* → responses，anthropic/* → anthropic，其余 chat）；未知自定义端点保守走 chat。
+- ai/providers/native-tool-output.ts：给 readImage/viewImages（含目录牌 useTool）补 toModelOutput，把旧 file+url:dataUrl 转成官方 file+mediaType+data；从 toolCallId 缓存恢复目录牌图片。
+- factory.ts：Anthropic 改原生 createAnthropic（修掉 openai-compatible 假适配）；OpenAI 显式 openai.responses()；grok 显式 .chat()；自定义端点按协议选 createOpenAI/createAnthropic/兼容通道；chat 通道补挂图片桥。
+- custom-chat-transport.ts：按当前选中模型解析协议，原生协议给工具加 toModelOutput 包装，chat 通道保持图片桥。
+
+### 7.3 尚未验证
+- 官方 OpenAI / Anthropic / Gemini 三个 provider id 的原生端点（无 key）；
+- Gemini 3 原生多模态工具结果（无 key、CherryIN 不代理 Gemini 原生协议）；
+- 应用 UI 内的端到端模型切换（本机 dev 实例当前停在书库页，模型下拉不在活动视口；需要打开书籍/论文后手测或用户切换后跑探针）；
+- Anthropic 原生下的 prompt cache / thinking 参数与 AI SDK 的兼容细节。
+
+### 7.4 工作量修正
+协议层代码（路由 + 工具输出 + factory + transport）已完成并 tsc 通过；剩余主要是 UI 端到端 + 官方 provider 回归，约 0.5–1.5 个聚焦日（不含发版）。
