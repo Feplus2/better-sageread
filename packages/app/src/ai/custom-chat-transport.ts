@@ -216,7 +216,11 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // P1-4：new 模式强制轻量目录牌（只发名字+一句话），把每步 ~2.4k token 的完整 schema 换成一个 describeTool 调用
     const { getDocumentToolMode } = await import("./tools/document/mode");
     const forceDirectoryForNewMode = agentScope !== "central" && getDocumentToolMode() === "new";
-    const directoryMode = forceDirectoryForNewMode || shouldUseDirectoryMode(guardedTools);
+    const debugDisableDirectory =
+      (globalThis as { __SAGEREAD_DISABLE_DIRECTORY__?: boolean }).__SAGEREAD_DISABLE_DIRECTORY__ === true;
+    const directoryMode = debugDisableDirectory
+      ? false
+      : forceDirectoryForNewMode || shouldUseDirectoryMode(guardedTools);
     const tools: Record<string, Tool> = directoryMode ? buildLazyToolset(guardedTools) : guardedTools;
 
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）

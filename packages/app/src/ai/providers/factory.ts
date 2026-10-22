@@ -6,6 +6,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
+import { wrapOpenAICompatToolImagesFetch } from "./tool-image-bridge";
 import { VISION_NAME_RE, modelSupportsVision } from "./vision-map";
 
 export interface ProviderConfig {
@@ -193,11 +194,13 @@ export function createProviderInstance(config: ProviderConfig) {
       // 命名无 vision 字样，单靠 VISION_NAME_RE 会误路由到纯文本适配器、图片被静默丢弃；
       // 表内未知型号默认放行即走兼容通道，误路由无害：DeepSeek API 本就是 OpenAI 兼容格式）。
       if (modelId && (VISION_NAME_RE.test(modelId.toLowerCase()) || modelSupportsVision("deepseek", modelId))) {
+        // OpenAI-compatible 聊天接口不支持工具结果里的图片：在 fetch 层把工具图片改挂到 user 消息
+        const visionFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault ?? fetch);
         return createOpenAICompatible({
           name: "deepseek-vision",
           baseURL: baseUrl || "https://api.deepseek.com",
           apiKey: apiKey || "",
-          ...(wrappedDefault ? { fetch: wrappedDefault } : {}),
+          fetch: visionFetch,
         });
       }
       return createDeepSeek({

@@ -122,3 +122,4 @@
 - 2026-10-22（方向修正）：撤回 readDocument 每轮次数/字符硬上限、图片每轮张数上限——分桶 A/B 方案见 docs/audits/agent-ab-plan-v2.md。
 - 下一步 P1-4：按分桶方案补 3 个能力探针（multi-figure / deep-research / cross-doc-2plus），跑 Bucket I + Bucket F 的 new-vs-legacy 3 次 A/B；Bucket I 达标且 Bucket F 不退化为切默认前提。
 - 发版推迟：先把 Agent 大任务整体做完（含 P1 收尾与 P2 必要项），再谈发版。
+- 2026-10-22（图片通道修复）：调研 DeepSeek Harness 的图片处理（规范化 + 超预算省略最旧 + 路径占位，无张数上限）；发现我们的 OpenAI-compatible 适配器把工具结果图片 JSON 成 base64 文本、模型根本看不见。已在 fetch 层加工具图片桥（图片改挂 user 消息、保留最近 3 张、旧图带路径占位），合成图 L2 探针两种路径均 PASS。详见 docs/audits/harness-image-handling.md。
