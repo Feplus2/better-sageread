@@ -237,6 +237,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           providerId: sel.providerId,
           baseUrl: selectedProvider?.baseUrl,
           modelId: sel.modelId,
+          apiStyle: selectedProvider?.apiStyle,
         })
       : "chat";
     const toolsForModel = supportsNativeToolImages(providerProtocol)

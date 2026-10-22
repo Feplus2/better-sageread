@@ -1,5 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { isLocalEndpoint } from "@/utils/provider-url";
 import SecretInput from "./secret-input";
 
@@ -85,6 +86,25 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           onChange={(e) => onFieldChange("baseUrl", e.target.value)}
           placeholder="https://api.example.com/v1"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-sm dark:text-neutral-200">API 格式（协议）</Label>
+        <p className="text-neutral-500 text-xs dark:text-neutral-400">
+          Base URL 只决定端点；协议决定用哪一代 API。预置提供商有推荐默认值，自定义代理/中转站请按实际支持的格式选择。
+        </p>
+        <Select value={provider.apiStyle ?? "auto"} onValueChange={(value) => onFieldChange("apiStyle", value)}>
+          <SelectTrigger className="h-8">
+            <SelectValue placeholder="自动" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">自动（按提供商/已知网关推断）</SelectItem>
+            <SelectItem value="openai-chat">OpenAI Chat Completions</SelectItem>
+            <SelectItem value="openai-responses">OpenAI Responses API</SelectItem>
+            <SelectItem value="anthropic-messages">Anthropic Messages（含 DeepSeek/Kimi/智谱兼容端点）</SelectItem>
+            <SelectItem value="gemini">Gemini 原生（v1beta）</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );

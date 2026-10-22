@@ -18,10 +18,14 @@ export type ProviderProtocol =
   | "gemini"
   | "chat";
 
+export type ProviderApiStyle = "auto" | "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
+
 export interface ProtocolInput {
   providerId: string;
   baseUrl?: string;
   modelId?: string;
+  /** 用户/预置 provider 显式声明的 API 协议；auto/缺省时按 provider 与已知网关推断 */
+  apiStyle?: ProviderApiStyle;
 }
 
 function hostOf(baseUrl?: string): string {
@@ -30,6 +34,24 @@ function hostOf(baseUrl?: string): string {
     return new URL(baseUrl).host.toLowerCase();
   } catch {
     return baseUrl.toLowerCase();
+  }
+}
+
+/** 是否官方 host（Base URL 未填视为官方默认端点） */
+function hostMatches(baseUrl: string | undefined, domain: string): boolean {
+  if (!baseUrl) return true;
+  const host = hostOf(baseUrl);
+  return host === domain || host.endsWith("." + domain);
+}
+
+/** 显式协议优先；auto/未填返回 null，继续走推断 */
+function explicitProtocol(style?: ProviderApiStyle): ProviderProtocol | null {
+  switch (style) {
+    case "openai-chat": return "openai-chat";
+    case "openai-responses": return "openai-responses";
+    case "anthropic-messages": return "anthropic-messages";
+    case "gemini": return "gemini";
+    default: return null;
   }
 }
 
@@ -62,20 +84,29 @@ function gatewayProtocol(host: string, modelId: string): ProviderProtocol | null
 }
 
 export function resolveProviderProtocol(input: ProtocolInput): ProviderProtocol {
-  const { providerId, baseUrl, modelId = "" } = input;
+  const { providerId, baseUrl, modelId = "", apiStyle } = input;
+  const explicit = explicitProtocol(apiStyle);
+  if (explicit) return explicit;
   const id = providerId.toLowerCase();
   const model = modelId.toLowerCase();
   const host = hostOf(baseUrl);
 
-  if (id === "openai") return "openai-responses";
-  if (id === "anthropic") return "anthropic-messages";
-  if (id === "gemini" || id === "google") return "gemini";
+  // 预置 provider：只有官方 baseURL 才自动走原生；用户改成代理时保守回落 chat，
+  // 除非用户在设置里显式选择 API 格式（由上面的 apiStyle 覆盖）。
+  if (id === "openai") return hostMatches(baseUrl, "api.openai.com") ? "openai-responses" : "chat";
+  if (id === "anthropic") return hostMatches(baseUrl, "api.anthropic.com") ? "anthropic-messages" : "chat";
+  if (id === "gemini" || id === "google") {
+    return hostMatches(baseUrl, "generativelanguage.googleapis.com") ? "gemini" : "chat";
+  }
   if (id === "grok") return "openai-chat";
   if (id === "deepseek") {
     // 官方 DeepSeek 同时提供 Anthropic Messages 兼容端点（支持 tool_result 图片），官方 baseURL 优先走原生；
     // 自定义 DeepSeek-compatible 代理仍走 chat + 图片桥（避免把只实现 chat 的代理打挂）。
     return isOfficialDeepSeekHost(baseUrl) ? "anthropic-messages" : "chat";
   }
+  if (id === "kimi") return hostMatches(baseUrl, "api.moonshot.cn") ? "anthropic-messages" : "chat";
+  if (id === "zhipu") return hostMatches(baseUrl, "open.bigmodel.cn") ? "anthropic-messages" : "chat";
+  if (id === "minimax") return hostMatches(baseUrl, "api.minimaxi.com") || hostMatches(baseUrl, "api.minimax.io") ? "anthropic-messages" : "chat";
   if (id === "openrouter") return "chat";
 
   if (id.startsWith("custom-") || id === "custom" || !["zhipu", "kimi", "qwen", "doubao", "xiaomi", "ollama", "lmstudio"].includes(id)) {
@@ -104,6 +135,27 @@ export function normalizeGeminiBaseUrl(baseUrl?: string): string | undefined {
   if (/\/v1beta$/.test(trimmed)) return trimmed;
   if (/\/v1$/.test(trimmed)) return trimmed.replace(/\/v1$/, "/v1beta");
   return trimmed + "/v1beta";
+}
+
+/** 已知 Anthropic 兼容 provider 的规范 baseURL（官方文档推荐端点） */
+export function resolveAnthropicCompatibleBaseUrl(providerId: string, baseUrl?: string): string | undefined {
+  const id = providerId.toLowerCase();
+  // 官方默认端点用规范地址；用户自定义代理时尊重用户 Base URL（避免把代理请求硬打到官方）。
+  if (id === "deepseek") {
+    return hostMatches(baseUrl, "api.deepseek.com") ? "https://api.deepseek.com/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+  }
+  if (id === "kimi") {
+    return hostMatches(baseUrl, "api.moonshot.cn") ? "https://api.moonshot.cn/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+  }
+  if (id === "zhipu") {
+    return hostMatches(baseUrl, "open.bigmodel.cn") ? "https://open.bigmodel.cn/api/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+  }
+  if (id === "minimax") {
+    if (hostMatches(baseUrl, "api.minimax.io")) return "https://api.minimax.io/anthropic";
+    if (hostMatches(baseUrl, "api.minimaxi.com")) return "https://api.minimaxi.com/anthropic";
+    return normalizeAnthropicBaseUrl(baseUrl);
+  }
+  return normalizeAnthropicBaseUrl(baseUrl);
 }
 
 /** Anthropic Messages baseURL：保留 .../v1；用户若只填根地址则补 /v1。 */

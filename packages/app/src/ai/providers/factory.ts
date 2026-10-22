@@ -9,9 +9,9 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
 import {
-  normalizeAnthropicBaseUrl,
-  normalizeDeepSeekAnthropicBaseUrl,
+  type ProviderApiStyle,
   normalizeGeminiBaseUrl,
+  resolveAnthropicCompatibleBaseUrl,
   normalizeOpenAIBaseUrl,
   resolveProviderProtocol,
 } from "./protocol";
@@ -22,6 +22,8 @@ export interface ProviderConfig {
   providerId: string;
   apiKey?: string;
   baseUrl?: string;
+  /** 显式 API 协议（预置 provider 有默认值；自定义 provider 可在设置里选） */
+  apiStyle?: ProviderApiStyle;
   /** 轻量任务：注入"关闭思考"请求体参数（DeepSeek V4 默认开思考，轻量任务会慢一个数量级） */
   disableThinking?: boolean;
   /** 模型 ID（关闭思考参数按模型分档时用，如 Kimi K3 用 reasoning_effort、思考专用模型不下发） */
@@ -182,7 +184,7 @@ function wrapChatReasoningFetch(
  */
 export function createProviderInstance(config: ProviderConfig) {
   const { providerId, apiKey, baseUrl, disableThinking, modelId, reasoningLevelRef } = config;
-  const protocol = resolveProviderProtocol({ providerId, baseUrl, modelId });
+  const protocol = resolveProviderProtocol({ providerId, baseUrl, modelId, apiStyle: config.apiStyle });
   // 关闭思考补丁：仅轻量任务（disableThinking）且端点认识时生效
   const patch = disableThinking ? thinkingOffPatch(providerId, baseUrl, modelId) : null;
   // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
@@ -202,7 +204,7 @@ export function createProviderInstance(config: ProviderConfig) {
       if (protocol === "anthropic-messages") {
         return createAnthropic({
           apiKey: apiKey || "",
-          baseURL: normalizeDeepSeekAnthropicBaseUrl(baseUrl),
+          baseURL: resolveAnthropicCompatibleBaseUrl("deepseek", baseUrl),
         });
       }
       // 自定义 DeepSeek-compatible 代理：沿用 chat 通道（视觉型号再挂图片桥）
@@ -234,11 +236,19 @@ export function createProviderInstance(config: ProviderConfig) {
         baseURL: baseUrl,
       });
 
-    case "openai":
+    case "openai": {
+      // 官方默认 Responses；若用户显式选 chat（或改成只支持 chat 的代理），
+      // chat 通道挂图片桥，保证工具图片仍可用。
+      const openaiChatFetch =
+        protocol === "openai-chat"
+          ? wrapOpenAICompatToolImagesFetch(maybeWrap(fetchTauri) ?? fetchTauri)
+          : undefined;
       return createOpenAI({
         apiKey: apiKey || "",
         baseURL: baseUrl,
+        ...(openaiChatFetch ? { fetch: openaiChatFetch } : {}),
       });
+    }
 
     case "anthropic":
       // 2026-10-22 修复历史遗留：Anthropic 没有 OpenAI chat-completions 端点，
@@ -246,7 +256,7 @@ export function createProviderInstance(config: ProviderConfig) {
       if (protocol === "anthropic-messages") {
         return createAnthropic({
           apiKey: apiKey || "",
-          baseURL: normalizeAnthropicBaseUrl(baseUrl),
+          baseURL: resolveAnthropicCompatibleBaseUrl("anthropic", baseUrl),
         });
       }
       // 显式 chat 兼容（用户自建 Anthropic 兼容代理且只支持 chat 时）保留旧路径
@@ -274,8 +284,7 @@ export function createProviderInstance(config: ProviderConfig) {
 
     default: {
       // 自定义 / 国内兼容端点：按协议能力选通道。
-      // openai-responses / openai-chat：用官方 OpenAI SDK（前者走 Responses，后者显式 chat()）
-      if (protocol === "openai-responses" || protocol === "openai-chat") {
+      if (protocol === "openai-responses") {
         return createOpenAI({
           apiKey: apiKey || "",
           baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
@@ -284,7 +293,7 @@ export function createProviderInstance(config: ProviderConfig) {
       if (protocol === "anthropic-messages") {
         return createAnthropic({
           apiKey: apiKey || "",
-          baseURL: normalizeAnthropicBaseUrl(baseUrl),
+          baseURL: resolveAnthropicCompatibleBaseUrl(providerId, baseUrl),
         });
       }
       if (protocol === "gemini") {
@@ -293,7 +302,8 @@ export function createProviderInstance(config: ProviderConfig) {
           baseURL: normalizeGeminiBaseUrl(baseUrl),
         });
       }
-      // chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）
+      // chat / openai-chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）。
+      // openai-chat 也走兼容适配器而不是 createOpenAI().chat()，以保留图片桥与旧代理兼容性。
       const chatFetch = wrapOpenAICompatToolImagesFetch(maybeWrap(fetchTauri) ?? fetchTauri);
       return createOpenAICompatible({
         apiKey: apiKey || "",
@@ -336,6 +346,7 @@ export function createModelInstance(
     providerId,
     apiKey: provider.apiKey,
     baseUrl: provider.baseUrl,
+    apiStyle: provider.apiStyle,
     disableThinking: opts?.disableThinking,
     modelId,
     reasoningLevelRef: opts?.reasoningLevelRef,

@@ -44,6 +44,7 @@ export const useProviderStore = create<ProviderState>()(
           name: "untitled",
           active: true,
           provider: newProviderId,
+          apiStyle: "auto",
           apiKey: "",
           baseUrl: "",
           models: [],
@@ -68,7 +69,7 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
-      version: 5,
+      version: 6,
       migrate: (persistedState: any, version: number) => {
         if (version < 1) {
           // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
@@ -150,6 +151,56 @@ export const useProviderStore = create<ProviderState>()(
           const currentIds = new Set(current.map((p) => p.provider));
           const missing = predefinedProviders.filter((p) => !currentIds.has(p.provider));
           if (missing.length > 0) persistedState.modelProviders = [...current, ...missing];
+        }
+        if (version < 6) {
+          // v5→v6: API 协议现代化。预置 provider 写默认 apiStyle；
+          // 已有用户若把官方 provider 改成自定义代理，不强行覆盖为原生（按 auto 处理）。
+          const nativeDefaults: Record<string, string> = {
+            openai: "openai-responses",
+            anthropic: "anthropic-messages",
+            gemini: "gemini",
+            deepseek: "anthropic-messages",
+            kimi: "anthropic-messages",
+            zhipu: "anthropic-messages",
+            minimax: "anthropic-messages",
+          };
+          const officialHosts: Record<string, string[]> = {
+            openai: ["api.openai.com"],
+            anthropic: ["api.anthropic.com"],
+            gemini: ["generativelanguage.googleapis.com"],
+            deepseek: ["deepseek.com"],
+            kimi: ["api.moonshot.cn"],
+            zhipu: ["open.bigmodel.cn"],
+            minimax: ["api.minimaxi.com", "api.minimax.io"],
+          };
+          const isOfficialHost = (providerId: string, baseUrl?: string) => {
+            if (!baseUrl) return true;
+            const hosts = officialHosts[providerId];
+            if (!hosts) return false;
+            try {
+              const host = new URL(baseUrl).host.toLowerCase();
+              return hosts.some((allowed) => host === allowed || host.endsWith("." + allowed));
+            } catch {
+              return false;
+            }
+          };
+          const chatDefaults: Record<string, string> = {
+            openrouter: "openai-chat",
+            grok: "openai-chat",
+            xiaomi: "openai-chat",
+            qwen: "openai-chat",
+            doubao: "openai-chat",
+            ollama: "openai-chat",
+            lmstudio: "openai-chat",
+          };
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+            if (p.apiStyle) return p;
+            const native = nativeDefaults[p.provider];
+            if (native && isOfficialHost(p.provider, p.baseUrl)) return { ...p, apiStyle: native };
+            const chat = chatDefaults[p.provider];
+            if (chat) return { ...p, apiStyle: chat };
+            return { ...p, apiStyle: "auto" as const };
+          });
         }
         return persistedState;
       },
