@@ -76,11 +76,6 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
               。
             </p>
           )}
-          {!isLocal && isCustomProvider && (
-            <p className="mt-2 text-neutral-500 text-xs dark:text-neutral-400">
-              Ollama 本地示例：http://127.0.0.1:11434/v1；LM Studio 示例：http://127.0.0.1:1234/v1
-            </p>
-          )}
         </div>
         <Input
           id="baseUrl"
