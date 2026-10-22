@@ -33,6 +33,21 @@ function hostOf(baseUrl?: string): string {
   }
 }
 
+/** DeepSeek 官方 Anthropic 兼容入口（2026-10-22 官方文档 + 实网图片工具结果验证） */
+function isOfficialDeepSeekHost(baseUrl?: string): boolean {
+  if (!baseUrl) return true; // 未自定义 baseURL = 官方默认端点
+  const host = hostOf(baseUrl);
+  return host === "api.deepseek.com" || host.endsWith(".deepseek.com");
+}
+
+export function normalizeDeepSeekAnthropicBaseUrl(baseUrl?: string): string {
+  if (!baseUrl) return "https://api.deepseek.com/anthropic";
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  if (/\/anthropic$/.test(trimmed)) return trimmed;
+  if (/\/v\d+$/.test(trimmed)) return trimmed.replace(/\/v\d+$/, "/anthropic");
+  return trimmed + "/anthropic";
+}
+
 /** 已知网关（按域名 + 模型前缀）的协议映射；未知端点不猜，走 chat。 */
 function gatewayProtocol(host: string, modelId: string): ProviderProtocol | null {
   // CherryIN：官方文档支持 /v1/chat/completions、/v1/responses，以及 Anthropic Messages（Claude Code 配置）
@@ -56,7 +71,11 @@ export function resolveProviderProtocol(input: ProtocolInput): ProviderProtocol 
   if (id === "anthropic") return "anthropic-messages";
   if (id === "gemini" || id === "google") return "gemini";
   if (id === "grok") return "openai-chat";
-  if (id === "deepseek") return "chat"; // 视觉走 openai-compatible + 图片桥
+  if (id === "deepseek") {
+    // 官方 DeepSeek 同时提供 Anthropic Messages 兼容端点（支持 tool_result 图片），官方 baseURL 优先走原生；
+    // 自定义 DeepSeek-compatible 代理仍走 chat + 图片桥（避免把只实现 chat 的代理打挂）。
+    return isOfficialDeepSeekHost(baseUrl) ? "anthropic-messages" : "chat";
+  }
   if (id === "openrouter") return "chat";
 
   if (id.startsWith("custom-") || id === "custom" || !["zhipu", "kimi", "qwen", "doubao", "xiaomi", "ollama", "lmstudio"].includes(id)) {

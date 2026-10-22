@@ -10,6 +10,7 @@ import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
 import {
   normalizeAnthropicBaseUrl,
+  normalizeDeepSeekAnthropicBaseUrl,
   normalizeGeminiBaseUrl,
   normalizeOpenAIBaseUrl,
   resolveProviderProtocol,
@@ -196,6 +197,15 @@ export function createProviderInstance(config: ProviderConfig) {
 
   switch (providerId) {
     case "deepseek":
+      // 2026-10-22 现代化：官方 DeepSeek 的 Anthropic 兼容端点（/anthropic）原生支持
+      // image / tool_result 图片（官方兼容表 + 实网探针），优先走 Messages 原生协议，不再用图片桥。
+      if (protocol === "anthropic-messages") {
+        return createAnthropic({
+          apiKey: apiKey || "",
+          baseURL: normalizeDeepSeekAnthropicBaseUrl(baseUrl),
+        });
+      }
+      // 自定义 DeepSeek-compatible 代理：沿用 chat 通道（视觉型号再挂图片桥）
       // D3 修复：视觉型号走 openai-compatible 通道——@ai-sdk/deepseek 为纯文本官方适配器
       // （file part 被静默丢弃，模型只能看到文件名文本）；DeepSeek 视觉 API 本就是 OpenAI
       // 兼容格式（image_url），openai-compatible 适配器可正确转换。

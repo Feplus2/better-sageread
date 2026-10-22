@@ -140,3 +140,33 @@ curl 实测三条通道均 200。
 - google/gemini-3.8-flash、google/gemini-4-argon（Gemini 原生）：PASS，字符串与形状/颜色全对。
 
 注意：AI SDK 的 Google provider 对含 `/` 的 modelId 不会自动补 `models/` 前缀，CherryIN 需要 `models/google/...` 路径；factory 已对 gemini 协议做 `models/` 前缀归一。
+## 8. 2026-10-22 晚补：DeepSeek/Kimi/Zhipu 的 Anthropic 兼容端点（推翻“国产只有 chat”的判断）
+
+### 8.1 DeepSeek 官方支持 Anthropic Messages（含工具结果图片）
+- 官方文档：https://api-docs.deepseek.com/guides/anthropic_api/
+  - base_url = https://api.deepseek.com/anthropic
+  - 兼容表明确：content type=image 支持 base64/url；tool_result 的 content **Fully Supported**；tools/input_schema/tool_choice 均支持。
+- 实网探针（DEEPSEEK_API_KEY）：createAnthropic + baseURL /anthropic，工具返回合成图片，deepseek-chat 与 deepseek-flash 均 PASS，准确读出图片字符串/形状/颜色。
+- 应用改动：DeepSeek 官方 baseURL（api.deepseek.com）路由到 anthropic-messages 原生协议；自定义 DeepSeek-compatible 代理仍走 chat + 图片桥。
+- App UI E2E：deepseek-flash 视觉探针 PASS（7.2s，bridgeLog=[]，说明不再走图片桥），token 23.9k。
+
+### 8.2 其他国产 provider 的 Anthropic 兼容端点（本轮 curl 实测）
+| provider | Anthropic base | 文本探针 | 说明 |
+|---|---|---|---|
+| Kimi | https://api.moonshot.cn/anthropic | 200 | Messages API 官方支持图片输入/工具调用 |
+| 智谱 GLM | https://open.bigmodel.cn/api/anthropic | 429（Coding Plan 到期） | 协议可达；续订后可测 |
+| MiniMax | https://api.minimaxi.com/anthropic / api.minimax.io/anthropic | 404 模型不可用 / 401 区域 key | 协议端点存在，模型名与 key 区域需匹配 |
+
+结论：**不能按厂商假设“只有 chat-completions”**；要做的是 provider/endpoint 能力矩阵（官方 host + 模型视觉能力 + tool_result 图片支持），而不是按厂商贴“旧协议”标签。
+
+## 9. 原生图片预算：不要拍脑袋手搓，优先 provider 原生限制
+
+研究结论（以官方文档为准，后续把精确数字补进能力表）：
+- Anthropic Messages：官方对每请求图片张数/单图大小/边长有明确上限，超出会自动缩放或拒绝；不需要我们自己按 dataUrl 字符数淘汰。
+- OpenAI：图片有 detail=low/high/auto；low 约 85 tokens；high 按 512px tile 计费（每 tile 170 tokens + 85 基础），auto 在任一边 >512 时用 high；图片会先缩放到 2048 上限、短边 768。
+- Gemini：有 media_resolution（low/medium/high）控制视觉 token 与精细度；由 provider 端缩放/计费。
+
+应做：
+1. **native 通道**：按 provider 原生 detail/mediaResolution 控制成本，图片只做一次规范化；不再套 700k dataUrl 字节预算（当前 native 通道本来也没有），上下文预算交给 token 用量与既有压缩机制。
+2. **chat 通道**：保留字节预算 + 最新批优先作为兼容兜底（chat 端点没有统一规范，且大请求易挂）；这是 fallback，不是主路径。
+3. 补 provider 能力矩阵与图片探针（单图/4 图/6 图）覆盖 native 与 chat 各一条。
