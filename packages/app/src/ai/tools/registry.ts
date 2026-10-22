@@ -46,6 +46,7 @@ import { getDocumentToolMode } from "./document/mode";
 import { createReadDocumentTool } from "./document/read-document";
 import { createSearchLibraryTool } from "./document/search-library";
 import {
+  createGetCitationGraphTool,
   createGetCitationsTool,
   createGetFiguresTool,
   createPaperContextTool,
@@ -445,6 +446,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
       tools.readDocument = createReadDocumentTool(paperDocCtx) as Tool;
       tools.getDocumentInfo = createGetDocumentInfoTool(paperDocCtx) as Tool;
       tools.searchLibrary = createSearchLibraryTool(paperDocCtx) as Tool;
+      tools.getCitationGraph = createGetCitationGraphTool({ scope: "paper", currentId: context.paperId }) as Tool;
     }
     // 笔记面板（绑定当前论文；create/update 由 tool-guard 弹确认卡）
     tools.manageNotes = createManageNotesTool(context.paperId) as Tool;
@@ -471,6 +473,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
     tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;
     tools.searchLibrary = createSearchLibraryTool(centralDocCtx) as Tool;
+    tools.getCitationGraph = createGetCitationGraphTool({ scope: "central" }) as Tool;
   }
 
   // 6. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求

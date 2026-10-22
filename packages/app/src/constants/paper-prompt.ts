@@ -59,6 +59,7 @@ const PAPER_POLICY_BASE_NEW = `—— 先读后答 ——
 • getDocumentInfo：元数据（标题/作者/期刊/DOI/摘要）+ 目录 + 图表与引用计数；元数据问题直接用它。
 • readDocument：按 doc 读原文窗口（doc=paper:<id> / book:<id>；heading/offset/position + 窗口续读）。总结全文先 getDocumentInfo 看目录，再按小节分窗读，不要一次读全文。
 • getCitations：参考文献列表（References 小节）。
+• getCitationGraph：库内引用关系——它引用了库内哪些论文 / 库内哪些论文引用了它（按 DOI/标题匹配 References，无需向量索引）。
 • getFigures：图片清单（图注 + 绝对 image_path）；真正看图用 readImage(path=image_path)。看图昂贵：先读图注/正文，确需视觉细节时最后再看图，看完立即作答。
 • 检索当前/跨论文用 searchLibrary（见下节）；命中后用 readDocument 精读。
 

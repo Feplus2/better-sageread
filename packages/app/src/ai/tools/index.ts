@@ -12,6 +12,7 @@ export { webSearchTool } from "./web-search";
 export { sciverseSearchTool } from "./sciverse-search";
 export { readImageTool } from "./read-image";
 export {
+  createGetCitationGraphTool,
   createGetCitationsTool,
   createGetFiguresTool,
   createPaperContextTool,

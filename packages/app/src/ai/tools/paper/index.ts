@@ -5,3 +5,4 @@ export { createPaperSearchTool } from "./paper-search";
 export { createPaperSectionTool } from "./paper-section";
 export { createPaperTocTool } from "./paper-toc";
 export { createGetCitationsTool, createGetFiguresTool } from "./paper-extras";
+export { createGetCitationGraphTool } from "./citation-graph";

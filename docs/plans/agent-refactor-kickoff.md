@@ -129,4 +129,6 @@
 - 2026-10-22：**默认切 new**——Agent 设置新增「文档工具模式」（new/both/legacy）+ 持久化迁移 v2（旧 both → new）；L1 32/32；默认模式 10 题冒烟 **10/10 通过**（含真实看图），旧工具可一键回退。
 - 2026-10-22（P1 收尾）：**guidance 单源**——reader/paper 系统策略按 docMode=new 生成新原语文案（不再引用 ragSearch/readBookSection/readAtReadingPosition/paperSearch/paperContext）；`searchLibrary` 支持 `doc=book:<id>` / `doc=paper:<id>`，接入书籍混合检索（补上 new 模式的本书语义检索），L1 **35/35**；快速冒烟 3/3。**P1 完成**。
 - 2026-10-22（P2-1）：**跨库统一检索落地**——Rust `search_all_books_db`（一次 embedding fan-out 所有已索引书）+ central `searchLibrary(scope=all)` 书库/论文库 RRF 合并（结果带 kind、book_total/paper_total）；L1 **38/38**（含跨库 8 book / 8 paper）。
-- 下一步 P2：引用图谱、子代理评估（先调研 Harness 的 subagent 设计再决定是否做）；全量回归（L1 + 10 题 ×3 + 探针）后进入发版评审。
+- 2026-10-22（P2-2）：**引用图谱落地**——`getCitationGraph`（paper/central）：读目标论文 References 与库内其它论文按 DOI/标题匹配，返回「引用了库内谁 / 被库内谁引用」；L1 **41/41**。
+- 2026-10-22（P2-3）：**子代理评估完成**——调研 Harness subagent seam（provider/lifecycle/容量/结算/权限），结论是 P2 暂不做（单 agent 已达标，成本高、收益无证据），保留 P3 最小 one-shot 方案。详见 docs/audits/subagent-evaluation-2026-10-22.md。
+- 下一步：P2 收尾检查 → 全量回归（L1 + 10 题 ×3 + 3 探针）→ 发版评审。

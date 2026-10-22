@@ -21,6 +21,10 @@ const checks = await evalJS(`(async () => {
   const paperTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
   check("paper scope 含 readDocument/getDocumentInfo/searchLibrary", !!paperTools.readDocument && !!paperTools.getDocumentInfo && !!paperTools.searchLibrary, Object.keys(paperTools).join(","));
   check("默认文档工具模式=new（旧工具不暴露）", !!paperTools.readDocument && !paperTools.readPaperSection && !paperTools.ragSearch, Object.keys(paperTools).length);
+  check("new 模式含 getCitationGraph", !!paperTools.getCitationGraph, Object.keys(paperTools).length);
+  const citationGraph = await paperTools.getCitationGraph.execute({ reasoning: "L1", doc: "paper:" + PAPER_A }, { toolCallId: "p15", messages: [] });
+  check("getCitationGraph 参考文献总数>0", (citationGraph.references && citationGraph.references.total) > 0, citationGraph.references && citationGraph.references.total);
+  check("getCitationGraph 结构完整", Array.isArray(citationGraph.references && citationGraph.references.in_library) && Array.isArray(citationGraph.cited_by && citationGraph.cited_by.papers), JSON.stringify({ refs: citationGraph.references && citationGraph.references.in_library.length, cited: citationGraph.cited_by && citationGraph.cited_by.total_papers }));
 
   const info = await paperTools.getDocumentInfo.execute({ reasoning: "L1", doc: "paper:" + PAPER_A }, { toolCallId: "p1", messages: [] });
   check("getDocumentInfo(paper) 标题", String(info.doc.title || "").includes("Rational design"), info.doc.title);
