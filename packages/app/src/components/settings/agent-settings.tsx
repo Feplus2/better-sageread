@@ -1,12 +1,17 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { type AgentSafetyMode, type AgentWorkspaceScope, useAgentSettingsStore } from "@/store/agent-settings-store";
+import {
+  type AgentSafetyMode,
+  type AgentWorkspaceScope,
+  type DocumentToolMode,
+  useAgentSettingsStore,
+} from "@/store/agent-settings-store";
+import { isMobile } from "@/utils/mobile";
 import { appDataDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { isMobile } from "@/utils/mobile";
 
 const MODE_OPTIONS: { value: AgentSafetyMode; label: string; desc: string }[] = [
   {
@@ -26,6 +31,24 @@ const MODE_OPTIONS: { value: AgentSafetyMode; label: string; desc: string }[] = 
   },
 ];
 
+const DOC_TOOL_MODE_OPTIONS: { value: DocumentToolMode; label: string; desc: string }[] = [
+  {
+    value: "new",
+    label: "新原语（推荐）",
+    desc: "readDocument / getDocumentInfo / searchLibrary：跨文献直接读、按目录/锚点取原文，更省 token。",
+  },
+  {
+    value: "both",
+    label: "新旧并存",
+    desc: "新旧工具同时暴露，用于对照调试；工具更多、提示词更长。",
+  },
+  {
+    value: "legacy",
+    label: "旧版工具",
+    desc: "回退到旧版阅读工具集；新原语不可用。",
+  },
+];
+
 const SCOPE_OPTIONS: { scope: AgentWorkspaceScope; label: string }[] = [
   { scope: "central", label: "全局助手" },
   { scope: "reader", label: "阅读助手" },
@@ -38,8 +61,16 @@ const SCOPE_OPTIONS: { scope: AgentWorkspaceScope; label: string }[] = [
  * 界内界外的路径判定在原生侧强制（含符号链接解析），不依赖模型自觉。
  */
 export default function AgentSettings() {
-  const { safetyMode, workspaceRoot, perAgentRoots, setSafetyMode, setWorkspaceRoot, setPerAgentRoot } =
-    useAgentSettingsStore();
+  const {
+    safetyMode,
+    workspaceRoot,
+    perAgentRoots,
+    documentToolMode,
+    setSafetyMode,
+    setWorkspaceRoot,
+    setPerAgentRoot,
+    setDocumentToolMode,
+  } = useAgentSettingsStore();
   const [defaultRoot, setDefaultRoot] = useState("");
   const [auditPath, setAuditPath] = useState("");
 
@@ -74,11 +105,7 @@ export default function AgentSettings() {
       <section className="rounded-lg bg-muted/80 p-4">
         <div className="flex items-center justify-between gap-4">
           <Label className="text-sm">安全模式</Label>
-          <Select
-            value={safetyMode}
-            onValueChange={(v) => setSafetyMode(v as AgentSafetyMode)}
-            disabled={isMobile}
-          >
+          <Select value={safetyMode} onValueChange={(v) => setSafetyMode(v as AgentSafetyMode)} disabled={isMobile}>
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -180,6 +207,31 @@ export default function AgentSettings() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* 文档工具模式 */}
+      <section className="rounded-lg bg-muted/80 p-4">
+        <div className="flex items-center justify-between gap-4">
+          <Label className="text-sm">文档工具模式</Label>
+          <Select value={documentToolMode} onValueChange={(v) => setDocumentToolMode(v as DocumentToolMode)}>
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DOC_TOOL_MODE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="mt-2 text-neutral-500 text-xs dark:text-neutral-400">
+          {DOC_TOOL_MODE_OPTIONS.find((option) => option.value === documentToolMode)?.desc}
+        </p>
+        <p className="mt-1 text-neutral-500 text-xs dark:text-neutral-400">
+          对阅读助手与论文助手生效；切回「旧版工具」即可回退，旧工具保留 alias。
+        </p>
       </section>
     </div>
   );

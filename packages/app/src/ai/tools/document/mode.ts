@@ -15,5 +15,5 @@ export function getDocumentToolMode(): DocumentToolMode {
     const override = window.__SAGEREAD_DOC_TOOL_MODE__;
     if (override === "new" || override === "legacy" || override === "both") return override;
   }
-  return useAgentSettingsStore.getState().documentToolMode ?? "both";
+  return useAgentSettingsStore.getState().documentToolMode ?? "new";
 }

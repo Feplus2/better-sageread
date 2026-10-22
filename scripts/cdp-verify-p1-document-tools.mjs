@@ -20,6 +20,7 @@ const checks = await evalJS(`(async () => {
   const lazy = await import("/src/ai/tools/lazy-toolset.ts");
   const paperTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
   check("paper scope 含 readDocument/getDocumentInfo/searchLibrary", !!paperTools.readDocument && !!paperTools.getDocumentInfo && !!paperTools.searchLibrary, Object.keys(paperTools).join(","));
+  check("默认文档工具模式=new（旧工具不暴露）", !!paperTools.readDocument && !paperTools.readPaperSection && !paperTools.ragSearch, Object.keys(paperTools).length);
 
   const info = await paperTools.getDocumentInfo.execute({ reasoning: "L1", doc: "paper:" + PAPER_A }, { toolCallId: "p1", messages: [] });
   check("getDocumentInfo(paper) 标题", String(info.doc.title || "").includes("Rational design"), info.doc.title);

@@ -126,4 +126,5 @@
 - 2026-10-22（多图修复）：两张图同轮挂起的根因是图片 user 消息插在 tool 响应之间（违反 OpenAI 协议）；已改为同组 tool 结束后聚合附图，双小图探针 6s PASS；useTool 输出脱敏 + 内存缓存（图片不进聊天记录，按 toolCallId 给模型）。
 - 2026-10-22：**分桶 A/B 达标**——Bucket I new 18/18、干净 18/18、均值 39.1k vs legacy 42.7k、中位 24.1k vs 26.1k、耗时 11.3s vs 12.4s（步数 +9% 在容忍带）；Bucket F 12/12、向量化提及率 8/12（合格题 8/9）。详见 docs/audits/agent-ab-bucket-2026-10-22.md。
 - 2026-10-22：新增 `plugin:epub|paper_index_status` 命令（论文级索引状态，含 ACL permission）+ readDocument/getDocumentInfo 返回 index 提示；未索引引导落地。L1 31/31。
-- 下一步：Agent 设置加「文档工具模式」可视化开关 → 默认切 new（旧工具可一键回退）→ L1 + 10 题冒烟 → 继续 P1 guidance 单源与 P2。
+- 2026-10-22：**默认切 new**——Agent 设置新增「文档工具模式」（new/both/legacy）+ 持久化迁移 v2（旧 both → new）；L1 32/32；默认模式 10 题冒烟 **10/10 通过**（含真实看图），旧工具可一键回退。
+- 下一步：P1 guidance 单源重构（把 reader policy 里 legacy 工具引用改成模式感知）→ P2 必要项（跨库检索、引用图谱、子代理评估）→ 全量回归后谈发版。

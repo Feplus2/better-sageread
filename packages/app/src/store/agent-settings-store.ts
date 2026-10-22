@@ -19,7 +19,7 @@ export type AgentWorkspaceScope = "central" | "reader" | "paper";
 /** 按助手覆盖的工作区根；缺项/空串 = 跟随共享根（2026-08-05 拍板：共享根 + 按助手覆盖） */
 export type PerAgentRoots = Partial<Record<AgentWorkspaceScope, string>>;
 
-/** 文档工具模式：both=新旧并存（过渡默认）；new=只暴露通用文档原语；legacy=旧工具（回退位） */
+/** 文档工具模式：new=通用文档原语（默认）；both=新旧并存（调试）；legacy=旧工具（回退位） */
 export type DocumentToolMode = "both" | "new" | "legacy";
 
 interface AgentSettingsState {
@@ -42,7 +42,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
       safetyMode: "strict",
       workspaceRoot: null,
       perAgentRoots: {},
-      documentToolMode: "both",
+      documentToolMode: "new",
       // 移动端 Agent 权限收敛（M3-g 裁定）：只保留严格模式——无 shell/子进程能力，
       // 完全访问在手机上无意义且风险放大；同步过来的桌面配置可能带 full，写入侧一律拦回 strict
       setSafetyMode: (safetyMode) => set({ safetyMode: isMobile ? "strict" : safetyMode }),
@@ -65,6 +65,15 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
     {
       name: tauriStorageKey.agentSettings,
       storage: createJSONStorage(() => tauriStorage),
+      version: 2,
+      // v2：文档工具模式默认值从 both 切到 new——旧版本持久化的 both 迁移到 new（用户仍可在设置里切回）
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<AgentSettingsState> | undefined;
+        if (state && version < 2 && state.documentToolMode === "both") {
+          state.documentToolMode = "new";
+        }
+        return state as AgentSettingsState;
+      },
       partialize: (state) => ({
         safetyMode: state.safetyMode,
         workspaceRoot: state.workspaceRoot,
@@ -85,7 +94,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
           merged.documentToolMode !== "legacy" &&
           merged.documentToolMode !== "both"
         ) {
-          merged.documentToolMode = "both";
+          merged.documentToolMode = "new";
         }
         return merged;
       },
