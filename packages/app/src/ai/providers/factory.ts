@@ -10,6 +10,7 @@ import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
 import {
   normalizeAnthropicBaseUrl,
+  normalizeGeminiBaseUrl,
   normalizeOpenAIBaseUrl,
   resolveProviderProtocol,
 } from "./protocol";
@@ -279,7 +280,7 @@ export function createProviderInstance(config: ProviderConfig) {
       if (protocol === "gemini") {
         return createGoogleGenerativeAI({
           apiKey: apiKey || "",
-          baseURL: baseUrl,
+          baseURL: normalizeGeminiBaseUrl(baseUrl),
         });
       }
       // chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）
@@ -346,7 +347,13 @@ export function createModelInstance(
   if (protocol === "openai-chat" && typeof providerAny.chat === "function") {
     return providerAny.chat(modelId);
   }
-  return providerInstance(modelId) as LanguageModel;
+  // Gemini 原生协议：AI SDK 只在 modelId 不含 "/" 时自动补 models/ 前缀；
+  // 网关的 google/xxx 模型需要 models/google/xxx 才能命中 /v1beta/models/... 路径。
+  const effectiveModelId =
+    protocol === "gemini" && modelId.includes("/") && !modelId.startsWith("models/")
+      ? "models/" + modelId
+      : modelId;
+  return providerInstance(effectiveModelId) as LanguageModel;
 }
 
 /**

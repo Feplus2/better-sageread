@@ -39,7 +39,8 @@ function gatewayProtocol(host: string, modelId: string): ProviderProtocol | null
   if (host.endsWith("cherryin.net") || host.endsWith("cherryin.ai")) {
     if (modelId.startsWith("openai/")) return "openai-responses";
     if (modelId.startsWith("anthropic/")) return "anthropic-messages";
-    // google/gemini 模型在网关只走 OpenAI compatible（官方 Gemini 协议另需 Google key）
+    // 2026-10-22 实测：CherryIN 的 google/* 模型对外暴露 gemini 端点（/v1beta），可走原生 Gemini 协议
+    if (modelId.startsWith("google/") || modelId.startsWith("gemini/")) return "gemini";
     return "chat";
   }
   return null;
@@ -75,6 +76,15 @@ export function normalizeOpenAIBaseUrl(baseUrl?: string): string | undefined {
   if (!baseUrl) return undefined;
   const trimmed = baseUrl.replace(/\/+$/, "");
   return /\/v\d+$/.test(trimmed) ? trimmed : trimmed + "/v1";
+}
+
+/** Gemini 原生 baseURL：Gemini API 用 /v1beta；用户填 /v1 或根地址时规范化。 */
+export function normalizeGeminiBaseUrl(baseUrl?: string): string | undefined {
+  if (!baseUrl) return undefined;
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  if (/\/v1beta$/.test(trimmed)) return trimmed;
+  if (/\/v1$/.test(trimmed)) return trimmed.replace(/\/v1$/, "/v1beta");
+  return trimmed + "/v1beta";
 }
 
 /** Anthropic Messages baseURL：保留 .../v1；用户若只填根地址则补 /v1。 */

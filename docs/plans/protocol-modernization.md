@@ -119,9 +119,24 @@ curl 实测三条通道均 200。
 
 ### 7.3 尚未验证
 - 官方 OpenAI / Anthropic / Gemini 三个 provider id 的原生端点（无 key）；
-- Gemini 3 原生多模态工具结果（无 key、CherryIN 不代理 Gemini 原生协议）；
-- 应用 UI 内的端到端模型切换（本机 dev 实例当前停在书库页，模型下拉不在活动视口；需要打开书籍/论文后手测或用户切换后跑探针）；
+- ~~Gemini 3 原生多模态工具结果~~ **已补测（2026-10-22 晚）**：CherryIN 的 google/* 模型暴露 gemini 端点，/v1beta 原生协议可用；gemini-3.8-flash、gemini-4-argon 的图片工具结果探针均 PASS；
+- 应用 UI 内的端到端模型切换：已能在打开书籍后切到 `openai/gpt-5.6-luna`，但 L2 视觉探针在 UI 内 240s 超时（协议层 curl/SDK 探针均正常，初步判断是 UI 测试脚本/模型切换状态问题，不是令牌或协议不可用）；
 - Anthropic 原生下的 prompt cache / thinking 参数与 AI SDK 的兼容细节。
 
 ### 7.4 工作量修正
 协议层代码（路由 + 工具输出 + factory + transport）已完成并 tsc 通过；剩余主要是 UI 端到端 + 官方 provider 回归，约 0.5–1.5 个聚焦日（不含发版）。
+
+### 7.5 国产模型同样可测（2026-10-22 晚补测）
+协议可用性与厂商无关：用 CherryIN 的 Anthropic Messages 原生端点直接调用国产模型，均 HTTP 200 且返回合法 Anthropic message：
+- agent/deepseek-v4-flash：200（含 thinking + text）
+- agent/glm-5.2：200（含 thinking）
+- agent/kimi-k2.6：200
+
+因此“只有海外御三家能测原生协议”是误解；真实能力取决于网关暴露的 endpoint 类型与模型本身是否支持视觉，不是厂商国籍。
+
+### 7.6 最新模型原生多模态补测（2026-10-22 晚）
+- openai/gpt-6-luna（Responses）：PASS，看到图；小字号字符串有一处字符误读（SAGEREAD → SAGFAD），形状/颜色全对；
+- anthropic/claude-sonnet-5.5（Anthropic Messages）：PASS，字符串与形状/颜色全对；
+- google/gemini-3.8-flash、google/gemini-4-argon（Gemini 原生）：PASS，字符串与形状/颜色全对。
+
+注意：AI SDK 的 Google provider 对含 `/` 的 modelId 不会自动补 `models/` 前缀，CherryIN 需要 `models/google/...` 路径；factory 已对 gemini 协议做 `models/` 前缀归一。
