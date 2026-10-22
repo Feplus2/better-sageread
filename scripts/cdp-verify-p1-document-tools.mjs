@@ -47,7 +47,7 @@ const checks = await evalJS(`(async () => {
 
   const civilTools = registry.getToolsForScope("reader", { bookId: "718a0d5d6514980ce87dd8b0d39ad2dc" });
   const infoCivil = await civilTools.getDocumentInfo.execute({ reasoning: "L1", doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }, { toolCallId: "p5b", messages: [] });
-  check("getDocumentInfo(未索引书) 目录 5-35 条（EPUB TOC 回退）", infoCivil.outline.total >= 5 && infoCivil.outline.items.length <= 35, infoCivil.outline.total + "/" + infoCivil.outline.source + "/items=" + infoCivil.outline.items.length);
+  check("getDocumentInfo(未索引书) 目录 5-40 条（EPUB TOC 回退）", infoCivil.outline.total >= 5 && infoCivil.outline.items.length <= 40, infoCivil.outline.total + "/" + infoCivil.outline.source + "/items=" + infoCivil.outline.items.length);
 
   window.__SAGEREAD_DOC_TOOL_MODE__ = "new";
   const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
@@ -67,15 +67,26 @@ const checks = await evalJS(`(async () => {
   check("searchLibrary doc 锚点", (search.results || []).every((r) => String(r.doc).startsWith("paper:")), "");
   check("searchLibrary 无 citation_guide", !("citation_guide" in search), Object.keys(search).join(","));
 
-  const budgetMod = await import("/src/ai/tools/document/read-budget.ts");
-  budgetMod.resetReadBudget();
-  let budgetHit = false;
+  const figs2 = await paperTools.getFigures.execute({ reasoning: "L1" }, { toolCallId: "p10", messages: [] });
+  const imgPath = figs2.figures[0].image_path;
+  let imageOk = 0;
   for (let i = 0; i < 4; i++) {
-    const r = await paperTools.readDocument.execute({ reasoning: "L1", doc: "paper:" + PAPER_A, offset: i * 2000, after: 12000 }, { toolCallId: "p8-" + i, messages: [] });
-    if (String(r.note || "").includes("预算")) budgetHit = true;
+    const r = await paperTools.readImage.execute({ path: imgPath }, { toolCallId: "p10-" + i, messages: [] });
+    if (r.type === "content") imageOk += 1;
   }
-  check("单轮读取预算生效", budgetHit, "");
-  budgetMod.resetReadBudget();
+  check("连续看 4 张图不被每轮张数限制", imageOk === 4, imageOk + "/4");
+  const imgLarge = await paperTools.readImage.execute({ path: imgPath, maxEdge: 2048 }, { toolCallId: "p10-large", messages: [] });
+  const imgSmall = await paperTools.readImage.execute({ path: imgPath, maxEdge: 512 }, { toolCallId: "p10-small", messages: [] });
+  const largeUrl = imgLarge.type === "content" ? (imgLarge.value.find((p) => p.type === "file") || {}).url : "";
+  const smallUrl = imgSmall.type === "content" ? (imgSmall.value.find((p) => p.type === "file") || {}).url : "";
+  check("maxEdge 可放大到 2048 且 512 更小", String(largeUrl).length > String(smallUrl).length && String(smallUrl).length > 0, String(smallUrl).length + " < " + String(largeUrl).length);
+  // 文本读取不再有每轮硬上限：多次 readDocument 都应正常返回
+  let readsOk = 0;
+  for (let i = 0; i < 5; i++) {
+    const r = await paperTools.readDocument.execute({ reasoning: "L1", doc: "paper:" + PAPER_A, offset: i * 1000, after: 3000 }, { toolCallId: "p9-" + i, messages: [] });
+    if (String(r.text || "").length > 0) readsOk += 1;
+  }
+  check("文本读取无每轮硬上限", readsOk === 5, readsOk + "/5");
 
   const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "collection" }, { toolCallId: "p7", messages: [] });
   check("searchLibrary(collection) 只查面板范围", (scoped.results || []).every((r) => r.doc === "paper:" + PAPER_C), (scoped.results || []).map((r) => r.doc).join(","));

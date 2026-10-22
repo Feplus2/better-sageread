@@ -8,7 +8,7 @@ import { type AgentDocScope, bookIndexed, docDir, docRefString, readDocMetadata,
 
 const MAX_OUTLINE_ITEMS = 80;
 /** 书籍目录注入上限：EPUB TOC 可能上百条，注入 35 条一级/二级即可，避免挤占上下文 */
-const BOOK_TOC_MAX = 35;
+const BOOK_TOC_MAX = 40;
 
 function countFigureLines(markdown: string): number {
   return markdown.split("\n").filter((line) => line.trim().startsWith("![") && line.includes("images/")).length;
@@ -128,7 +128,10 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
           })),
           truncated: tocTruncated,
           source: tocSource,
-          note: tocItems.length === 0 ? "没有可用目录；可直接用 readDocument 的 heading 尝试匹配 EPUB 目录" : undefined,
+          note:
+            tocItems.length === 0
+              ? "没有可用目录；可直接用 readDocument 的 heading 尝试匹配 EPUB 目录。有目录时只读目标小节，不要整章通读。"
+              : undefined,
         },
         counts: { figures: null, citations: null },
         meta: { reasoning: args.reasoning },

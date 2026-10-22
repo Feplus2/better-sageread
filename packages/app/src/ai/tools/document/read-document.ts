@@ -8,7 +8,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
-import { takeReadBudget } from "./read-budget";
 import { type AgentDocScope, type DocRef, docRefString, readDocMetadata, resolveDocRef } from "./shared";
 
 const DEFAULT_WINDOW = 6000;
@@ -170,21 +169,14 @@ export const createReadDocumentTool = (ctx: AgentDocScope) =>
       const doc = resolveDocRef(args.doc, ctx);
       const metadata = await readDocMetadata(doc);
       const window = doc.kind === "paper" ? await readPaperWindow(doc, args) : await readBookWindow(doc, args);
-      // 单轮读取预算：超出后只返回剩余部分，并提示停止扩读
-      const requested = window.text.length;
-      const granted = takeReadBudget(requested);
-      const budgetNote =
-        granted < requested
-          ? `本轮读取预算已到上限，本次只返回前 ${granted} 字符；请基于已有信息作答，不要再扩读。`
-          : "";
       return {
         doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
         anchor: window.anchor,
-        text: window.text.slice(0, granted),
+        text: window.text,
         total_chars: window.totalChars,
         next_offset: window.nextOffset,
-        truncated: window.truncated || granted < requested,
-        note: [window.note, budgetNote].filter(Boolean).join("；") || undefined,
+        truncated: window.truncated,
+        note: window.note || undefined,
         meta: { reasoning: args.reasoning },
       };
     },

@@ -138,8 +138,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const activeBookId = chatContext?.activeBookId;
     const agentScope = chatContext?.agentScope ?? "reader";
 
-    const { resetReadBudget } = await import("./tools/document/read-budget");
-    resetReadBudget();
     const sel = useProviderStore.getState().selectedModel;
 
     // J2：当前模型不支持多模态时，剔除全部 file part（含历史图片）——
@@ -215,7 +213,10 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // D8 目录牌模式（预算守门：工具池 >30 个或 schema >12k 字符自动启用）：
     // 请求工具面换 describeTool/useTool 惰性入口，真实工具（含守卫包装）经 useTool 转发执行；
     // 目录牌文本进 system 静态区（随 scope/连接器集稳定，缓存友好）。
-    const directoryMode = shouldUseDirectoryMode(guardedTools);
+    // P1-4：new 模式强制轻量目录牌（只发名字+一句话），把每步 ~2.4k token 的完整 schema 换成一个 describeTool 调用
+    const { getDocumentToolMode } = await import("./tools/document/mode");
+    const forceDirectoryForNewMode = agentScope !== "central" && getDocumentToolMode() === "new";
+    const directoryMode = forceDirectoryForNewMode || shouldUseDirectoryMode(guardedTools);
     const tools: Record<string, Tool> = directoryMode ? buildLazyToolset(guardedTools) : guardedTools;
 
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
