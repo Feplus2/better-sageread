@@ -5,6 +5,27 @@ import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { tool } from "ai";
 import { z } from "zod";
 
+/** 单个/合计解压体积上限（防 zip 炸弹） */
+const MAX_ENTRY_BYTES = 100 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+
+/**
+ * 安全拼接解压目标路径：拒绝绝对路径、盘符、任何 .. 段，保证落点始终在 destDir 内（防 zip-slip）。
+ * 返回 null 表示该 entry 非法，应跳过。
+ */
+function safeEntryPath(destDir: string, entryName: string): string | null {
+  const normalized = entryName.replace(/\\/g, "/");
+  if (!normalized || normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return null;
+  const segments: string[] = [];
+  for (const segment of normalized.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") return null; // 直接拒绝，不做"尝试归一化"
+    segments.push(segment);
+  }
+  if (segments.length === 0) return null;
+  return `${destDir.replace(/[\\/]+$/, "")}/${segments.join("/")}`;
+}
+
 export const extractZipTool = tool({
   description: `解压 ZIP 压缩文件到指定目录。
 
@@ -34,18 +55,39 @@ export const extractZipTool = tool({
       await mkdir(destDir, { recursive: true }).catch(() => {});
 
       const files: string[] = [];
+      const skipped: string[] = [];
+      let totalBytes = 0;
       for (const entry of entries) {
-        const entryPath = `${destDir}/${entry.filename}`;
+        const entryPath = safeEntryPath(destDir, entry.filename);
+        if (!entryPath) {
+          skipped.push(entry.filename);
+          continue;
+        }
         if (entry.directory) {
           await mkdir(entryPath, { recursive: true }).catch(() => {});
-        } else {
-          // 确保父目录存在
-          const parentDir = entryPath.replace(/[/\\][^/\\]+$/, "");
-          await mkdir(parentDir, { recursive: true }).catch(() => {});
-          const data = await entry.getData!(new Uint8ArrayWriter());
-          await writeFile(entryPath, data);
-          files.push(entry.filename);
+          continue;
         }
+        const entryBytes = Number(entry.uncompressedSize ?? 0);
+        if (entryBytes > MAX_ENTRY_BYTES || totalBytes + entryBytes > MAX_TOTAL_BYTES) {
+          await reader.close().catch(() => {});
+          return {
+            results: {
+              success: false,
+              message: `解压中止：压缩包内文件过大（单文件上限 100MB、解压总量上限 200MB），疑似 zip 炸弹`,
+              destDir,
+              files,
+              skipped,
+            },
+            meta: { reasoning, zipPath },
+          };
+        }
+        // 确保父目录存在
+        const parentDir = entryPath.replace(/[/\\][^/\\]+$/, "");
+        await mkdir(parentDir, { recursive: true }).catch(() => {});
+        const data = await entry.getData!(new Uint8ArrayWriter());
+        totalBytes += data.length;
+        await writeFile(entryPath, data);
+        files.push(entry.filename);
       }
 
       await reader.close();
@@ -53,9 +95,12 @@ export const extractZipTool = tool({
       return {
         results: {
           success: true,
-          message: `已解压 ${files.length} 个文件到 ${destDir}`,
+          message: skipped.length
+            ? `已解压 ${files.length} 个文件到 ${destDir}；跳过 ${skipped.length} 个非法路径项（防 zip-slip）`
+            : `已解压 ${files.length} 个文件到 ${destDir}`,
           destDir,
           files,
+          ...(skipped.length > 0 ? { skipped } : {}),
         },
         meta: { reasoning, zipPath },
       };

@@ -9,12 +9,9 @@
    - description 中文富文本：核心功能 / 前提条件 / 返回内容 / **什么时候别用**（决定模型的选择准确率，比堆工具数量重要）
    - 工具输出是模型的"眼睛"：给结构化结果 + 可继续的线索，不要只回 "ok"
 2. **注册** `ai/tools/registry.ts`
-   - 静态工具：`registerTools([...])`（scope central/shared），自动进 `getToolDescriptions`
-   - 需要 bookId/paperId 闭包的：在 `getToolsForScope` 对应分支工厂创建（ragSearch 先例），**并手动同步 `getToolDescriptions`**
-3. **提示词清单同步**（按 scope 三选一）
-   - central → `constants/central-prompt.ts` 工具清单
-   - paper → `constants/paper-prompt.ts`
-   - reader → `src-tauri/src/core/default-skills.json` 系统技能种子。**坑：存量数据库不会自动更新**——必须在 `core/database.rs` 加条件迁移块（指纹匹配官方文案才动，用户自定义过的不动；先例：v2 整文替换、v2.1 ragRange 手术插入）
+   - 静态工具：`registerTools([...])`（scope central/shared）进模块级 `registry`，由 `getToolsForScope` 组装。注意 `getToolDescriptions()` 当前**无调用方**，不要为它维护清单。
+   - 需要 bookId/paperId 闭包的：在 `getToolsForScope` 对应分支工厂创建（ragSearch/readDocument 先例）。
+3. **提示词策略同步**（按 scope 三选一）：2026-09 分层重构后，工具策略不再走 DB 种子/清单生成，而是代码里的系统策略段——改工具面必须同步 `constants/central-prompt.ts`、`constants/paper-prompt.ts`、`constants/prompt.ts`（buildReaderPolicy），并检查 `ai/prompts/library-guide.ts` 的共享约定。`src-tauri/src/core/default-skills.json` 的系统基词种子已退役（只剩"生成思维导图"一条技能）。
 4. **UI 显示名** `components/side-chat/chat-messages.tsx` 的 TOOL_NAME_MAP；要结构化结果面板再改 `pages/chat/index.tsx` 的 renderToolContent
 5. **barrel 导出** `ai/tools/index.ts`（+ `central/index.ts` 或 `paper/index.ts`）
 

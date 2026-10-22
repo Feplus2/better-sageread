@@ -386,27 +386,50 @@ export function chatReasoningBodyPatch(
  * 实网验证：DeepSeek 支持 disabled / enabled+budget_tokens / adaptive；Kimi 支持 disabled；
  * 恒思考型号发 disabled 会 400，因此夹到最低档后用 enabled 下发（失败时 wrapper 去补丁重放）。
  */
-export function anthropicThinkingBodyPatch(modelId: string, level: ReasoningLevel): ReasoningBodyPatch | null {
+export function anthropicThinkingBodyPatch(
+  providerId: string,
+  baseUrl: string | undefined,
+  modelId: string,
+  level: ReasoningLevel,
+): ReasoningBodyPatch | null {
   if (level === "auto") return null;
   const cap = lookupCap(modelId);
   const lv = cap ? clampReasoningLevel(cap.levels, level) : level;
+  // DeepSeek 的 Anthropic 兼容端点：thinking.budget_tokens 会被忽略，只有 output_config.effort 生效
+  // （官方兼容表 2026-10-22 核实）。恒思考型号的 off/none 也夹到最低档后走 effort。
+  const isDeepSeek = providerId === "deepseek" || /\.deepseek\.com/i.test(baseUrl ?? "");
 
   // 可关闭的型号：off/none 直接关思考（已实网验证 DeepSeek/Kimi）
   if ((lv === "off" || lv === "none") && !cap?.alwaysOn) {
     return (body) => {
       delete body.reasoning_effort;
       delete body.enable_thinking;
+      delete body.output_config;
       body.thinking = { type: "disabled" };
     };
   }
 
-  // 恒思考型号的 off/none 夹到最低原生档；其余档位按映射表折算 budget_tokens
+  // 恒思考型号的 off/none 夹到最低原生档；其余档位按映射表折算
   const effective = cap?.alwaysOn && (lv === "off" || lv === "none") && cap.levels.length > 0 ? cap.levels[0] : lv;
+  if (isDeepSeek) {
+    const effort = effective === "on" ? "high" : effective;
+    return (body) => {
+      delete body.reasoning_effort;
+      delete body.enable_thinking;
+      delete body.thinking;
+      body.output_config = { effort };
+    };
+  }
   const budget = budgetTokensForLevel(effective);
   return (body) => {
     delete body.reasoning_effort;
     delete body.enable_thinking;
+    delete body.output_config;
     body.thinking = budget ? { type: "enabled", budget_tokens: budget } : { type: "enabled" };
+    // Anthropic 要求 max_tokens > budget_tokens；否则严格兼容端点会 400（wrapper 会去补丁重放=控制失效）
+    if (budget && typeof body.max_tokens === "number" && body.max_tokens <= budget + 1024) {
+      body.max_tokens = budget + 2048;
+    }
   };
 }
 

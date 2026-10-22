@@ -59,6 +59,8 @@ export function useModelSelector(defaultProviderId?: string, defaultModelId?: st
     if (!selectedModel) return null;
 
     try {
+      // 切换模型时清掉工具图片缓存：避免旧模型的历史图用新模型重发（尤其切到纯文本模型时 400）
+      void import("@/ai/utils/tool-image-cache").then((m) => m.clearToolImageCache());
       // 聊天模型：挂动态思考强度包装（P3；按请求时刻档位打补丁，映射表不认的端透传）
       return createModelInstance(selectedModel.providerId, selectedModel.modelId, {
         reasoningLevelRef: () => useChatSettingsStore.getState().reasoningLevel,

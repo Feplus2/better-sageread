@@ -25,8 +25,9 @@
 | Gemini | gemini | gemini: https://generativelanguage.googleapis.com/v1beta；chat: …/v1beta/openai | 官方文档；网络超时 |
 | DeepSeek | anthropic-messages | anthropic: https://api.deepseek.com/anthropic/v1；chat: https://api.deepseek.com/v1 | **实网 401 可达**（chat/responses/anthropic）；App 内视觉探针 PASS |
 | Kimi (Moonshot) | anthropic-messages | anthropic: https://api.moonshot.cn/anthropic/v1；chat/responses: https://api.moonshot.cn/v1 | **实网 401 可达**；App 内 tool_result 图片探针（curl 层）PASS |
-| 智谱 GLM | anthropic-messages | anthropic: https://open.bigmodel.cn/api/anthropic/v1；chat: https://open.bigmodel.cn/api/paas/v4 | 实网 401；Coding Plan 到期，图片能力待续订 |
+| 智谱 GLM | **openai-chat（2026-10-22 晚改）** | chat: https://open.bigmodel.cn/api/paas/v4；anthropic: https://open.bigmodel.cn/api/anthropic/v1（需 Coding Plan） | 实网：普通 key 的 OpenAI 兼容端点 200、App 文本探针 PASS；Anthropic 兼容端点 429 "Coding Plan 到期" |
 | MiniMax | anthropic-messages | anthropic: https://api.minimaxi.com/anthropic/v1；chat: https://api.minimaxi.com/v1 | 实网 401；**App 内 tool_result 图片探针 PASS（2026-10-22 晚）** |
+| CherryIN 网关（自定义） | auto（按模型前缀） | https://open.cherryin.net/v1 | **App 内 Anthropic/Gemini 原生工具图片探针双 PASS** |
 | 小米 MiMo | openai-chat | chat: https://api.xiaomimimo.com/v1；anthropic: https://api.xiaomimimo.com/anthropic/v1 | 实网 401 |
 | 阿里云百炼 Qwen | openai-chat | chat/responses: https://dashscope.aliyuncs.com/compatible-mode/v1；anthropic: https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy/v1 | 实网 401 |
 | 豆包（火山方舟） | openai-chat | chat/responses: https://ark.cn-beijing.volces.com/api/v3 | 实网 401 |
@@ -57,6 +58,12 @@
 
 注意：OpenAI/Gemini/xAI/Mistral/Perplexity 等在本机出口超时；Anthropic/Together/Cohere/Cerebras/Groq 被 WAF 403。
 这些状态是"文档核实、实网不可达"，不能写进用户可见的"已验证"文案。
+
+### 3.1 2026-10-22 晚补充：网关与智谱实测
+
+- CherryIN 网关：自定义 provider（auto 前缀路由）App 内实跑——`anthropic/claude-sonnet-4.6`（Messages 原生）视觉探针 PASS 13.6s；`google/gemini-3.5-flash`（Gemini 原生）视觉探针 PASS 13.6s；均 bridgeLog=[]。
+- 智谱：普通 API key 的 OpenAI 兼容端点可用（App 文本探针 7.0s PASS）；Anthropic 兼容端点绑定 GLM Coding Plan（未订阅 429）。**预置默认协议已从 anthropic-messages 改为 openai-chat**，Anthropic 端点保留为 Coding Plan 用户备选；provider-store v9 迁移会改掉旧的默认值。
+- 结论：国产厂商的 Anthropic 兼容端点并不同质——DeepSeek/Kimi/MiniMax 普通 key 即可用，智谱需要 Coding Plan；不能按"厂商支持 Anthropic 兼容"一刀切。
 
 ## 4. 原生工具结果图片（多模态）能力矩阵
 

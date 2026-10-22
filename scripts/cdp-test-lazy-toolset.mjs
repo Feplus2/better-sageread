@@ -40,6 +40,8 @@ const evalp = async (expression) => {
 };
 
 const out = await evalp(`(async () => {
+  // 该脚本用 ragSearch 验 describeTool；显式切 legacy 工具池
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
   const res = {};
   const bust = '?t=' + Date.now();
   const reg = await import('/src/ai/tools/registry.ts' + bust);

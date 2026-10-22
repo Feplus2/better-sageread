@@ -71,7 +71,7 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
 
 —— 引用与图片规范 ——
 • 引用给章节标题 / 图号 / 表号 / 参考文献编号，不编造页码。
-• 图片：先用 getFigures 拿绝对 image_path，再 readImage(path=...)；没有真正调用 readImage 时不要声称看过图。`
+• 图片：检索/读原文结果里给出的图片绝对路径（Markdown 图片语法或 image_path 字段）可直接用 readImage(path=...) 查看；书籍没有独立的“图片清单”工具，不要调用 getFigures。没有真正调用 readImage 时不要声称看过图。`
         : `—— 内容读取（新原语，当前书未建索引） ——
 本书未建向量索引，不能用 searchLibrary 检索本书。先 getDocumentInfo(doc=book:<id>) 取目录（无索引时回退 EPUB TOC），再用 readDocument(doc=book:<id>, heading=... 或 position=true) 读原文；目录缺失时用 offset 从开头按窗口读。
 回答里明确告诉用户「本书尚未向量化，按原文读取较慢；在设置里向量化后可提速」；未读原文前不得凭印象编造。`
@@ -84,6 +84,12 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
 • 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答，并继续用 readDocument(position=true) 读当前位置原文；需要其它章节正文用 getDocumentInfo 取目录后 readDocument(heading=...)。`
       : `• 需要"当前这一节/这里/我读到的地方"的原文时用 readAtReadingPosition（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
 • 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答并继续用 readAtReadingPosition 读当前位置原文；需要其它章节正文再尝试 readBookSection（按标题匹配，可能失败）或 ragToc/ragRange。`;
+  const fileTools =
+    docMode === "new"
+      ? `—— 文件工具 ——
+readLocalFile 只读可用（用户消息里【附件已登记】的本地文件用它读取，大文件分段续读）；writeFile / editFile / searchFiles / runCommand 在新原语模式下不在你的工具面；阅读笔记与摘要用 manageNotes 落盘，导出划线与想法用 exportNotes；需要写工作区文件时引导用户到全局助手。`
+      : `—— 文件工具 ——
+writeFile / editFile / readLocalFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段），整理好的阅读笔记/摘要可落盘；exportNotes 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）。`;
   const crossDoc =
     docMode === "legacy"
       ? `—— 跨文档阅读 ——
@@ -121,8 +127,7 @@ readThread：读回本对话的完整问答记录（仅用户提问与 AI 回答
 —— 思维导图 ——
 mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="生成思维导图") 获取规范并严格按步骤执行；生成思维导图时不要在回复中输出任何图片（含 Markdown 图片语法）。
 
-—— 文件工具 ——
-writeFile / editFile / readLocalFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段），整理好的阅读笔记/摘要可落盘；exportNotes 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）。
+${fileTools}
 
 —— 全书翻译 ——
 全书翻译不在你的工具面：引导用户用阅读器顶栏「翻译」菜单（翻译全书/继续翻译/重新翻译，含句词对齐重建入口），或到全局助手执行；翻译进度在主页右下角「图书翻译」任务卡可见、可取消。`;

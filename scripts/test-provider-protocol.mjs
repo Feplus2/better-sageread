@@ -89,19 +89,32 @@ check("自定义代理根 → 补 /v1", lib.normalizeAnthropicBaseUrl("https://r
 check("自定义代理已带 /v1 不变", lib.normalizeAnthropicBaseUrl("https://relay.example.com/v1") === "https://relay.example.com/v1");
 
 console.log("[4] Anthropic 原生通道 thinking 补丁（P0-2）");
-const thinkingBody = (modelId, level) => {
-  const patch = lib.anthropicThinkingBodyPatch(modelId, level);
+const DS = "https://api.deepseek.com/anthropic/v1";
+const KM = "https://api.moonshot.cn/anthropic/v1";
+const applyThinking = (providerId, baseUrl, modelId, level) => {
+  const patch = lib.anthropicThinkingBodyPatch(providerId, baseUrl, modelId, level);
   if (!patch) return null;
   const body = {};
   patch(body);
-  return body.thinking;
+  return body;
 };
-check("DeepSeek off → thinking disabled", JSON.stringify(thinkingBody("deepseek-flash", "off")) === JSON.stringify({ type: "disabled" }));
-check("DeepSeek high → enabled + 4096 budget", JSON.stringify(thinkingBody("deepseek-flash", "high")) === JSON.stringify({ type: "enabled", budget_tokens: 4096 }));
-check("DeepSeek auto → 不下发", thinkingBody("deepseek-flash", "auto") === null);
-check("Kimi K3 恒思考 off → 最低档 enabled（不 400）", (() => { const t = thinkingBody("kimi-k3", "off"); return t?.type === "enabled" && t?.budget_tokens === 1024; })());
-check("Kimi K2.6 on → enabled", thinkingBody("kimi-k2.6", "on")?.type === "enabled");
-check("未知型号 off → disabled（可关优先）", thinkingBody("some-unknown-model", "off")?.type === "disabled");
+const dsOff = applyThinking("deepseek", DS, "deepseek-flash", "off");
+check("DeepSeek off → thinking disabled", JSON.stringify(dsOff?.thinking) === JSON.stringify({ type: "disabled" }));
+const dsHigh = applyThinking("deepseek", DS, "deepseek-flash", "high");
+check(
+  "DeepSeek high → output_config.effort（不吃 budget_tokens）",
+  JSON.stringify(dsHigh?.output_config) === JSON.stringify({ effort: "high" }) && !dsHigh?.thinking,
+);
+check("DeepSeek auto → 不下发", applyThinking("deepseek", DS, "deepseek-flash", "auto") === null);
+const kimiK3Off = applyThinking("kimi", KM, "kimi-k3", "off");
+check("Kimi K3 恒思考 off → 最低档 enabled（不 400）", kimiK3Off?.thinking?.type === "enabled" && kimiK3Off?.thinking?.budget_tokens === 1024);
+const kimiOn = applyThinking("kimi", KM, "kimi-k2.6", "on");
+check("Kimi K2.6 on → enabled", kimiOn?.thinking?.type === "enabled");
+const kimiMax = applyThinking("kimi", KM, "kimi-k2.6", "max");
+const rawMax = { max_tokens: 4096 };
+lib.anthropicThinkingBodyPatch("kimi", KM, "kimi-k2.6", "max")(rawMax);
+check("budget 注入会抬高 max_tokens（防严格端点 400）", rawMax.max_tokens === 8192 + 2048);
+check("未知型号 off → disabled（可关优先）", applyThinking("anthropic", "https://api.anthropic.com/v1", "some-unknown-model", "off")?.thinking?.type === "disabled");
 
 console.log("[5] native 历史图回灌预算（最近 6 张 / 2 批 + 当轮 live 6 张）");
 const dataUrl = (tag, chars = 64) => `data:image/png;base64,${tag}${"A".repeat(chars)}`;

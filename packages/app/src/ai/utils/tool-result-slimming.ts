@@ -33,6 +33,13 @@ export const TOOL_RESULT_PREVIEW_CHARS = 1000;
 const L1_CONTENT_TOOLS = new Set([
   "describeTool",
   "useTool",
+  // 2026-10-22 新原语（默认模式实际在用的工具；漏加会让 L1 截断对默认工具面失效）
+  "readDocument",
+  "getDocumentInfo",
+  "searchLibrary",
+  "getCitationGraph",
+  "getFigures",
+  "getCitations",
   "ragSearch",
   "ragContext",
   "ragRange",

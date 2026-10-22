@@ -39,6 +39,8 @@ function cdp(method, params = {}) {
 
 const expression = `
 (async () => {
+  // 该脚本断言的是旧版文档工具面（ragRange/readBookSection）；显式切 legacy，避免被默认 new 模式误判
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
   const checks = [];
   const check = (name, pass, info) => checks.push({ name, pass: !!pass, info: info == null ? "" : String(info) });
   const origin = location.origin;

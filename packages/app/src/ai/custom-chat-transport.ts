@@ -240,9 +240,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           apiStyle: selectedProvider?.apiStyle,
         })
       : "chat";
-    const toolsForModel = supportsNativeToolImages(providerProtocol)
-      ? wrapToolsForNativeImages(tools)
-      : tools;
+    // 原生工具图只按协议判定不够：切到纯文本模型后历史工具图会以图片 part 重发导致 400
+    const toolsForModel =
+      supportsNativeToolImages(providerProtocol) && visionOk ? wrapToolsForNativeImages(tools) : tools;
 
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
     options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });

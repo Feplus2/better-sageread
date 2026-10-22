@@ -6,7 +6,8 @@
  * - openai-chat：OpenAI Chat Completions（grok、以及只支持 chat 的自定义代理）
  * - anthropic-messages：Anthropic Messages（官方 Anthropic、以及已知网关的 anthropic/* 模型）
  * - gemini：Google Gemini 原生（Gemini 3 支持多模态工具结果）
- * - chat：OpenAI-compatible chat（DeepSeek 视觉、OpenRouter、未知自定义端点；工具图片走 fetch 层图片桥）
+ * - chat：OpenAI-compatible chat（OpenRouter、自定义代理、未知端点；工具图片走 fetch 层图片桥）
+ *   注：官方 DeepSeek 已走 anthropic-messages（2026-10-22），自定义 DeepSeek 代理仍走 chat。
  *
  * 注意：这是“传输协议”路由，不是“模型能力”判断；未知自定义端点默认 chat（最保守，不会误发新端点 404）。
  */
@@ -124,7 +125,9 @@ export function supportsNativeToolImages(protocol: ProviderProtocol): boolean {
 export function normalizeOpenAIBaseUrl(baseUrl?: string): string | undefined {
   if (!baseUrl) return undefined;
   const trimmed = baseUrl.replace(/\/+$/, "");
-  return /\/v\d+$/.test(trimmed) ? trimmed : trimmed + "/v1";
+  // 已带版本段（/v1、/v4、/v3、/v1beta、/v1beta/openai 等）不重复追加 /v1；
+  // 2026-10-22 修：Gemini 的 /v1beta/openai 之前会被拼成 /v1beta/openai/v1 → 404。
+  return /\/v\d+[a-z]*(?:\/|$)/i.test(trimmed) ? trimmed : trimmed + "/v1";
 }
 
 /** Gemini 原生 baseURL：Gemini API 用 /v1beta；用户填 /v1 或根地址时规范化。 */

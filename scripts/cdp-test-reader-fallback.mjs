@@ -33,6 +33,8 @@ function cdp(method, params = {}) {
 
 const expression = `
 (async () => {
+  // 该脚本断言旧版 rag/readBookSection 兜底与旧版提示词；显式切 legacy
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
   const checks = [];
   const check = (name, pass, info) => checks.push({ name, pass: !!pass, info: info == null ? "" : String(info) });
   const origin = location.origin;

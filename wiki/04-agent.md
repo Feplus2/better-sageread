@@ -9,12 +9,13 @@
 
 **各 scope 实际挂载**
 
-- **shared（三 scope 通用，15 个，`registry.ts:106-206`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage
+- **shared（三 scope 通用，16 个，`registry.ts:106-206`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage、viewImages（2026-10-22 新增，1–6 张批量看图；new 模式下 reader/paper 会隐藏文件五件套）
 - **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
 - **central 专属（23 个，`registry.ts:191-335`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes
-- **reader（:344-355，需 bookId 闭包）**：ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（常驻，未建索引时的正文兜底；匹配语义 精确>前缀>包含>小节号相等>父级退化——号通道防注入目录损坏/模型幻觉标题）、manageNotes（绑定当前书）
-- **paper（:358-373，需 paperId）**：基础层 6 个常驻——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getCitations/getFigures + manageNotes；增强层 paperSearch/paperContext 向量门控
+- **reader（需 bookId 闭包，`getToolsForScope` 内组装）**：默认 new 模式——readDocument/getDocumentInfo/searchLibrary（通用文档原语，受 retrievalScope 约束）、getReadingPosition（常驻）、manageNotes；legacy 模式（设置 → Agent → 文档工具模式）——ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（未建索引正文兜底）、readAtReadingPosition。图片走 readImage（书籍无 getFigures）
+- **paper（需 paperId）**：默认 new 模式——getDocumentInfo/readDocument/searchLibrary/getCitationGraph/getFigures/getCitations/getReadingPosition + manageNotes；legacy 模式——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getFigures/getCitations + paperSearch/paperContext（向量门控）
 - **MCP 工具不在静态组装里**，由 transport 在发请求时合并（:375-377 注释，见第 5 节）
+- **2026-10-22 起两个用户可见模式开关**（都在设置 → Agent）：① 文档工具模式 documentToolMode：new（默认，通用原语）/ legacy（旧工具回退）/ both；② 检索范围 retrievalScope：reader=本书/图书馆/图书馆+论文库，paper=本篇/论文库/论文库+图书馆，按书/论文持久化（`constants/retrieval-scope.ts`、`store/retrieval-scope-store.ts`）。提示词与工具面都会按这两个开关切换，改工具时必须同步 3 个 `*-prompt` 策略段（见第 3 条维护要点）
 
 命名约定：MCP 工具键为 `mcp_{sanitize(server名)}_{toolName}`（`ai/mcp/mcp-manager.ts:44-46,183-189`），description 前加 `[server名]`；工具文件按目录分组 `ai/tools/central/`、`ai/tools/paper/`、根级共享文件，各目录有 barrel（`index.ts`）。新工具的开发套路见 `docs/agent-tool-recipe.md`（步骤清单也浓缩在 `06-dev-workflow.md` 第 9 节）。
 
@@ -114,7 +115,7 @@
 
 **模型层**（`ai/providers/factory.ts`）：
 
-- 支持的 provider：openai / deepseek / google / anthropic / grok / openrouter / openai-compatible（预置清单 11 家，`constants/predefined-providers.ts`，zhipu/kimi 等落 openai-compatible 分支）。**fetch 走向分两路**：anthropic 与 openai-compatible（default 分支）传 `fetch: fetchTauri`，走 Rust 网络栈绕 CORS、跟随应用级代理；openai/deepseek/google/grok/openrouter 走 AI SDK 默认的 WebView fetch（跟随系统代理，不过应用代理）
+- 支持的 provider：openai / anthropic / google(gemini) / deepseek / grok / openrouter / kimi / zhipu / minimax / xiaomi / qwen / doubao / ollama / lmstudio + 自定义（预置 14 家，`constants/predefined-providers.ts`；每家预填多协议端点，见 `docs/plans/provider-endpoint-matrix.md`）。**fetch 走向（2026-10-22 改）**：所有 provider（含原生 OpenAI Responses/Anthropic/Gemini）统一传 `fetch: fetchTauri`，走 Rust 网络栈绕 CORS——webview 默认 fetch 对 Kimi 等厂商会直接 `Failed to fetch`；只有 OpenRouter 专用 adapter 与 MCP 另有自己的传输
 - 思考强度：`reasoning-map.ts` 按端点/模型分档生成请求体补丁（`chatReasoningBodyPatch`），聊天模型按用户档位动态下发；摘要压缩、术语表抽取等轻量任务走辅助模型实例（`createUtilityModelInstance`）并尽量关闭思考
 - 密钥运行时加载：前端仅经 `secret_get_for_runtime` 把 key 载入内存发请求，zustand `partialize` 保证不落盘（`services/secret-init.ts:16`）
 

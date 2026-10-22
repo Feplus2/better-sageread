@@ -205,18 +205,23 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
         const rawSchema = (real as any).inputSchema;
         let parsedArgs: any = args ?? {};
         if (rawSchema) {
-          const schema = asSchema(rawSchema);
-          if (schema.validate) {
-            const validation = await schema.validate(parsedArgs);
-            if (!validation.success) {
-              return {
-                success: false,
-                error: `参数校验失败：${validation.error.message.slice(0, 500)}`,
-                hint: "按 expected_schema 修正字段后重试（不要凭猜测传参）",
-                expected_schema: serializeSchema(rawSchema),
-              };
+          try {
+            const schema = asSchema(rawSchema);
+            if (schema.validate) {
+              const validation = await schema.validate(parsedArgs);
+              if (!validation.success) {
+                return {
+                  success: false,
+                  error: `参数校验失败：${validation.error.message.slice(0, 500)}`,
+                  hint: "按 expected_schema 修正字段后重试（不要凭猜测传参）",
+                  expected_schema: serializeSchema(rawSchema),
+                };
+              }
+              parsedArgs = validation.value;
             }
-            parsedArgs = validation.value;
+          } catch {
+            // 非 zod / 非 AI SDK 包装的 schema（部分 MCP 工具是裸 JSON Schema，asSchema 会抛）：
+            // 跳过本地校验直接转发，让真实工具返回明确错误（比 useTool 层直接失败好）
           }
         }
         const rawResult = await real.execute(parsedArgs, options);

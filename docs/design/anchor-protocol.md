@@ -157,7 +157,7 @@ position：与注入段同源（同一 ReadingPositionSnapshot）；书走 mdboo
 | outline 条目 | — | 300 |
 | list_figures | — | 100 |
 | get_citations | — | 200 条 / 8000 字符 |
-| view 单图 | 长边 2048 | 原图 20MB / 每轮 4 张 |
+| view 单图 | 长边默认 1024 / 上限 1536 | 原图 20MB / viewImages 一次 1–6 张（2026-10-22 实际值） |
 | 单次工具结果 | — | 沿用现有 tool-result-slimming 上限；超限写回执 + locator |
 
 ## 7. 注入与 guidance

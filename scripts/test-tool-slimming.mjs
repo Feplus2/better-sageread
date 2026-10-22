@@ -209,6 +209,25 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   ok(r2[0].parts[0].output === p1, "useTool 二次截断幂等");
 }
 
+// ========== 2026-10-22 新原语：L1 截断必须覆盖默认工具面（防重构漏迁） ==========
+{
+  const makePart = (name, output) => ({ type: `tool-${name}`, toolCallId: `n-${name}`, state: "output-available", output });
+  const bigOut = (n) => ({ text: "x".repeat(n), anchor: { heading: "第X章" } });
+  const msgs = [
+    { id: "n1", role: "assistant", parts: [
+      makePart("readDocument", bigOut(1500)),
+      makePart("searchLibrary", { results: [{ doc: "paper:1", snippet: "s".repeat(1500) }] }),
+      makePart("getDocumentInfo", { outline: { items: Array(50).fill("第N章".repeat(20)) } }),
+      makePart("getCitationGraph", { outgoing: Array(50).fill({ title: "T".repeat(100) }) }),
+      makePart("getFigures", { figures: Array(50).fill({ caption: "图注".repeat(50) }) }),
+    ]},
+  ];
+  const r = truncateToolResultsForStorage(msgs);
+  r[0].parts.forEach((p, i) => ok(p.output.__slimPreview === true, `新原语 L1 截断：${msgs[0].parts[i].type}`));
+  const small = [{ id: "n2", role: "assistant", parts: [makePart("readDocument", { text: "短结果" })] }];
+  ok(truncateToolResultsForStorage(small) === small, "新原语小结果零拷贝");
+}
+
 // L2：useTool 转发的 rag 结果按原名降级，存根用原名 ⟦ragSearch#N⟧，引用位/来源坐标同口径
 //（3×big(1400) ≈ 2.1k tokens 清除量，过 clear_at_least 门槛）
 {

@@ -1,4 +1,5 @@
 import { getUtilityModel } from "@/ai/providers/factory";
+import { predefinedProviders } from "@/constants/predefined-providers";
 import { uploadBook } from "@/services/book-service";
 import { useConverterStore } from "@/store/converter-store";
 import { useProviderStore } from "@/store/provider-store";
@@ -49,8 +50,24 @@ export function resolveLlmParams(): { llmBaseUrl: string; llmApiKey: string; llm
   if (!provider.apiKey) {
     throw new Error(`模型提供商「${provider.name}」未配置 API Key`);
   }
+  // 转换引擎只讲 OpenAI 兼容协议：优先用预置的 openai-chat 端点。
+  // 2026-10-22 教训：DeepSeek 默认 baseUrl 改成 .../anthropic/v1 后，直接把 baseUrl 传给 sidecar
+  // 会发出 /anthropic/v1/chat/completions → 404，PDF 转换/翻译对新老用户都会坏。
+  const preset = predefinedProviders.find((p) => p.provider === provider.provider);
+  const endpoints = provider.endpoints ?? preset?.endpoints ?? {};
+  const chatBaseUrl =
+    endpoints["openai-chat"] ??
+    (provider.apiStyle === "openai-chat" || provider.apiStyle === "openai-responses" || !provider.apiStyle
+      ? provider.baseUrl
+      : undefined) ??
+    provider.baseUrl;
+  if (!chatBaseUrl) {
+    throw new Error(
+      `「${provider.name}」没有 OpenAI 兼容端点，PDF 转换/翻译暂不可用；请在 设置 → 模型提供商 里把辅助模型换成 OpenAI 兼容的提供商`,
+    );
+  }
   return {
-    llmBaseUrl: provider.baseUrl || "https://api.deepseek.com/v1",
+    llmBaseUrl: chatBaseUrl,
     llmApiKey: provider.apiKey,
     llmModel: selected.modelId,
   };

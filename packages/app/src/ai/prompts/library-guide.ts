@@ -29,7 +29,7 @@ export async function buildLibraryGuide(): Promise<string> {
     "• 书籍：<book_id>/book.epub + mdbook/book/src/text/*.md + images/；没有 mdbook 的旧书按 EPUB 解析。",
     "• 论文：<paper_id>/paper.md + images/。",
     "探索顺序：目录/元信息 → 检索（语义问题用检索工具；精确术语可先查工作区文件）→ 按锚点读原文窗口 → 需要看图时用 readImage(path=绝对路径)。",
-    "图片：Markdown 里的相对路径不是本地文件路径。先取图片清单（getFigures）拿到 image_path，再用 readImage 看内容；没有真正调用 readImage 时，不要声称自己看过图。",
+    "图片：Markdown 里的相对路径不是本地文件路径。论文助手可用 getFigures 拿图片清单（image_path）；书籍/全局场景没有独立图片清单工具，请使用检索或原文结果里给出的绝对图片路径。拿到路径后用 readImage 看内容；没有真正调用 readImage 时，不要声称自己看过图。",
     "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；多图对比可以连续看，但看完尽快作答；默认长边 1024，小字看不清可升到 1536（更大请改用图注/正文，请求会明显变慢）。",
     "文献库只读：不要用 runCommand/dir/python 到文献库目录里翻文件。找文档用元数据/检索工具，读正文用原文读取工具；导入、删除、翻译、向量化属于全局助手的事务，引导用户去全局助手。",
     docMode === "legacy"

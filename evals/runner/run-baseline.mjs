@@ -387,7 +387,7 @@ async function runOne(task, rep) {
   return rec;
 }
 
-console.log("runner: out=" + outDir + " tasks=" + selected.length + " repeats=" + repeats + " dry=" + args.dry + " docMode=" + (args.docMode || "current"));
+console.log("runner: out=" + outDir + " tasks=" + selected.length + " repeats=" + repeats + " dry=" + args.dry + " docMode=" + (args.docMode || "default(new)"));
 for (const task of selected) {
   for (let rep = 1; rep <= repeats; rep++) {
     try { await runOne(task, rep); }

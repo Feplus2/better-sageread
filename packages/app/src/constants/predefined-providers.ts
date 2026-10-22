@@ -102,14 +102,16 @@ export const predefinedProviders: ModelProvider[] = [
     active: false,
     apiKey: "",
     name: "智谱 GLM",
-    baseUrl: "https://open.bigmodel.cn/api/anthropic/v1",
+    // 2026-10-22 实网：普通 API key 的 OpenAI 兼容端点可用；Anthropic 兼容端点绑定 GLM Coding Plan
+    // （未订阅时报 429 "套餐已到期"）。故默认改走 OpenAI 兼容，Anthropic 端点仅作 Coding Plan 用户的备选。
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     apiKeyHelpUrl: "https://open.bigmodel.cn/usercenter/apikeys",
     baseUrlHelpUrl: "https://open.bigmodel.cn/dev/api/normal-model/glm-4",
     provider: "zhipu",
-    apiStyle: "anthropic-messages",
+    apiStyle: "openai-chat",
     endpoints: {
-      "anthropic-messages": "https://open.bigmodel.cn/api/anthropic/v1",
       "openai-chat": "https://open.bigmodel.cn/api/paas/v4",
+      "anthropic-messages": "https://open.bigmodel.cn/api/anthropic/v1",
     },
     models: [],
   },

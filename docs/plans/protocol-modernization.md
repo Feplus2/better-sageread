@@ -42,7 +42,7 @@ createModelInstance(providerId, modelId)
 
 - 原生通道：图片工具用 `toModelOutput` 输出官方 file content；不再挂 user 消息桥。
 - chat 通道：保留现桥，但升级为字节预算 + 最新工具批优先（见 task-9）。
-- 新增设置/调试开关：`protocol: auto | native | compat`（auto 按 provider 能力选，native 强制原生，compat 强制旧桥）——便于灰度与回退，默认 auto。
+- ~~新增设置/调试开关：`protocol: auto | native | compat`~~（历史方案，实际未按此实现：最终是每个 provider 的 `apiStyle` + 预置端点；回退靠把 apiStyle 切 openai-chat/custom。见 §10）
 
 ## 3. 工作包（WP）与文件面
 

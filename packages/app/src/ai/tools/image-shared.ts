@@ -8,7 +8,28 @@ import { appDataDir } from "@tauri-apps/api/path";
  *   "被省略的图是哪一张"，所以批量看图时每张图各自带一条信封（顺序与 file part 一致）。
  */
 
-const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+/**
+ * 词法归一化：消掉 ./ 与 ../，防止 <appData>/../../x.png 绕过根前缀判断。
+ * 不依赖文件系统（图片可能尚未加载）；符号链接逃逸不在本函数职责内。
+ */
+function normalizePath(value: string): string {
+  const slashed = value.replace(/\\/g, "/").trim();
+  const absolute = slashed.startsWith("/");
+  const parts: string[] = [];
+  for (const segment of slashed.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      const last = parts[parts.length - 1];
+      // 盘符段（C:）不允许被 .. 吃掉；无处可退时保留 ".."，后续根前缀判断会拒绝
+      if (parts.length > 0 && last !== ".." && !/^[A-Za-z]:$/.test(last)) parts.pop();
+      else parts.push("..");
+      continue;
+    }
+    parts.push(segment);
+  }
+  const joined = (absolute ? "/" : "") + parts.join("/");
+  return joined.replace(/\/+$/, "").toLowerCase();
+}
 
 async function allowedRoots(): Promise<string[]> {
   const roots: string[] = [];
@@ -28,6 +49,10 @@ async function allowedRoots(): Promise<string[]> {
 /** 校验图片路径在允许根内；越界抛错（错误文案直接回给模型） */
 export async function assertAllowedPath(filePath: string): Promise<void> {
   const target = normalizePath(filePath);
+  // 归一化后仍有 ".." 段 = 越界未消化（如 C:/..），直接拒绝
+  if (!target || target.split("/").includes("..")) {
+    throw new Error("路径不合法：不允许使用上级目录访问界外图片");
+  }
   const roots = await allowedRoots();
   const allowed = roots.some((root) => target === root || target.startsWith(`${root}/`));
   if (!allowed) {

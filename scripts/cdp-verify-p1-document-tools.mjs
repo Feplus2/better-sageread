@@ -98,7 +98,7 @@ const checks = await evalJS(`(async () => {
   }
   check("文本读取无每轮硬上限", readsOk === 5, readsOk + "/5");
 
-  const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "collection" }, { toolCallId: "p7", messages: [] });
+  const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "library" }, { toolCallId: "p7", messages: [] });
   const bookSearch = await readerTools.searchLibrary.execute({ reasoning: "L1", doc: "book:" + BOOK, query: "政治 知识分子" }, { toolCallId: "p11", messages: [] });
   check("searchLibrary(doc=book) 本书检索命中", bookSearch.total >= 1, bookSearch.total + "/" + String(bookSearch.note || "").slice(0, 60));
   check("searchLibrary(doc=book) 结果锚点是书", (bookSearch.results || []).every((r) => String(r.doc).startsWith("book:")), (bookSearch.results || []).map((r) => r.doc).join(","));

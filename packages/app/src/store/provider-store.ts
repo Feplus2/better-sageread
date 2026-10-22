@@ -86,15 +86,17 @@ export const useProviderStore = create<ProviderState>()(
         return newProviderId;
       },
       removeProvider: (providerId: string) => {
-        const { modelProviders, selectedModel } = get();
+        const { modelProviders, selectedModel, utilityModel } = get();
         const updatedProviders = modelProviders.filter((provider) => provider.provider !== providerId);
 
         let newSelectedModel = selectedModel;
         if (selectedModel && selectedModel.providerId === providerId) {
           newSelectedModel = null;
         }
+        // 辅助模型同样不能悬挂：否则 createUtilityModelInstance 会抛 "Provider not found"
+        const newUtilityModel = utilityModel && utilityModel.providerId === providerId ? null : utilityModel;
 
-        set({ modelProviders: updatedProviders, selectedModel: newSelectedModel });
+        set({ modelProviders: updatedProviders, selectedModel: newSelectedModel, utilityModel: newUtilityModel });
       },
       setSelectedModel: (selectedModel: SelectedModel | null) => set({ selectedModel }),
       setUtilityModel: (utilityModel: SelectedModel | null) => set({ utilityModel }),
@@ -102,7 +104,7 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
-      version: 8,
+      version: 9,
       migrate: (persistedState: any, version: number) => {
         if (version < 1) {
           // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
@@ -194,7 +196,7 @@ export const useProviderStore = create<ProviderState>()(
             gemini: "gemini",
             deepseek: "anthropic-messages",
             kimi: "anthropic-messages",
-            zhipu: "anthropic-messages",
+            zhipu: "openai-chat",
             minimax: "anthropic-messages",
           };
           const officialHosts: Record<string, string[]> = {
@@ -256,6 +258,17 @@ export const useProviderStore = create<ProviderState>()(
           const ids = new Set(current.map((p) => p.provider));
           const missing = predefinedProviders.filter((p) => !ids.has(p.provider));
           if (missing.length > 0) persistedState.modelProviders = [...current, ...missing];
+        }
+        if (version < 9) {
+          // v8→v9：智谱默认协议改 OpenAI 兼容（普通 API key 的 Anthropic 兼容端点会 429 Coding Plan 限制）。
+          // 只迁移官方端点形态的预置选择；已订阅 Coding Plan 的用户可在设置里切回 Anthropic 端点。
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+            if (p.provider !== "zhipu") return p;
+            const official = !p.baseUrl || /open\.bigmodel\.cn|api\.z\.ai/i.test(p.baseUrl);
+            if (!official) return p;
+            if (p.apiStyle !== "anthropic-messages") return p;
+            return { ...p, apiStyle: "openai-chat" as const, baseUrl: "https://open.bigmodel.cn/api/paas/v4" };
+          });
         }
         return persistedState;
       },

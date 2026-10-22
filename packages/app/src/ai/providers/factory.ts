@@ -168,7 +168,7 @@ function wrapChatReasoningFetch(
       // 原生 Anthropic 通道写 thinking 字段；chat 通道走各家请求体补丁
       const patch =
         mode === "anthropic"
-          ? anthropicThinkingBodyPatch(modelId ?? "", levelRef())
+          ? anthropicThinkingBodyPatch(providerId, baseUrl, modelId ?? "", levelRef())
           : chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
       if (patch) {
         patch(body);
@@ -202,7 +202,7 @@ export function createProviderInstance(config: ProviderConfig) {
   // 之前原生分支直接 return createAnthropic 丢掉补丁：轻量任务在 DeepSeek 上重新变慢、聊天档位失效。
   const patch = disableThinking
     ? isAnthropicNative
-      ? anthropicThinkingBodyPatch(modelId ?? "", "off")
+      ? anthropicThinkingBodyPatch(providerId, baseUrl, modelId ?? "", "off")
       : thinkingOffPatch(providerId, baseUrl, modelId)
     : null;
   // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
@@ -224,6 +224,10 @@ export function createProviderInstance(config: ProviderConfig) {
   // 浏览器 CORS 头，webview 里的 globalThis.fetch 会直接 "Failed to fetch"（2026-10-22 实网复现：
   // Kimi 158ms 失败）。chat/兼容通道本来就用 fetchTauri，这里把原生通道也补齐。
   const wrappedDefault = wrapFetch(fetchTauri);
+  // 视觉能力门控：纯文本模型（vision-map=false）不挂图片桥，否则工具图会以 user 图片消息形式发送 → 400。
+  // modelId 缺省（如未绑定模型时）按"未知默认放行"，与 vision-map 口径一致。
+  const visionEligible = !modelId || modelSupportsVision(providerId, modelId);
+  const bridge = (base: typeof fetch): typeof fetch => (visionEligible ? wrapOpenAICompatToolImagesFetch(base) : base);
 
   switch (providerId) {
     case "deepseek":
@@ -245,7 +249,7 @@ export function createProviderInstance(config: ProviderConfig) {
       // 表内未知型号默认放行即走兼容通道，误路由无害：DeepSeek API 本就是 OpenAI 兼容格式）。
       if (modelId && (VISION_NAME_RE.test(modelId.toLowerCase()) || modelSupportsVision("deepseek", modelId))) {
         // OpenAI-compatible 聊天接口不支持工具结果里的图片：在 fetch 层把工具图片改挂到 user 消息
-        const visionFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
+        const visionFetch = bridge(wrappedDefault);
         return createOpenAICompatible({
           name: "deepseek-vision",
           baseURL: baseUrl || "https://api.deepseek.com",
@@ -269,8 +273,7 @@ export function createProviderInstance(config: ProviderConfig) {
     case "openai": {
       // 官方默认 Responses；若用户显式选 chat（或改成只支持 chat 的代理），
       // chat 通道挂图片桥，保证工具图片仍可用。
-      const openaiChatFetch =
-        protocol === "openai-chat" ? wrapOpenAICompatToolImagesFetch(wrappedDefault) : wrappedDefault;
+      const openaiChatFetch = protocol === "openai-chat" ? bridge(wrappedDefault) : wrappedDefault;
       return createOpenAI({
         apiKey: apiKey || "",
         baseURL: baseUrl,
@@ -294,7 +297,7 @@ export function createProviderInstance(config: ProviderConfig) {
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.anthropic.com/v1",
         includeUsage: true,
         name: "OpenAI Compatible",
-        fetch: wrapOpenAICompatToolImagesFetch(wrappedDefault),
+        fetch: bridge(wrappedDefault),
       });
 
     case "gemini":
