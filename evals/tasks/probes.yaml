@@ -1,0 +1,103 @@
+# SageRead Agent 能力探针（P1-4，2026-10-22）
+# 只判正确性，不设 token/步数门槛；用于防止「为了均值砍读取能力」。
+version: 1
+frozen_at: "2026-10-22"
+status: "active"
+
+fixtures:
+  book_foucault: "9f1820c6dcc62250458da69162b72e5d"
+  paper_rational: "a27b187c6bd02d3c"
+  paper_prussian: "43f3adfdea61b6d4"
+  paper_interface: "09515f7218b81d7f"
+
+fixture_meta:
+  "9f1820c6dcc62250458da69162b72e5d": { kind: "book", title: "牛津通识读本：福柯（中文版）" }
+  "a27b187c6bd02d3c": { kind: "paper", title: "Rational design of layered oxide materials for sodium-ion batteries" }
+  "43f3adfdea61b6d4": { kind: "paper", title: "Dehydration-induced CN- defects enable adaptive water regulation in Prussian blue cathodes" }
+  "09515f7218b81d7f": { kind: "paper", title: "Environmentally stable interface of layered oxide cathodes" }
+
+harness:
+  model: "deepseek-flash"
+  model_pin:
+    providerId: "deepseek"
+    providerName: "DeepSeek"
+    modelId: "deepseek-flash"
+    modelName: "deepseek-flash"
+  temperature: 0
+  repeats: 1
+  max_steps: 20
+  max_tokens_per_task: 60000
+  completion_timeout_ms: 900000
+  scoring: "能力探针：只判 correctness，人工/Lead 判分"
+
+tasks:
+  - id: "probe-multi-figure"
+    category: "probe-multi-figure"
+    doc: "paper:a27b187c6bd02d3c"
+    prompt: |
+      请先看图 2 和图 3（用 getFigures 拿 image_path，再用 readImage 逐张查看），然后对比它们：
+      两张图分别设计的是 O3 型还是 P2 型氧化物？各自用了什么成分体系、什么设计手段？证据是什么？
+      请明确说明你是否真的看了两张图。
+    gold:
+      anchors:
+        - "figure:a27b187c6bd02d3c:2"
+        - "figure:a27b187c6bd02d3c:3"
+      facts:
+        - "图 2 是 Designing an O3-type oxide（设计 O3 型氧化物）"
+        - "图 3 是 Designing a P2-type oxide（设计 P2 型氧化物）"
+        - "两张图都用阳离子势（cationic potential）分析做堆叠结构预测"
+        - "图 2 的体系是 Na-Li-Mn(Ti)-O（NaLi1/3Mn2/3O2）"
+        - "图 3 的体系是 Na-Li-Mn-O（NaLi1/3Ti1/6Mn1/2O2 与 Na5/6Li5/18Mn13/18O2）"
+    grader:
+      type: "anchor+facts"
+      pass_rule: "两张图号都命中 且 facts 命中 ≥4"
+    notes: "P1-4 能力探针：要求真正连续查看 ≥2 张图并对比；不设 token/步数门槛。"
+
+  - id: "probe-deep-research"
+    category: "probe-deep-research"
+    doc: "book:9f1820c6dcc62250458da69162b72e5d"
+    prompt: |
+      比较这本书的第三章、第四章、第五章：三章标题分别是什么？各自关注的主题和使用的分析方法有什么不同？
+      要求：三章都要有原文依据，不能只凭目录/印象回答。
+    gold:
+      anchors:
+        - "book:9f1820c6dcc62250458da69162b72e5d#第三章 政治学"
+        - "book:9f1820c6dcc62250458da69162b72e5d#第四章 考古学"
+        - "book:9f1820c6dcc62250458da69162b72e5d#第五章 系谱学"
+      facts:
+        - "第三章标题是「政治学」"
+        - "第四章标题是「考古学」"
+        - "第五章标题是「系谱学」"
+        - "第三章围绕福柯与萨特/马克思主义/法国共产党的政治立场分歧"
+        - "第四章对应话语/知识考古的方法"
+        - "第五章对应权力/系谱学的方法"
+    grader:
+      type: "anchor+facts"
+      pass_rule: "三章锚点都命中 且 facts 命中 ≥4"
+    notes: "能力探针：需要跨章节多次 readDocument；只判对错，不设 token/步数门槛。"
+
+  - id: "probe-cross-doc-3"
+    category: "probe-cross-doc"
+    docs:
+      - "paper:a27b187c6bd02d3c"
+      - "paper:09515f7218b81d7f"
+      - "paper:43f3adfdea61b6d4"
+    prompt: |
+      结合三篇论文（Rational design、Environmentally stable interface、Prussian blue dehydration），
+      比较它们在「钠离子正极材料设计」上的三条不同路线：各自解决什么问题、用什么设计手段、证据是什么？
+      要求三篇都要读到正文依据。
+    gold:
+      anchors:
+        - "paper:a27b187c6bd02d3c"
+        - "paper:09515f7218b81d7f"
+        - "paper:43f3adfdea61b6d4"
+      facts:
+        - "Rational design：体相堆叠设计，用阳离子势预测 P2/O3 堆叠"
+        - "Environmentally stable interface：表面/界面设计，表面富 Ti 形成类尖晶石界面"
+        - "Prussian blue dehydration：脱水诱导 CN− 缺陷，改变水–骨架相互作用"
+        - "三者分别针对体相结构、界面稳定性、水/缺陷化学三类问题"
+        - "三篇的证据类型不同（XRD/Rietveld、SEM/SAED/EELS、原位 XRD/TG-FTIR/正电子湮没等）"
+    grader:
+      type: "anchor+facts"
+      pass_rule: "三篇锚点都命中 且 facts 命中 ≥4"
+    notes: "能力探针：两篇以上文档、每篇至少读一个位置；只判对错。"

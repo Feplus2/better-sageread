@@ -75,11 +75,11 @@ const checks = await evalJS(`(async () => {
     if (r.type === "content") imageOk += 1;
   }
   check("连续看 4 张图不被每轮张数限制", imageOk === 4, imageOk + "/4");
-  const imgLarge = await paperTools.readImage.execute({ path: imgPath, maxEdge: 2048 }, { toolCallId: "p10-large", messages: [] });
+  const imgLarge = await paperTools.readImage.execute({ path: imgPath, maxEdge: 1536 }, { toolCallId: "p10-large", messages: [] });
   const imgSmall = await paperTools.readImage.execute({ path: imgPath, maxEdge: 512 }, { toolCallId: "p10-small", messages: [] });
   const largeUrl = imgLarge.type === "content" ? (imgLarge.value.find((p) => p.type === "file") || {}).url : "";
   const smallUrl = imgSmall.type === "content" ? (imgSmall.value.find((p) => p.type === "file") || {}).url : "";
-  check("maxEdge 可放大到 2048 且 512 更小", String(largeUrl).length > String(smallUrl).length && String(smallUrl).length > 0, String(smallUrl).length + " < " + String(largeUrl).length);
+  check("maxEdge 可放大到 1536 且 512 更小", String(largeUrl).length > String(smallUrl).length && String(smallUrl).length > 0, String(smallUrl).length + " < " + String(largeUrl).length);
   // 文本读取不再有每轮硬上限：多次 readDocument 都应正常返回
   let readsOk = 0;
   for (let i = 0; i < 5; i++) {

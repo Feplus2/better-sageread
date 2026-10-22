@@ -14,11 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const appRequire = createRequire(path.join(ROOT, "packages/app/package.json"));
 const yaml = appRequire("js-yaml");
-const TASKS_FILE = path.join(ROOT, "evals/tasks/baseline-10.yaml");
-const tasksDoc = yaml.load(fs.readFileSync(TASKS_FILE, "utf8"));
+const DEFAULT_TASKS_FILE = path.join(ROOT, "evals/tasks/baseline-10.yaml");
 
 function parseArgs(argv) {
-  const out = { tasks: "all", repeats: null, dry: false, keepThreads: false, out: null, docMode: null };
+  const out = { tasks: "all", repeats: null, dry: false, keepThreads: false, out: null, docMode: null, taskFile: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry") out.dry = true;
@@ -27,10 +26,13 @@ function parseArgs(argv) {
     else if (a === "--repeats") out.repeats = Number(argv[++i]);
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--doc-mode") out.docMode = argv[++i];
+    else if (a === "--task-file") out.taskFile = argv[++i];
   }
   return out;
 }
 const args = parseArgs(process.argv.slice(2));
+const TASKS_FILE = args.taskFile ? path.resolve(ROOT, args.taskFile) : DEFAULT_TASKS_FILE;
+const tasksDoc = yaml.load(fs.readFileSync(TASKS_FILE, "utf8"));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const outDir = args.out ? path.resolve(ROOT, args.out) : path.join(ROOT, ".tmp-eval-runs", stamp);
 fs.mkdirSync(path.join(outDir, "transcripts"), { recursive: true });
@@ -41,6 +43,7 @@ if (selected.length === 0) { console.error("没有匹配的题目: " + args.task
 const repeats = args.dry ? 1 : (args.repeats || (tasksDoc.harness && tasksDoc.harness.repeats) || 3);
 const modelPin = (tasksDoc.harness && tasksDoc.harness.model_pin) || null;
 const fixtureMeta = tasksDoc.fixture_meta || {};
+const completionTimeoutMs = (tasksDoc.harness && tasksDoc.harness.completion_timeout_ms) || 420000;
 
 function docsForTask(task) {
   const raw = task.docs && task.docs.length > 0 ? task.docs : [task.doc];
@@ -255,7 +258,7 @@ async function pageRunner(cfg) {
       const txt = last ? (last.textContent || '').trim() : '';
       if (b && b.querySelector('svg') && msgs.length >= 2 && txt.length > 5) return { msgs: msgs.length };
       return null;
-    }, 420000, 1500);
+    }, cfg.completionTimeoutMs || 420000, 1500);
     if (!done) throw new Error('completion timeout');
     result.elapsedMs = Date.now() - sendAt;
     await sleep(1500);
@@ -365,10 +368,11 @@ async function runOne(task, rep) {
     positionHeading: task.requires && task.requires.position ? task.requires.position : null,
     modelPin, keepThreads: args.keepThreads,
     docMode: args.docMode || null,
+    completionTimeoutMs,
     dry: args.dry,
   };
   const expr = "(" + pageRunnerSrc + ")(" + JSON.stringify(payload) + ")";
-  const rec = await evalJS(expr, 480000);
+  const rec = await evalJS(expr, Math.max(480000, completionTimeoutMs + 60000));
   rec.taskId = task.id;
   rec.rep = rep;
   rec.category = task.category;

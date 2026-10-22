@@ -30,11 +30,12 @@ export async function buildLibraryGuide(): Promise<string> {
     "• 论文：<paper_id>/paper.md + images/。",
     "探索顺序：目录/元信息 → 检索（语义问题用检索工具；精确术语可先查工作区文件）→ 按锚点读原文窗口 → 需要看图时用 readImage(path=绝对路径)。",
     "图片：Markdown 里的相对路径不是本地文件路径。先取图片清单（getFigures）拿到 image_path，再用 readImage 看内容；没有真正调用 readImage 时，不要声称自己看过图。",
-    "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；多图对比可以连续看，但看完尽快作答；默认长边 1024，截图/小字看不清可升 1536-2048。",
+    "看图策略：图片会进入上下文并在后续每步重复计费——先读图注/正文，确需视觉细节时再看图；多图对比可以连续看，但看完尽快作答；默认长边 1024，小字看不清可升到 1536（更大请改用图注/正文，请求会明显变慢）。",
     "文献库只读：不要用 runCommand/dir/python 到文献库目录里翻文件。找文档用元数据/检索工具，读正文用原文读取工具；导入、删除、翻译、向量化属于全局助手的事务，引导用户去全局助手。",
     docMode === "legacy"
       ? "跨文档：reader/paper scope 只有当前文档；跨论文检索用 paperSearch（全库范围）或请用户切到对应文档，不要用 readLocalFile/runCommand 到文献库目录翻文件。"
       : "跨文档：reader/paper scope 只有当前文档，但 readDocument 可直接读任意文档（doc=paper:<id> / book:<id>，配合 heading/offset）；检索库内论文用 searchLibrary(scope=all)。不要用 readLocalFile/runCommand 到文献库目录翻文件，也不要绕过工具硬读路径。",
+    "未索引文档：getDocumentInfo 的 index.status=not_indexed 表示没有向量索引，只能按目录/原文读取；正常读、不要拒答，并在回答里明确提醒用户「这本书/这篇论文尚未向量化，读起来会慢，设置里向量化后可提速」。",
     "引用规范：正文引用给章节标题；图表引用给图号/表号；参考文献给编号；不得编造页码或图中不存在的细节。",
   ].join("\n");
 }

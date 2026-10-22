@@ -118,7 +118,12 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
           published: metadata.published ?? null,
           language: metadata.language ?? null,
         },
-        index: { status: indexed ? "indexed" : "not_indexed" },
+        index: {
+          status: indexed ? "indexed" : "not_indexed",
+          note: indexed
+            ? "已建向量索引"
+            : "本书未建向量索引，只能按目录/原文读取（较慢）；建议告诉用户可在设置中向量化后再检索，速度会快很多。",
+        },
         outline: {
           total: tocTotal,
           items: tocItems.map((item) => ({

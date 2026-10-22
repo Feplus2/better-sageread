@@ -48,16 +48,18 @@ function imageEnvelope(params: {
   width: number;
   height: number;
   bytes: number;
+  payloadBytes?: number;
   downscaled: boolean;
 }): string {
   const sizeMb = (params.bytes / 1048576).toFixed(2);
-  const downsample = params.downscaled ? " (downscaled)" : "";
-  return `<path>${params.label}</path><type>image</type><content>${params.mediaType} ${params.width}x${params.height} px, ${sizeMb} MB${downsample}</content>\n请基于图片内容回答；引用时说明图号/所在小节，不要编造图中不存在的细节。`;
+  const downsample = params.downscaled ? " (resized)" : "";
+  const payload = params.payloadBytes ? `, payload ${Math.round(params.payloadBytes / 1024)} KB` : "";
+  return `<path>${params.label}</path><type>image</type><content>${params.mediaType} ${params.width}x${params.height} px, ${sizeMb} MB source${payload}${downsample}</content>\n请基于图片内容回答；引用时说明图号/所在小节，不要编造图中不存在的细节。`;
 }
 
 export const readImageTool = tool({
   description:
-    "查看图片内容：支持聊天图片附件（attachment:// 引用）与本地绝对路径（文献库插图、工作区图片）。\n\n📖 **使用场景**：\n• 用户问「图 3 说明了什么」「这张图里有什么」\n• getFigures 返回了 image_path，需要真正看图而不是只读图注\n• 历史消息里的图片存根（⟦可用 readImage 重看⟧）需要重新查看\n\n📊 **返回内容**：图片本体（多模态通道）+ 信封（路径/类型/尺寸/是否降采样）。\n\n⚠️ **成本**：图片会进入上下文并在后续每一步重复发送。先读图注/正文，确需视觉细节时再看图；看完立即作答，不要在多步之间反复看图。\n⚠️ **限制**：单图 ≤20MB；长边默认 1024px，截图/小字需要时可用 maxEdge=1536-2048；图片会随每步重复计费，建议看完立即作答；当前模型不支持视觉时返回明确错误。\n\n🚫 **相对路径不可用**：请使用 getFigures 返回的 image_path（绝对路径）。",
+    "查看图片内容：支持聊天图片附件（attachment:// 引用）与本地绝对路径（文献库插图、工作区图片）。\n\n📖 **使用场景**：\n• 用户问「图 3 说明了什么」「这张图里有什么」\n• getFigures 返回了 image_path，需要真正看图而不是只读图注\n• 历史消息里的图片存根（⟦可用 readImage 重看⟧）需要重新查看\n\n📊 **返回内容**：图片本体（多模态通道）+ 信封（路径/类型/尺寸/是否降采样）。\n\n⚠️ **成本**：图片会进入上下文并在后续每一步重复发送。先读图注/正文，确需视觉细节时再看图；看完立即作答，不要在多步之间反复看图。\n⚠️ **限制**：单图 ≤20MB；长边默认 1024px、最大 1536，截图/小字需要时才调大；图片会随每步重复计费，建议看完立即作答；当前模型不支持视觉时返回明确错误。\n\n🚫 **相对路径不可用**：请使用 getFigures 返回的 image_path（绝对路径）。",
   inputSchema: z.object({
     ref: z.string().min(1).optional().describe("聊天图片附件引用，形如 attachment://img-xxx.png"),
     path: z.string().min(1).optional().describe("本地图片绝对路径；通常直接来自 getFigures 的 image_path"),
@@ -65,9 +67,11 @@ export const readImageTool = tool({
       .number()
       .int()
       .min(512)
-      .max(2048)
+      .max(1536)
       .optional()
-      .describe("长边像素上限，默认 1024；截图/小字看不清时可升到 1536-2048（图片会随每步重复计费，看完尽快作答）"),
+      .describe(
+        "长边像素上限，默认 1024，最大 1536；截图/小字看不清时才升到 1536（图片会随每步重复计费，看完尽快作答）",
+      ),
   }),
   execute: async ({ ref, path, maxEdge }: { ref?: string; path?: string; maxEdge?: number }) => {
     const target = path ?? ref;
@@ -120,6 +124,7 @@ export const readImageTool = tool({
               width: loaded.width,
               height: loaded.height,
               bytes: loaded.bytes,
+              payloadBytes: loaded.payloadBytes,
               downscaled: loaded.downscaled,
             }),
           },
