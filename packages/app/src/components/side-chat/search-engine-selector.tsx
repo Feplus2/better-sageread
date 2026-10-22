@@ -17,6 +17,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   tavily: "Tavily",
   serper: "Serper",
   searxng: "SearXNG",
+  yuanbao: "元宝搜索",
 };
 
 const ENGINE_OPTIONS: { value: SearchEngine; label: string }[] = [

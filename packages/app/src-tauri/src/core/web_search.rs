@@ -459,6 +459,21 @@ struct ZhipuSearchResult {
     content: Option<String>,
 }
 
+/// 腾讯元宝搜索（WSA）：响应外层为 Response，Pages 是 JSON 字符串数组（API KEY 模式同样结构）
+#[derive(Deserialize)]
+struct YuanbaoSearchResponse {
+    #[serde(rename = "Response")]
+    response: Option<YuanbaoResponse>,
+}
+
+#[derive(Deserialize)]
+struct YuanbaoResponse {
+    #[serde(rename = "Pages")]
+    pages: Option<Vec<serde_json::Value>>,
+    #[serde(rename = "Msg")]
+    msg: Option<String>,
+}
+
 /// DeepSeek 官方搜索 API 响应（仅解析所需字段，rerank_score/site_name/date/authority 等由 serde 忽略）
 #[derive(Deserialize)]
 struct DeepseekSearchResponse {
@@ -502,6 +517,67 @@ fn map_deepseek_results(results: Vec<DeepseekSearchResult>) -> Vec<WebSearchResu
 }
 
 // ─── API Provider 搜索实现 ───────────────────────────────────────────────────
+
+/// 腾讯元宝搜索（腾讯云 WSA；服务 API KEY 模式：Authorization: Bearer <key>）
+async fn search_yuanbao(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
+    let client = crate::core::proxy::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    // Cnt 官方只支持 10/20/30/40/50；按 max 向上取整，最终再截断到 max
+    let cnt = if max <= 10 { 10 } else if max <= 20 { 20 } else if max <= 30 { 30 } else if max <= 40 { 40 } else { 50 };
+    let body = serde_json::json!({
+        "Query": query,
+        "Cnt": cnt,
+    });
+
+    let resp = client
+        .post("https://api.wsa.cloud.tencent.com/SearchPro")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("元宝搜索请求失败: {e}"))?;
+
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("读取元宝搜索结果失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("元宝搜索失败 (HTTP {status}): {}", text.chars().take(300).collect::<String>()));
+    }
+    let data: YuanbaoSearchResponse = serde_json::from_str(&text)
+        .map_err(|e| format!("解析元宝搜索响应失败: {e}"))?;
+    let response = data.response.ok_or_else(|| "元宝搜索响应缺少 Response 字段".to_string())?;
+    let mut results = Vec::new();
+    for page in response.pages.unwrap_or_default() {
+        // Pages 可能是 JSON 字符串，也可能已是对象
+        let object = match page {
+            serde_json::Value::String(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(value) => value,
+                Err(_) => continue,
+            },
+            value => value,
+        };
+        let title = object.get("title").and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
+        let url = object.get("url").and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
+        if title.is_empty() || url.is_empty() {
+            continue;
+        }
+        let content = object.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        let passage = object.get("passage").and_then(|v| v.as_str()).unwrap_or_default();
+        let snippet = if content.trim().is_empty() { passage.trim() } else { content.trim() };
+        results.push(WebSearchResult { title, url, snippet: snippet.to_string() });
+        if results.len() >= max {
+            break;
+        }
+    }
+    if results.is_empty() {
+        let msg = response.msg.unwrap_or_default();
+        return Err(if msg.is_empty() { "元宝搜索未返回结果".to_string() } else { format!("元宝搜索未返回结果: {msg}") });
+    }
+    Ok(results)
+}
 
 /// Tavily 搜索（专为 AI Agent 优化的搜索 API）
 async fn search_tavily(query: &str, max: usize, api_key: &str) -> Result<Vec<WebSearchResult>, String> {
@@ -754,7 +830,7 @@ async fn search_deepseek(query: &str, max: usize, api_key: &str) -> Result<Vec<W
 
 /// 网络搜索 Tauri command（批次 A：API Key 由 Rust 侧自 keyring 取，不经前端）
 ///
-/// provider："builtin" | "bocha" | "zhipu" | "deepseek" | "tavily" | "serper" | "searxng"
+/// provider："builtin" | "bocha" | "zhipu" | "deepseek" | "tavily" | "serper" | "searxng" | "yuanbao"
 /// engine：仅 builtin 模式下有效，"auto" | "bing" | "baidu" | "duckduckgo"
 #[tauri::command]
 pub async fn web_search(
@@ -813,6 +889,12 @@ pub async fn web_search(
                 return Err("DeepSeek 未返回搜索结果".to_string());
             }
             log::info!("[网络搜索] DeepSeek 返回 {} 条结果", results.len());
+            return Ok(results);
+        }
+        "yuanbao" => {
+            let key = provider_key(&app, "yuanbao", "腾讯元宝搜索")?;
+            let results = search_yuanbao(&query, max, &key).await?;
+            log::info!("[网络搜索] 腾讯元宝搜索返回 {} 条结果", results.len());
             return Ok(results);
         }
         "searxng" => {

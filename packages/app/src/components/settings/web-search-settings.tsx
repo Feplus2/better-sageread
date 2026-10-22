@@ -13,7 +13,7 @@ interface ProviderMeta {
   desc: string;
   link?: string;
   linkLabel?: string;
-  keyField?: "bochaKey" | "zhipuKey" | "deepseekKey" | "tavilyKey" | "serperKey";
+  keyField?: "bochaKey" | "zhipuKey" | "deepseekKey" | "tavilyKey" | "serperKey" | "yuanbaoKey";
   placeholder?: string;
 }
 
@@ -64,6 +64,15 @@ const PROVIDERS: ProviderMeta[] = [
     placeholder: "输入 Serper API Key",
   },
   {
+    id: "yuanbao",
+    label: "腾讯元宝搜索（WSA）",
+    desc: "腾讯云元宝搜索：互联网全网 + 腾讯内容生态，AI 友好结果（标题/摘要/链接）。需腾讯云实名账号开通服务并购买资源包或按量计费（极速版 14 元/千次起，标准版 20 元/千次；无免费额度）。",
+    link: "https://cloud.tencent.com/product/wsa",
+    linkLabel: "开通元宝搜索服务",
+    keyField: "yuanbaoKey",
+    placeholder: "输入元宝搜索服务 API KEY（sk-...）",
+  },
+  {
     id: "searxng",
     label: "SearXNG（自托管）",
     desc: "开源元搜索引擎，需 Docker 自行部署。完全免费、无限制、隐私安全。",
@@ -79,6 +88,7 @@ export default function WebSearchSettings() {
     deepseekKey,
     tavilyKey,
     serperKey,
+    yuanbaoKey,
     searxngUrl,
     enabledProviders,
     setBochaKey,
@@ -86,17 +96,19 @@ export default function WebSearchSettings() {
     setDeepseekKey,
     setTavilyKey,
     setSerperKey,
+    setYuanbaoKey,
     setSearxngUrl,
     toggleProvider,
   } = useWebSearchStore();
 
-  const keyValues: Record<string, string> = { bochaKey, zhipuKey, deepseekKey, tavilyKey, serperKey };
+  const keyValues: Record<string, string> = { bochaKey, zhipuKey, deepseekKey, tavilyKey, serperKey, yuanbaoKey };
   const keySetters: Record<string, (v: string) => void> = {
     bochaKey: setBochaKey,
     zhipuKey: setZhipuKey,
     deepseekKey: setDeepseekKey,
     tavilyKey: setTavilyKey,
     serperKey: setSerperKey,
+    yuanbaoKey: setYuanbaoKey,
   };
 
   return (

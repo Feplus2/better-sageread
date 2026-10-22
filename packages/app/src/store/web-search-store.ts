@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 /** 搜索 Provider 类型 */
-export type SearchProvider = "builtin" | "bocha" | "zhipu" | "deepseek" | "tavily" | "serper" | "searxng";
+export type SearchProvider = "builtin" | "bocha" | "zhipu" | "deepseek" | "tavily" | "serper" | "searxng" | "yuanbao";
 
 /** 内置引擎（仅 builtin 模式下有效） */
 export type SearchEngine = "auto" | "bing" | "baidu" | "duckduckgo";
@@ -18,6 +18,8 @@ interface WebSearchState {
   deepseekKey: string;
   tavilyKey: string;
   serperKey: string;
+  /** 腾讯元宝搜索（WSA）服务 API KEY */
+  yuanbaoKey: string;
   /** SearXNG 服务地址 */
   searxngUrl: string;
   /** 已启用的 API provider 列表（配置了 Key 且用户开启的） */
@@ -30,6 +32,7 @@ interface WebSearchState {
   setDeepseekKey: (key: string) => void;
   setTavilyKey: (key: string) => void;
   setSerperKey: (key: string) => void;
+  setYuanbaoKey: (key: string) => void;
   setSearxngUrl: (url: string) => void;
   toggleProvider: (p: SearchProvider) => void;
 }
@@ -44,6 +47,7 @@ export const useWebSearchStore = create<WebSearchState>()(
       deepseekKey: "",
       tavilyKey: "",
       serperKey: "",
+      yuanbaoKey: "",
       searxngUrl: "http://localhost:8080",
       enabledProviders: [],
 
@@ -54,6 +58,7 @@ export const useWebSearchStore = create<WebSearchState>()(
       setDeepseekKey: (deepseekKey) => set({ deepseekKey }),
       setTavilyKey: (tavilyKey) => set({ tavilyKey }),
       setSerperKey: (serperKey) => set({ serperKey }),
+      setYuanbaoKey: (yuanbaoKey) => set({ yuanbaoKey }),
       setSearxngUrl: (searxngUrl) => set({ searxngUrl }),
       toggleProvider: (p) =>
         set((state) => {
@@ -75,6 +80,7 @@ export const useWebSearchStore = create<WebSearchState>()(
         deepseekKey: "",
         tavilyKey: "",
         serperKey: "",
+        yuanbaoKey: "",
         searxngUrl: state.searxngUrl,
         enabledProviders: state.enabledProviders,
       }),

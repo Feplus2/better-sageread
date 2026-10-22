@@ -33,6 +33,7 @@ const WEB_SEARCH_FIELDS: Record<string, string> = {
   deepseekKey: "deepseek",
   tavilyKey: "tavily",
   serperKey: "serper",
+  yuanbaoKey: "yuanbao",
 };
 
 async function migrateLocalStorageSecrets(): Promise<void> {
@@ -143,18 +144,20 @@ async function loadKeyringIntoMemory(): Promise<void> {
 
   // 网络搜索
   const webSearchStore = useWebSearchStore.getState();
-  const [bocha, zhipu, deepseek, tavily, serper] = await Promise.all([
+  const [bocha, zhipu, deepseek, tavily, serper, yuanbao] = await Promise.all([
     readSecret("web-search", "bocha"),
     readSecret("web-search", "zhipu"),
     readSecret("web-search", "deepseek"),
     readSecret("web-search", "tavily"),
     readSecret("web-search", "serper"),
+    readSecret("web-search", "yuanbao"),
   ]);
   if (bocha) webSearchStore.setBochaKey(bocha);
   if (zhipu) webSearchStore.setZhipuKey(zhipu);
   if (deepseek) webSearchStore.setDeepseekKey(deepseek);
   if (tavily) webSearchStore.setTavilyKey(tavily);
   if (serper) webSearchStore.setSerperKey(serper);
+  if (yuanbao) webSearchStore.setYuanbaoKey(yuanbao);
 
   // 科研搜索（Sciverse）
   const sciverseToken = await readSecret("sciverse", "token");
