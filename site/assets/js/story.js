@@ -89,19 +89,27 @@ function ensureDir(dir) {
   if (imgs[dir]) return;
   imgs[dir] = new Array(N);
   var im0 = new Image(); // 首帧不等队列
-  im0.onload = function () { imgs[dir][0] = im0; };
+  im0.onload = function () {
+    if (im0.decode) { im0.decode().then(function () { imgs[dir][0] = im0; }, function () { imgs[dir][0] = im0; }); }
+    else { imgs[dir][0] = im0; }
+  };
   im0.src = frameSrc(dir, 0);
   var jobs = [];
   for (var i = 1; i < N; i++) jobs.push([dir, i]);
   queue = jobs.concat(queue); // 新激活 tab 的段插队优先
   pump();
 }
+var LOAD_CONCURRENCY = 12;
 function pump() {
-  while (activeJobs < 6 && queue.length) {
+  while (activeJobs < LOAD_CONCURRENCY && queue.length) {
     var job = queue.shift(); activeJobs++;
     (function (dir, i) {
       var im = new Image();
-      im.onload = function () { imgs[dir][i] = im; activeJobs--; pump(); };
+      var done = function () { imgs[dir][i] = im; activeJobs--; pump(); };
+      im.onload = function () {
+        // 先 decode 再入缓存：避免滚动到该帧时在主线程同步解码，导致掉帧
+        if (im.decode) { im.decode().then(done, done); } else { done(); }
+      };
       im.onerror = function () { activeJobs--; pump(); };
       im.src = frameSrc(dir, i);
     })(job[0], job[1]);
@@ -119,6 +127,8 @@ function pick(arr, i) { /* 邻近帧兜底：±24 帧内找已加载的 */
 
 /* ---------- 画布 ---------- */
 var canvas = $("#seq"), ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = "medium";
 function fit() { canvas.width = innerWidth; canvas.height = innerHeight; }
 fit(); addEventListener("resize", fit);
 var lastKey = "";
@@ -161,7 +171,10 @@ var lastSi = 0, lastPos = 0;
 
 function applyTrack() { track.style.height = TABS[cur].trackVh + "vh"; }
 
+var lastRenderedP = -1;
 function render(p) {
+  if (p === lastRenderedP) return;
+  lastRenderedP = p;
   var fr = frameAt(spec, p);
   lastSi = fr.si; lastPos = fr.pos;
   drawSeg(spec, fr.si, fr.pos);
@@ -243,7 +256,7 @@ function switchTab(name) {
     cur = name; spec = TABS[name];
     applyTrack();
     spec.dirs.forEach(ensureDir);
-    scrollTo(0, 0); target = curP = 0; lastSi = 0; lastPos = 0; lastKey = "";
+    scrollTo(0, 0); target = curP = 0; lastSi = 0; lastPos = 0; lastKey = ""; lastRenderedP = -1;
     render(0);
     switching = false;
   });
@@ -279,7 +292,7 @@ spec.dirs.forEach(ensureDir);
 render(0);
 
 /* 截图探针 */
-window.__setP = function (p) { target = curP = Math.max(0, Math.min(1, p)); render(curP); };
+window.__setP = function (p) { target = curP = Math.max(0, Math.min(1, p)); lastRenderedP = -1; render(curP); };
 window.__tab = function (n) { switchTab(n); };
 window.__ready = true;
 })();
