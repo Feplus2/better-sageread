@@ -170,3 +170,29 @@ curl 实测三条通道均 200。
 1. **native 通道**：按 provider 原生 detail/mediaResolution 控制成本，图片只做一次规范化；不再套 700k dataUrl 字节预算（当前 native 通道本来也没有），上下文预算交给 token 用量与既有压缩机制。
 2. **chat 通道**：保留字节预算 + 最新批优先作为兼容兜底（chat 端点没有统一规范，且大请求易挂）；这是 fallback，不是主路径。
 3. 补 provider 能力矩阵与图片探针（单图/4 图/6 图）覆盖 native 与 chat 各一条。
+
+## 10. 2026-10-22 晚：review 纠偏与修复结果（取代 §7/§8/§9 的部分结论）
+
+完整 review 见 `docs/plans/protocol-review-2026-10-22.md`，端点矩阵见 `docs/plans/provider-endpoint-matrix.md`。
+
+### 10.1 已修复
+- **P0-1** `factory.createModelInstance` 第二次协议解析补传 `apiStyle`（否则"显式 API 格式/c 回退"对原生入口不生效）。
+- **P0-2** 原生 Anthropic 通道的思考控制：新增 `anthropicThinkingBodyPatch`（off→`thinking.disabled`；档位→`budget_tokens`；恒思考型号→最低档），并随 fetch 包装下传。之前原生分支直接 return，补丁被丢弃导致 DeepSeek 轻量任务变慢/档位失效。
+- **P0-3** Anthropic 兼容 baseURL 统一带 `/v1`：Kimi/智谱/MiniMax 的短路径实网分别 404/伪 404/404；预置常量 + resolve + provider-store v7 迁移三处一起改。
+- **P0-4** native 历史图回灌预算：每轮最多最近 2 批/6 张，旧图换诚实占位（原实现对每个历史 toolCallId 全量重发，长对话会持续膨胀）。
+- **P0-5** Gemini 分支 `apiKey` 被误填 URL 的 bug；删除死代码 `normalizeDeepSeekAnthropicBaseUrl`；Gemini provider 支持显式非原生协议（预置的 OpenAI 兼容端点）。
+- **新发现**：原生 provider 不能走 webview 的 `globalThis.fetch`（Kimi 实测 "Failed to fetch" 158ms）→ 原生通道统一改走 Tauri HTTP 客户端；v8 迁移合并后加的预置（MiniMax）。
+- **多端点预置（CherryStudio 式）**：`ModelProvider.endpoints`（协议→baseURL）+ 设置页端点下拉/请求路径预览/恢复默认 + 模型列表回退；用户正常只填 Key。
+- **AI SDK 升级**：ai 7.0.73→7.0.148，@ai-sdk/* 同批升级并去重。
+
+### 10.2 App 内实测（真实 key，2026-10-22 晚）
+- DeepSeek deepseek-flash：视觉探针 PASS（7.7s，bridgeLog=[]）；4 图 viewImages PASS（两个 profile）。
+- Kimi kimi-k2.6：视觉探针 PASS（12.2s，bridgeLog=[]）。
+- MiniMax MiniMax-M3.1-Flash：视觉探针 PASS（14.0s，bridgeLog=[]）。
+- 单测：`scripts/test-provider-protocol.mjs` 38 断言、`scripts/test-tool-image-bridge.mjs` 34 断言全过；`tsc -b` 通过。
+
+### 10.3 仍不成立 / 未验证（更新）
+- 官方 OpenAI/Anthropic/Gemini 仍无 key，原生端点只能单测/文档级证据。
+- OpenRouter 多协议、Grok Responses、Gemini OpenAI 兼容端点：factory 按协议分派的路径已具备，但未实网验证。
+- 智谱 tool_result 图片：Coding Plan 到期，待续订。
+- 用户可见文案（接口端点选择器、路径预览）需主人过目。

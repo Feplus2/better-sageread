@@ -1,3 +1,14 @@
+/**
+ * 预置提供商（CherryStudio 式多端点预置）。
+ *
+ * 2026-10-22 改版：每个预置提供商同时预填多个协议的 Base URL（endpoints），
+ * 默认协议由 apiStyle 决定——用户通常只填 API Key 即可，不需要手动选协议。
+ * endpoints 里的地址是**给 AI SDK 的 baseURL 语义**（含 /v1 等版本段，SDK 会再追加
+ * /chat/completions、/responses、/messages、/models/{id}:generateContent）。
+ *
+ * 实网核对（2026-10-22）：Kimi/智谱/MiniMax 的 Anthropic 兼容端点短路径（不带 /v1）
+ * 分别 404 / 伪 404 / 404；DeepSeek 两种都接受但统一用 /v1。
+ */
 export const predefinedProviders: ModelProvider[] = [
   {
     active: true,
@@ -8,6 +19,10 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://platform.openai.com/docs/api-reference/chat/create",
     provider: "openai",
     apiStyle: "openai-responses",
+    endpoints: {
+      "openai-responses": "https://api.openai.com/v1",
+      "openai-chat": "https://api.openai.com/v1",
+    },
     models: [],
   },
   {
@@ -18,6 +33,9 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrl: "https://api.anthropic.com/v1",
     provider: "anthropic",
     apiStyle: "anthropic-messages",
+    endpoints: {
+      "anthropic-messages": "https://api.anthropic.com/v1",
+    },
     baseUrlHelpUrl: "https://docs.anthropic.com/en/api/messages",
     models: [],
   },
@@ -30,6 +48,9 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://openrouter.ai/docs/api-reference/overview",
     provider: "openrouter",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://openrouter.ai/api/v1",
+    },
     models: [],
   },
   {
@@ -41,6 +62,9 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://docs.x.ai/docs/models",
     provider: "grok",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://api.x.ai/v1",
+    },
     models: [],
   },
   {
@@ -52,17 +76,25 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://ai.google.dev/gemini-api/docs/openai",
     provider: "gemini",
     apiStyle: "gemini",
+    endpoints: {
+      gemini: "https://generativelanguage.googleapis.com/v1beta",
+      "openai-chat": "https://generativelanguage.googleapis.com/v1beta/openai",
+    },
     models: [],
   },
   {
     active: true,
     apiKey: "",
     name: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/anthropic",
+    baseUrl: "https://api.deepseek.com/anthropic/v1",
     apiKeyHelpUrl: "https://platform.deepseek.com/api_keys",
     baseUrlHelpUrl: "https://api-docs.deepseek.com",
     provider: "deepseek",
     apiStyle: "anthropic-messages",
+    endpoints: {
+      "anthropic-messages": "https://api.deepseek.com/anthropic/v1",
+      "openai-chat": "https://api.deepseek.com/v1",
+    },
     models: [],
   },
   // ==================== 国内提供商 ====================
@@ -70,22 +102,31 @@ export const predefinedProviders: ModelProvider[] = [
     active: false,
     apiKey: "",
     name: "智谱 GLM",
-    baseUrl: "https://open.bigmodel.cn/api/anthropic",
+    baseUrl: "https://open.bigmodel.cn/api/anthropic/v1",
     apiKeyHelpUrl: "https://open.bigmodel.cn/usercenter/apikeys",
     baseUrlHelpUrl: "https://open.bigmodel.cn/dev/api/normal-model/glm-4",
     provider: "zhipu",
     apiStyle: "anthropic-messages",
+    endpoints: {
+      "anthropic-messages": "https://open.bigmodel.cn/api/anthropic/v1",
+      "openai-chat": "https://open.bigmodel.cn/api/paas/v4",
+    },
     models: [],
   },
   {
     active: false,
     apiKey: "",
     name: "KIMI (Moonshot)",
-    baseUrl: "https://api.moonshot.cn/anthropic",
+    baseUrl: "https://api.moonshot.cn/anthropic/v1",
     apiKeyHelpUrl: "https://platform.moonshot.cn/console/api-keys",
     baseUrlHelpUrl: "https://platform.moonshot.cn/docs/api/chat",
     provider: "kimi",
     apiStyle: "anthropic-messages",
+    endpoints: {
+      "anthropic-messages": "https://api.moonshot.cn/anthropic/v1",
+      "openai-chat": "https://api.moonshot.cn/v1",
+      "openai-responses": "https://api.moonshot.cn/v1",
+    },
     models: [],
   },
   {
@@ -97,6 +138,10 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://platform.xiaomimimo.com",
     provider: "xiaomi",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://api.xiaomimimo.com/v1",
+      "anthropic-messages": "https://api.xiaomimimo.com/anthropic/v1",
+    },
     models: [],
   },
   {
@@ -108,6 +153,11 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://help.aliyun.com/zh/model-studio/compatibility-with-openai",
     provider: "qwen",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "openai-responses": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "anthropic-messages": "https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy/v1",
+    },
     models: [],
   },
   {
@@ -119,17 +169,25 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://www.volcengine.com/docs/82379/1263512",
     provider: "doubao",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://ark.cn-beijing.volces.com/api/v3",
+      "openai-responses": "https://ark.cn-beijing.volces.com/api/v3",
+    },
     models: [],
   },
   {
     active: false,
     apiKey: "",
     name: "MiniMax",
-    baseUrl: "https://api.minimaxi.com/anthropic",
+    baseUrl: "https://api.minimaxi.com/anthropic/v1",
     apiKeyHelpUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     baseUrlHelpUrl: "https://platform.minimaxi.com/document",
     provider: "minimax",
     apiStyle: "anthropic-messages",
+    endpoints: {
+      "anthropic-messages": "https://api.minimaxi.com/anthropic/v1",
+      "openai-chat": "https://api.minimaxi.com/v1",
+    },
     models: [],
   },
   // ==================== 本地服务（OpenAI 兼容，免 Key） ====================
@@ -142,6 +200,9 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://github.com/ollama/ollama/blob/main/docs/openai.md",
     provider: "ollama",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "http://127.0.0.1:11434/v1",
+    },
     models: [],
   },
   {
@@ -153,6 +214,9 @@ export const predefinedProviders: ModelProvider[] = [
     baseUrlHelpUrl: "https://lmstudio.ai/docs/developer/openai-compat",
     provider: "lmstudio",
     apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "http://127.0.0.1:1234/v1",
+    },
     models: [],
   },
 ];

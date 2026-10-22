@@ -40,6 +40,22 @@ export function getCachedToolImages(toolCallId: string): CachedToolImage[] | und
   return cacheState().entries.get(toolCallId);
 }
 
+/** 按插入顺序（旧→新）导出缓存条目：native 通道历史图回灌预算按"最近 N 批"计算 */
+export function listCachedToolImageEntries(): Array<{ toolCallId: string; images: CachedToolImage[] }> {
+  return Array.from(cacheState().entries.entries()).map(([toolCallId, images]) => ({ toolCallId, images }));
+}
+
+/** 该 toolCallId 是否在最近 maxEntries 个缓存条目内（Map 插入序，新条目在尾部） */
+export function isRecentToolImageEntry(toolCallId: string, maxEntries: number): boolean {
+  if (maxEntries <= 0) return false;
+  const keys = Array.from(cacheState().entries.keys());
+  const start = Math.max(0, keys.length - maxEntries);
+  for (let i = start; i < keys.length; i++) {
+    if (keys[i] === toolCallId) return true;
+  }
+  return false;
+}
+
 export function clearToolImageCache(): void {
   cacheState().entries.clear();
 }

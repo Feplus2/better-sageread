@@ -378,6 +378,60 @@ export function chatReasoningBodyPatch(
   return null;
 }
 
+/**
+ * Anthropic Messages 原生通道的思考参数补丁（2026-10-22 纠偏）。
+ *
+ * 背景：DeepSeek/Kimi/智谱/MiniMax 的 Anthropic 兼容端点没有 AI SDK 的 providerOptions 通道
+ * （factory 走 fetch 包装），所以直接在 JSON 请求体上写 thinking 字段。
+ * 实网验证：DeepSeek 支持 disabled / enabled+budget_tokens / adaptive；Kimi 支持 disabled；
+ * 恒思考型号发 disabled 会 400，因此夹到最低档后用 enabled 下发（失败时 wrapper 去补丁重放）。
+ */
+export function anthropicThinkingBodyPatch(modelId: string, level: ReasoningLevel): ReasoningBodyPatch | null {
+  if (level === "auto") return null;
+  const cap = lookupCap(modelId);
+  const lv = cap ? clampReasoningLevel(cap.levels, level) : level;
+
+  // 可关闭的型号：off/none 直接关思考（已实网验证 DeepSeek/Kimi）
+  if ((lv === "off" || lv === "none") && !cap?.alwaysOn) {
+    return (body) => {
+      delete body.reasoning_effort;
+      delete body.enable_thinking;
+      body.thinking = { type: "disabled" };
+    };
+  }
+
+  // 恒思考型号的 off/none 夹到最低原生档；其余档位按映射表折算 budget_tokens
+  const effective = cap?.alwaysOn && (lv === "off" || lv === "none") && cap.levels.length > 0 ? cap.levels[0] : lv;
+  const budget = budgetTokensForLevel(effective);
+  return (body) => {
+    delete body.reasoning_effort;
+    delete body.enable_thinking;
+    body.thinking = budget ? { type: "enabled", budget_tokens: budget } : { type: "enabled" };
+  };
+}
+
+/** 思考档位 → Anthropic budget_tokens（官方要求 ≥1024；未知词用 2048） */
+function budgetTokensForLevel(level: string): number | undefined {
+  const n = Number.parseInt(level, 10);
+  if (Number.isFinite(n) && n > 0) return Math.max(1024, n);
+  switch (level) {
+    case "minimal":
+    case "low":
+      return 1024;
+    case "medium":
+    case "on":
+      return 2048;
+    case "high":
+      return 4096;
+    case "xhigh":
+      return 6144;
+    case "max":
+      return 8192;
+    default:
+      return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 工具函数
 // ---------------------------------------------------------------------------

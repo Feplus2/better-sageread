@@ -4,6 +4,39 @@ import { tauriStorage } from "@/lib/tauri-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+/**
+ * Anthropic 兼容端点的规范 baseURL（2026-10-22 实网纠偏）。
+ * @ai-sdk/anthropic 在 baseURL 后追加 /messages，而厂商文档的 base_url 是 Anthropic 官方
+ * SDK 语义（SDK 再补 /v1/messages），所以预填地址必须带 /v1。实测短路径：
+ * Kimi 404 / 智谱 HTTP200 包 404 / MiniMax 404；带 /v1 均可达。
+ */
+const ANTHROPIC_COMPAT_CANONICAL_BASE_URLS: Record<string, string> = {
+  deepseek: "https://api.deepseek.com/anthropic/v1",
+  kimi: "https://api.moonshot.cn/anthropic/v1",
+  zhipu: "https://open.bigmodel.cn/api/anthropic/v1",
+  minimax: "https://api.minimaxi.com/anthropic/v1",
+};
+
+const ANTHROPIC_COMPAT_OFFICIAL_HOSTS: Record<string, string[]> = {
+  deepseek: ["deepseek.com"],
+  kimi: ["api.moonshot.cn"],
+  zhipu: ["open.bigmodel.cn"],
+  minimax: ["api.minimaxi.com", "api.minimax.io"],
+};
+
+/** 只对官方 host 做端点规范化；用户自定义代理保持原样 */
+function isOfficialProviderHost(providerId: string, baseUrl?: string): boolean {
+  if (!baseUrl) return true;
+  const allowed = ANTHROPIC_COMPAT_OFFICIAL_HOSTS[providerId];
+  if (!allowed) return false;
+  try {
+    const host = new URL(baseUrl).host.toLowerCase();
+    return allowed.some((domain) => host === domain || host.endsWith("." + domain));
+  } catch {
+    return false;
+  }
+}
+
 export interface SelectedModel {
   modelId: string;
   providerId: string;
@@ -69,7 +102,7 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
-      version: 6,
+      version: 8,
       migrate: (persistedState: any, version: number) => {
         if (version < 1) {
           // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
@@ -201,6 +234,28 @@ export const useProviderStore = create<ProviderState>()(
             if (chat) return { ...p, apiStyle: chat };
             return { ...p, apiStyle: "auto" as const };
           });
+        }
+        if (version < 7) {
+          // v6→v7：Anthropic 兼容端点补 /v1（Kimi/智谱/MiniMax 短路径会 404；DeepSeek 兼容两种但统一）。
+          // 只迁移官方 host；用户自定义代理保持原样，避免覆盖别人的路径约定。
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+            const target = ANTHROPIC_COMPAT_CANONICAL_BASE_URLS[p.provider];
+            if (!target || !isOfficialProviderHost(p.provider, p.baseUrl)) return p;
+            // MiniMax 区域域名保持用户选择
+            const next =
+              p.provider === "minimax" && /minimax\.io/i.test(p.baseUrl ?? "")
+                ? "https://api.minimax.io/anthropic/v1"
+                : target;
+            return p.baseUrl === next ? p : { ...p, baseUrl: next };
+          });
+        }
+        if (version < 8) {
+          // v7→v8：合并新增的预置提供商（如 MiniMax；v4 之后新增的预置在旧用户 store 里不存在）。
+          // 同 id 不覆盖，保留用户已有配置。
+          const current: ModelProvider[] = persistedState.modelProviders ?? [];
+          const ids = new Set(current.map((p) => p.provider));
+          const missing = predefinedProviders.filter((p) => !ids.has(p.provider));
+          if (missing.length > 0) persistedState.modelProviders = [...current, ...missing];
         }
         return persistedState;
       },

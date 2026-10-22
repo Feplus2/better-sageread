@@ -359,7 +359,11 @@ console.log("[7] 落库 sanitize：图片字节不写进线程（内存消息不
   const json = JSON.stringify(stripped);
   check("落库副本不含 base64", !json.includes("data:image/"), json.slice(0, 120));
   check("信封路径保留", json.includes("C:/ws/a.png") && json.includes("C:/ws/b.png"), "paths");
-  check("图片字节换成文本占位", json.includes("图片字节未落库"), "placeholder");
+  check(
+    "图片字节换成诚实文本占位（不谎称仍在线程里）",
+    json.includes("历史图片未随本轮重发") && json.includes("readImage"),
+    "placeholder",
+  );
   check(
     "useTool 转发的 viewImages 同样被摘",
     !JSON.stringify(stripped[0].parts[2]).includes("data:image/"),

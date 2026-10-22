@@ -55,8 +55,10 @@ const L1_CONTENT_TOOLS = new Set([
 
 /** 图片类工具：结果里的 dataUrl 一律不落库（2026-10-22，viewImages 一次最多 6 张，base64 会撑爆线程） */
 const IMAGE_TOOLS = new Set(["readImage", "viewImages"]);
-/** 落库占位：字节丢弃，信封（路径/尺寸）仍在，需要重看时按路径重新调用 readImage/viewImages */
-const IMAGE_BYTES_PLACEHOLDER = "[图片字节未落库（在线程里保留），需要重看时用 readImage/viewImages 按路径重取]";
+/** 落库占位：字节丢弃，信封（路径/尺寸）仍在，需要重看时按路径重新调用 readImage/viewImages。
+ * 注意：重启或超过 native 回灌窗口后图片不会自动重发，文案必须诚实（不能写"在线程里保留"）。 */
+const IMAGE_BYTES_PLACEHOLDER =
+  "[历史图片未随本轮重发（字节不落库；重启/较早轮次后模型看不到原图），需要重看时用 readImage/viewImages 按路径重取]";
 
 /** L2 纳入存根的 RAG 工具 */
 const L2_RAG_TOOLS = new Set(["ragSearch", "ragContext", "ragRange"]);

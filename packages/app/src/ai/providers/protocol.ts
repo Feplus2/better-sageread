@@ -11,12 +11,7 @@
  * 注意：这是“传输协议”路由，不是“模型能力”判断；未知自定义端点默认 chat（最保守，不会误发新端点 404）。
  */
 
-export type ProviderProtocol =
-  | "openai-responses"
-  | "openai-chat"
-  | "anthropic-messages"
-  | "gemini"
-  | "chat";
+export type ProviderProtocol = "openai-responses" | "openai-chat" | "anthropic-messages" | "gemini" | "chat";
 
 export type ProviderApiStyle = "auto" | "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
 
@@ -47,11 +42,16 @@ function hostMatches(baseUrl: string | undefined, domain: string): boolean {
 /** 显式协议优先；auto/未填返回 null，继续走推断 */
 function explicitProtocol(style?: ProviderApiStyle): ProviderProtocol | null {
   switch (style) {
-    case "openai-chat": return "openai-chat";
-    case "openai-responses": return "openai-responses";
-    case "anthropic-messages": return "anthropic-messages";
-    case "gemini": return "gemini";
-    default: return null;
+    case "openai-chat":
+      return "openai-chat";
+    case "openai-responses":
+      return "openai-responses";
+    case "anthropic-messages":
+      return "anthropic-messages";
+    case "gemini":
+      return "gemini";
+    default:
+      return null;
   }
 }
 
@@ -60,14 +60,6 @@ function isOfficialDeepSeekHost(baseUrl?: string): boolean {
   if (!baseUrl) return true; // 未自定义 baseURL = 官方默认端点
   const host = hostOf(baseUrl);
   return host === "api.deepseek.com" || host.endsWith(".deepseek.com");
-}
-
-export function normalizeDeepSeekAnthropicBaseUrl(baseUrl?: string): string {
-  if (!baseUrl) return "https://api.deepseek.com/anthropic";
-  const trimmed = baseUrl.replace(/\/+$/, "");
-  if (/\/anthropic$/.test(trimmed)) return trimmed;
-  if (/\/v\d+$/.test(trimmed)) return trimmed.replace(/\/v\d+$/, "/anthropic");
-  return trimmed + "/anthropic";
 }
 
 /** 已知网关（按域名 + 模型前缀）的协议映射；未知端点不猜，走 chat。 */
@@ -106,10 +98,17 @@ export function resolveProviderProtocol(input: ProtocolInput): ProviderProtocol 
   }
   if (id === "kimi") return hostMatches(baseUrl, "api.moonshot.cn") ? "anthropic-messages" : "chat";
   if (id === "zhipu") return hostMatches(baseUrl, "open.bigmodel.cn") ? "anthropic-messages" : "chat";
-  if (id === "minimax") return hostMatches(baseUrl, "api.minimaxi.com") || hostMatches(baseUrl, "api.minimax.io") ? "anthropic-messages" : "chat";
+  if (id === "minimax")
+    return hostMatches(baseUrl, "api.minimaxi.com") || hostMatches(baseUrl, "api.minimax.io")
+      ? "anthropic-messages"
+      : "chat";
   if (id === "openrouter") return "chat";
 
-  if (id.startsWith("custom-") || id === "custom" || !["zhipu", "kimi", "qwen", "doubao", "xiaomi", "ollama", "lmstudio"].includes(id)) {
+  if (
+    id.startsWith("custom-") ||
+    id === "custom" ||
+    !["zhipu", "kimi", "qwen", "doubao", "xiaomi", "ollama", "lmstudio"].includes(id)
+  ) {
     const gateway = gatewayProtocol(host, model);
     if (gateway) return gateway;
   }
@@ -137,22 +136,44 @@ export function normalizeGeminiBaseUrl(baseUrl?: string): string | undefined {
   return trimmed + "/v1beta";
 }
 
-/** 已知 Anthropic 兼容 provider 的规范 baseURL（官方文档推荐端点） */
+/**
+ * 已知 Anthropic 兼容 provider 的规范 baseURL。
+ *
+ * 关键语义（2026-10-22 实网纠偏）：@ai-sdk/anthropic 会在 baseURL 后**追加 /messages**，
+ * 而厂商文档写的 base_url 是 Anthropic 官方 SDK 语义（SDK 自己再追加 /v1/messages）。
+ * 因此预填给 AI SDK 的地址必须带厂商文档里的 .../v1：
+ *   DeepSeek: https://api.deepseek.com/anthropic/v1
+ *   Kimi:     https://api.moonshot.cn/anthropic/v1
+ *   智谱:     https://open.bigmodel.cn/api/anthropic/v1
+ *   MiniMax:  https://api.minimaxi.com/anthropic/v1
+ * 实测短路径（无 /v1）：Kimi 404、智谱 HTTP 200 包 404、MiniMax 404；带 /v1 均可达。
+ * 用户自定义代理时尊重其 Base URL（normalizeAnthropicBaseUrl 补 /v1，不硬打官方）。
+ */
 export function resolveAnthropicCompatibleBaseUrl(providerId: string, baseUrl?: string): string | undefined {
   const id = providerId.toLowerCase();
-  // 官方默认端点用规范地址；用户自定义代理时尊重用户 Base URL（避免把代理请求硬打到官方）。
+  if (id === "anthropic") {
+    return hostMatches(baseUrl, "api.anthropic.com")
+      ? "https://api.anthropic.com/v1"
+      : normalizeAnthropicBaseUrl(baseUrl);
+  }
   if (id === "deepseek") {
-    return hostMatches(baseUrl, "api.deepseek.com") ? "https://api.deepseek.com/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+    return hostMatches(baseUrl, "api.deepseek.com")
+      ? "https://api.deepseek.com/anthropic/v1"
+      : normalizeAnthropicBaseUrl(baseUrl);
   }
   if (id === "kimi") {
-    return hostMatches(baseUrl, "api.moonshot.cn") ? "https://api.moonshot.cn/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+    return hostMatches(baseUrl, "api.moonshot.cn")
+      ? "https://api.moonshot.cn/anthropic/v1"
+      : normalizeAnthropicBaseUrl(baseUrl);
   }
   if (id === "zhipu") {
-    return hostMatches(baseUrl, "open.bigmodel.cn") ? "https://open.bigmodel.cn/api/anthropic" : normalizeAnthropicBaseUrl(baseUrl);
+    return hostMatches(baseUrl, "open.bigmodel.cn")
+      ? "https://open.bigmodel.cn/api/anthropic/v1"
+      : normalizeAnthropicBaseUrl(baseUrl);
   }
   if (id === "minimax") {
-    if (hostMatches(baseUrl, "api.minimax.io")) return "https://api.minimax.io/anthropic";
-    if (hostMatches(baseUrl, "api.minimaxi.com")) return "https://api.minimaxi.com/anthropic";
+    if (hostMatches(baseUrl, "api.minimax.io")) return "https://api.minimax.io/anthropic/v1";
+    if (hostMatches(baseUrl, "api.minimaxi.com")) return "https://api.minimaxi.com/anthropic/v1";
     return normalizeAnthropicBaseUrl(baseUrl);
   }
   return normalizeAnthropicBaseUrl(baseUrl);

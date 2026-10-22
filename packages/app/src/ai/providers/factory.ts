@@ -7,7 +7,13 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
-import { type ReasoningLevel, auxThinkingLevel, chatReasoningBodyPatch, lookupCap } from "./reasoning-map";
+import {
+  type ReasoningLevel,
+  anthropicThinkingBodyPatch,
+  auxThinkingLevel,
+  chatReasoningBodyPatch,
+  lookupCap,
+} from "./reasoning-map";
 import {
   type ProviderApiStyle,
   normalizeGeminiBaseUrl,
@@ -150,6 +156,7 @@ function wrapChatReasoningFetch(
   baseUrl: string | undefined,
   modelId: string | undefined,
   levelRef: () => ReasoningLevel,
+  mode: "chat" | "anthropic" = "chat",
 ): typeof fetch {
   const inner = base ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
   return async (input, init) => {
@@ -158,7 +165,11 @@ function wrapChatReasoningFetch(
     let didPatch = false;
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
-      const patch = chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
+      // 原生 Anthropic 通道写 thinking 字段；chat 通道走各家请求体补丁
+      const patch =
+        mode === "anthropic"
+          ? anthropicThinkingBodyPatch(modelId ?? "", levelRef())
+          : chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
       if (patch) {
         patch(body);
         didPatch = true;
@@ -185,17 +196,34 @@ function wrapChatReasoningFetch(
 export function createProviderInstance(config: ProviderConfig) {
   const { providerId, apiKey, baseUrl, disableThinking, modelId, reasoningLevelRef } = config;
   const protocol = resolveProviderProtocol({ providerId, baseUrl, modelId, apiStyle: config.apiStyle });
-  // 关闭思考补丁：仅轻量任务（disableThinking）且端点认识时生效
-  const patch = disableThinking ? thinkingOffPatch(providerId, baseUrl, modelId) : null;
+  const isAnthropicNative = protocol === "anthropic-messages";
+  // 关闭思考补丁：原生 Anthropic 通道写 thinking 字段（DeepSeek/Kimi 已验证）；
+  // chat 通道按端点认识的请求体补丁（reasoning_effort/thinking/enable_thinking）。
+  // 之前原生分支直接 return createAnthropic 丢掉补丁：轻量任务在 DeepSeek 上重新变慢、聊天档位失效。
+  const patch = disableThinking
+    ? isAnthropicNative
+      ? anthropicThinkingBodyPatch(modelId ?? "", "off")
+      : thinkingOffPatch(providerId, baseUrl, modelId)
+    : null;
   // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
-  const wrapFetch = (base?: typeof fetch): typeof fetch | undefined => {
+  const wrapFetch = (base: typeof fetch): typeof fetch => {
     let f = base;
     if (patch) f = wrapThinkingOffFetch(f, patch);
-    if (reasoningLevelRef) f = wrapChatReasoningFetch(f, providerId, baseUrl, modelId, reasoningLevelRef);
+    if (reasoningLevelRef)
+      f = wrapChatReasoningFetch(
+        f,
+        providerId,
+        baseUrl,
+        modelId,
+        reasoningLevelRef,
+        isAnthropicNative ? "anthropic" : "chat",
+      );
     return f;
   };
-  const wrappedDefault = patch || reasoningLevelRef ? wrapFetch(undefined) : undefined;
-  const maybeWrap = (base?: typeof fetch) => wrapFetch(base) ?? base;
+  // 统一走 Tauri 的 HTTP 客户端：原生 provider（尤其是官方 OpenAI/Anthropic/Gemini/Kimi）不返回
+  // 浏览器 CORS 头，webview 里的 globalThis.fetch 会直接 "Failed to fetch"（2026-10-22 实网复现：
+  // Kimi 158ms 失败）。chat/兼容通道本来就用 fetchTauri，这里把原生通道也补齐。
+  const wrappedDefault = wrapFetch(fetchTauri);
 
   switch (providerId) {
     case "deepseek":
@@ -205,6 +233,7 @@ export function createProviderInstance(config: ProviderConfig) {
         return createAnthropic({
           apiKey: apiKey || "",
           baseURL: resolveAnthropicCompatibleBaseUrl("deepseek", baseUrl),
+          fetch: wrappedDefault,
         });
       }
       // 自定义 DeepSeek-compatible 代理：沿用 chat 通道（视觉型号再挂图片桥）
@@ -216,7 +245,7 @@ export function createProviderInstance(config: ProviderConfig) {
       // 表内未知型号默认放行即走兼容通道，误路由无害：DeepSeek API 本就是 OpenAI 兼容格式）。
       if (modelId && (VISION_NAME_RE.test(modelId.toLowerCase()) || modelSupportsVision("deepseek", modelId))) {
         // OpenAI-compatible 聊天接口不支持工具结果里的图片：在 fetch 层把工具图片改挂到 user 消息
-        const visionFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault ?? fetch);
+        const visionFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
         return createOpenAICompatible({
           name: "deepseek-vision",
           baseURL: baseUrl || "https://api.deepseek.com",
@@ -227,26 +256,25 @@ export function createProviderInstance(config: ProviderConfig) {
       return createDeepSeek({
         apiKey: apiKey || "",
         baseURL: baseUrl,
-        ...(wrappedDefault ? { fetch: wrappedDefault } : {}),
+        fetch: wrappedDefault,
       });
 
     case "openrouter":
       return createOpenRouter({
         apiKey: apiKey || "",
         baseURL: baseUrl,
+        fetch: wrappedDefault,
       });
 
     case "openai": {
       // 官方默认 Responses；若用户显式选 chat（或改成只支持 chat 的代理），
       // chat 通道挂图片桥，保证工具图片仍可用。
       const openaiChatFetch =
-        protocol === "openai-chat"
-          ? wrapOpenAICompatToolImagesFetch(maybeWrap(fetchTauri) ?? fetchTauri)
-          : undefined;
+        protocol === "openai-chat" ? wrapOpenAICompatToolImagesFetch(wrappedDefault) : wrappedDefault;
       return createOpenAI({
         apiKey: apiKey || "",
         baseURL: baseUrl,
-        ...(openaiChatFetch ? { fetch: openaiChatFetch } : {}),
+        fetch: openaiChatFetch,
       });
     }
 
@@ -257,6 +285,7 @@ export function createProviderInstance(config: ProviderConfig) {
         return createAnthropic({
           apiKey: apiKey || "",
           baseURL: resolveAnthropicCompatibleBaseUrl("anthropic", baseUrl),
+          fetch: wrappedDefault,
         });
       }
       // 显式 chat 兼容（用户自建 Anthropic 兼容代理且只支持 chat 时）保留旧路径
@@ -265,21 +294,42 @@ export function createProviderInstance(config: ProviderConfig) {
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.anthropic.com/v1",
         includeUsage: true,
         name: "OpenAI Compatible",
-        fetch: maybeWrap(fetchTauri) ?? fetchTauri,
+        fetch: wrapOpenAICompatToolImagesFetch(wrappedDefault),
       });
 
     case "gemini":
-    case "google":
-      return createGoogleGenerativeAI({
-        apiKey: apiKey || "https://generativelanguage.googleapis.com/v1beta",
-        baseURL: baseUrl,
+    case "google": {
+      // 预置端点允许切换协议（如 Gemini 的 OpenAI 兼容端点）；显式选非 gemini 协议时按对应通道走。
+      if (protocol === "gemini") {
+        return createGoogleGenerativeAI({
+          apiKey: apiKey || "",
+          ...(baseUrl ? { baseURL: normalizeGeminiBaseUrl(baseUrl) } : {}),
+          fetch: wrappedDefault,
+        });
+      }
+      if (protocol === "openai-responses") {
+        return createOpenAI({
+          apiKey: apiKey || "",
+          baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
+          fetch: wrappedDefault,
+        });
+      }
+      const geminiChatFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
+      return createOpenAICompatible({
+        apiKey: apiKey || "",
+        baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
+        includeUsage: true,
+        name: "OpenAI Compatible",
+        fetch: geminiChatFetch,
       });
+    }
 
     case "grok":
       // Grok 使用 OpenAI 兼容的 chat completions，不走 Responses
       return createOpenAI({
         apiKey: apiKey || "",
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.x.ai/v1",
+        fetch: wrappedDefault,
       });
 
     default: {
@@ -288,23 +338,26 @@ export function createProviderInstance(config: ProviderConfig) {
         return createOpenAI({
           apiKey: apiKey || "",
           baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
+          fetch: wrappedDefault,
         });
       }
       if (protocol === "anthropic-messages") {
         return createAnthropic({
           apiKey: apiKey || "",
           baseURL: resolveAnthropicCompatibleBaseUrl(providerId, baseUrl),
+          fetch: wrappedDefault,
         });
       }
       if (protocol === "gemini") {
         return createGoogleGenerativeAI({
           apiKey: apiKey || "",
           baseURL: normalizeGeminiBaseUrl(baseUrl),
+          fetch: wrappedDefault,
         });
       }
       // chat / openai-chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）。
       // openai-chat 也走兼容适配器而不是 createOpenAI().chat()，以保留图片桥与旧代理兼容性。
-      const chatFetch = wrapOpenAICompatToolImagesFetch(maybeWrap(fetchTauri) ?? fetchTauri);
+      const chatFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
       return createOpenAICompatible({
         apiKey: apiKey || "",
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
@@ -352,11 +405,14 @@ export function createModelInstance(
     reasoningLevelRef: opts?.reasoningLevelRef,
   });
 
-  // 返回模型实例：按协议选择 Responses / chat / Messages 入口
+  // 返回模型实例：按协议选择 Responses / chat / Messages 入口。
+  // 必须把 apiStyle 一起传入——否则用户在设置里显式选的协议会在这一步被重新推断覆盖
+  // （官方 OpenAI 选 openai-chat 永远失效、自定义代理选 openai-responses 会被当成 chat）。
   const protocol = resolveProviderProtocol({
     providerId,
     baseUrl: provider.baseUrl,
     modelId,
+    apiStyle: provider.apiStyle,
   });
   const providerAny = providerInstance as unknown as {
     responses?: (id: string) => LanguageModel;
@@ -371,9 +427,7 @@ export function createModelInstance(
   // Gemini 原生协议：AI SDK 只在 modelId 不含 "/" 时自动补 models/ 前缀；
   // 网关的 google/xxx 模型需要 models/google/xxx 才能命中 /v1beta/models/... 路径。
   const effectiveModelId =
-    protocol === "gemini" && modelId.includes("/") && !modelId.startsWith("models/")
-      ? "models/" + modelId
-      : modelId;
+    protocol === "gemini" && modelId.includes("/") && !modelId.startsWith("models/") ? "models/" + modelId : modelId;
   return providerInstance(effectiveModelId) as LanguageModel;
 }
 

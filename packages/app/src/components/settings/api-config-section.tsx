@@ -1,7 +1,15 @@
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { isLocalEndpoint } from "@/utils/provider-url";
+import {
+  buildRequestPathPreview,
+  findCurrentEndpoint,
+  getEndpointOptions,
+  getPresetDefaultEndpoint,
+  nativeImageHint,
+} from "@/utils/provider-endpoint";
 import SecretInput from "./secret-input";
 
 interface ApiConfigSectionProps {
@@ -13,6 +21,19 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
   const providerName = provider.name;
   const isCustomProvider = provider.provider.startsWith("custom-");
   const isLocal = isLocalEndpoint(provider.baseUrl);
+  const endpointOptions = getEndpointOptions(provider);
+  const currentEndpoint = findCurrentEndpoint(provider);
+  const hasPresetEndpoints = endpointOptions.length > 0;
+  const preview = buildRequestPathPreview(provider.baseUrl, provider.apiStyle ?? "auto");
+  // 预置端点命中时不再让用户选协议（端点即协议）；手改地址/自定义 provider 才显示协议选择
+  const showProtocolSelect = !hasPresetEndpoints || !currentEndpoint;
+
+  const applyEndpoint = (protocol: ChatProtocol) => {
+    const option = endpointOptions.find((item) => item.protocol === protocol);
+    if (!option) return;
+    onFieldChange("apiStyle", option.protocol);
+    onFieldChange("baseUrl", option.baseUrl);
+  };
 
   return (
     <div className="space-y-4 rounded-lg bg-muted/80 p-4">
@@ -58,6 +79,35 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
         />
       </div>
 
+      {hasPresetEndpoints && (
+        <div className="space-y-2">
+          <Label className="text-sm dark:text-neutral-200">接口端点</Label>
+          <p className="text-neutral-500 text-xs dark:text-neutral-400">
+            地址已按 {providerName} 的官方端点预填好，通常只需填写 API Key；改用代理或其它协议时再切换。
+          </p>
+          <Select
+            value={currentEndpoint?.protocol ?? "custom"}
+            onValueChange={(value) => value !== "custom" && applyEndpoint(value as ChatProtocol)}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="选择端点" />
+            </SelectTrigger>
+            <SelectContent>
+              {endpointOptions.map((option) => (
+                <SelectItem key={option.protocol} value={option.protocol}>
+                  {option.label}
+                  {option.isDefault ? "（推荐）" : ""}
+                </SelectItem>
+              ))}
+              {/* 手动改过 Base URL 后显示为"自定义"状态（不可选；切回预置用下方"恢复预置端点"） */}
+              <SelectItem value="custom" disabled>
+                自定义（手动填写）
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="space-y-2">
         <div>
           <Label htmlFor="baseUrl" className="text-sm dark:text-neutral-200">
@@ -86,26 +136,53 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           onChange={(e) => onFieldChange("baseUrl", e.target.value)}
           placeholder="https://api.example.com/v1"
         />
+        {preview && (
+          <p className="break-all font-mono text-neutral-500 text-xs dark:text-neutral-400">请求路径：{preview}</p>
+        )}
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-sm dark:text-neutral-200">API 格式（协议）</Label>
-        <p className="text-neutral-500 text-xs dark:text-neutral-400">
-          Base URL 只决定端点；协议决定用哪一代 API。预置提供商有推荐默认值，自定义代理/中转站请按实际支持的格式选择。
-        </p>
-        <Select value={provider.apiStyle ?? "auto"} onValueChange={(value) => onFieldChange("apiStyle", value)}>
-          <SelectTrigger className="h-8">
-            <SelectValue placeholder="自动" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="auto">自动（按提供商/已知网关推断）</SelectItem>
-            <SelectItem value="openai-chat">OpenAI Chat Completions</SelectItem>
-            <SelectItem value="openai-responses">OpenAI Responses API</SelectItem>
-            <SelectItem value="anthropic-messages">Anthropic Messages（含 DeepSeek/Kimi/智谱兼容端点）</SelectItem>
-            <SelectItem value="gemini">Gemini 原生（v1beta）</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {showProtocolSelect && (
+        <div className="space-y-2">
+          <Label className="text-sm dark:text-neutral-200">API 格式（协议）</Label>
+          <p className="text-neutral-500 text-xs dark:text-neutral-400">
+            Base URL 只决定端点；协议决定用哪一代 API。自定义代理/中转站请按实际支持的格式选择。
+          </p>
+          <Select value={provider.apiStyle ?? "auto"} onValueChange={(value) => onFieldChange("apiStyle", value)}>
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="自动" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动（按提供商/已知网关推断）</SelectItem>
+              <SelectItem value="openai-chat">OpenAI Chat Completions</SelectItem>
+              <SelectItem value="openai-responses">OpenAI Responses API</SelectItem>
+              <SelectItem value="anthropic-messages">Anthropic Messages（含兼容端点）</SelectItem>
+              <SelectItem value="gemini">Gemini 原生（v1beta）</SelectItem>
+            </SelectContent>
+          </Select>
+          {nativeImageHint(provider.apiStyle ?? "auto") && (
+            <p className="text-neutral-500 text-xs dark:text-neutral-400">
+              {nativeImageHint(provider.apiStyle ?? "auto")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {hasPresetEndpoints && !currentEndpoint && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => {
+            const option = getPresetDefaultEndpoint(provider);
+            if (option) {
+              onFieldChange("apiStyle", option.protocol);
+              onFieldChange("baseUrl", option.baseUrl);
+            }
+          }}
+        >
+          恢复预置端点
+        </Button>
+      )}
     </div>
   );
 }
