@@ -84,12 +84,9 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
 • 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答，并继续用 readDocument(position=true) 读当前位置原文；需要其它章节正文用 getDocumentInfo 取目录后 readDocument(heading=...)。`
       : `• 需要"当前这一节/这里/我读到的地方"的原文时用 readAtReadingPosition（默认从当前位置向后 6000 字符，可用 before/after 扩窗续读）；不要凭记忆复述正文，也不要因为注入段没有正文就拒答。
 • 该段标注"目录不可用，按 spine 定位"时说明本书 TOC 缺失——位置坐标仍是可靠定位，直接用它回答并继续用 readAtReadingPosition 读当前位置原文；需要其它章节正文再尝试 readBookSection（按标题匹配，可能失败）或 ragToc/ragRange。`;
-  const fileTools =
-    docMode === "new"
-      ? `—— 文件工具 ——
-readLocalFile 只读可用（用户消息里【附件已登记】的本地文件用它读取，大文件分段续读）；writeFile / editFile / searchFiles / runCommand 在新原语模式下不在你的工具面；阅读笔记与摘要用 manageNotes 落盘，导出划线与想法用 exportNotes；需要写工作区文件时引导用户到全局助手。`
-      : `—— 文件工具 ——
-writeFile / editFile / readLocalFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段），整理好的阅读笔记/摘要可落盘；exportNotes 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）。`;
+  // 2026-10-23 用户拍板：new 模式同样恢复文件五件套（写/命令仍经 tool-guard 确认卡）
+  const fileTools = `—— 文件工具 ——
+readLocalFile / writeFile / editFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段；写入与命令执行会按安全模式弹确认卡由用户裁决），整理好的阅读笔记/摘要可落盘；exportNotes 导出本书划线与想法为 Markdown（bookId 先用 getBooks 按书名查得）。`;
   const crossDoc =
     docMode === "legacy"
       ? `—— 跨文档阅读 ——

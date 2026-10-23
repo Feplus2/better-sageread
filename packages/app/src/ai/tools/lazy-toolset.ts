@@ -238,9 +238,16 @@ export function buildLazyToolset(tools: Record<string, Tool>): Record<string, To
           // 图片与 <path> 信封同序遍历，按下标配对：viewImages 多图时缓存里每张图各有自己的路径，
           // 图片桥省略较早图片时才能给出正确的 readImage(path=…)
           const firstPath = foundPaths[0];
+          // 来源口径（2026-10-23）：内置看图工具可跨轮回灌；MCP 工具只当轮 live 可见
+          // （正常链路 MCP 图片已被 mcp-manager 落盘收口，这里兜底标记 origin=mcp 防跨轮误回灌）
+          const origin = name.startsWith("mcp_") ? ("mcp" as const) : ("builtin" as const);
           cacheToolImages(
             String(options?.toolCallId ?? ""),
-            foundImages.map((image, index) => ({ ...image, path: image.path ?? foundPaths[index] ?? firstPath })),
+            foundImages.map((image, index) => ({
+              ...image,
+              path: image.path ?? foundPaths[index] ?? firstPath,
+              origin,
+            })),
           );
           try {
             const holder = globalThis as typeof globalThis & { __sagereadLazyImageLog?: string[] };

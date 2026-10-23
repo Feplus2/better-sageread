@@ -10,6 +10,10 @@
  * 2. 预算 = 全部工具图片 dataUrl 字符数之和（默认 700k，见 utils/tool-image-budget，可运行时覆盖）；
  * 3. 装不下的老图替换成带可读路径的占位（可用 readImage/viewImages 重看），且任何情况至少保留 1 张；
  * 4. 多图工具结果（viewImages）按图片顺序配对各自的 <path>，占位能指回具体文件而不是第一条路径。
+ *
+ * MCP 口径（2026-10-23 用户拍板）：MCP 图片已落盘、缓存 origin=mcp，**只在当前轮**（本轮最后一条
+ * user 消息之后的工具结果）改挂给模型；更早的历史消息不回灌，只保留带落盘路径的文本占位。
+ * 内置 readImage/viewImages（origin=builtin）的历史回灌行为不变。
  */
 
 import { getToolImageBudgetChars } from "@/ai/utils/tool-image-budget";
@@ -144,6 +148,14 @@ function transformBody(bodyText: string): string {
   if (!Array.isArray(messages)) return bodyText;
   debugLog(`transform: messages=${messages.length} bodyLen=${bodyText.length}`);
 
+  // MCP 图片只允许“当前轮”回灌：当前轮 = 本轮最后一条 user 消息之后的消息。
+  // 上几轮的历史工具结果即使缓存还在也不改挂（历史只有落盘路径占位）。
+  let lastUserIndex = -1;
+  messages.forEach((message, index) => {
+    if (!message || typeof message !== "object") return;
+    if ((message as Record<string, unknown>).role === "user") lastUserIndex = index;
+  });
+
   const extractions = new Map<number, ToolImageExtraction>();
   messages.forEach((message, index) => {
     if (!message || typeof message !== "object") return;
@@ -153,9 +165,11 @@ function transformBody(bodyText: string): string {
     const extracted = extractToolImages(rawContent);
     const toolCallId = typeof record.tool_call_id === "string" ? record.tool_call_id : null;
     const cached = toolCallId ? getCachedToolImages(toolCallId) : undefined;
-    // 目录牌模式：工具结果里的 dataUrl 已被 useTool 摘到内存缓存，这里按 toolCallId 取回
+    // 目录牌模式：工具结果里的 dataUrl 已被 useTool 摘到内存缓存，这里按 toolCallId 取回；
+    // MCP 来源（origin=mcp）只有当前轮 live 才可回灌，历史消息跳过（内置图不受影响）
+    const cachedReplay = (cached ?? []).filter((image) => image.origin !== "mcp" || index > lastUserIndex);
     const contentPath = extractPath(rawContent);
-    const images = (extracted && extracted.images.length > 0 ? extracted.images : (cached ?? [])).map((image) => ({
+    const images = (extracted && extracted.images.length > 0 ? extracted.images : cachedReplay).map((image) => ({
       ...image,
       path: image.path ?? contentPath,
     }));

@@ -56,21 +56,22 @@
 4. **智谱 Coding Plan 用户**：如要用 Anthropic 端点做工具图片，需在设置里手动切端点（默认已改 OpenAI 兼容）。
 5. **UI 文案**（接口端点选择器/请求路径预览）仍需主人过目。
 
-## 4. 2026-10-22 深夜第二轮：剩余项清除情况
+## 4. 剩余项清除情况（2026-10-23 更新）
 
-已修（本轮）：
-- **MCP 工具图片/base64 全链路**：mcp-manager 包 execute 统一转信封+缓存；lazy-toolset / tool-result-slimming / native-tool-output 全覆盖（含 L1 截断与 2 批/6 张回灌）；新增 34 断言单测。
-- **书籍/论文插图读取**：readDocument 输出把可解析的 markdown/HTML 图片相对路径重写为绝对路径（幂等、不改 schema），reader/central 现在能真正 readImage；新增 26 断言单测。
-- **上下文水位去硬编码**：改为按所选模型真实窗口自动 compact（公式对齐 DSH/Cherry，实现与调研见 docs/plans/context-compaction-research.md；含 P0 回归修复与 20 断言单测）；模型列表的 context_window/max_output_tokens 会被解析并优先使用（DeepSeek 实测 1M/393k）；token 估算补齐长文本外推、图片、dynamic-tool；保留段若超线会自动缩小最近消息 floor。
-- **provider P2**：协议下拉按预置端点过滤不可行组合；auto 模式端点显示不再错配；删除 provider 清 keyring；模型刷新 15s 超时；设置里改 baseUrl/apiStyle 后模型实例重建；版本号 Cargo/package 对齐 0.4.2。
-- **评估卫生**：baseline-10 的 golden_trace 工具名映射为实际工具（并注明是人工参考、非自动回放）。
+已修（全部）：
+- **MCP 工具图片**：按用户 2026-10-23 拍板的新口径——图片落盘到 `{appData}/image-cache/mcp/<uuid>.<ext>`，**当前轮模型可见**（原生 toModelOutput / chat 桥），**跨轮与重启只留带路径占位**（`readImage(path=...)` 可重看），历史不再把 MCP 图灌回模型；内置 readImage/viewImages 的跨轮预算回灌行为不变。48 断言单测。已知限制：image-cache 暂无清理/LRU；落盘失败时当前轮也只看占位（按口径降级）。
+- **书籍/论文插图读取**：readDocument 输出把可解析的 markdown/HTML 图片相对路径重写为绝对路径（幂等、不改 schema）；26 断言单测。
+- **上下文水位**：按所选模型真实窗口自动 compact（DSH/Cherry 公式；含 P0 回归修复与 20 断言单测）；模型元数据 context_window/max_output_tokens 优先。**2026-10-23 用户拍板：未知模型默认从 128k 提高到 1M**（现代 Agent 模型基本 1M 标配；更小的说明不是为 Agent 设计），家族表/接口元数据仍优先。
+- **摘要挪位（前缀缓存优化）**：摘要从 systemPrompt 挪到"保留段第一条 user 消息"前缀（切点），system 与最近对话保持逐字节稳定；纯函数 + 9 断言单测。
+- **阅读/论文助手文件能力（用户拍板 B 方案）**：new 模式恢复 readLocalFile/writeFile/editFile/searchFiles/runCommand 五件套，不再要求绕全局助手；写/命令仍走 tool-guard 确认卡。实测 reader 工具 17→21（schema 10.4k→12.4k chars）、paper 20→24（12.2k→14.2k）；因 transport 对 reader/paper new 模式本就强制目录牌，schema 上涨不进入真实请求体。23 断言源码契约测试 + CDP 45 checks PASS。
+- **provider P2**：协议下拉按预置端点过滤；auto 端点显示修正；删 provider 清 keyring；模型刷新 15s 超时；设置改端点后实例重建；版本号对齐 0.4.2。
+- **评估卫生**：baseline-10 golden_trace 工具名规范化（注明人工参考、非自动回放）。
 
 仍未做（不阻塞发版，建议 0.5.x）：
-- **上下文溢出恢复**：捕获 provider context-length 错误 → 强制压缩一次重试（DSH maxOverflowRetries=1）。
-- **pruneMessages 廉价第一刀**：压缩前先做确定性裁剪，减少摘要调用（AI SDK 原生能力）。
-- **独立压缩模型/摘要 input 上限**：目前复用 utilityModel（Cherry 口径 (compressorW−maxOut)×0.85 未实现）。
-- 长会话前缀摘要重复计费（Cherry foldCache 类优化）。
-- 手册/wiki 更新时间点：**发版前必做**（用户固定动作），本轮只记录了待更新点。
+- **上下文**（详见 docs/plans/context-compaction-research.md §6）：固定开销 F 计入预算；prepareStep 在环压缩；溢出错误强制压缩重试；pruneMessages + 工具结果 head/tail 廉价裁剪（**作用域已确认：只对跨轮历史；同轮新工具结果必须完整保留，不允许刚读完下一步就忘；仅濒临溢出时处理更早步骤并保留最近 N 步 + 重读提示**）；独立压缩模型；foldCache。
+- **MCP 图片缓存清理**：image-cache/mcp 目录暂无容量/时间清理。
+- **文件工具副作用面**：阅读/论文助手可写文件/执行命令后，文献库内容提示注入的触达面变大；tool-guard 确认卡与审计日志仍是兜底，发版前建议再跑一轮"诱导写入"红队测试。
+- 手册/wiki 更新时间点：**发版前必做**（用户固定动作）。
 
 ## 5. 代码/文档落点
 - 安全：`ai/tools/image-shared.ts`、`ai/tools/central/extract-zip.ts`、`ai/utils/tool-guard.ts`

@@ -17,13 +17,15 @@
  *
  * 批次 D：stdio 传输经 Rust 子进程桥（TauriStdioMcpTransport），启动前按安全模式弹确认卡。
  */
-import { sanitizeMcpToolResultImages } from "@/ai/utils/tool-result-slimming";
+import { type ToolImageBytes, sanitizeMcpToolResultImages } from "@/ai/utils/tool-result-slimming";
 import { secretResolveBatch } from "@/services/secret-service";
 import { useAgentConfirmStore } from "@/store/agent-confirm-store";
 import { useAgentSettingsStore } from "@/store/agent-settings-store";
 import { type McpServer, useMcpStore } from "@/store/mcp-store";
 import type { AgentScope } from "@/store/quick-command-store";
 import { createMCPClient } from "@ai-sdk/mcp";
+import { appDataDir } from "@tauri-apps/api/path";
+import { BaseDirectory, mkdir, writeFile } from "@tauri-apps/plugin-fs";
 import type { Tool } from "ai";
 import { SseLegacyMcpTransport, StreamableHttpMcpTransport } from "./mcp-transport";
 import { TauriStdioMcpTransport } from "./tauri-stdio-transport";
@@ -149,12 +151,92 @@ async function connectServer(server: McpServer): Promise<McpClient> {
   });
 }
 
+/** MCP 图片落盘目录（相对 {appData}）：重启后 readImage 仍可按绝对路径重看 */
+const MCP_IMAGE_DIR = "image-cache/mcp";
+/** MIME → 文件扩展名（readImage 按魔数识别，扩展名只影响可读性） */
+const MCP_IMAGE_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+/** 目录创建/绝对根缓存：成功一次后复用；失败不缓存（下轮可重试） */
+let mcpImageDirReady: Promise<void> | null = null;
+let mcpImageAbsBase: Promise<string> | null = null;
+
+function ensureMcpImageDir(): Promise<void> {
+  if (!mcpImageDirReady) {
+    mcpImageDirReady = mkdir(MCP_IMAGE_DIR, { baseDir: BaseDirectory.AppData, recursive: true }).catch((error) => {
+      mcpImageDirReady = null;
+      throw error;
+    });
+  }
+  return mcpImageDirReady;
+}
+
+function mcpImageCacheAbsDir(): Promise<string> {
+  if (!mcpImageAbsBase) {
+    mcpImageAbsBase = appDataDir()
+      .then((base) => `${base.replace(/\\/g, "/").replace(/\/+$/, "")}/${MCP_IMAGE_DIR}`)
+      .catch((error) => {
+        mcpImageAbsBase = null;
+        throw error;
+      });
+  }
+  return mcpImageAbsBase;
+}
+
+/** 落盘文件名 ID：优先 crypto.randomUUID；老 WebView 不支持时退回时间戳+随机数（仍唯一可用） */
+function newMcpImageId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+  }
+}
+
+/** dataUrl → 字节（base64）；解析失败返回 null（上层降级纯占位） */
+function dataUrlToBytes(dataUrl: string): Uint8Array | null {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  try {
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * MCP 工具结果图片收口（2026-10-22）：MCP server 的图片 content 是 @ai-sdk/mcp 的原始形状
- * { type:"image", data:"<裸base64>", mimeType }，若原样进 UI/线程 JSON/模型上下文会：
- * ① base64 永久写进线程与备份（DB 无界增长）；② 以文本形式进模型上下文（数十万 token）。
- * 这里在 execute 返回处把图片摘成占位文本并按 toolCallId 写入内存缓存——目录牌 useTool、
- * native toModelOutput、chat 图片桥都用同一 toolCallId 恢复给模型；文本型 MCP 结果零改动。
+ * MCP 图片落盘（2026-10-23 用户拍板口径）：当前轮模型看原图，跨轮/重启只留路径。
+ * 成功返回绝对路径（放进占位文案，readImage 可直接读）；任何一步失败返回 null —
+ * 上层会降级为"落盘失败已省略"纯占位，绝不把 base64 交给 UI/线程/模型历史。
+ */
+async function saveMcpImageToDisk(image: ToolImageBytes): Promise<string | null> {
+  try {
+    const bytes = dataUrlToBytes(image.dataUrl);
+    if (!bytes) return null;
+    await ensureMcpImageDir();
+    const ext = MCP_IMAGE_EXT[image.mediaType.toLowerCase()] ?? "png";
+    const filename = `${newMcpImageId()}.${ext}`;
+    await writeFile(`${MCP_IMAGE_DIR}/${filename}`, bytes, { baseDir: BaseDirectory.AppData });
+    return `${await mcpImageCacheAbsDir()}/${filename}`;
+  } catch (error) {
+    console.warn("[mcp-image] 图片落盘失败，已降级为纯文本占位:", error);
+    return null;
+  }
+}
+
+/**
+ * MCP 工具结果图片收口（2026-10-23 口径）：MCP server 的图片 content 是 @ai-sdk/mcp 的原始形状
+ * { type:"image", data:"<裸base64>", mimeType }。execute 返回时：
+ * ① 逐张落盘到 {appData}/image-cache/mcp/<uuid>.<ext>，输出里的图片 part 换成带绝对路径的占位；
+ * ② 落盘成功的图片按 toolCallId 进内存缓存（origin=mcp）——当轮 native / chat 桥仍能让模型看到图，
+ *    跨轮/历史按 origin 跳过回灌，只留路径占位（重启后 readImage 按路径重看）。
+ * 文本型 MCP 结果原样返回（引用相等=零改动）。
  */
 function wrapMcpToolImageOutput(tool: Tool): Tool {
   const originalExecute = tool.execute;
@@ -167,6 +249,7 @@ function wrapMcpToolImageOutput(tool: Tool): Tool {
       return sanitizeMcpToolResultImages(
         result,
         typeof options?.toolCallId === "string" ? options.toolCallId : undefined,
+        { saveImage: saveMcpImageToDisk },
       );
     },
   } as Tool;

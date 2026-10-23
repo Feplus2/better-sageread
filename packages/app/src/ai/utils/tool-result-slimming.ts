@@ -85,6 +85,16 @@ export function imagePlaceholderText(seq: number): string {
   return `[图片 #${seq} 内容已交给模型，base64 不写入聊天记录]`;
 }
 
+/** MCP 图片已落盘占位：带绝对路径，重启/跨轮后模型可用 readImage 按路径重看（2026-10-23 口径） */
+export function mcpImageSavedPlaceholder(path: string): string {
+  return `[MCP 图片已落盘：${path}，需要重看时用 readImage(path=${path})]`;
+}
+
+/** MCP 图片落盘失败的降级占位：字节省略，明确告知重看要重新调用 MCP 工具 */
+export function mcpImageSaveFailedPlaceholder(seq: number): string {
+  return `[MCP 图片 #${seq} 落盘失败已省略（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具]`;
+}
+
 function dataUrlMediaType(dataUrl: string): string {
   const matched = /^data:([^;]+);base64,/i.exec(dataUrl);
   return matched?.[1] ?? "image/jpeg";
@@ -144,18 +154,51 @@ interface ImageWalkResult {
   changed: boolean;
 }
 
+interface ToolImageWalkOptions {
+  /** 图片节点替换内容；缺省返回 "内容已交给模型" 通用占位 */
+  placeholderFor?: (seq: number, image: ToolImageBytes) => unknown;
+}
+
+/** 递归收集图片节点（不替换）；MCP 收口需要先落盘拿到路径，再按同一顺序生成带路径占位 */
+function collectToolImagesWalk(node: unknown, images: ToolImageBytes[]): void {
+  const image = toolImageBytesFromNode(node);
+  if (image) {
+    images.push(image);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectToolImagesWalk(item, images);
+    return;
+  }
+  if (node && typeof node === "object") {
+    for (const item of Object.values(node as Record<string, unknown>)) collectToolImagesWalk(item, images);
+  }
+}
+
+/** 收集工具结果里的全部图片（按遍历顺序，与 stripToolImageBytes 的 #N 序号一一对应） */
+export function collectToolImages(node: unknown): ToolImageBytes[] {
+  const images: ToolImageBytes[] = [];
+  collectToolImagesWalk(node, images);
+  return images;
+}
+
 /** 递归把图片节点换成带序号占位；只改副本（无图片返回原引用，保证文本型结果零开销） */
-function replaceImageBytesWalk(node: unknown, images: ToolImageBytes[], seq: { count: number }): ImageWalkResult {
+function replaceImageBytesWalk(
+  node: unknown,
+  images: ToolImageBytes[],
+  seq: { count: number },
+  placeholderFor: (seq: number, image: ToolImageBytes) => unknown,
+): ImageWalkResult {
   const image = toolImageBytesFromNode(node);
   if (image) {
     images.push(image);
     seq.count += 1;
-    return { value: { type: "text", text: imagePlaceholderText(seq.count) }, changed: true };
+    return { value: placeholderFor(seq.count, image), changed: true };
   }
   if (Array.isArray(node)) {
     let changed = false;
     const value = node.map((item) => {
-      const walked = replaceImageBytesWalk(item, images, seq);
+      const walked = replaceImageBytesWalk(item, images, seq, placeholderFor);
       if (walked.changed) changed = true;
       return walked.value;
     });
@@ -165,7 +208,7 @@ function replaceImageBytesWalk(node: unknown, images: ToolImageBytes[], seq: { c
     let changed = false;
     const value: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(node as Record<string, unknown>)) {
-      const walked = replaceImageBytesWalk(item, images, seq);
+      const walked = replaceImageBytesWalk(item, images, seq, placeholderFor);
       value[key] = walked.value;
       if (walked.changed) changed = true;
     }
@@ -174,28 +217,78 @@ function replaceImageBytesWalk(node: unknown, images: ToolImageBytes[], seq: { c
   return { value: node, changed: false };
 }
 
+const defaultImagePlaceholderFor = (seq: number): unknown => ({ type: "text", text: imagePlaceholderText(seq) });
+
 /**
  * 摘掉工具结果里的图片字节并换文本占位（供 MCP execute 包装用）。
- * 返回 null = 没有图片（文本型 MCP 工具保持零改动）；有图片返回新副本 + 图片字节，
- * 调用方负责按 toolCallId 写入 tool-image-cache（模型侧经图片桥 / native toModelOutput 恢复）。
+ * 返回 null = 没有图片（文本型 MCP 工具保持零改动）；有图片返回新副本 + 图片字节。
+ * placeholderFor 允许调用方按 #N 序号生成自定义占位（MCP 落盘后用带路径文案）。
  */
-export function stripToolImageBytes(node: unknown): { output: unknown; images: ToolImageBytes[] } | null {
+export function stripToolImageBytes(
+  node: unknown,
+  options?: ToolImageWalkOptions,
+): { output: unknown; images: ToolImageBytes[] } | null {
   const images: ToolImageBytes[] = [];
-  const walked = replaceImageBytesWalk(node, images, { count: 0 });
+  const walked = replaceImageBytesWalk(
+    node,
+    images,
+    { count: 0 },
+    options?.placeholderFor ?? defaultImagePlaceholderFor,
+  );
   if (!walked.changed) return null;
   return { output: walked.value, images };
 }
 
+/** MCP 图片落盘回调：成功返回图片绝对路径，返回 null / 抛错表示落盘失败（降级纯占位） */
+export type McpImageSaveFn = (image: ToolImageBytes, seq: number) => Promise<string | null>;
+
+export interface McpImagePersistOptions {
+  saveImage?: McpImageSaveFn;
+}
+
 /**
  * MCP 工具结果图片统一收口（getMcpToolsForScope 的 execute 包装调用；导出供单测）：
- * - 图片 → 文本占位 + 按 toolCallId 进内存缓存；无图片 → 原对象引用返回（文本型工具行为不变）；
- * - 即使 toolCallId 缺失也剥离图片（绝不把 base64 交给 UI/落库），只是无法再回灌给模型。
+ * 1) 收集图片 → 调 saveImage 逐张落盘（失败降级纯占位并说明）；
+ * 2) 输出里的图片 part 换成带绝对路径的文本占位（历史/落库只留路径，重启后可 readImage 重看）；
+ * 3) 成功落盘的图片按 toolCallId 进内存缓存（origin=mcp），仅用于**当轮 live** 可见
+ *    （native toModelOutput / chat 图片桥会按 origin 跳过历史回灌）；
+ * 4) 无图片 → 原对象引用返回（文本型 MCP 工具行为不变）。
  */
-export function sanitizeMcpToolResultImages(result: unknown, toolCallId: string | undefined): unknown {
-  const stripped = stripToolImageBytes(result);
+export async function sanitizeMcpToolResultImages(
+  result: unknown,
+  toolCallId: string | undefined,
+  options?: McpImagePersistOptions,
+): Promise<unknown> {
+  const images = collectToolImages(result);
+  if (images.length === 0) return result;
+  const saveImage = options?.saveImage;
+  const savedPaths: Array<string | null> = [];
+  if (saveImage) {
+    for (let index = 0; index < images.length; index += 1) {
+      try {
+        savedPaths.push(await saveImage(images[index], index + 1));
+      } catch {
+        savedPaths.push(null);
+      }
+    }
+  }
+  const stripped = stripToolImageBytes(result, {
+    placeholderFor: (seq) => ({
+      type: "text",
+      text: saveImage
+        ? savedPaths[seq - 1]
+          ? mcpImageSavedPlaceholder(savedPaths[seq - 1] as string)
+          : mcpImageSaveFailedPlaceholder(seq)
+        : imagePlaceholderText(seq),
+    }),
+  });
   if (!stripped) return result;
-  if (toolCallId && stripped.images.length > 0) {
-    cacheToolImages(toolCallId, stripped.images);
+  // 当轮 live 缓存：落盘失败的图不再回灌（已明确降级为纯占位），避免"说省略却又看到图"
+  const visible = stripped.images
+    .map((image, index) => ({ ...image, path: savedPaths[index] ?? undefined, origin: "mcp" as const }))
+    .filter((image) => !saveImage || !!image.path);
+  if (toolCallId && visible.length > 0) {
+    cacheToolImages(toolCallId, visible);
   }
   return stripped.output;
 }
@@ -329,13 +422,23 @@ export function truncateToolResultsForStorage(messages: UIMessage[]): UIMessage[
       }
       const text = stringifyOutput(workingPart.output);
       if (text.length <= TOOL_RESULT_PREVIEW_CHARS) return workingPart;
+      // MCP 图片已落盘：L1 截断时把带路径的图片占位补回预览尾部——
+      // 历史消息只留路径也能 readImage 重看（2026-10-23 口径）
+      const preservedImageNotes = isMcpPart
+        ? Array.from(text.matchAll(/\[MCP 图片[^\]]*\]/g))
+            .map((match) => match[0])
+            .slice(0, 6)
+        : [];
       touched = true;
       return {
         ...workingPart,
         output: {
           __slimPreview: true,
           originalChars: text.length,
-          preview: text.slice(0, TOOL_RESULT_PREVIEW_CHARS),
+          preview:
+            preservedImageNotes.length > 0
+              ? `${text.slice(0, TOOL_RESULT_PREVIEW_CHARS)}\n…（工具结果已截断，以下为图片落盘路径）\n${preservedImageNotes.join("\n")}`
+              : text.slice(0, TOOL_RESULT_PREVIEW_CHARS),
           hint: "工具结果已按 D6 截断归档（完整内容可按参数重取）",
         },
       };

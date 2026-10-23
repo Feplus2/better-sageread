@@ -12,14 +12,17 @@
  *   触发线 = max(MIN, min(0.8W, IR − B))
  *   压缩后保留 = max(12k, min(0.3×IR, 0.75×触发线))，最近消息最少保留（selector 内保证）
  *
- * 容量来源优先级：模型列表接口 context_window > 内置家族表 > 保守默认 128k。
- * 未知模型宁可压早，不要爆请求。
+ * 容量来源优先级：模型列表接口 context_window > 内置家族表 > 默认 1M。
+ * 2026-10 用户拍板：现代 Agent 模型基本 1M 标配，128k/256k 兜底过于保守会频繁误压。
  */
 import { estimateMessagesTokens } from "@/ai/utils/token-estimator";
 import type { UIMessage } from "@ai-sdk/react";
 
-/** 未知模型的保守窗口（主流国产模型不低于此值；未知模型宁可早压） */
-export const DEFAULT_CONTEXT_WINDOW = 128_000;
+/**
+ * 未知模型的默认窗口：现代 Agent 模型基本 1M 标配（用户 2026-10-23 拍板）。
+ * 模型列表接口真实值 / 内置家族表仍优先；未知的极小窗口若溢出，后续用溢出重试兜底。
+ */
+export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 /** 触发线占窗口比例（对齐 DSH / CherryStudio 默认 80%） */
 export const TRIGGER_RATIO = 0.8;
 /** 压缩后保留 ≈ 输入预算的 30%（对齐 Cherry 0.3×窗口口径） */

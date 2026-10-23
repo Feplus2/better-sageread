@@ -9,6 +9,7 @@ import {
 } from "@/services/reading-position/position-service";
 import { buildTimestampLookup, composeDynamicTail, withMessageTimestamps } from "@/services/time-awareness";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
+import { injectConversationSummary } from "./utils/conversation-summary-message";
 import { resolveContextBudget } from "./providers/context-window";
 import { wrapToolsForNativeImages } from "./providers/native-tool-output";
 import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
@@ -277,6 +278,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       convertedMessages,
       buildTimestampLookup(modelInputMessages, convertedMessages, { now: Date.now() }),
     );
+    // 前情摘要放在保留段第一条 user 消息前缀（切点），不再拼进 systemPrompt：
+    // 摘要变化时只击穿切点之后的前缀缓存，system 与最近对话保持逐字节稳定。
+    const messagesForModel = injectConversationSummary(timestampedMessages, summaryText);
 
     // D3 静态优先布局：buildPrompt（基词+静态段+技能+metadata，按书稳定）在前，
     // 工作区/记忆段（准静态）居中，前情摘要（稀有）次之，每轮可能变化的动态状态殿后。
@@ -292,8 +296,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       // 工作区根 + 文件即记忆（memory.md）：三 scope 统一在此注入，按 scope 解析生效根
       (await loadWorkspaceSection(agentScope)) +
       (await loadMemorySection(agentScope)) +
-      // 前情摘要变化频率低（触发压缩才换），放在动态段之前，避免翻页/时间更新时被连带击穿
-      (summaryText ? `\n\n【前情摘要】\n${summaryText}\n（以上为早期对话的压缩摘要，非原始记录）` : "") +
+      // 前情摘要已挪到切点 user 消息（见 messagesForModel）；systemPrompt 保持与摘要无关的静态前缀
       (dynamicTail ? `\n\n${dynamicTail}` : "");
 
     // P3 思考强度档位：AI SDK 原生参数族（openai/google/openrouter/grok）在此下发；
@@ -307,7 +310,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const forcedFinalInstructions = `${systemPrompt}\n\n【步骤预算】已接近本轮工具调用上限，不要再调用任何工具；请立即基于已获得的信息给出最终答案，并明确说明还有哪些信息没拿到。`;
     const result = streamText({
       model,
-      messages: timestampedMessages,
+      messages: messagesForModel,
       abortSignal: options.abortSignal,
       toolChoice: "auto",
       stopWhen: isStepCount(STEP_LIMIT),

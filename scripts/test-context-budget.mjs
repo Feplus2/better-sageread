@@ -43,8 +43,8 @@ check("DeepSeek 触发线 838860（80% 窗口，旧 256k 会过早压缩）", de
 const deepseekOut = lib.resolveContextBudget("deepseek-flash", 1_048_576, 393_216);
 check("输出预留生效（DSH 公式 min(0.8W, W-O-B)）", deepseekOut.highWater === 591_360 && deepseekOut.outputReserve === 393_216, deepseekOut);
 const unknown = lib.resolveContextBudget("some-unknown-model");
-check("未知模型保守默认 128k", unknown.contextWindow === lib.DEFAULT_CONTEXT_WINDOW && unknown.source === "default", unknown);
-check("未知模型触发线 102400 / 保留 38400", unknown.highWater === 102_400 && unknown.lowWater === 38_400, unknown);
+check("未知模型默认 1M（现代 Agent 模型口径）", unknown.contextWindow === lib.DEFAULT_CONTEXT_WINDOW && unknown.source === "default" && unknown.contextWindow === 1_000_000, unknown);
+check("未知模型触发线 800000 / 保留 300000", unknown.highWater === 800_000 && unknown.lowWater === 300_000, unknown);
 const tiny = lib.resolveContextBudget("x", 10_000);
 check("极小窗口有历史下限", tiny.highWater === 24_000 && tiny.lowWater === 12_000, tiny);
 
@@ -68,7 +68,7 @@ for (let i = 0; i < pairs; i++) {
 }
 const total = lib.estimateMessagesTokens ? null : null;
 const budget = lib.resolveContextBudget("test-model", 128_000);
-const sel = lib.selectMessagesWithinBudget(msgs, budget);
+const sel = lib.selectMessagesWithinBudget(msgs, { budget: budget.highWater, lowWater: budget.lowWater, floor: budget.floor });
 check("120k 线程在 128k 模型上会触发压缩", sel.dropped.length > 0, { dropped: sel.dropped.length, kept: sel.kept.length });
 check("压缩后保留段落回触发线内（floor 自动缩小）", lib.estimateMessagesTokens(sel.kept) <= budget.highWater, { keptTokens: lib.estimateMessagesTokens(sel.kept), high: budget.highWater });
 check("保留段仍以 user 开头", sel.kept.length > 0 && sel.kept[0].role === "user");
@@ -91,7 +91,7 @@ const mappedMillion = lib.selectMessagesWithinBudget(bigThread, { budget: millio
 check("1M 窗口下 200k 线程不压缩（映射正确才会发生）", mappedMillion.dropped.length === 0, { dropped: mappedMillion.dropped.length, high: million.highWater });
 const smallWindow = lib.resolveContextBudget("test", 128_000);
 const wrongShape = lib.selectMessagesWithinBudget(bigThread, smallWindow);
-check("把 ContextBudget 当 number 误用时确实会误压（迁移前 bug）", wrongShape.dropped.length > 0, { dropped: wrongShape.dropped.length });
+check("把 ContextBudget 当 number 误用时预算失效（该压不压，迁移前 bug）", wrongShape.dropped.length === 0, { dropped: wrongShape.dropped.length });
 const mappedSmall = lib.selectMessagesWithinBudget(bigThread, { budget: smallWindow.highWater, lowWater: smallWindow.lowWater, floor: smallWindow.floor });
 check("128k 窗口下 200k 线程会压缩", mappedSmall.dropped.length > 0, { dropped: mappedSmall.dropped.length });
 

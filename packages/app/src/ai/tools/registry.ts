@@ -380,14 +380,10 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
   const useLegacyDocTools = docToolMode !== "new";
   const useNewDocTools = docToolMode !== "legacy";
 
-  // 1. 注入共享工具（new 模式：reader/paper 隐藏工作区/命令类工具，压 schema、退出目录牌）
-  // readLocalFile 保留（只读，附件/工作区文件读取依赖它；2026-10-22 审计：隐藏后附件在默认模式读不到）
-  const NEW_MODE_HIDDEN_SHARED = new Set(["writeFile", "editFile", "searchFiles", "runCommand"]);
+  // 1. 注入共享工具（2026-10-23 用户拍板：new 模式也恢复文件五件套，reader/paper 不再隐藏
+  // 工作区/命令类工具；写/命令仍由 tool-guard 的确认卡裁决。目录牌/守卫顺序不变。）
   for (const reg of registry) {
     if (reg.scope === "shared") {
-      if (docToolMode === "new" && agentScope !== "central" && NEW_MODE_HIDDEN_SHARED.has(reg.name)) {
-        continue;
-      }
       tools[reg.name] = reg.tool;
     }
   }

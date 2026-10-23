@@ -56,7 +56,8 @@
 ```
 W = 模型列表 context_window（实测 DeepSeek /models: 1,048,576；max_output_tokens 393,216）
   > 内置家族表（deepseek 1M / gemini 1M / gpt-5+ 400k / claude 200k / kimi 262k / glm-5 200k / ...）
-  > 未知模型保守 128k（记录 source，便于日志观察）
+  > 未知模型默认 1M（2026-10-23 用户拍板：现代 Agent 模型基本 1M 标配，更小的说明不是为 Agent 设计；
+    模型列表真实值/家族表仍优先；记录 source 便于日志观察）
 O = min(模型 max_output_tokens ?? 0, W/2)
 IR = max(W − O, floor(0.2W))
 B  = clamp(0.1W, 8k, 64k)
@@ -72,10 +73,13 @@ B  = clamp(0.1W, 8k, 64k)
 ## 6. 尚未实现（建议 0.5.x）
 
 1. **固定开销 F 计入预算**：system prompt + tools schema + 目录牌（约 8–20k）目前未从触发线扣除；建议用"上一轮 usage.totalTokens − 上一轮发送历史估算"做锚，无则估 system+tools。
-2. **摘要位置改到切点 user 消息**：当前摘要拼进 systemPrompt（transport:292），每轮改摘要会从 system 段起击穿全部前缀缓存；DSH/Cherry/OpenCode 都是把摘要作为一条 user 消息放在切点。建议改为合成 `<compacted-summary>` user 消息（持久化仍留 thread.metadata）。
+2. ~~**摘要位置改到切点 user 消息**~~ **已完成（2026-10-23）**：摘要不再进 systemPrompt，改为合并到"保留段第一条 user 消息"的前缀（等价切点、避免连续 user 角色问题）；纯函数 `ai/utils/conversation-summary-message.ts` + 9 断言单测。摘要变化只击穿切点之后的前缀缓存。
 3. **prepareStep 在环压缩**：20 步工具循环中真正会爆的位置是 step 内增长；用 `steps.at(-1).usage.totalTokens` + 尾部估算法，超线时返回 `{messages: pruned}`。
 4. **溢出恢复**：捕获 context-length 错误 → 强制压缩一次并重试（DSH maxOverflowRetries=1 / OpenCode 递减 shrink）。
 5. **pruneMessages 廉价第一刀** + 工具结果 head/tail 裁剪（8192/4096/1024 chars）先于 LLM 摘要。
+   **作用域（2026-10-23 用户确认）**：头尾裁剪只针对**跨轮历史**；同一轮里刚读到的工具结果必须完整保留，
+   不允许"刚读完下一步就忘"。只有在一轮内真正濒临溢出（在环压缩）时才处理更早的步骤，且要保留最近 N 步完整 +
+   给"可按路径/偏移重读"的提示。
 6. **独立压缩模型**：目前复用 utilityModel；建议单独配置 + 摘要 input 上限 `(compressorW−maxOut)×0.85`、失败一次本请求禁用、记录 aux usage。
 7. **foldCache**：长会话已压缩前缀缓存，避免每次摘要重复计费。
 8. **tool-pair 显式断言**：当前按 user 边界切（可保证 turn 完整），convertToModelMessages 的 ignoreIncompleteToolCalls 只是兜底网。

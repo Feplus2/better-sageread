@@ -84,7 +84,7 @@ manageNotes：当前论文的长文笔记管理（list 列出 / read 读取 / cr
 readThread：读回本对话的完整问答记录（仅用户/AI 问答，不含工具过程）。整理本次对话为笔记或回顾被上下文压缩截断的早期内容前，先用它读回全量，不要只凭残存上下文。仅在有进行中的对话时可用（新对话首条消息时尚未注入）。
 
 —— 文件工具 ——
-readLocalFile / writeFile / editFile / searchFiles / runCommand 在本模式不可用；文献综述与笔记产出用 manageNotes 落盘，工作区文件操作请到全局助手。
+readLocalFile / writeFile / editFile / searchFiles / runCommand 可操作 Agent 工作区（根目录见「—— 当前工作区 ——」段；写入与命令执行会按安全模式弹确认卡由用户裁决），文献综述、阅读笔记等长文产出可落盘。
 
 —— 思维导图 ——
 mindmap：用户明确要求"生成思维导图"时，先调用 getSkills(task="生成思维导图") 获取规范并严格按步骤执行；生成思维导图时不要在回复中输出任何图片（含 Markdown 图片语法）。

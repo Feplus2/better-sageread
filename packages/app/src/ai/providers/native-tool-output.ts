@@ -8,9 +8,11 @@
  *
  * 本模块在 transport 组装工具后按协议包一层 toModelOutput；chat 通道不启用，继续走图片桥。
  *
- * MCP 工具（2026-10-22 图片收口）：mcp_ 工具结果里的图片已被 mcp-manager 摘成占位并按 toolCallId
- * 进内存缓存，这里按同一预算把缓存图回灌成官方 file part；直接调用（非目录牌）时也识别
- * MCP 原始 image content 形状，避免把 base64 当文本喂给模型。
+ * MCP 工具（2026-10-23 口径）：mcp_ 工具结果里的图片已被 mcp-manager 落盘并换成带路径的占位，
+ * 落盘成功的图按 toolCallId 进内存缓存（origin=mcp），**只在当轮 live** 回灌成官方 file part；
+ * 跨轮/历史（请求开始时的历史快照）一律跳过 origin=mcp，只保留落盘路径占位（重启后 readImage 重看）。
+ * 内置 readImage/viewImages（origin=builtin）的跨轮预算回灌行为不变。
+ * 直接调用（非目录牌）时也识别 MCP 原始 image content 形状，避免把 base64 当文本喂给模型。
  *
  * 历史图回灌预算（2026-10-22 晚纠偏）：图片字节落库时已剥离，toModelOutput 只能从内存缓存
  * （tool-image-cache，40 条 LRU）恢复历史工具图。原实现对每个历史 toolCallId 全量恢复并重发，
@@ -19,7 +21,12 @@
  * 更早的历史图不重发——占位文案提示模型按路径重新 readImage/viewImages。
  */
 
-import { getCachedToolImages, isRecentToolImageEntry, listCachedToolImageEntries } from "@/ai/utils/tool-image-cache";
+import {
+  getCachedToolImages,
+  isMcpToolImage,
+  isRecentToolImageEntry,
+  listCachedToolImageEntries,
+} from "@/ai/utils/tool-image-cache";
 import { toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
 import type { Tool } from "ai";
 
@@ -42,16 +49,28 @@ interface CollectedOutput {
   images: CollectedImage[];
 }
 
-/** 每次 wrapToolsForNativeImages 一份（= 每次 sendMessages 一份），跨历史转换与当轮多步共享 */
+/**
+ * 每次 wrapToolsForNativeImages 一份（= 每次 sendMessages 一份），跨历史转换与当轮多步共享。
+ * 历史条目在**创建本对象时**冻结（= 本次请求开始）：此后工具执行新写入缓存的条目一律算当轮 live，
+ * 不能等第一次 toModelOutput 才拍快照——否则会话里第一次看图时，当前工具结果会被误判成"历史"
+ * （MCP 图因此丢失；内置图也会被错算进历史预算）。
+ */
 interface ReplayBudget {
+  /** 请求开始时缓存里的条目快照（历史消息的图片回灌只看这份） */
+  historyEntries: ReturnType<typeof listCachedToolImageEntries>;
+  /** 快照内所有 toolCallId（含 MCP）：这些条目不得再走 live 预算 */
+  snapshotKeys: Set<string>;
   history?: Map<string, number>;
-  /** 快照时已存在的 toolCallId：历史里被预算排除的旧条目不能走 live 预算 */
-  snapshotKeys?: Set<string>;
   liveRemaining: number;
 }
 
 function createReplayBudget(): ReplayBudget {
-  return { liveRemaining: LIVE_MAX_IMAGES };
+  const historyEntries = listCachedToolImageEntries();
+  return {
+    historyEntries,
+    snapshotKeys: new Set(historyEntries.map((entry) => entry.toolCallId)),
+    liveRemaining: LIVE_MAX_IMAGES,
+  };
 }
 
 function isDataImageUrl(value: unknown): value is string {
@@ -86,15 +105,23 @@ function walk(node: unknown, out: CollectedOutput): void {
   for (const value of Object.values(record)) walk(value, out);
 }
 
-/** 惰性建历史快照：按缓存插入序从新到旧取最近 N 批、累计 ≤6 张（同轮多步的历史工具图仍会重发） */
+/**
+ * 用请求开始时的冻结快照算历史预算：按缓存插入序从新到旧取最近 N 批、累计 ≤6 张（仅 origin=builtin）。
+ * MCP 图片（origin=mcp）不参与历史回灌、也不占内置图配额（2026-10-23 口径）。
+ */
 function ensureHistoryAllowance(budget: ReplayBudget): Map<string, number> {
   if (budget.history) return budget.history;
   const allowance = new Map<string, number>();
-  const entries = listCachedToolImageEntries();
+  const entries = budget.historyEntries;
   let remaining = REPLAY_MAX_IMAGES;
+  let index = entries.length - 1;
   let batches = 0;
-  for (let i = entries.length - 1; i >= 0 && batches < REPLAY_MAX_BATCHES && remaining > 0; i--, batches++) {
-    const entry = entries[i];
+  while (index >= 0 && remaining > 0 && batches < REPLAY_MAX_BATCHES) {
+    const entry = entries[index];
+    index -= 1;
+    // 跨轮/历史不回灌 MCP 图：跳过且不消耗批次配额，保证内置图历史预算不变
+    if (entry.images.some(isMcpToolImage)) continue;
+    batches += 1;
     const take = Math.min(entry.images.length, remaining);
     if (take > 0) {
       allowance.set(entry.toolCallId, take);
@@ -102,7 +129,6 @@ function ensureHistoryAllowance(budget: ReplayBudget): Map<string, number> {
     }
   }
   budget.history = allowance;
-  budget.snapshotKeys = new Set(entries.map((entry) => entry.toolCallId));
   return allowance;
 }
 

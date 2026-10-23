@@ -18,7 +18,8 @@ const checks = await evalJS(`(async () => {
   const BOOK = "9f1820c6dcc62250458da69162b72e5d";
   const registry = await import("/src/ai/tools/registry.ts");
   const lazy = await import("/src/ai/tools/lazy-toolset.ts");
-  const paperTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
+  // 2026-10-23：L1 需要跨论文/跨书读取，显式给用户圈定范围「图书馆+论文库」（不设置则默认 current，跨文档会被门禁拒绝）
+  const paperTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C], retrievalScope: "all" });
   check("paper scope 含 readDocument/getDocumentInfo/searchLibrary", !!paperTools.readDocument && !!paperTools.getDocumentInfo && !!paperTools.searchLibrary, Object.keys(paperTools).join(","));
   check("默认文档工具模式=new（旧工具不暴露）", !!paperTools.readDocument && !paperTools.readPaperSection && !paperTools.ragSearch, Object.keys(paperTools).length);
   check("new 模式含 getCitationGraph", !!paperTools.getCitationGraph, Object.keys(paperTools).length);
@@ -46,7 +47,7 @@ const checks = await evalJS(`(async () => {
   check("readDocument offset 窗口<=600", String(win.text || "").length <= 600, String(win.text || "").length);
   check("readDocument offset next_offset", typeof win.next_offset === "number", win.next_offset);
 
-  const readerTools = registry.getToolsForScope("reader", { bookId: BOOK });
+  const readerTools = registry.getToolsForScope("reader", { bookId: BOOK, retrievalScope: "all" });
   const bookRead = await readerTools.readDocument.execute({ reasoning: "L1", doc: "book:" + BOOK, heading: "第三章 政治学", after: 3000 }, { toolCallId: "p4", messages: [] });
   check("readDocument(book) 命中章节", String(bookRead.anchor.heading || "").includes("第三章"), bookRead.anchor.heading);
   check("readDocument(book) 正文匹配", /萨特|政治/.test(String(bookRead.text || "")), String(bookRead.text || "").slice(0, 80));
@@ -59,22 +60,56 @@ const checks = await evalJS(`(async () => {
   const infoCivil = await civilTools.getDocumentInfo.execute({ reasoning: "L1", doc: "book:718a0d5d6514980ce87dd8b0d39ad2dc" }, { toolCallId: "p5b", messages: [] });
   check("getDocumentInfo(未索引书) 目录 5-40 条（EPUB TOC 回退）", infoCivil.outline.total >= 5 && infoCivil.outline.items.length <= 40, infoCivil.outline.total + "/" + infoCivil.outline.source + "/items=" + infoCivil.outline.items.length);
 
+  // 2026-10-23 用户拍板：new 模式恢复文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）
+  const FILE_TOOLS = ["readLocalFile", "writeFile", "editFile", "searchFiles", "runCommand"];
   window.__SAGEREAD_DOC_TOOL_MODE__ = "new";
-  const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
+  const newModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C], retrievalScope: "all" });
   check("new 模式隐藏旧读工具", !newModeTools.readPaperSection && !newModeTools.getPaperToc && !newModeTools.paperSearch && !!newModeTools.readDocument, Object.keys(newModeTools).length);
-  check("new 模式工具数 <= 18", Object.keys(newModeTools).length <= 18, Object.keys(newModeTools).length);
+  check(
+    "new 模式恢复文件五件套（write/edit/search/run 不再隐藏）",
+    FILE_TOOLS.every((name) => !!newModeTools[name]),
+    FILE_TOOLS.filter((name) => !newModeTools[name]).join(",") || Object.keys(newModeTools).join(","),
+  );
+  check(
+    "new 模式 paper 工具数 = 24（shared 16 + paper 专属 8）",
+    Object.keys(newModeTools).length === 24,
+    Object.keys(newModeTools).length,
+  );
   const newChars = lazy.estimateToolsChars(newModeTools);
-  check("new 模式退出目录牌（schema<12k）", lazy.shouldUseDirectoryMode(newModeTools) === false, newChars + " chars");
-  check("new 模式隐藏工作区命令工具", !newModeTools.runCommand && !newModeTools.writeFile && !newModeTools.readLocalFile, Object.keys(newModeTools).length);
+  // transport 对 reader/paper 的 new 模式本就强制目录牌（forceDirectoryForNewMode），
+  // 因此 schema 上涨对请求面影响有限；这里只校验目录牌预算事实（>12k 会触发）。
+  check(
+    "new 模式 schema 超 12k → 目录牌预算触发（与 transport 强制目录牌一致）",
+    lazy.shouldUseDirectoryMode(newModeTools) === true,
+    newChars + " chars",
+  );
+  const readerNewModeTools = registry.getToolsForScope("reader", { bookId: BOOK, retrievalScope: "all" });
+  check(
+    "reader new 模式恢复文件五件套",
+    FILE_TOOLS.every((name) => !!readerNewModeTools[name]),
+    FILE_TOOLS.filter((name) => !readerNewModeTools[name]).join(",") || Object.keys(readerNewModeTools).join(","),
+  );
+  check(
+    "reader new 模式工具数 = 21（shared 16 + reader 专属 5）",
+    Object.keys(readerNewModeTools).length === 21,
+    Object.keys(readerNewModeTools).length,
+  );
+  const readerChars = lazy.estimateToolsChars(readerNewModeTools);
+  check(
+    "reader new 模式 schema 超 12k → 目录牌预算触发",
+    lazy.shouldUseDirectoryMode(readerNewModeTools) === true,
+    readerChars + " chars",
+  );
   window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
-  const legacyModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C] });
+  const legacyModeTools = registry.getToolsForScope("paper", { paperId: PAPER_A, paperScopeIds: [PAPER_C], retrievalScope: "all" });
   check("legacy 模式隐藏新原语", !legacyModeTools.readDocument && !!legacyModeTools.readPaperSection, Object.keys(legacyModeTools).length);
+  check("legacy 模式文件五件套仍在", FILE_TOOLS.every((name) => !!legacyModeTools[name]), "");
   delete window.__SAGEREAD_DOC_TOOL_MODE__;
 
   const search = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "environmentally stable interface layered oxide cathode", scope: "all" }, { toolCallId: "p6", messages: [] });
   check("searchLibrary(all) 命中", search.total >= 1, search.total);
   check("searchLibrary 片段<=405", (search.results || []).every((r) => String(r.snippet).length <= 405), (search.results || []).map((r) => String(r.snippet).length).join(","));
-  check("searchLibrary doc 锚点", (search.results || []).every((r) => String(r.doc).startsWith("paper:")), "");
+  check("searchLibrary(all) doc 锚点（paper:<id> / book:<id>）", (search.results || []).every((r) => /^(paper|book):/.test(String(r.doc))), (search.results || []).map((r) => r.doc).join(","));
   check("searchLibrary 无 citation_guide", !("citation_guide" in search), Object.keys(search).join(","));
 
   const figs2 = await paperTools.getFigures.execute({ reasoning: "L1" }, { toolCallId: "p10", messages: [] });
@@ -98,13 +133,15 @@ const checks = await evalJS(`(async () => {
   }
   check("文本读取无每轮硬上限", readsOk === 5, readsOk + "/5");
 
-  const scoped = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "library" }, { toolCallId: "p7", messages: [] });
+  // 旧断言用 legacy 的 scope:"collection"（新 searchLibrary 已无此档，schema enum=current/library/all）；
+  // 改为验证新原语的范围收窄语义：用户圈 all 时，模型可收窄到 current（只查当前论文）。
+  const narrowed = await paperTools.searchLibrary.execute({ reasoning: "L1", query: "interface stability", scope: "current" }, { toolCallId: "p7", messages: [] });
   const bookSearch = await readerTools.searchLibrary.execute({ reasoning: "L1", doc: "book:" + BOOK, query: "政治 知识分子" }, { toolCallId: "p11", messages: [] });
   check("searchLibrary(doc=book) 本书检索命中", bookSearch.total >= 1, bookSearch.total + "/" + String(bookSearch.note || "").slice(0, 60));
   check("searchLibrary(doc=book) 结果锚点是书", (bookSearch.results || []).every((r) => String(r.doc).startsWith("book:")), (bookSearch.results || []).map((r) => r.doc).join(","));
   const paperDocSearch = await paperTools.searchLibrary.execute({ reasoning: "L1", doc: "paper:" + PAPER_C, query: "interface stability" }, { toolCallId: "p12", messages: [] });
   check("searchLibrary(doc=paper) 只查该论文", (paperDocSearch.results || []).every((r) => r.doc === "paper:" + PAPER_C), (paperDocSearch.results || []).map((r) => r.doc).join(","));
-  check("searchLibrary(collection) 只查面板范围", (scoped.results || []).every((r) => r.doc === "paper:" + PAPER_C), (scoped.results || []).map((r) => r.doc).join(","));
+  check("searchLibrary(scope=current) 只查当前论文", (narrowed.results || []).every((r) => r.doc === "paper:" + PAPER_A), (narrowed.results || []).map((r) => r.doc).join(","));
   const centralTools = registry.getToolsForScope("central");
   const mergedBooks = await centralTools.searchLibrary.execute({ reasoning: "L1", query: "政治 权力 知识分子", scope: "all", topK: 8 }, { toolCallId: "p13", messages: [] });
   check("searchLibrary(central,all) 跨库含书库结果", (mergedBooks.book_total ?? 0) >= 1, (mergedBooks.book_total ?? 0) + " book / " + (mergedBooks.paper_total ?? 0) + " paper");
