@@ -83,8 +83,35 @@ Better SageRead 有两套互不影响的配色系统：
 | `chat-message-assistant` | 单条 AI 消息（同上） |
 | `dialog` | 所有对话框弹层（shadcn Dialog 共用挂载点） |
 | `settings-panel` | 设置弹窗主体（左侧导航 + 右侧内容） |
+| `statistics` | 阅读统计页滚动容器（整页换肤入口） |
+| `stats-panel` | 统计页的大卡片（AI 用量分布 / 阅读活动热力图），带 `data-panel` 区分 |
+| `stat-card` | 统计页顶部的单个数字卡片 |
 
 选择器写法：`[data-region="book-card"] { ... }`。钩子的稳定性受版本维护承诺约束，优先于猜测 Tailwind 类名。
+
+## 阅读统计页变量（`--stats-*`）
+
+统计页（书架 → 阅读统计）的组件全部消费下列派生变量，默认值在 `src/index.css` 里从主题变量合成，主题通常**不需要**改；想微调观感时按需覆盖即可：
+
+| 变量 | 用途 |
+| --- | --- |
+| `--stats-surface` / `--stats-surface-strong` | 统计卡片承力面（默认 = card 58% + popover 42% 合成；半透明视频壁纸主题可提高 popover 占比） |
+| `--stats-border` / `--stats-border-hover` | 卡片/分段控件边框（默认把 border 与 muted-foreground 混 26%，避免低 alpha 主题框线发虚） |
+| `--stats-glow` | hover 荧光色（默认 primary 32% 透明度） |
+| `--stats-chart-1` … `--stats-chart-12` | 模型图表色（12 个固定色相各与 primary 轻混 22%，可按主题整体接管） |
+
+主题可以只给 `[data-region="statistics"]` 作用域写规则，例如羊皮纸主题的暖色阴影：
+
+```css
+[data-region="statistics"] .stats-card {
+  box-shadow: var(--shadow-warm-sm);
+}
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px color-mix(in oklab, var(--primary) 24%, transparent);
+}
+```
+
+统计页可复用的类：`.stats-card`（卡片表面 + hover 荧光）、`.stats-icon-tile`（图标底座，hover 口径对齐 AI 消息 Markdown 表格单元格）、`.stats-icon-button`（小图标按钮）、`.stats-segmented` / `.stats-segmented-item`（分段控件）、`.stats-table`（明细表行/单元格 hover）、`.stats-rule`（分隔线）。
 
 ## 常用片段示例
 

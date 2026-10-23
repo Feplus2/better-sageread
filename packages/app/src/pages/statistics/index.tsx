@@ -2,7 +2,6 @@ import { getAiUsageEntries } from "@/services/ai-usage-service";
 import type { AiUsageEntry } from "@/services/ai-usage-service";
 import { getAllReadingSessions } from "@/services/reading-session-service";
 import type { ReadingSession } from "@/types/reading-session";
-import clsx from "clsx";
 import dayjs from "dayjs";
 import {
   ArrowDownToLine,
@@ -15,6 +14,7 @@ import {
   ClockIcon,
   DatabaseIcon,
   TrendingUpIcon,
+  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import AiUsageCharts, { formatTokens, type StatUnit } from "./components/ai-usage-charts";
@@ -49,7 +49,12 @@ function windowStartMs(unit: StatUnit): number | null {
   }
 }
 
-const formatDuration = (seconds: number) => `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+/** 阅读时长：小时 + 分钟的中文紧凑写法（0 小时时只显示分钟，避免 "0h 23m" 的噪音） */
+const formatDuration = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
+};
 
 const StatisticsPage = () => {
   const [sessions, setSessions] = useState<ReadingSession[]>([]);
@@ -127,11 +132,23 @@ const StatisticsPage = () => {
     return years.length > 0 ? Math.min(...years, currentYear) : currentYear;
   }, [sessions, currentYear]);
 
+  const unitLabel = UNIT_OPTIONS.find((o) => o.value === unit)?.label ?? "本月";
+
   if (loading) {
     return (
-      <div className="container mx-auto p-4">
-        <div className="flex h-[60vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-700 dark:border-neutral-600 dark:border-t-neutral-400" />
+      <div data-region="statistics" className="stats-page flex-1 overflow-auto p-3">
+        <div className="relative z-10 space-y-6">
+          <div className="space-y-2">
+            <div className="h-8 w-36 animate-pulse rounded-md bg-muted" />
+            <div className="h-4 w-56 animate-pulse rounded bg-muted" />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="stats-card h-[104px] animate-pulse" />
+            ))}
+          </div>
+          <div className="stats-card h-[420px] animate-pulse" />
+          <div className="stats-card h-[260px] animate-pulse" />
         </div>
       </div>
     );
@@ -139,44 +156,44 @@ const StatisticsPage = () => {
 
   if (error) {
     return (
-      <div className="container mx-auto p-4">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-800 dark:bg-red-950">
-          <div className="text-center text-red-700 dark:text-red-300">
-            <p className="font-medium text-lg">加载失败</p>
-            <p className="text-sm">{error}</p>
+      <div data-region="statistics" className="stats-page flex-1 overflow-auto p-3">
+        <div className="stats-card mx-auto mt-16 max-w-lg p-8 text-center">
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <TriangleAlert className="h-5 w-5" />
           </div>
+          <p className="font-semibold text-foreground text-lg">加载失败</p>
+          <p className="mt-1 text-muted-foreground text-sm">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 space-y-6 overflow-auto p-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-2">
-          <h1 className="font-bold text-3xl text-neutral-900 dark:text-neutral-100">阅读统计</h1>
-          <p className="text-neutral-600 dark:text-neutral-400">阅读习惯与 AI 用量的统计数据</p>
+    <div data-region="statistics" className="stats-page flex-1 space-y-6 overflow-auto p-3">
+      <header className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1.5">
+          <h1 className="font-bold text-3xl text-foreground tracking-tight">阅读统计</h1>
+          <p className="text-muted-foreground text-sm">阅读习惯与 AI 用量的统计数据</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-neutral-150 p-1 dark:border-neutral-800">
-          {UNIT_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => setUnit(o.value)}
-              className={clsx(
-                "rounded-md px-3 py-1 text-sm transition-colors",
-                unit === o.value
-                  ? "bg-primary font-medium text-primary-foreground"
-                  : "text-neutral-600 hover:bg-muted dark:text-neutral-400",
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
+        <div className="flex shrink-0 items-center gap-2">
+          <div aria-label="统计时间范围" className="stats-segmented" role="group">
+            {UNIT_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                aria-pressed={unit === o.value}
+                className="stats-segmented-item"
+                data-active={unit === o.value}
+                onClick={() => setUnit(o.value)}
+                type="button"
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="阅读概览" className="relative z-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard title="阅读会话" value={totalSessions.toString()} icon={<BookIcon className="h-4 w-4" />} />
         <StatCard title="阅读时长" value={formatDuration(totalDuration)} icon={<ClockIcon className="h-4 w-4" />} />
         <StatCard title="活跃天数" value={activeDays.toString()} icon={<CalendarIcon className="h-4 w-4" />} />
@@ -185,9 +202,9 @@ const StatisticsPage = () => {
           value={averageSessionsPerDay.toFixed(1)}
           icon={<TrendingUpIcon className="h-4 w-4" />}
         />
-      </div>
+      </section>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="AI 用量概览" className="relative z-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard title="输入 Token" value={formatTokens(inputTokens)} icon={<ArrowDownToLine className="h-4 w-4" />} />
         <StatCard
           title="输出 Token"
@@ -196,50 +213,56 @@ const StatisticsPage = () => {
         />
         <StatCard title="AI 请求数" value={winUsage.length.toString()} icon={<BotIcon className="h-4 w-4" />} />
         <StatCard title="向量化用量" value={formatTokens(embedTokens)} icon={<DatabaseIcon className="h-4 w-4" />} />
-      </div>
+      </section>
 
-      <div className="rounded-lg border border-neutral-150 p-4 dark:border-neutral-800">
-        <div className="space-y-2 pb-4">
-          <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">AI 用量</h3>
-          <p className="text-neutral-600 text-sm dark:text-neutral-400">
-            各模型 token 消耗（自功能上线起累计；图表悬浮可见模型与具体数值）
-          </p>
-        </div>
-        <AiUsageCharts usage={winUsage} unit={unit} />
-      </div>
-
-      <div className="rounded-lg border border-neutral-150 p-4 dark:border-neutral-800">
-        <div className="flex items-start justify-between pb-4">
-          <div className="space-y-2">
-            <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">阅读活动热力图</h3>
-            <p className="text-neutral-600 text-sm dark:text-neutral-400">
-              {heatYear} 年的阅读活动分布，颜色深浅表示当天的阅读强度
+      <section className="stats-card relative z-10 p-5" data-panel="ai-usage" data-region="stats-panel">
+        <div className="flex flex-wrap items-start justify-between gap-3 pb-5">
+          <div className="space-y-1">
+            <h2 className="font-semibold text-foreground text-lg">AI 用量分布</h2>
+            <p className="text-muted-foreground text-sm">
+              各模型 token 消耗，按当前时间范围统计；图表悬浮或点按可查看模型与具体数值
             </p>
+          </div>
+          <span
+            className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 font-medium text-[11px] text-muted-foreground"
+            style={{ borderColor: "var(--stats-border)" }}
+          >
+            {unitLabel}
+          </span>
+        </div>
+        <AiUsageCharts unit={unit} usage={winUsage} />
+      </section>
+
+      <section className="stats-card relative z-10 p-5" data-panel="heatmap" data-region="stats-panel">
+        <div className="flex flex-wrap items-start justify-between gap-3 pb-4">
+          <div className="space-y-1">
+            <h2 className="font-semibold text-foreground text-lg">阅读活动热力图</h2>
+            <p className="text-muted-foreground text-sm">{heatYear} 年的阅读活动分布，颜色深浅表示当天的阅读强度</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
-              type="button"
-              onClick={() => setHeatYear((y) => y - 1)}
-              disabled={heatYear <= minYear}
-              className="rounded-md p-1.5 text-neutral-600 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400"
               aria-label="上一年"
+              className="stats-icon-button"
+              disabled={heatYear <= minYear}
+              onClick={() => setHeatYear((y) => y - 1)}
+              type="button"
             >
               <ChevronLeftIcon className="h-4 w-4" />
             </button>
-            <span className="min-w-12 text-center font-medium text-sm">{heatYear}</span>
+            <span className="min-w-12 text-center font-medium text-foreground text-sm tabular-nums">{heatYear}</span>
             <button
-              type="button"
-              onClick={() => setHeatYear((y) => y + 1)}
-              disabled={heatYear >= currentYear}
-              className="rounded-md p-1.5 text-neutral-600 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400"
               aria-label="下一年"
+              className="stats-icon-button"
+              disabled={heatYear >= currentYear}
+              onClick={() => setHeatYear((y) => y + 1)}
+              type="button"
             >
               <ChevronRightIcon className="h-4 w-4" />
             </button>
           </div>
         </div>
         <ReadingHeatMap data={heatStats} year={heatYear} />
-      </div>
+      </section>
     </div>
   );
 };

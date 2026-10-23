@@ -606,6 +606,260 @@ foliate-view {
   }
 }
 
+/* ---------- 阅读统计页视觉系统（stats-*） ----------
+ * 整页只消费主题语义变量，不写死 neutral/hex，保证默认明暗与 5 套内置全局主题
+ * （羊皮纸/蛋糕/怜烟/蒙德里安/莫兰迪）共 12 个变体都可读、不串色。
+ *
+ * 关键取舍：
+ * - 承力面：单用 --card 时怜烟等半透明主题（card alpha≈0.3）叠在视频壁纸上太透，
+ *   文字对比度不稳定；--stats-surface 把 card 与 popover（alpha≈0.9）按 58/42 合成，
+ *   视频壁纸仍隐约透出，但文字有稳定底。
+ * - 框线：多套主题的 --border 是低 alpha 色（怜烟 0.28），1px 框线在壁纸/深色面上发虚；
+ *   --stats-border 与 muted-foreground 混 34% 抬高可见度，仍保持主题色相。
+ * - 模型色：12 个固定色相各与主题 primary 轻混 22%，保留模型辨识度、又不与主题撞色；
+ *   主题想完全接管时覆盖 --stats-chart-N 即可。
+ * - 动效：时长/缓动一律走动效 token；位移只在 [data-motion="full"] 档启用，
+ *   fade-only/reduced 档退化为纯颜色/阴影过渡（与 .hover-glow/.chat-thread-card 同口径）。 */
+:root {
+  --stats-surface: color-mix(in oklab, var(--card) 58%, var(--popover) 42%);
+  --stats-surface-strong: color-mix(in oklab, var(--card) 38%, var(--popover) 62%);
+  --stats-border: color-mix(in oklab, var(--border) 66%, var(--muted-foreground) 34%);
+  /* 统计页的次级文字：把 muted-foreground 向 foreground 收紧 34%（66/34）。
+   * 羊皮纸/蛋糕/莫兰迪等主题的 muted-foreground 在卡片底上只有 3.4~3.7:1（WCAG AA 不足），
+   * 但直接改主题变量会波及全应用；这里只在统计页作用域内替换，页面内的
+   * text-muted-foreground / SVG fill=currentColor / 图例 / 表头会一起变清楚。 */
+  --stats-muted-foreground: color-mix(in oklab, var(--muted-foreground) 66%, var(--foreground));
+  --stats-border-hover: color-mix(in oklab, var(--primary) 38%, var(--stats-border) 62%);
+  --stats-glow: color-mix(in oklab, var(--primary) 32%, transparent);
+  --stats-chart-1: color-mix(in oklab, #3d7ff0 78%, var(--primary) 22%);
+  --stats-chart-2: color-mix(in oklab, #1f9d63 78%, var(--primary) 22%);
+  --stats-chart-3: color-mix(in oklab, #d98b12 78%, var(--primary) 22%);
+  --stats-chart-4: color-mix(in oklab, #e04f45 78%, var(--primary) 22%);
+  --stats-chart-5: color-mix(in oklab, #8b5cf6 78%, var(--primary) 22%);
+  --stats-chart-6: color-mix(in oklab, #0d9db5 78%, var(--primary) 22%);
+  --stats-chart-7: color-mix(in oklab, #d94c8f 78%, var(--primary) 22%);
+  --stats-chart-8: color-mix(in oklab, #6d9e1f 78%, var(--primary) 22%);
+  --stats-chart-9: color-mix(in oklab, #e0782a 78%, var(--primary) 22%);
+  --stats-chart-10: color-mix(in oklab, #119e8b 78%, var(--primary) 22%);
+  --stats-chart-11: color-mix(in oklab, #5b6cf0 78%, var(--primary) 22%);
+  --stats-chart-12: color-mix(in oklab, #c9a227 78%, var(--primary) 22%);
+}
+
+@layer components {
+  /* 统计页作用域：次级文字整体收紧一档（派生变量见 :root 的 --stats-muted-foreground）。
+   * 只覆盖本页容器，不影响其它页面；全局主题切成任意一套时都会跟随。 */
+  [data-region="statistics"] {
+    --muted-foreground: var(--stats-muted-foreground);
+  }
+
+  /* 页面装饰光：顶部两团主色柔光，给纯色页面一点纵深；视频壁纸主题下自然叠加 */
+  .stats-page {
+    position: relative;
+  }
+
+  .stats-page::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 360px;
+    pointer-events: none;
+    background:
+      radial-gradient(52% 100% at 14% 0%, color-mix(in oklab, var(--primary) 7%, transparent), transparent 72%),
+      radial-gradient(44% 90% at 88% 0%, color-mix(in oklab, var(--primary) 4%, transparent), transparent 74%);
+  }
+
+  /* 卡片：hover = 主色描边 + 底纹 + 荧光环；位移只在 full 档 */
+  .stats-card {
+    position: relative;
+    border: 1px solid var(--stats-border);
+    border-radius: 0.875rem;
+    background-color: var(--stats-surface);
+    /* 静息阴影：极淡黑投影给卡片一点离面感；内置主题在自身 CSS 里用 --shadow-warm-* 覆写 */
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition:
+      border-color var(--motion-dur-fast) var(--motion-ease),
+      background-color var(--motion-dur-fast) var(--motion-ease),
+      box-shadow var(--motion-dur-base) var(--motion-ease),
+      transform var(--motion-dur-base) var(--motion-ease);
+  }
+
+  .stats-card:hover {
+    border-color: var(--stats-border-hover);
+    background-color: color-mix(in oklab, var(--stats-surface) 94%, var(--primary) 6%);
+  }
+
+  [data-motion="full"] .stats-card:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 12px 30px -14px var(--stats-glow),
+      0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent),
+      0 0 26px -8px color-mix(in oklab, var(--primary) 26%, transparent);
+  }
+
+  .stats-card:focus-within {
+    border-color: var(--stats-border-hover);
+  }
+
+  /* 图标底座：hover 口径对齐 .chat-md 表格——卡片 hover 时轻亮 10%（行 hover 档），
+   * 指到图标本身再加重 17%（单元格 hover 档 + 字色向 primary 偏移 + 微光） */
+  .stats-icon-tile {
+    display: inline-flex;
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    color: var(--muted-foreground);
+    background-color: color-mix(in oklab, var(--muted-foreground) 9%, transparent);
+    transition:
+      color var(--motion-dur-fast) var(--motion-ease),
+      background-color var(--motion-dur-fast) var(--motion-ease),
+      box-shadow var(--motion-dur-base) var(--motion-ease),
+      transform var(--motion-dur-base) var(--motion-ease);
+  }
+
+  .stats-card:hover .stats-icon-tile {
+    color: var(--primary);
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+  }
+
+  /* 双类选择器提高优先级：卡片 hover 预亮规则是 0-3-0，单类 :hover 会输给它 */
+  .stats-card .stats-icon-tile:hover {
+    color: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+    background-color: color-mix(in oklab, var(--primary) 17%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent),
+      0 0 16px -2px color-mix(in oklab, var(--primary) 36%, transparent);
+  }
+
+  [data-motion="full"] .stats-icon-tile:hover {
+    transform: translateY(-1px) scale(1.06);
+  }
+
+  /* 小图标按钮（年份切换、次级操作）：hover = 主色底纹 + 主色字 + 柔光 */
+  .stats-icon-button {
+    display: inline-flex;
+    width: 1.75rem;
+    height: 1.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.4375rem;
+    color: var(--muted-foreground);
+    transition:
+      color var(--motion-dur-fast) var(--motion-ease),
+      background-color var(--motion-dur-fast) var(--motion-ease),
+      box-shadow var(--motion-dur-base) var(--motion-ease),
+      opacity var(--motion-dur-fast) var(--motion-ease);
+  }
+
+  .stats-icon-button:hover:not(:disabled) {
+    color: var(--primary);
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+    box-shadow: 0 0 14px -6px var(--stats-glow);
+  }
+
+  .stats-icon-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+
+  /* 分段控件（时间单位 / 图表类型） */
+  .stats-segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    border: 1px solid var(--stats-border);
+    border-radius: 0.625rem;
+    padding: 3px;
+    background-color: color-mix(in oklab, var(--muted) 76%, transparent);
+    box-shadow: inset 0 1px 2px color-mix(in oklab, var(--foreground) 5%, transparent);
+  }
+
+  .stats-segmented-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 0.4375rem;
+    padding: 0.25rem 0.6875rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    transition:
+      color var(--motion-dur-fast) var(--motion-ease),
+      background-color var(--motion-dur-fast) var(--motion-ease),
+      box-shadow var(--motion-dur-fast) var(--motion-ease);
+  }
+
+  .stats-segmented-item:hover {
+    color: var(--foreground);
+    background-color: color-mix(in oklab, var(--primary) 9%, transparent);
+  }
+
+  .stats-segmented-item[data-active="true"] {
+    color: var(--primary-foreground);
+    background-color: var(--primary);
+    font-weight: 500;
+    box-shadow:
+      0 1px 6px -2px color-mix(in oklab, var(--primary) 55%, transparent),
+      inset 0 1px 0 color-mix(in oklab, #ffffff 14%, transparent);
+  }
+
+  .stats-segmented-item[data-active="true"]:hover {
+    background-color: color-mix(in oklab, var(--primary) 90%, var(--foreground));
+  }
+
+  /* 明细表：行 hover 5% 主色底、单元格 hover 14% + 字色偏移（对齐 .chat-md 表格 hover） */
+  .stats-table {
+    width: 100%;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+  }
+
+  .stats-table th,
+  .stats-table td {
+    transition:
+      background-color var(--motion-dur-fast) var(--motion-ease),
+      color var(--motion-dur-fast) var(--motion-ease);
+  }
+
+  .stats-table thead th {
+    border-bottom: 1px solid var(--stats-border);
+    font-weight: 500;
+    text-align: left;
+    color: var(--muted-foreground);
+  }
+
+  .stats-table tbody tr {
+    border-bottom: 1px solid var(--stats-border);
+  }
+
+  .stats-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .stats-table tbody tr:hover > td {
+    background-color: color-mix(in oklab, var(--primary) 5%, transparent);
+  }
+
+  .stats-table tbody tr:hover > td:hover,
+  .stats-table thead th:hover {
+    /* 字色向 foreground 收 55%：只留主色倾向，保证浅主色/深底主题（莫兰迪）hover 后仍 ≥4.5:1 */
+    color: color-mix(in oklab, var(--primary) 45%, var(--foreground));
+    background-color: color-mix(in oklab, var(--primary) 14%, transparent);
+  }
+
+  .stats-table thead th:hover {
+    border-radius: 0.25rem;
+  }
+
+  /* 统计页内分隔线（图表区/图例/明细区之间） */
+  .stats-rule {
+    border-top: 1px solid var(--stats-border);
+  }
+}
+
 /* ---------- Sonner toast 主题接管 ----------
  * Sonner 内部写死了 --gray* 色阶和 [data-description] 颜色，
  * 不响应应用主题变量。以下规则用更高优先级将其收编。 */

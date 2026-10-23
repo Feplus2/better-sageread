@@ -490,3 +490,14 @@ html.dark {
   --chat-heading-hover: #e88aa5;
   --chat-heading-rule-hover: rgba(232, 138, 165, 0.4);
 }
+
+/* ---------- 8. 阅读统计页（statistics）----------
+ * 统计页组件消费 --stats-* 变量（默认值见 src/index.css）；本主题补蛋糕胚暖阴影，
+ * hover 用糖浆粉/樱桃红的柔和光晕，保持「奶油 + 甜点」的软质感。 */
+[data-region="statistics"] .stats-card {
+  box-shadow: var(--shadow-warm-sm);
+}
+
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent);
+}

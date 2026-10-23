@@ -217,3 +217,27 @@ html.dark {
 html.dark {
   --reader-solid-alpha: 0.6;
 }
+
+/* ══════════════ 阅读统计页（statistics）══════════════
+   统计页的文字/图表要压在视频壁纸上方，默认按 58% card + 42% popover 合成承力面；
+   本主题两套变量的 alpha 都偏低，这里把 popover 占比抬到 62%/78%，保证小字与图表刻度可读，
+   壁纸仍从剩余透明度里隐约透出。边框同时提高不透明占比（默认 --border alpha 0.28 太虚）。 */
+:root {
+  --stats-surface: color-mix(in oklab, var(--card) 38%, var(--popover) 62%);
+  --stats-surface-strong: color-mix(in oklab, var(--card) 22%, var(--popover) 78%);
+  --stats-border: color-mix(in oklab, var(--border) 55%, var(--muted-foreground) 45%);
+}
+
+html.dark {
+  --stats-surface: color-mix(in oklab, var(--card) 38%, var(--popover) 62%);
+  --stats-surface-strong: color-mix(in oklab, var(--card) 22%, var(--popover) 78%);
+  --stats-border: color-mix(in oklab, var(--border) 55%, var(--muted-foreground) 45%);
+}
+
+[data-region="statistics"] .stats-card {
+  box-shadow: var(--shadow-warm-sm);
+}
+
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px color-mix(in oklab, var(--primary) 26%, transparent);
+}

@@ -147,3 +147,21 @@ html.dark {
   --chat-heading-hover: #a8c4d0;
   --chat-heading-rule-hover: #45525a;
 }
+
+/* ---------- 阅读统计页（statistics）----------
+ * 统计页组件消费 --stats-* 变量（默认值见 src/index.css）；本主题保持低饱和柔光：
+ * 静息 = 极淡灰绿阴影，hover = 雾灰青柔光 + 细描边，对比度控制在安静的高级灰范围。
+ * 另：本主题浅色下 primary/primary-foreground（#6e838c/#f4f6f5）只有 3.66:1，
+ * 统计页激活分段控件等小字会读数吃力；仅在统计页作用域把 primary 压深一档
+ * （#5f737c，白字约 4.6:1），不影响其它页面的按钮/链接。 */
+html:not(.dark) [data-region="statistics"] {
+  --primary: #5f737c;
+}
+
+[data-region="statistics"] .stats-card {
+  box-shadow: var(--shadow-warm-sm);
+}
+
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px color-mix(in oklab, var(--primary) 24%, transparent);
+}

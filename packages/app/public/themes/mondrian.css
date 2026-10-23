@@ -153,3 +153,20 @@ html.dark {
   --chat-heading-hover: #e2543f;
   --chat-heading-rule-hover: #f2c230;
 }
+
+/* ---------- 阅读统计页（statistics）----------
+ * 统计页组件消费 --stats-* 变量（默认值见 src/index.css）；本主题保持风格派语汇：
+ * 硬描边 + 无模糊硬投影，hover 换成红原色描边 + 更大偏移的硬投影（不用柔光）。 */
+[data-region="statistics"] .stats-card {
+  border-width: 1.5px;
+  box-shadow: var(--shadow-warm-sm);
+}
+
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px var(--primary);
+}
+
+[data-region="statistics"] .stats-segmented {
+  border-color: var(--border);
+  border-width: 1.5px;
+}

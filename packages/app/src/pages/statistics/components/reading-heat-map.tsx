@@ -13,8 +13,74 @@ interface ReadingHeatMapProps {
 interface HeatMapValue {
   date: string;
   count: number;
-  content?: string;
 }
+
+/** 一年 53 列（含首尾跨年补齐列）。 */
+const COLS = 53;
+const DAYS_IN_WEEK = 7;
+const RECT_GAP = 2;
+const MIN_RECT = 8;
+const MAX_RECT = 18;
+
+/** 月份/星期标签提成模块常量：引用稳定，避免 @uiw/react-heat-map 内部 effect 因数组换新反复 setState。 */
+const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+const WEEK_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
+/**
+ * 色阶完全从主题语义变量派生（默认明暗 + 羊皮纸/蛋糕/怜烟/蒙德里安/莫兰迪共 12 个变体都自适应）：
+ * - 0 档 = 前景色 12% 半透明，只是淡淡底格（怜烟这类半透明主题也不会糊成一片）；
+ * - 1..5 档 = primary 与 muted 混合（而不是混 transparent）：浅色主题里越深越暗、深色主题里越深越亮，
+ *   半透明主题下仍有足够不透明度，不会随背景视频一起发虚。
+ * 档位阈值沿用原「按 maxCount 百分比分 5 档」逻辑（由下方 panelColors useMemo 计算）。
+ */
+const EMPTY_CELL_COLOR = "color-mix(in oklab, var(--muted-foreground) 18%, transparent)";
+const LEVEL_PRIMARY_PERCENT = [20, 36, 52, 68, 86];
+
+/**
+ * 单元格交互样式（组件内联，只作用于本热力图，不往全局 index.css 加规则）：
+ * - hover：主色 2px 描边 + 主色荧光（纯 CSS，全图共 370 个 rect 也只有一条规则，无逐帧 JS）；
+ * - 今天：常驻主色环 + 柔光；
+ * - 选择器带上 .sage-heatmap-shell / rect.sage-heatmap-cell 提高优先级，压过
+ *   @uiw/react-heat-map 自带的 svg.w-heatmap rect:hover（写死 rgba 黑描边）；
+ * - 所有颜色 color-mix 自 --primary，时长/缓动只引用动效 token。
+ */
+const CELL_CSS = `
+.sage-heatmap-shell svg.w-heatmap rect.sage-heatmap-cell {
+  stroke: transparent;
+  stroke-width: 2px;
+  shape-rendering: geometricPrecision;
+  transition:
+    stroke var(--motion-dur-fast) var(--motion-ease),
+    filter var(--motion-dur-base) var(--motion-ease);
+}
+.sage-heatmap-shell svg.w-heatmap rect.sage-heatmap-cell[data-today="true"] {
+  stroke: var(--primary);
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--primary) 60%, transparent));
+}
+.sage-heatmap-shell svg.w-heatmap rect.sage-heatmap-cell:hover {
+  stroke: var(--primary);
+  filter: drop-shadow(0 1px 3px color-mix(in oklab, var(--primary) 55%, transparent));
+}
+.sage-heatmap-shell svg.w-heatmap text {
+  font-variant-numeric: tabular-nums;
+}
+/* 热力图 Tooltip 与图表 Tooltip 同一视觉语言：popover 承力面 + 主题边框/文字，
+ * 不复用全局 TooltipContent 的 bg-primary——莫兰迪等主题 primary/primary-foreground
+ * 这对色只有 3.66:1，浅色 primary 主题下小字会看不清。 */
+.sage-heatmap-tooltip[data-slot="tooltip-content"] {
+  border: 1px solid var(--stats-border);
+  border-radius: 0.5rem;
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 10px 28px -16px color-mix(in oklab, var(--foreground) 45%, transparent);
+}
+/* Radix Arrow 的 DOM 是 <span><svg class="bg-primary fill-primary">…</svg></span>，
+ * svg 并非 content 的直接子节点，必须用后代选择器才能压掉全局 primary 箭头色 */
+.sage-heatmap-tooltip svg {
+  fill: var(--popover);
+  background-color: var(--popover);
+}
+`;
 
 function useResizeObserver<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -39,73 +105,58 @@ function useResizeObserver<T extends HTMLElement>() {
   return { ref, width };
 }
 
+/** 把 @uiw/react-heat-map 归一化后的 "YYYY/M/D" 补零成 "YYYY-MM-DD"（tooltip 展示 + 今天判定）。 */
+function toIsoDate(date: string) {
+  const [y, m, d] = date.split("/");
+  if (!y || !m || !d) return date;
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
 const ReadingHeatMap = ({ data, year }: ReadingHeatMapProps) => {
   const { ref, width } = useResizeObserver<HTMLDivElement>();
 
   const today = useMemo(() => dayjs().format("YYYY-MM-DD"), []);
 
   const { startDate, endDate } = useMemo(() => {
-    const start = new Date(year, 0, 1);
-    const end = new Date(year, 11, 31);
-
-    return { startDate: start, endDate: end };
+    return { startDate: new Date(year, 0, 1), endDate: new Date(year, 11, 31) };
   }, [year]);
 
-  const cols = useMemo(() => {
-    return 53;
-  }, []);
-
-  const { rectSize, space, containerHeight, showLabels } = useMemo(() => {
-    const minCell = 8;
-    const maxCell = 18;
-    const gap = 2;
-    const padding = 16;
-
-    const daysInWeek = 7;
-    const topLabelHeight = 30;
-    const bottomPadding = 20;
-
+  /**
+   * 布局：rect 尺寸按容器宽度反推（53 列 + 标签列 + 列间距都要装下），
+   * 并给库内部 gridNum = floor((svg 宽 - leftPad) / (rect + gap)) 留够格子，
+   * 避免最后一周被 floor 抹掉（旧实现少减 leftPad，宽窗口下会丢最后一列）。
+   * 高度只留标签 + 7 行格子 + 少量底部余量，去掉库自带的无用留白，让图例行贴近热力图。
+   */
+  const { rectSize, containerHeight, showLabels } = useMemo(() => {
     const shouldShowLabels = width > 350;
-    let calculatedRectSize = minCell;
-    if (width && cols > 0) {
-      const usableWidth = Math.max(0, width - padding * 2 - (cols - 1) * gap);
-      const sideLength = Math.floor(usableWidth / cols);
-      calculatedRectSize = Math.max(minCell, Math.min(maxCell, sideLength));
+    const leftPad = shouldShowLabels ? 28 : 5;
+    const topPad = shouldShowLabels ? 20 : 5;
+    const bottomPad = 8;
+
+    let size = MIN_RECT;
+    if (width > 0) {
+      const usable = width - leftPad - COLS * RECT_GAP;
+      size = Math.max(MIN_RECT, Math.min(MAX_RECT, Math.floor(usable / COLS)));
     }
 
-    const heatmapHeight =
-      calculatedRectSize * daysInWeek +
-      gap * (daysInWeek - 1) +
-      (shouldShowLabels ? topLabelHeight : 10) +
-      bottomPadding;
+    const height = topPad + DAYS_IN_WEEK * size + (DAYS_IN_WEEK - 1) * RECT_GAP + bottomPad;
 
-    return {
-      rectSize: calculatedRectSize,
-      space: gap,
-      containerHeight: Math.floor(heatmapHeight),
-      showLabels: shouldShowLabels,
-    };
-  }, [width, cols]);
+    return { rectSize: size, containerHeight: Math.floor(height), showLabels: shouldShowLabels };
+  }, [width]);
 
   const heatMapValue = useMemo<HeatMapValue[]>(() => {
     return data.map((item) => {
       const minutes = Math.max(0, Math.round(item.totalDuration / 60));
-      return {
-        date: item.date.replace(/-/g, "/"),
-        count: minutes,
-        content: `${item.date}: ${minutes}分钟`,
-      };
+      return { date: item.date.replace(/-/g, "/"), count: minutes };
     });
   }, [data]);
 
   const maxCount = useMemo(() => {
-    const minutesList = data.map((item) => Math.max(0, Math.round(item.totalDuration / 60)));
-    return Math.max(...minutesList, 0);
+    return data.reduce((max, item) => Math.max(max, Math.max(0, Math.round(item.totalDuration / 60))), 0);
   }, [data]);
 
-  const panelColors = useMemo(() => {
-    const colors: Record<number, string> = { 0: "#f5f5f5" };
-
+  const panelColors = useMemo<Record<number, string>>(() => {
+    const colors: Record<number, string> = { 0: EMPTY_CELL_COLOR };
     if (maxCount <= 0) return colors;
 
     const s1 = Math.max(1, Math.round(maxCount * 0.2));
@@ -114,17 +165,42 @@ const ReadingHeatMap = ({ data, year }: ReadingHeatMapProps) => {
     const s4 = Math.max(s3 + 1, Math.round(maxCount * 0.8));
     const s5 = Math.max(s4 + 1, maxCount);
 
-    colors[s1] = "oklch(96.2% 0.059 95.617)";
-    colors[s2] = "oklch(92.4% 0.12 95.746)";
-    colors[s3] = "oklch(87.9% 0.169 91.605)";
-    colors[s4] = "oklch(82.8% 0.189 84.429)";
-    colors[s5] = "oklch(76.9% 0.188 70.08)";
+    [s1, s2, s3, s4, s5].forEach((threshold, index) => {
+      colors[threshold] = `color-mix(in oklab, var(--primary) ${LEVEL_PRIMARY_PERCENT[index]}%, var(--muted))`;
+    });
 
     return colors;
   }, [maxCount]);
 
+  /** 图例色块：0 档 + 5 个强度档全展示（旧实现只画到第 4 档，最高档缺一格）。 */
+  const legendKeys = useMemo(
+    () =>
+      Object.keys(panelColors)
+        .map(Number)
+        .sort((a, b) => a - b),
+    [panelColors],
+  );
+
+  /** 底部统计：阅读天数（有实际时长的天数）+ 该年总时长。 */
+  const summary = useMemo(() => {
+    let seconds = 0;
+    let activeDays = 0;
+    for (const item of data) {
+      const value = Math.max(0, item.totalDuration);
+      seconds += value;
+      if (value > 0) activeDays += 1;
+    }
+    const hours = seconds / 3600;
+    const durationText =
+      hours >= 1
+        ? `${hours >= 10 ? Math.round(hours) : Number(hours.toFixed(1))} 小时`
+        : `${Math.round(seconds / 60)} 分钟`;
+    return { activeDays, durationText };
+  }, [data]);
+
   return (
-    <div className="w-full overflow-hidden">
+    <div className="sage-heatmap-shell w-full overflow-hidden">
+      <style>{CELL_CSS}</style>
       <div ref={ref} className="w-full">
         <HeatMap
           value={heatMapValue}
@@ -133,42 +209,41 @@ const ReadingHeatMap = ({ data, year }: ReadingHeatMapProps) => {
           panelColors={panelColors}
           rectSize={rectSize}
           legendCellSize={0}
-          space={space}
-          width={width > 0 ? width - 32 : undefined}
+          space={RECT_GAP}
+          width={width > 0 ? Math.floor(width) : undefined}
           height={containerHeight}
-          style={{
-            color: "#525252",
-          }}
-          monthLabels={
-            showLabels ? ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"] : []
-          }
-          weekLabels={showLabels ? ["日", "一", "二", "三", "四", "五", "六"] : []}
-          rectRender={(props, data) => {
-            const isToday = data.date === today.replace(/-/g, "/");
-            const originalDate = data.date.replace(/\//g, "-");
-            const hasData = data.count > 0;
-            const minutes = Math.max(0, Math.round(Number(data.count) || 0));
+          style={{ color: "var(--muted-foreground)" }}
+          monthLabels={showLabels ? MONTH_LABELS : false}
+          weekLabels={showLabels ? WEEK_LABELS : false}
+          rectRender={(props, value) => {
+            const isoDate = toIsoDate(value.date);
+            const isToday = isoDate === today;
+            const minutes = Math.max(0, Math.round(Number(value.count) || 0));
+            const hasData = minutes > 0;
+            const fill = typeof props.fill === "string" ? props.fill : undefined;
 
             return (
-              <Tooltip>
+              <Tooltip key={`${value.column}-${value.row}`}>
                 <TooltipTrigger asChild>
                   <rect
                     {...props}
                     rx={2}
                     ry={2}
-                    className={`cursor-pointer hover:stroke-2 hover:stroke-blue-400 ${
-                      isToday ? "stroke-2 stroke-blue-500 dark:stroke-blue-300" : ""
-                    }`}
+                    className="sage-heatmap-cell"
+                    data-today={isToday ? "true" : undefined}
+                    // 内联 fill：同时压掉库自带的 rect:active 写死绿色（#196127），保持主题色阶
+                    style={{ ...props.style, fill }}
                   />
                 </TooltipTrigger>
-                <TooltipContent>
-                  <div className="space-y-1 text-xs">
-                    <div className="font-medium">{originalDate}</div>
-                    {hasData ? (
-                      <div className="text-neutral-200">{minutes}分钟</div>
-                    ) : (
-                      <div className="text-neutral-300">无阅读记录</div>
-                    )}
+                <TooltipContent className="sage-heatmap-tooltip" side="top" sideOffset={6}>
+                  {/* 次要信息不再降透明度：Tooltip 底是 var(--primary)，parchment/cake 等
+                      浅 primary 主题下 primary-foreground/80 只有 ~2.9:1；改用同色 + 字重区分 */}
+                  <div className="font-medium tabular-nums">
+                    {isoDate}
+                    <span className="font-normal">
+                      {" · "}
+                      {hasData ? `${minutes} 分钟` : "无阅读记录"}
+                    </span>
                   </div>
                 </TooltipContent>
               </Tooltip>
@@ -176,24 +251,30 @@ const ReadingHeatMap = ({ data, year }: ReadingHeatMapProps) => {
           }}
         />
 
-        <div className="flex items-center justify-between text-neutral-600 text-sm dark:text-neutral-400">
-          <div className="flex items-center gap-2 text-xs">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
             <span>少</span>
             <div className="flex items-center gap-1">
-              <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: panelColors[0] }} />
-              {Object.keys(panelColors)
-                .filter((key) => key !== "0")
-                .sort((a, b) => Number(a) - Number(b))
-                .slice(0, 4)
-                .map((key) => (
-                  <div key={key} className="h-3 w-3 rounded-sm" style={{ backgroundColor: panelColors[Number(key)] }} />
-                ))}
+              {legendKeys.map((key) => (
+                <span
+                  key={key}
+                  aria-hidden="true"
+                  className="size-3 rounded-[3px] ring-1 ring-border"
+                  style={{ backgroundColor: panelColors[key] }}
+                />
+              ))}
             </div>
             <span>多</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="text-xs">今年共阅读 {data.filter((item) => item.totalDuration > 0).length} 天</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground tabular-nums">
+            <span>
+              共 <span className="font-semibold text-foreground">{summary.activeDays}</span> 天
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              总时长 <span className="font-semibold text-foreground">{summary.durationText}</span>
+            </span>
           </div>
         </div>
       </div>

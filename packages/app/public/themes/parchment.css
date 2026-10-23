@@ -514,3 +514,14 @@ html.dark {
   --chat-heading-hover: #d8a860;
   --chat-heading-rule-hover: rgba(216, 168, 96, 0.4);
 }
+
+/* ---------- 8. 阅读统计页（statistics）----------
+ * 统计页组件消费 --stats-* 变量（默认值见 src/index.css），本主题只补纸张阴影：
+ * 静息 = 暖色小阴影，hover = 暖色中阴影 + 主色描边环（覆盖全局主色柔光，避免与纸感冲突）。 */
+[data-region="statistics"] .stats-card {
+  box-shadow: var(--shadow-warm-sm);
+}
+
+[data-region="statistics"] .stats-card:hover {
+  box-shadow: var(--shadow-warm-md), 0 0 0 1px color-mix(in oklab, var(--primary) 24%, transparent);
+}
