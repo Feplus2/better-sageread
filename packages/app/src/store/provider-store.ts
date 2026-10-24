@@ -24,6 +24,26 @@ const ANTHROPIC_COMPAT_OFFICIAL_HOSTS: Record<string, string[]> = {
   minimax: ["api.minimaxi.com", "api.minimax.io"],
 };
 
+const ZHIPU_OPENAI_CHAT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
+
+type ZhipuEndpointKind = "openai-chat" | "anthropic-messages" | "other" | "custom";
+
+function classifyZhipuEndpoint(baseUrl?: string): ZhipuEndpointKind {
+  if (!baseUrl) return "other";
+  try {
+    const url = new URL(baseUrl);
+    const host = url.host.toLowerCase();
+    const official = ["open.bigmodel.cn", "api.z.ai"].some((domain) => host === domain || host.endsWith(`.${domain}`));
+    if (!official) return "custom";
+    const path = url.pathname.replace(/\/+$/, "");
+    if (path === "/api/paas/v4") return "openai-chat";
+    if (path === "/api/anthropic" || path === "/api/anthropic/v1") return "anthropic-messages";
+    return "other";
+  } catch {
+    return "custom";
+  }
+}
+
 /** 只对官方 host 做端点规范化；用户自定义代理保持原样 */
 function isOfficialProviderHost(providerId: string, baseUrl?: string): boolean {
   if (!baseUrl) return true;
@@ -108,7 +128,7 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
-      version: 9,
+      version: 10,
       migrate: (persistedState: any, version: number) => {
         if (version < 1) {
           // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
@@ -243,10 +263,11 @@ export const useProviderStore = create<ProviderState>()(
         }
         if (version < 7) {
           // v6→v7：Anthropic 兼容端点补 /v1（Kimi/智谱/MiniMax 短路径会 404；DeepSeek 兼容两种但统一）。
-          // 只迁移官方 host；用户自定义代理保持原样，避免覆盖别人的路径约定。
+          // 只迁移 Anthropic 协议的官方 host；显式 chat 和用户自定义代理保持原样。
           persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
             const target = ANTHROPIC_COMPAT_CANONICAL_BASE_URLS[p.provider];
-            if (!target || !isOfficialProviderHost(p.provider, p.baseUrl)) return p;
+            if (p.apiStyle !== "anthropic-messages" || !target || !isOfficialProviderHost(p.provider, p.baseUrl))
+              return p;
             // MiniMax 区域域名保持用户选择
             const next =
               p.provider === "minimax" && /minimax\.io/i.test(p.baseUrl ?? "")
@@ -265,13 +286,32 @@ export const useProviderStore = create<ProviderState>()(
         }
         if (version < 9) {
           // v8→v9：智谱默认协议改 OpenAI 兼容（普通 API key 的 Anthropic 兼容端点会 429 Coding Plan 限制）。
-          // 只迁移官方端点形态的预置选择；已订阅 Coding Plan 的用户可在设置里切回 Anthropic 端点。
+          // 同时修复旧迁移留下的 chat + Anthropic 地址；自定义代理保持原样。
           persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
             if (p.provider !== "zhipu") return p;
-            const official = !p.baseUrl || /open\.bigmodel\.cn|api\.z\.ai/i.test(p.baseUrl);
-            if (!official) return p;
-            if (p.apiStyle !== "anthropic-messages") return p;
-            return { ...p, apiStyle: "openai-chat" as const, baseUrl: "https://open.bigmodel.cn/api/paas/v4" };
+            const endpoint = classifyZhipuEndpoint(p.baseUrl);
+            if (endpoint === "custom") return p;
+            if (p.apiStyle === "anthropic-messages" && (endpoint !== "other" || !p.baseUrl)) {
+              return { ...p, apiStyle: "openai-chat" as const, baseUrl: ZHIPU_OPENAI_CHAT_BASE_URL };
+            }
+            if (p.apiStyle === "openai-chat" && (!p.baseUrl || endpoint === "anthropic-messages")) {
+              return { ...p, baseUrl: ZHIPU_OPENAI_CHAT_BASE_URL };
+            }
+            return p;
+          });
+        }
+        if (version < 10) {
+          // v9→v10：只修已落盘的协议/地址错位。v9 后主动选择的 Coding Plan 保留 Anthropic 协议。
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+            if (p.provider !== "zhipu") return p;
+            const endpoint = classifyZhipuEndpoint(p.baseUrl);
+            if (p.apiStyle === "openai-chat" && endpoint === "anthropic-messages") {
+              return { ...p, baseUrl: ZHIPU_OPENAI_CHAT_BASE_URL };
+            }
+            if (p.apiStyle === "anthropic-messages" && endpoint === "openai-chat") {
+              return { ...p, baseUrl: ANTHROPIC_COMPAT_CANONICAL_BASE_URLS.zhipu };
+            }
+            return p;
           });
         }
         return persistedState;

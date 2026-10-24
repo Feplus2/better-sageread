@@ -3,6 +3,7 @@
 > 背景：本轮 Agent 大更新改动面很大（工具面、检索范围、图片链路、provider 协议、MCP）。主人要求发版前做一次"查漏"，避免带病上生产。
 > 方式：3 个 fresh-context 只读审计员（工具面/图片文件/安全；provider/迁移/发布；陈旧引用/文档一致性）+ 本轮真机/实网验证 + 逐项代码复核修复。
 > 结论：**发现并修复了 2 个安全级 P0 和 1 个生产阻断 P0**；其余为 P1/P2，已修关键项，剩余项列在 §4，发版前需拍板。
+> 历史口径：§1–§5 保留当次审计与修复记录，不重写当时数值；其中已被后续实现取代的描述以 §6 为准。
 
 ## 1. 已修复（本轮）
 
@@ -81,3 +82,15 @@
 - 图片/工具面：`ai/providers/native-tool-output.ts`、`ai/tools/{registry,lazy-toolset}.ts`、`ai/utils/tool-result-slimming.ts`
 - 预置/迁移：`constants/predefined-providers.ts`、`store/provider-store.ts`（v9 智谱）
 - 验证：`scripts/test-provider-protocol.mjs`、`scripts/test-tool-slimming.mjs`、`scripts/cdp-*.mjs`
+
+## 6. 后续已变更（2026-10-23 当前契约）
+
+以下是对上述历史审计的后续说明，不改变当时发现、修复或实测数值：
+
+- §1.1 的 readImage 词法归一化已被更强的 Rust canonical 方案取代：`agent_read_image` 在同一调用内判界、拒绝敏感路径、检查目录/20MiB、复核逐路径授权并读字节。strict 界外读先确认，relaxed/full 免确认但仍需 canonical 授权；junction retarget 和原始 path 替换会失效。未扩大 assetProtocol scope。
+- §1.3 所述“New 仅保留 readLocalFile、写/命令隐藏”已被后续用户拍板取代：New/Legacy 都保留共享文件五件套、`exportNotes/askAppHelp` 等共享能力；写与命令仍按安全模式确认。文档模式现仅 New/Legacy，旧 Both/非法值归一为 New，Legacy 可回退。
+- 检索范围现为 reader 缺省 `current`、paper 缺省 `library`、central 恒 `all`；仅缺失 key 使用默认值。central 在两种模式均有论文 `getFigures/getCitations`，必须显式 `doc=paper:<id>`，书籍无独立 extras。
+- 未索引文档除目录/原文直读外，还可用 `searchLibrary` 关键词/标题通道；命中通过 `hit.read → readDocument` 扩窗。library/all 正文扫描有界并报告 `partial/truncated`；带 `next_cursor` 时可用相同 query/参数续扫后续文档且跨页去重，current/doc 不使用 cursor，不再宣称未索引只能盲读或只能覆盖首批文档。
+- 请求历史不再使用 `stripUnknownToolParts` 删除旧证据：仅在请求副本中适配 direct/directory 并 sanitize 旧 raw MCP 图片，保留未知/已下线工具的 output 与元数据；当前轮 MCP 图片和 UI/DB 历史行为不变。
+- provider 持久化已升级到 v10：修复智谱 absent/empty baseUrl 与错位协议/端点组合，同时保留显式 Coding Plan、自定义代理、模型选择。上下文水位按模型窗口计算，未知模型默认 1M，显式小窗口的高低水位不超窗。
+- 官方 OpenAI/Anthropic/Gemini 仍因无官方 key 而未验证；上文其他 provider 的实网记录只代表当时列出的模型与场景，不能扩展为“全部 provider/全部场景”结论。发布前仍需完成本轮全量回归、Release Notes 过目、版本号统一与发布流程；本轮不 bump 版本、不 publish。

@@ -1,3 +1,4 @@
+import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import {
   formatPositionForPrompt,
   formatPositionForTool,
@@ -12,7 +13,7 @@ import { z } from "zod";
  *
  * 设计口径（用户拍板）：
  * - 提示词每轮只注入【当前阅读位置】坐标（不注入小节正文），位置取自活注册表、以本轮为准；
- * - 需要原文时由模型显式调用 readAtReadingPosition 按需扩窗，避免"目录崩坏时把整篇正文灌进上下文"；
+ * - 需要原文时按当前文档模式调用 readDocument(position=true) 或 Legacy readAtReadingPosition，避免整篇正文灌入；
  * - 工具返回的坐标与注入段同源（同一 ReadingPositionSnapshot），保证口径一致。
  */
 
@@ -56,7 +57,7 @@ export function createGetReadingPositionTool(scope: PositionScope, docId: string
       return {
         ok: true,
         position: formatPositionForTool(snapshot),
-        position_text: formatPositionForPrompt(snapshot),
+        position_text: formatPositionForPrompt(snapshot, getDocumentToolMode()),
         meta: { reasoning },
       };
     },

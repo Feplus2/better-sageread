@@ -19,7 +19,7 @@ interface ProviderDetailSettingsProps {
 }
 
 export default function ProviderDetailSettings({ providerId, onBack }: ProviderDetailSettingsProps) {
-  const { modelProviders, updateProvider, removeProvider } = useProviderStore();
+  const { modelProviders, updateProvider, removeProvider, selectedModel } = useProviderStore();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -48,14 +48,24 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
 
   const throttledUpdate = useMemo(
     () =>
-      throttle((field: string, value: any) => {
-        updateProvider(providerId, { [field]: value });
-      }, 200),
+      throttle(
+        (updates: Partial<ModelProvider>) => {
+          updateProvider(providerId, updates);
+        },
+        200,
+        {
+          mergeArgs: (previous, next) => [{ ...previous[0], ...next[0] }] as [Partial<ModelProvider>],
+        },
+      ),
     [providerId, updateProvider],
   );
 
+  const handleFieldsChange = (updates: Partial<ModelProvider>) => {
+    throttledUpdate(updates);
+  };
+
   const handleFieldChange = (field: string, value: any) => {
-    throttledUpdate(field, value);
+    handleFieldsChange({ [field]: value });
   };
 
   const handleAddModel = (newModel: Omit<Model, "active" | "description" | "capabilities" | "manual">) => {
@@ -162,11 +172,14 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
     setRefreshError(null);
 
     try {
-      const catalog = await fetchModelCatalog({
-        ...provider,
-        apiKey: provider.apiKey,
-        baseUrl: provider.baseUrl,
-      });
+      const catalog = await fetchModelCatalog(
+        {
+          ...provider,
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl,
+        },
+        selectedModel?.providerId === providerId ? selectedModel.modelId : undefined,
+      );
       const rawModelIds = catalog.map((entry) => entry.id);
       const contextWindowById = new Map(
         catalog.filter((entry) => entry.contextWindow).map((entry) => [entry.id, entry.contextWindow as number]),
@@ -328,7 +341,7 @@ export default function ProviderDetailSettings({ providerId, onBack }: ProviderD
         </div>
       </div>
       <div className="space-y-6">
-        <ApiConfigSection provider={provider} onFieldChange={handleFieldChange} />
+        <ApiConfigSection provider={provider} onFieldsChange={handleFieldsChange} />
         <ModelsManagement
           provider={provider}
           isRefreshing={isRefreshing}

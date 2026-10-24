@@ -1,26 +1,109 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { sanitizeLegacyMcpHistoryOutput } from "./tool-result-slimming";
+
+export interface AdaptToolHistoryOptions {
+  directoryMode: boolean;
+  /** 当前真实工具面（非 directory 的 describeTool/useTool 壳），只用于判断能否安全改写名称 */
+  tools: Record<string, unknown>;
+}
+
+function historyToolName(part: any): string | null {
+  if (part?.type === "dynamic-tool") return typeof part.toolName === "string" ? part.toolName : null;
+  if (typeof part?.type === "string" && part.type.startsWith("tool-")) return part.type.slice("tool-".length);
+  return null;
+}
+
+function hasTool(tools: Record<string, unknown>, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(tools, name);
+}
+
+function renameHistoryTool(part: any, name: string): any {
+  return part.type === "dynamic-tool" ? { ...part, toolName: name } : { ...part, type: `tool-${name}` };
+}
 
 /**
- * 兼容层：剔除引用已下线工具的 tool part。
- *
- * convertToModelMessages 遇到工具名不在当前 tools 中的 tool part 会抛
- * TypeValidationError: No tool schema found for tool part <name>；
- * 旧对话历史里残留已下线工具（如 deleteBook）的 part 会把整个聊天炸掉，
- * 因此在转换前过滤：未知工具的 part 剔除，过滤后 parts 为空的消息整条丢弃。
+ * 请求副本的 direct↔directory 适配。AI SDK 7.0.148 不会因未知历史工具名直接拒绝转换，
+ * 因此不再按当前工具面删除 part；只有能确认目标存在时才改名称/入参，output、审批与元数据原样保留。
  */
-export function stripUnknownToolParts(messages: UIMessage[], tools: Record<string, unknown>): UIMessage[] {
-  return messages
-    .map((message) => {
-      if (!Array.isArray(message.parts)) return message;
-      const parts = message.parts.filter((part: any) => {
-        if (typeof part?.type === "string" && part.type.startsWith("tool-")) {
-          return part.type.slice("tool-".length) in tools;
-        }
-        return true;
-      });
-      return { ...message, parts } as UIMessage;
-    })
-    .filter((message) => !Array.isArray(message.parts) || message.parts.length > 0);
+export function adaptToolHistoryForRequest(
+  messages: UIMessage[],
+  { directoryMode, tools }: AdaptToolHistoryOptions,
+): UIMessage[] {
+  let touched = false;
+  const adapted = messages.map((message) => {
+    if (!Array.isArray(message.parts)) return message;
+    let messageTouched = false;
+    const parts = (message.parts as any[]).map((part) => {
+      const name = historyToolName(part);
+      if (!name) return part;
+      if (directoryMode) {
+        if (name === "describeTool" || name === "useTool" || !hasTool(tools, name)) return part;
+        messageTouched = true;
+        return { ...renameHistoryTool(part, "useTool"), input: { tool: name, args: part.input } };
+      }
+      if (name !== "useTool") return part;
+      const forwarded = typeof part.input?.tool === "string" ? part.input.tool : null;
+      if (!forwarded || !hasTool(tools, forwarded)) return part;
+      messageTouched = true;
+      return { ...renameHistoryTool(part, forwarded), input: part.input.args };
+    });
+    if (!messageTouched) return message;
+    touched = true;
+    return { ...message, parts } as UIMessage;
+  });
+  return touched ? adapted : messages;
+}
+
+/**
+ * dynamic:false 会让 SDK 对缺失工具使用 output-omitted 文案。仅为历史转换补空 stub，
+ * 让默认 text/json 转换保留原 output；调用方不得把返回的扩展工具面传给 streamText/provider。
+ */
+export function withUnavailableDynamicHistoryStubs<T extends Record<string, unknown>>(
+  messages: UIMessage[],
+  tools: T,
+): T {
+  let conversionTools: Record<string, unknown> | null = null;
+  for (const message of messages) {
+    if (!Array.isArray(message.parts)) continue;
+    for (const part of message.parts as any[]) {
+      if (part?.type !== "dynamic-tool" || part.dynamic !== false || typeof part.toolName !== "string") continue;
+      const name = part.toolName;
+      if (!name || hasTool(tools, name)) continue;
+      conversionTools ??= { ...tools };
+      if (!hasTool(conversionTools, name)) {
+        Object.defineProperty(conversionTools, name, {
+          value: {},
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      }
+    }
+  }
+  return (conversionTools ?? tools) as T;
+}
+
+/** 仅处理请求开始时快照里的 MCP output；不当场改写 UI/DB，也不影响之后产生的 live 工具结果 */
+export function sanitizeLegacyMcpHistoryImages(messages: UIMessage[]): UIMessage[] {
+  let touched = false;
+  const sanitized = messages.map((message) => {
+    if (!Array.isArray(message.parts)) return message;
+    let messageTouched = false;
+    const parts = (message.parts as any[]).map((part) => {
+      const name = historyToolName(part);
+      const forwarded = name === "useTool" && typeof part.input?.tool === "string" ? part.input.tool : null;
+      const isMcp = name?.startsWith("mcp_") || forwarded?.startsWith("mcp_");
+      if (!isMcp || part.output == null) return part;
+      const stripped = sanitizeLegacyMcpHistoryOutput(part.output);
+      if (!stripped) return part;
+      messageTouched = true;
+      return { ...part, output: stripped.output };
+    });
+    if (!messageTouched) return message;
+    touched = true;
+    return { ...message, parts } as UIMessage;
+  });
+  return touched ? sanitized : messages;
 }
 
 /**

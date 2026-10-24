@@ -105,13 +105,16 @@ async function pageRunner(cfg) {
   let before = null;
   let modelBefore = null;
   let settingsStore = null;
-  let docModeBefore = null;
+  let hadDocToolMode = false;
+  let previousDocToolMode = undefined;
   let originalCfi = null;
   let originalView = null;
   try {
     const layout = await import(modUrl('/src/store/layout-store.ts'));
     const provider = await import(modUrl('/src/store/provider-store.ts'));
     const threadSvc = await import(modUrl('/src/services/thread-service.ts'));
+    hadDocToolMode = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DOC_TOOL_MODE__");
+    previousDocToolMode = window.__SAGEREAD_DOC_TOOL_MODE__;
     if (cfg.docMode) {
       window.__SAGEREAD_DOC_TOOL_MODE__ = cfg.docMode;
       result.docMode = cfg.docMode;
@@ -352,7 +355,10 @@ async function pageRunner(cfg) {
         const provider = await import(modUrl('/src/store/provider-store.ts'));
         provider.useProviderStore.getState().setSelectedModel(modelBefore);
       }
-      try { delete window.__SAGEREAD_DOC_TOOL_MODE__; } catch (e) {}
+      try {
+        if (hadDocToolMode) window.__SAGEREAD_DOC_TOOL_MODE__ = previousDocToolMode;
+        else delete window.__SAGEREAD_DOC_TOOL_MODE__;
+      } catch (e) {}
     } catch (e) { result.cleanupError = String(e); }
   }
 }

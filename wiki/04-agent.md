@@ -9,13 +9,14 @@
 
 **各 scope 实际挂载**
 
-- **shared（三 scope 通用，16 个，`registry.ts:106-206`）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage、viewImages（2026-10-22 新增，1–6 张批量看图；new 模式下 reader/paper 会隐藏文件五件套）
-- **readThread（条件注入，三 scope，`registry.ts:362`）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注
-- **central 专属（23 个，`registry.ts:191-335`）**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes
-- **reader（需 bookId 闭包，`getToolsForScope` 内组装）**：默认 new 模式——readDocument/getDocumentInfo/searchLibrary（通用文档原语，受 retrievalScope 约束）、getReadingPosition（常驻）、manageNotes；legacy 模式（设置 → Agent → 文档工具模式）——ragSearch/ragToc/ragContext/ragRange（向量能力门控 `useLlamaStore.hasVectorCapability()`）、readBookSection（未建索引正文兜底）、readAtReadingPosition。图片走 readImage（书籍无 getFigures）
-- **paper（需 paperId）**：默认 new 模式——getDocumentInfo/readDocument/searchLibrary/getCitationGraph/getFigures/getCitations/getReadingPosition + manageNotes；legacy 模式——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getFigures/getCitations + paperSearch/paperContext（向量门控）
-- **MCP 工具不在静态组装里**，由 transport 在发请求时合并（:375-377 注释，见第 5 节）
-- **2026-10-22 起两个用户可见模式开关**（都在设置 → Agent）：① 文档工具模式 documentToolMode：new（默认，通用原语）/ legacy（旧工具回退）/ both；② 检索范围 retrievalScope：reader=本书/图书馆/图书馆+论文库，paper=本篇/论文库/论文库+图书馆，按书/论文持久化（`constants/retrieval-scope.ts`、`store/retrieval-scope-store.ts`）。提示词与工具面都会按这两个开关切换，改工具时必须同步 3 个 `*-prompt` 策略段（见第 3 条维护要点）
+- **shared（三 scope 通用）**：notes、getBooks、getReadingStats、getSkills、mindmap、webSearch、sciverseSearch、文件五件套（readLocalFile/writeFile/editFile/searchFiles/runCommand）、exportNotes、askAppHelp、readImage、viewImages。共享能力不随 New/Legacy 文档模式裁剪；viewImages 一次 1–6 张。
+- **readThread（条件注入，三 scope）**：召回当前（或指定）对话的完整问答（仅用户/AI 消息，工具/思考跳过）。`context.threadId` 存在时注入（新对话首条消息时无线程不注入）——上下文活塞截断后，Agent 整理对话笔记或回顾早期内容前必用；用法与口径见 `ai/tools/read-thread.ts` 头注。
+- **central 专属管理工具**：manageBook、convertPdf、importBook、importPaper、manageSync、searchDevDocs、vectorizeBook、manageTags、trashManager、managePreferences、switchModel、manageThreads、importFont、httpRequest、downloadFile、extractZip、manageSkill、manageSecrets、manageMcp、managePaperFolders、processPaper、translateBook、manageNotes。New/Legacy 还都有论文 `getFigures/getCitations`，必须显式传 `doc=paper:<id>`，缺 doc 或 book doc 会报错。
+- **reader（需 bookId 闭包）**：New——readDocument/getDocumentInfo/searchLibrary（受 retrievalScope 约束）、getReadingPosition、manageNotes；Legacy——ragSearch/ragToc/ragContext/ragRange（向量能力门控）、readBookSection、readAtReadingPosition。图片走 readImage/viewImages；书籍不注册独立 getFigures/getCitations。
+- **paper（需 paperId）**：New——getDocumentInfo/readDocument/searchLibrary/getCitationGraph/getFigures/getCitations/getReadingPosition + manageNotes；Legacy——getPaperToc/readPaperSection/readPaperFull/getPaperInfo/getFigures/getCitations + paperSearch/paperContext（向量门控）。paper extras 省略 doc 时读取绑定论文，显式 doc 仍受范围门禁。
+- **MCP 工具不在静态组装里**，由 transport 在发请求时合并。
+- **两个用户可见设置**：① 文档工具模式仅 `new`（默认）/ `legacy`（回退），旧 Both/非法持久化值与 override 归一为 `new`，显式 Legacy 保留；② 检索范围 reader=本书/图书馆/图书馆+论文库，paper=本篇/论文库/论文库+图书馆，按书/论文持久化。缺失 key 才回退 reader=`current`、paper=`library`，central 恒 `all`；不改写已保存范围。提示词与工具面按实际模式生成，改工具时同步三个 `*-prompt` 策略段。
+- **searchLibrary 检索与续扫**：topK 最多 30，支持权重与 includeReferences；命中带可重放 read/anchor_precision。未索引标题/关键词通道独立于向量配置，library/all 正文扫描有界并报告 partial/truncated；有 next_cursor 时以相同 query/参数续扫后续文档，游标绑定查询并避免跨页重复，current/doc 不使用 cursor。
 
 命名约定：MCP 工具键为 `mcp_{sanitize(server名)}_{toolName}`（`ai/mcp/mcp-manager.ts:44-46,183-189`），description 前加 `[server名]`；工具文件按目录分组 `ai/tools/central/`、`ai/tools/paper/`、根级共享文件，各目录有 barrel（`index.ts`）。新工具的开发套路见 `docs/agent-tool-recipe.md`（步骤清单也浓缩在 `06-dev-workflow.md` 第 9 节）。
 
@@ -24,28 +25,23 @@
 - 增删工具时真正的同步点是**提示词系统策略段**（`prompt.ts` 的 `buildReaderPolicy` / `paper-prompt.ts` 的 `PAPER_POLICY_*` / `central-prompt.ts` 的 `CENTRAL_POLICY`，共享规则在 `shared-policy.ts`）与各工具 schema 的 describe——漏改策略段则模型不知道新工具的存在与分工；风格层（`agent-styles.ts`）不含任何工具内容，无需同步；`getToolDescriptions()` 里也手动同步了一份 paper 工厂工具描述（`registry.ts:424-445`），但该函数无调用方，改它不影响模型所见
 - reader/paper 的专属工具是**工厂函数**（闭包捕获 bookId/paperId），不是静态注册——所以 `ToolScope` 里的 `"reader"` 分支恒为空，排查"工具没挂"先看组装时的 context 是否传了 id
 
-## 2. 写操作安全三档与确认卡
+## 2. 安全三档、canonical 路径与确认卡
 
-- 实际命名：`AgentSafetyMode = "strict" | "relaxed" | "full"`（`store/agent-settings-store.ts:13`），默认 `"strict"`（:35）。语义（:7-11 注释）：
-  - `strict` — 界外读/写/命令均弹确认
-  - `relaxed` — 界外读静默，界外写/命令确认
-  - `full` — 全静默（审计日志照写）
-  - 例外：**httpRequest 非 GET 任何模式恒确认**
-- **危险级别不在工具元数据里**（`ToolRegistration` 只有 name/scope/tool/description，`registry.ts:68-73`）。分档集中在 `ai/utils/tool-guard.ts` 的 `GUARDED_TOOLS` 决策表（:41-48：writeFile/editFile→fileWrite、readLocalFile/searchFiles→fileRead、runCommand→command、httpRequest→network）加一组特殊分支：
-  - `mcp_` 前缀（:120-146，strict/relaxed 确认、full 放行、可按 server 免打扰）
-  - manageMcp 全动作确认且 create/delete 恒确认（:149-176）
-  - manageSecrets set/delete 恒确认（:180-210）
-  - manageNotes create/update 恒确认（:214-243）
-  - manageSkill/manageThreads 的 delete 恒确认（:247-274）
-  - importPaper（:278-304）、processPaper reparse（:308-335）
-- 机制：`allowOutside`/`rootOverride` **不进模型 schema**，由守卫在确认通过后注入（`tool-guard.ts:349-375`）；界内/界外判定走 Rust `agent_resolve_path`（canonicalize + 根前缀，`core/agent_ws/commands.rs:69-77`，守卫实现在 `agent_ws/mod.rs:104-115`，:6-9 模块注释标明它是唯一实现处）
-- **确认卡 UI**：`components/side-chat/agent-confirm-card.tsx:11`（队列式逐张处理，"本次会话不再询问此项"复选框 :39-42）；确认桥为 `store/agent-confirm-store.ts` 队列，挂起等待在 `tool-guard.ts:79-102`。三处挂载点：全局助手 `pages/chat/index.tsx:388`、阅读侧边栏 `components/side-chat/index.tsx:261`、论文面板 `pages/papers/paper-chat-panel.tsx:395`
+- `AgentSafetyMode = "strict" | "relaxed" | "full"`，默认 `strict`。常规文件/图片/命令语义：
+  - `strict` — 界外读、界外写与命令执行先确认；界内普通读/写静默。
+  - `relaxed` — 界外读免确认；界外写与命令仍确认。
+  - `full` — 常规界外读写与命令静默，审计照写；下列恒确认/拒绝例外仍生效。
+  - httpRequest 非 GET 或携带密钥引用、manageSecrets set/delete、破坏性删除/恢复等按 guard 矩阵恒确认；敏感图片路径、目录和超过 20MiB 的图片在所有模式都拒绝。
+- 分档集中在 `ai/utils/tool-guard.ts`：writeFile/editFile→fileWrite，readLocalFile/searchFiles→fileRead，readImage/viewImages→imageRead，runCommand→command，httpRequest→network；远程 MCP、manageMcp/manageNotes/manageSkill/manageThreads/importPaper/processPaper 等特殊分支也在同一守卫中。
+- 内部授权不进模型 schema：`allowOutside/rootOverride/imageRoots/imageGrant/imageGrants/expectedResolved` 由 guard 注入并覆盖模型同名字段。界内/界外预检走 Rust `agent_resolve_path`，不使用 TS 词法根前缀。
+- 本地图片由 `agent_read_image` 在同一 Rust 调用中完成 canonical 判界、敏感路径/目录/20MiB 检查、授权复核与字节读取。授权绑定原始 path 和 `expectedResolved`；strict 在读取字节前确认，relaxed/full 免确认但仍需授权。junction retarget 或换原始 path 会失败。viewImages 与 guard 共用 `collectImageTargets`，混合批次一张确认卡、逐路径 grants；attachment:// 不走本地判界。
+- 确认卡 UI 为 `components/side-chat/agent-confirm-card.tsx`，确认桥为 `store/agent-confirm-store.ts` 队列；全局、阅读、论文三个聊天面板均挂载。会话免打扰只适用于 guard 允许记忆的同类请求，不覆盖恒确认例外。
 
 ## 3. 滚动摘要压缩（上下文活塞）
 
 - **存储**：`threads` 表 `metadata` 列（JSON），键 `conversationSummary = {text, coveredCount, lastCoveredMessageId, updatedAt}`（`services/conversation-summary-service.ts:12-24`）
-- **双水位活塞**（常量 `ai/utils/message-selector.ts:5-12`）：点火线 `COMPRESS_HIGH_WATER = 256k tokens`、泄压线 `COMPRESS_LOW_WATER = 128k`、保底 `RECENT_MESSAGE_FLOOR = 10` 条。≤256k 零压缩；超过则从最新向前裁到 ≤128k，最近 10 条永不压缩（`selectMessagesWithinBudget`，:112-163）。token 估算：CJK≈1 token/字、其余≈1/4 字符（`ai/utils/token-estimator.ts:16-21`）
-- **不动原始 messages**：压缩只把 dropped 前缀**增量**滚成摘要写回 `thread.metadata`（`conversation-summary-service.ts:172-184`），`messages` 列全程不改；摘要在 transport 注入 system prompt 的【前情摘要】块（`custom-chat-transport.ts:117-130,164-169`）
+- **按模型窗口计算双水位**：`ai/providers/context-window.ts` 的 `resolveContextBudget` 使用模型列表 `contextWindow/maxOutputTokens`，其次家族表，未知模型默认 1M；高低水位满足 `0 < lowWater <= highWater <= floor(W*0.8)`，显式小窗口也不会套用旧的 256k/128k 固定值。最近消息保底 10 条，token 估算仍是 CJK≈1 token/字、其余≈1/4 字符。
+- **不动原始 messages**：压缩只把 dropped 前缀增量滚成摘要写回 `thread.metadata`，`messages` 列不改；摘要注入保留段第一条 user 消息前缀，不再拼进 system prompt，system 与最近对话保持逐字节稳定。
 - 压缩用辅助模型 `generateText`（:148-158）；对齐校验（coveredCount/lastCoveredMessageId 对不上则从头重滚）在 :129-136；失败降级沿用旧摘要、不阻断聊天
 - 旧机制残留：`selectValidMessages`（8 条硬截断）仍在 `message-selector.ts:14-49`，但已是死代码
 
@@ -89,11 +85,11 @@
 1. `prepareSendMessagesRequest` 把 `chatContext`（agentScope/activeBookId/paperScopeIds/threadId）塞进 body；body 缺失时按 scopeHint 读活注册表兜底（`utils/live-chat-context.ts`）
 2. 多模态闸：非视觉模型 `stripFileParts` + mediaType 魔数嗅探修复（:122-151）
 3. 引用块拼装（`processQuoteMessages`）+ 图片附件物化（仅最后一条 user 消息带真图，更早轮次降级 ⟦可用 readImage 重看⟧ 存根）
-4. 上下文活塞（双水位 256k/128k + 保底 10 条，`message-selector.ts`）+ 老轮次 RAG 结果存根降级（`tool-result-slimming.ts`）；被裁前缀滚成摘要（第 3 节）
-5. 工具组装：`getToolsForScope(scope, ctx)` 合并 `await getMcpToolsForScope(scope)`（MCP 失败逐个 toast），再过 `wrapToolsWithGuard` 安全门控（:173-192）
-6. **D8 目录牌**（`tools/lazy-toolset.ts`）：工具池 >30 个或 schema >12k 字符时，请求工具面收缩为 describeTool/useTool 两个入口 + 目录牌文本进 system 静态区；**useTool 转发前经 `asSchema(inputSchema).validate` 校验入参并填 zod 默认值**（2026-09-09 根修：此前直调 execute 绕过校验，错参静默级联成"内部错误"）
-7. `convertToModelMessages(stripUnknownToolParts(sanitizeMessageParts(...)), { tools, ignoreIncompleteToolCalls: true })`——stripUnknownToolParts 剔除已下线工具的旧 part 防 TypeValidationError
-8. system prompt = buildPrompt + 目录牌 + 工作区段 + memory.md 段 + 动态状态段（【当前阅读章节】/【当前阅读小节】）+ 前情摘要（:213-224，D3 静态优先保前缀缓存）
+4. 上下文活塞按 `resolveContextBudget` 的模型窗口高低水位选择消息 + 老轮次 RAG 结果存根降级；被裁前缀滚成摘要（第 3 节）。
+5. 工具组装：`getToolsForScope(scope, ctx)` 合并 `await getMcpToolsForScope(scope)`（MCP 失败逐个 toast），再过 `wrapToolsWithGuard` 安全门控。
+6. **D8 目录牌**（`tools/lazy-toolset.ts`）：工具池 >30 个或 schema >12k 字符时，请求工具面收缩为 describeTool/useTool 两个入口 + 目录牌文本进 system 静态区；Zod 工具在 useTool 转发前校验并填默认值，裸 JSON Schema MCP 工具跳过不兼容的本地 asSchema 校验。
+7. 请求历史先 `sanitizeMessageParts`、sanitize 旧 raw MCP 图片，再以 `adaptToolHistoryForRequest` 适配 direct↔directory；随后 `await convertToModelMessages(..., { tools: conversionTools, ignoreIncompleteToolCalls: true })`。未知/已下线工具结果与元数据保留，conversion-only stub 不进入 live 工具面，UI/DB 原消息不改。
+8. system prompt = buildPrompt + 目录牌 + 工作区段 + memory.md 段 + 动态状态段；前情摘要单独注入保留段第一条 user 消息前缀，不进入 system prompt。
 9. `streamText({ toolChoice:"auto", stopWhen: isStepCount(20), tools, instructions, ... })` 的 ReAct 循环，`onEnd` 关闭 MCP 连接；`toUIMessageStream` 回流给 useChat
 
 思考强度经 `chatReasoningProviderOptions` 下发（:226-229）；**UI 刷新节流 `experimental_throttle: 150ms`**（`hooks/use-chat-state.ts:207`——2026-09-08 长推理流卡死根修：50ms 下每 tick 整页重渲染，思考型模型高频长流时事件循环积压致死；CDP 强制长流 A/B 实证）；`reconnectToStream` 返回 null（不支持断流重连）。
@@ -103,7 +99,7 @@
 **提示词组装**（每条消息发送时重新组装）：
 
 - `constants/prompt.ts:15-24` 按 `agentScope` 路由到三个构建器。2026-09 分层重构后，每个构建器的产出都是同一个三层结构：**风格层**（激活预设 ?? `agent-styles.ts` 的内置默认风格；全局助手暂无预设恒用默认）+ **通用规范**（`shared-policy.ts`）+ **系统策略段**（`prompt.ts` 的 `buildReaderPolicy` / `paper-prompt.ts` 的 `PAPER_POLICY_*` / `central-prompt.ts` 的 `CENTRAL_POLICY`，检索能力按 `hasVectorCapability()` 分档拼接）；之后照旧叠加激活技能清单与书籍/论文元数据。预设只替换风格层，够不到策略段
-- transport 内的最终拼装顺序：buildPrompt + 目录牌（D8，条件触发）+ 工作区段 + memory.md 段 + 动态状态段（【当前阅读章节】/【当前阅读小节】）+ 前情摘要（`custom-chat-transport.ts:213-224`）
+- transport 的 system 拼装顺序：buildPrompt + 目录牌（D8，条件触发）+ 工作区段 + memory.md 段 + 动态状态段（阅读位置、当前时间）；前情摘要不在这里，而是注入保留段第一条 user 消息前缀。
 - 书籍【当前阅读图书元信息与目录】的目录段：优先用 EPUB 原生 TOC 整段替换（`ChatContext.bookTocMd` 由阅读面板从 foliate `bookDoc.toc` 构建下发，`prompt.ts` 的 `replaceTocSection`）——metadata.md 的目录由转换器生成、段号曾被 markdown 转义吃掉（"5.6"→"5.\."，转换器侧待修见 `docs/plans/books-converter-optimizations.md` 第 2 条）
 - **提示词预设**（`prompt_presets` 表）：reader/paper 的命名风格预设，同 scope 内 `is_active` 互斥，无激活行时用内置默认风格（`database.rs:243-259`、`core/prompts/models.rs:7-19`）；与技能是两套东西，别混淆
 
@@ -135,10 +131,11 @@
 
 **sendMessages 内的消息清洗管线**（`custom-chat-transport.ts`）：
 
-1. `processQuoteMessages` 处理引用消息（:115 之前）
-2. `sanitizeMessageParts` 清理 part 结构
-3. `stripUnknownToolParts` 剔除已下线工具的旧 part——防止历史线程里的残留工具名触发 TypeValidationError（:156-162）
-4. `convertToModelMessages(..., { tools, ignoreIncompleteToolCalls: true })`——容忍中断的工具调用
+1. `processQuoteMessages` 处理引用消息，随后按模型视觉能力处理附件与预算。
+2. `sanitizeMessageParts` 清理 part 结构；`sanitizeLegacyMcpHistoryImages` 只处理请求开始前的旧 raw MCP 历史。
+3. `adaptToolHistoryForRequest` 在请求副本中适配 direct↔directory，不删除未知/已下线工具，保留 output、toolCallId、approval/metadata。
+4. `withUnavailableDynamicHistoryStubs` 仅为缺失的 dynamic:false 工具提供转换副本 stub；live 工具面不变。
+5. `await convertToModelMessages(..., { tools: conversionTools, ignoreIncompleteToolCalls: true })` 完成异步转换并容忍中断调用；UI/DB 原消息不变。
 
 **工具的 UI 展示**：工具名即 UI 名的映射表 `TOOL_NAME_MAP` 在 `components/side-chat/chat-messages.tsx:38`，未收录的工具 fallback 显示原始名（:516）；MCP 工具显示名带 `[server名]` 前缀。
 
@@ -151,7 +148,7 @@
 1. keyring service 名：ecosystem-plan A1 写 `com.xincmm.sageread`，实际 `com.bettersageread.app`（`secrets/mod.rs:18`）；向量密钥账户为 `vector-model:{modelId}`
 2. MCP Registry 字段大小写：文档写 snake_case，实测 camelCase（见第 5 节）
 3. `@ai-sdk/mcp` 依赖：文档预判要新增，实际无需（`mcp-manager.ts:5-8`）
-4. 上下文窗口参数过时：roadmap P3 写 `RECENT_MESSAGE_FLOOR=40`、无泄压线；现为双水位 256k/128k + floor=10（`message-selector.ts:5-12`）
-5. `skills.scope` 两处缺省口径不一：DB 迁移默认 `'both'`（`database.rs:120`），而模型 `from_db_row` 的 fallback 是 `"reader,central"`（`skills/models.rs:65`）——旧值体系残留
-6. roadmap P1.5 "central 26→17" 是当时快照；现静态注册表 central 为 22 个
+4. 上下文窗口参数以 `ai/providers/context-window.ts` 为准：按模型窗口计算高低水位，未知模型默认 1M，floor=10；旧 roadmap 的固定 256k/128k 描述已过时。
+5. `skills.scope` 两处缺省口径不一：DB 迁移默认 `'both'`（`database.rs:120`），而模型 `from_db_row` 的 fallback 是 `"reader,central"`（`skills/models.rs:65`）——这是技能作用域的旧值残留，与文档工具 New/Legacy 无关。
+6. roadmap P1.5 的 central 工具数量是历史快照；当前以 registry 实际组装为准，central 还包含两种模式均可用的论文 extras，不再用固定数量描述。
 7. 一致项抽验（无出入）：三档命名、`{{secret:NAME}}` 正则（Rust `secrets/mod.rs:106` 与前端 `skill-import-service.ts:155` 一致）、迁移标记 `secretsMigratedTo:keyring`、审计脱敏模式清单、确认卡三挂载点、I2 双端点与 token 模型

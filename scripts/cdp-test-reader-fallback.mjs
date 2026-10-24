@@ -33,10 +33,13 @@ function cdp(method, params = {}) {
 
 const expression = `
 (async () => {
-  // 该脚本断言旧版 rag/readBookSection 兜底与旧版提示词；显式切 legacy
-  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
   const checks = [];
   const check = (name, pass, info) => checks.push({ name, pass: !!pass, info: info == null ? "" : String(info) });
+  // 该脚本断言旧版 rag/readBookSection 兜底与旧版提示词；显式切 legacy，退出前恢复原覆盖值。
+  const hadDocToolMode = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DOC_TOOL_MODE__");
+  const previousDocToolMode = window.__SAGEREAD_DOC_TOOL_MODE__;
+  window.__SAGEREAD_DOC_TOOL_MODE__ = "legacy";
+  try {
   const origin = location.origin;
   const core = await import(origin + "/@id/@tauri-apps/api/core");
   const registry = await import(origin + "/src/ai/tools/registry.ts");
@@ -93,16 +96,44 @@ const expression = `
   const llama = await import(origin + "/src/store/llama-store.ts");
   await new Promise((r) => setTimeout(r, 2000));
   const hasVec = llama.useLlamaStore.getState().hasVectorCapability();
+  const library = await import(origin + "/src/store/library-store.ts");
+  const bookIndexed = library.useLibraryStore.getState().booksWithStatus.find((b) => b.id === epub.id)?.status?.metadata?.vectorization?.status === "success";
   const rt = registry.getToolsForScope("reader", { bookId: epub.id });
-  if (hasVec) {
-    check("有向量：rag 四件在、readBookSection 常驻兜底也在", !!rt.ragSearch && !!rt.ragToc && !!rt.ragContext && !!rt.ragRange && !!rt.readBookSection, "");
+  if (hasVec && bookIndexed) {
+    check("有向量且本书已索引：rag 四件在、readBookSection 常驻兜底也在", !!rt.ragSearch && !!rt.ragToc && !!rt.ragContext && !!rt.ragRange && !!rt.readBookSection, "");
   } else {
-    check("无向量：readBookSection 在、rag 不在", !!rt.readBookSection && !rt.ragSearch, "");
+    check("本书未索引：readBookSection 在、rag 不在", !!rt.readBookSection && !rt.ragSearch, "hasVec=" + hasVec + ", indexed=" + bookIndexed);
+  }
+  if (!hasVec) {
     const prompt = await promptMod.buildReadingPrompt({ agentScope: "reader", activeBookId: epub.id });
     check("无向量提示词含未建索引策略段", prompt.includes("当前书未建立索引"), "");
   }
 
+  // ---- 5. Task 6：Legacy/New 共用 JS 高保真 canonical，heading 节内 offset 可重放 ----
+  if (candidates.length > 0) {
+    const title = pickContentChapter(candidates);
+    try {
+      const documentMod = await import(origin + "/src/ai/tools/document/read-document.ts");
+      const documentTool = documentMod.createReadDocumentTool({ scope: "reader", currentId: epub.id, retrievalScope: "current" });
+      const legacyFirst = await tool.execute({ reasoning: "Task6", chapterTitle: title, maxChars: 500 }, { toolCallId: "t6-legacy-1", messages: [] });
+      const newFirst = await documentTool.execute({ reasoning: "Task6", doc: "book:" + epub.id, heading: title, after: 500 }, { toolCallId: "t6-new-1", messages: [] });
+      check("Legacy/New 同章 canonical 完全一致", legacyFirst.results?.success === true && legacyFirst.results.content === newFirst.text, String(legacyFirst.results?.content || "").length + "/" + String(newFirst.text || "").length);
+      if (legacyFirst.results?.nextOffset != null) {
+        const legacySecond = await tool.execute({ reasoning: "Task6", chapterTitle: title, maxChars: 500, startOffset: legacyFirst.results.nextOffset }, { toolCallId: "t6-legacy-2", messages: [] });
+        const newSecond = await documentTool.execute({ reasoning: "Task6", doc: "book:" + epub.id, heading: title, offset: legacyFirst.results.nextOffset, after: 500 }, { toolCallId: "t6-new-2", messages: [] });
+        check("Legacy/New heading 节内 offset 重放一致且不重复", legacySecond.results?.content === newSecond.text && newSecond.text !== newFirst.text, legacyFirst.results.nextOffset + "/" + newFirst.next_offset + "/" + newSecond.next_offset);
+      }
+    } catch (error) {
+      check("Legacy/New 同章 canonical 完全一致", false, String(error));
+    }
+  }
+
   return checks;
+  } finally {
+    if (hadDocToolMode) window.__SAGEREAD_DOC_TOOL_MODE__ = previousDocToolMode;
+    else delete window.__SAGEREAD_DOC_TOOL_MODE__;
+    check("文档模式覆盖已恢复", window.__SAGEREAD_DOC_TOOL_MODE__ === previousDocToolMode && Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DOC_TOOL_MODE__") === hadDocToolMode, String(window.__SAGEREAD_DOC_TOOL_MODE__));
+  }
 })()
 `;
 

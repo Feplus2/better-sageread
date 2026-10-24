@@ -3,10 +3,24 @@ const LIST_URL = "http://127.0.0.1:9223/json/list";
 const pages = await (await fetch(LIST_URL)).json();
 const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
 const ws = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-let mid = 0; const pending = new Map();
-ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
-const cdp = (method, params = {}) => { const id = ++mid; ws.send(JSON.stringify({ id, method, params })); return new Promise((r) => pending.set(id, r)); };
+await new Promise((res, rej) => {
+  ws.onopen = res;
+  ws.onerror = rej;
+});
+let mid = 0;
+const pending = new Map();
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.id && pending.has(m.id)) {
+    pending.get(m.id)(m);
+    pending.delete(m.id);
+  }
+};
+const cdp = (method, params = {}) => {
+  const id = ++mid;
+  ws.send(JSON.stringify({ id, method, params }));
+  return new Promise((r) => pending.set(id, r));
+};
 
 const expression = `
 (async () => {
@@ -29,8 +43,10 @@ const expression = `
     try {
       const processed = utils.processQuoteMessages(messages);
       const sel = utils.selectMessagesWithinBudget(processed);
-      const stripped = utils.stripUnknownToolParts(sel.kept, tools);
-      convertToModelMessages(stripped, { tools, ignoreIncompleteToolCalls: true });
+      const sanitized = utils.sanitizeLegacyMcpHistoryImages(utils.sanitizeMessageParts(sel.kept));
+      const adapted = utils.adaptToolHistoryForRequest(sanitized, { directoryMode: false, tools });
+      const conversionTools = utils.withUnavailableDynamicHistoryStubs(adapted, tools);
+      await convertToModelMessages(adapted, { tools: conversionTools, ignoreIncompleteToolCalls: true });
     } catch (e) {
       err = String(e?.cause ?? e).slice(0, 300);
     }

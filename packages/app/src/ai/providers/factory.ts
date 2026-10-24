@@ -317,7 +317,7 @@ export function createProviderInstance(config: ProviderConfig) {
           fetch: wrappedDefault,
         });
       }
-      const geminiChatFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
+      const geminiChatFetch = bridge(wrappedDefault);
       return createOpenAICompatible({
         apiKey: apiKey || "",
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
@@ -358,9 +358,9 @@ export function createProviderInstance(config: ProviderConfig) {
           fetch: wrappedDefault,
         });
       }
-      // chat / openai-chat：OpenAI-compatible，并挂图片桥（工具图片改挂 user 消息）。
+      // chat / openai-chat：OpenAI-compatible，按视觉能力挂图片桥（工具图片改挂 user 消息）。
       // openai-chat 也走兼容适配器而不是 createOpenAI().chat()，以保留图片桥与旧代理兼容性。
-      const chatFetch = wrapOpenAICompatToolImagesFetch(wrappedDefault);
+      const chatFetch = bridge(wrappedDefault);
       return createOpenAICompatible({
         apiKey: apiKey || "",
         baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",

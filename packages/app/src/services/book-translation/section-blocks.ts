@@ -19,6 +19,8 @@
  * MathML（iframe WebView2 原生 MathML Core，免 CSS）。译文其余部分仍为纯文本节点（免 XSS）。
  */
 
+import { serializeMathElement } from "@/services/book-content/extract-structured-text";
+
 /** 块级候选选择器（与 use-annotator 块级容器、论文侧 TRANSLATION_SELECTOR 口径对齐） */
 const BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, dd, dt, td, th, figcaption";
 
@@ -89,27 +91,6 @@ function localNameOf(el: Element): string {
 }
 
 const MATH_LOCAL_NAME = "math";
-
-/**
- * math 元素的 TeX 源码：annotation(application/x-tex 族) 优先 → alttext 兜底；
- * 两者皆无返回 null（调用方回退子节点遍历 = 旧 textContent 字形口径，不劣化）。
- * display 判定走 MathML display="block"（KaTeX mathml 输出同属性，两侧口径一致）。
- */
-function mathTexOf(el: Element): { tex: string; display: boolean } | null {
-  const ann = Array.from(el.querySelectorAll("annotation")).find((a) =>
-    (a.getAttribute("encoding") ?? "").toLowerCase().includes("tex"),
-  );
-  const tex = (ann?.textContent ?? el.getAttribute("alttext") ?? "").trim();
-  if (!tex) return null;
-  return { tex, display: el.getAttribute("display") === "block" };
-}
-
-/** math 元素 → `$tex$` / `$$tex$$`；无 TeX 源码返回 null（回退子节点遍历） */
-function serializeMathElement(el: Element): string | null {
-  const t = mathTexOf(el);
-  if (!t) return null;
-  return t.display ? `$$${t.tex}$$` : `$${t.tex}$`;
-}
 
 /**
  * 文本节点残留裸 LaTeX 定界符 → 标准定界符（与 rawmath 同口径 \(..\)/\[..\]）。

@@ -8,7 +8,17 @@ export type RetrievalScope = "current" | "library" | "all";
 
 export type RetrievalScopeRole = "reader" | "paper";
 
-export const DEFAULT_RETRIEVAL_SCOPE: RetrievalScope = "current";
+/** 仅用于缺失记录的读取回退；不要借此回填或改写已持久化的 scopes。 */
+export function defaultRetrievalScope(role: RetrievalScopeRole | "central"): RetrievalScope {
+  if (role === "paper") return "library";
+  if (role === "central") return "all";
+  return "current";
+}
+
+/** Legacy paperSearch 只能表达本篇或全部论文；all 中的书籍无法由旧工具表达。 */
+export function legacyPaperScopeIds(scope: RetrievalScope, paperId: string): string[] | null {
+  return scope === "current" ? [paperId] : null;
+}
 
 const RETRIEVAL_SCOPE_ORDER: Record<RetrievalScope, number> = {
   current: 0,

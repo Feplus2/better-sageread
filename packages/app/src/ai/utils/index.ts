@@ -8,11 +8,13 @@ export {
   selectValidMessages,
 } from "./message-selector";
 export {
+  adaptToolHistoryForRequest,
   processQuoteMessages,
   resolveImageAttachmentsForRequest,
+  sanitizeLegacyMcpHistoryImages,
   sanitizeMessageParts,
   stripFileParts,
-  stripUnknownToolParts,
+  withUnavailableDynamicHistoryStubs,
 } from "./message-processor";
 export { loadMemorySection, loadWorkspaceSection } from "./workspace-context";
 export { estimateMessageTokens, estimateMessagesTokens, estimateTokens } from "./token-estimator";

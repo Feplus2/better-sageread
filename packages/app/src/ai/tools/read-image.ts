@@ -4,7 +4,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import { modelSupportsVision } from "../providers/vision-map";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, loadLocalImageAsDataUrl } from "../utils/local-image";
-import { assertAllowedPath, imageEnvelope, isAbsoluteImagePath } from "./image-shared";
+import { imageEnvelope, isAbsoluteImagePath, readLocalImageBytes } from "./image-shared";
+import type { ImageReadGrant, ImageRoots } from "./image-shared";
 
 /**
  * P0：readImage 从「只看聊天附件」升级为通用看图片原语。
@@ -31,7 +32,19 @@ export const readImageTool = tool({
         "长边像素上限，默认 1024，最大 1536；截图/小字看不清时才升到 1536（图片会随每步重复计费，看完尽快作答）",
       ),
   }),
-  execute: async ({ ref, path, maxEdge }: { ref?: string; path?: string; maxEdge?: number }) => {
+  execute: async ({
+    ref,
+    path,
+    maxEdge,
+    imageRoots,
+    imageGrant,
+  }: {
+    ref?: string;
+    path?: string;
+    maxEdge?: number;
+    imageRoots?: ImageRoots;
+    imageGrant?: ImageReadGrant;
+  }) => {
     const target = path ?? ref;
     if (!target) {
       return errorText("需要提供 ref（聊天附件引用）或 path（本地图片绝对路径）之一");
@@ -64,12 +77,8 @@ export const readImageTool = tool({
       );
     }
     try {
-      await assertAllowedPath(target);
-    } catch (error) {
-      return errorText(error instanceof Error ? error.message : String(error));
-    }
-    try {
-      const loaded = await loadLocalImageAsDataUrl(target, { maxEdge });
+      const bytes = await readLocalImageBytes(target, { roots: imageRoots, grant: imageGrant });
+      const loaded = await loadLocalImageAsDataUrl(bytes, { maxEdge });
       return {
         type: "content" as const,
         value: [

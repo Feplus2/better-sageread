@@ -27,7 +27,7 @@ import {
   isRecentToolImageEntry,
   listCachedToolImageEntries,
 } from "@/ai/utils/tool-image-cache";
-import { toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
+import { stripToolImageBytes, toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
 import type { Tool } from "ai";
 
 /** 目录牌模式下模型实际调用的是 useTool，图片结果也可能由缓存恢复 */
@@ -182,8 +182,54 @@ function stringifyText(output: unknown): string {
   }
 }
 
-function toNativeToolOutput(output: unknown, toolCallId: string | undefined, budget: ReplayBudget) {
+interface McpNativeConversion {
+  hasImageEvidence: boolean;
+  strippedOutput: { output: unknown } | null;
+}
+
+function isGeneratedMcpImagePlaceholderText(text: string): boolean {
+  if (/^\[MCP 图片 #\d+ 落盘失败已省略（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具\]$/.test(text)) {
+    return true;
+  }
+  if (/^\[历史 MCP 图片 #\d+ 未保留可重看路径（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具\]$/.test(text)) {
+    return true;
+  }
+  const prefix = "[MCP 图片已落盘：";
+  const instruction = "，需要重看时用 readImage(path=";
+  if (!text.startsWith(prefix) || !text.endsWith(")]")) return false;
+  const body = text.slice(prefix.length, -2);
+  const split = body.indexOf(instruction);
+  if (split <= 0) return false;
+  const path = body.slice(0, split);
+  return body === `${path}${instruction}${path}`;
+}
+
+function containsMcpImageMarker(output: unknown): boolean {
+  if (Array.isArray(output)) return output.some(containsMcpImageMarker);
+  if (!output || typeof output !== "object") return false;
+  const record = output as Record<string, unknown>;
+  if (record.type === "text" && typeof record.text === "string" && isGeneratedMcpImagePlaceholderText(record.text)) {
+    return true;
+  }
+  return Object.values(record).some(containsMcpImageMarker);
+}
+
+function toNativeToolOutput(
+  output: unknown,
+  toolCallId: string | undefined,
+  budget: ReplayBudget,
+  mcp: McpNativeConversion,
+) {
   const collected = collectOutput(output, toolCallId, budget);
+  if (mcp.hasImageEvidence) {
+    // ToolResultOutput 顶层只能是官方判别联合；完整 MCP 结果放在 text JSON，图片另附官方 file-data。
+    const text = stringifyText(mcp.strippedOutput?.output ?? output);
+    if (collected.images.length === 0) return { type: "text" as const, value: text };
+    return {
+      type: "content" as const,
+      value: [{ type: "text" as const, text }, ...collected.images.map(dataUrlToFilePart)],
+    };
+  }
   if (collected.images.length === 0) {
     if (output && typeof output === "object" && (output as { type?: string }).type === "error-text") {
       return output as { type: "error-text"; value: string };
@@ -203,7 +249,10 @@ function isNativeImageCapableTool(name: string): boolean {
 }
 
 /** 给图片类工具（含目录牌 useTool 与 MCP 工具）补官方 toModelOutput；其它工具原样返回。 */
-export function wrapToolsForNativeImages<T extends Record<string, Tool>>(tools: T): T {
+export function wrapToolsForNativeImages<T extends Record<string, Tool>>(
+  tools: T,
+  forwardedTools: Record<string, Tool> = {},
+): T {
   // 预算跟随本次请求：历史转换与当轮多步工具调用共用同一份
   const budget = createReplayBudget();
   const wrapped: Record<string, Tool> = {};
@@ -215,14 +264,26 @@ export function wrapToolsForNativeImages<T extends Record<string, Tool>>(tools: 
     // MCP Tool 自带 mcpToModelOutput（content → text parts）；文本型结果没有图时应沿用，
     // 不能退化成 JSON.stringify（保持文本型 MCP 工具行为不变）
     const originalToModelOutput = (tool as any).toModelOutput as
-      | ((opts: { output: unknown; toolCallId?: string }) => unknown)
+      | ((opts: { output: unknown; toolCallId?: string; input?: unknown }) => unknown)
       | undefined;
     wrapped[name] = {
       ...tool,
-      toModelOutput: ({ output, toolCallId }: { output: unknown; toolCallId?: string }) => {
-        const nativeOutput = toNativeToolOutput(output, toolCallId, budget);
-        if (name.startsWith("mcp_") && nativeOutput.type === "text" && originalToModelOutput) {
-          return originalToModelOutput({ output, toolCallId });
+      toModelOutput: ({ output, toolCallId, input }: { output: unknown; toolCallId?: string; input?: unknown }) => {
+        const forwarded = name === "useTool" ? (input as any)?.tool : null;
+        const forwardedTool =
+          name === "useTool" && typeof forwarded === "string" ? forwardedTools[forwarded] : undefined;
+        const converter =
+          name === "useTool"
+            ? ((forwardedTool as any)?.toModelOutput as typeof originalToModelOutput)
+            : originalToModelOutput;
+        const converterInput = name === "useTool" ? (input as any)?.args : input;
+        const isMcp = name.startsWith("mcp_") || (typeof forwarded === "string" && forwarded.startsWith("mcp_"));
+        const strippedOutput = isMcp ? stripToolImageBytes(output) : null;
+        const hasCachedImages = !!(isMcp && toolCallId && getCachedToolImages(toolCallId)?.length);
+        const hasImageEvidence = isMcp && (!!strippedOutput || hasCachedImages || containsMcpImageMarker(output));
+        const nativeOutput = toNativeToolOutput(output, toolCallId, budget, { hasImageEvidence, strippedOutput });
+        if (isMcp && !hasImageEvidence && nativeOutput.type === "text" && converter) {
+          return converter({ output, toolCallId, input: converterInput });
         }
         return nativeOutput;
       },

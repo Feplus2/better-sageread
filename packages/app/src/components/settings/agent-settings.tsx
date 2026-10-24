@@ -27,7 +27,7 @@ const MODE_OPTIONS: { value: AgentSafetyMode; label: string; desc: string }[] = 
   {
     value: "full",
     label: "完全访问",
-    desc: "读写与命令执行全部静默（网络外发仍确认）。注意防范提示注入风险。",
+    desc: "常规读写与命令静默；恒确认例外和敏感路径拦截仍生效。注意防范提示注入风险。",
   },
 ];
 
@@ -36,11 +36,6 @@ const DOC_TOOL_MODE_OPTIONS: { value: DocumentToolMode; label: string; desc: str
     value: "new",
     label: "新原语（推荐）",
     desc: "readDocument / getDocumentInfo / searchLibrary：跨文献直接读、按目录/锚点取原文，更省 token。",
-  },
-  {
-    value: "both",
-    label: "新旧并存",
-    desc: "新旧工具同时暴露，用于对照调试；工具更多、提示词更长。",
   },
   {
     value: "legacy",

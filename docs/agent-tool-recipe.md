@@ -21,20 +21,28 @@
 - **新 Rust 命令**：`core/` 加模块 → `core/mod.rs` 导出 → `lib.rs` generate_handler! 注册；走 epub 插件则还要三处同步（插件 lib.rs、build.rs COMMANDS、permissions/default.toml，见 format-strategy-and-paper-module.md §108）
 - **验证**：`pnpm --filter app exec tsc --noEmit` + `biome check` 改动文件 + CDP 冒烟（仿 `scripts/cdp-test-p0-tools.mjs`：注册断言 + execute 直调 + 写操作立即清理）
 
-## 写/执行类工具的安全守卫（P1 起）
+## 写/执行/图片工具的安全守卫
 
-给 Agent 加"会动手"的工具（写文件/执行命令/网络外发）时，除上面五步外还要过守卫：
+给 Agent 加"会动手"的工具（写文件/执行命令/网络外发）或本地图片读取时，除上面五步外还要过守卫：
 
-1. **界内/界外判定只在 Rust**：`core/agent_ws` 的 `guard()`（canonicalize + 根前缀，符号链接绕不过）；TS 侧 `agent_resolve_path` 拿 verdict。不要在 TS 里自己拼路径判前缀
-2. **放行参数不进 inputSchema**：`allowOutside` 由 transport 的 `ai/utils/tool-guard.ts` 在确认通过/模式放行后注入，模型构造不出来
-3. **决策表集中在 tool-guard.ts 的 GUARDED_TOOLS**：新危险工具在此登记（action: fileWrite/fileRead/command/network + pathArg + 确认卡标题），不要在工具文件里各写各的分档逻辑
-4. **确认桥走 `store/agent-confirm-store.ts` 队列**：execute 挂起等用户（先例：export-threads await 原生对话框）；拒绝返回 `{results:{success:false,message:"用户已拒绝本次操作"}}` 即可，AI SDK 当普通工具结果处理
-5. **runCommand 全模式写审计日志**（Rust 侧 `{appData}/agent-audit/commands.jsonl`），网络外发（httpRequest 非 GET）任何模式都确认
+1. **界内/界外判定只在 Rust**：`core/agent_ws` 复用 canonicalize、最近存在祖先解析与根前缀判界；TS 侧只通过 `agent_resolve_path` 取 verdict，不做词法根前缀放行。junction/symlink 与 `..` 不能绕过。
+2. **内部授权不进 inputSchema**：`allowOutside/rootOverride` 以及图片的 `imageRoots/imageGrant/imageGrants/expectedResolved` 只由 transport 的 `tool-guard.ts` 注入；guard 覆盖模型传入的同名字段。图片授权绑定原始 path 与 canonical target，批量图片逐路径授权，没有整批界外放行布尔值。
+3. **决策表集中在 tool-guard.ts 的 GUARDED_TOOLS**：新危险工具在此登记（fileWrite/fileRead/imageRead/command/network + pathArg + 确认卡标题），不要在工具文件里各写各的分档逻辑。
+4. **确认按安全模式与例外矩阵**：strict 的界外读、strict/relaxed 的界外写与命令先确认，full 对常规路径/命令静默；relaxed/full 的界外读免确认。`attachment://` 不走本地路径判界。网络非 GET、含密钥引用的外发以及破坏性/密钥操作等恒确认例外不因 full 取消。确认桥使用 `store/agent-confirm-store.ts` 队列，拒绝返回取消结果。
+5. **图片检查与读取不可分离**：`agent_read_image` 在同一 Rust 调用内完成 canonical 判界、授权复核、敏感路径拒绝、目录/20MiB 检查与字节读取，返回 `ArrayBuffer`；前端保留魔数嗅探、解码和降采样。确认后 canonical target 变化必须失败，不能复用旧授权。
+6. **runCommand 全模式写审计日志**（Rust 侧 `{appData}/agent-audit/commands.jsonl`）；不要为通过测试而扩大全局 assetProtocol scope。
 
-## 验证基线（P0 落地时）
+## 请求历史兼容
 
-tsc exit 0；biome 改动文件 clean（全库 14 个报错均为 HEAD 既有，勿顺手修）；CDP 11/11 PASS。
+- transport 在请求副本上先执行 `sanitizeLegacyMcpHistoryImages`，再用 `adaptToolHistoryForRequest` 做 direct↔directory 适配，最后 `await convertToModelMessages`。
+- 不因当前 New/Legacy 工具面或目录牌模式删除未知、已下线工具的 history part；保留 toolCallId、output、approval/metadata。`dynamic:false` 缺失工具的 conversion-only stub 只进转换副本，不进入 live 工具面。
+- 旧 raw MCP 历史不回灌图片字节：有路径留路径，无路径留“重新调用”占位；当前轮 live MCP 图片仍可进入模型。UI/DB 原消息保持不变。
+- 回归：`scripts/test-tool-history.mjs`、`test-mcp-image-pipeline.mjs`、`test-tool-image-bridge.mjs`、`cdp-test-tool-consolidation.mjs` 与 `cdp-scan-thread-conversion.mjs`。
 
-## 工具合并（2026-08-05，13→5）
+## 当前验证基线
 
-deleteBook/openBook/resetProgress → manageBook；backupNow/backupRestore/syncNow/syncPreferences → manageSync；setTheme/readerPreferences/uiPreferences → managePreferences；getThreads/exportThreads 并入 manageThreads（search/export 动作）；toggleSkill 并入 manageSkill（toggle 动作）。执行逻辑原样搬入未改行为。兼容层：`ai/utils/message-processor.ts` 的 `stripUnknownToolParts(messages, tools)` 在 transport 的 `convertToModelMessages` 前剔除引用已下线工具的 part（否则旧对话历史直接抛 TypeValidationError 炸聊天）。冒烟：`scripts/cdp-test-tool-consolidation.mjs`（24/24 PASS；vite 缓存模块用 `?smoke=<ts>` 强制重新转换拿最新产物）。
+`pnpm --filter app build`、相关 Node/CDP 行为测试与 `git diff --check` 必须通过。图片安全还需跑 `scripts/cdp-verify-p0-read-image.mjs`、`scripts/cdp-test-p1-tools.mjs` 和 Rust `agent_ws` 测试；不能用源码字符串断言替代真实工具、真实 junction 或请求历史转换测试。
+
+## 工具合并与模式回退
+
+deleteBook/openBook/resetProgress → manageBook；backupNow/backupRestore/syncNow/syncPreferences → manageSync；setTheme/readerPreferences/uiPreferences → managePreferences；getThreads/exportThreads 并入 manageThreads（search/export 动作）；toggleSkill 并入 manageSkill（toggle 动作）。文档工具只保留 `new` 与 `legacy` 两个互斥模式：默认 New，Legacy 保留旧工具回退；旧 Both/非法持久化值归一为 New。共享文件五件套、`exportNotes/askAppHelp/readImage/viewImages` 不随文档模式裁剪；central 的论文 `getFigures/getCitations` 在两种模式均注册且必须显式传 `doc=paper:<id>`。

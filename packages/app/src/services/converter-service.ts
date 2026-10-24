@@ -59,8 +59,7 @@ export function resolveLlmParams(): { llmBaseUrl: string; llmApiKey: string; llm
     endpoints["openai-chat"] ??
     (provider.apiStyle === "openai-chat" || provider.apiStyle === "openai-responses" || !provider.apiStyle
       ? provider.baseUrl
-      : undefined) ??
-    provider.baseUrl;
+      : undefined);
   if (!chatBaseUrl) {
     throw new Error(
       `「${provider.name}」没有 OpenAI 兼容端点，PDF 转换/翻译暂不可用；请在 设置 → 模型提供商 里把辅助模型换成 OpenAI 兼容的提供商`,

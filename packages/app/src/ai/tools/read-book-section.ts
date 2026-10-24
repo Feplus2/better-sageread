@@ -1,8 +1,8 @@
-import { extractStructuredText } from "@/services/book-content/extract-structured-text";
-import { openBookDocument } from "@/services/book-translation/book-translation-service";
+import { readBookSectionCanonical, resolveBookWindowImages } from "@/services/book-content/book-reading-adapter";
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
+import { readCanonicalWindow } from "./document/canonical-window";
 
 interface SectionReadResult {
   matchedTitle: string;
@@ -12,77 +12,10 @@ interface SectionReadResult {
   pages: number;
 }
 
-interface TocEntry {
-  label: string;
-  href?: string;
-  subitems?: TocEntry[];
-}
-
-const normalize = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-
-/** 拍平目录为 [{ label, href }]（保留层级序） */
-function flattenToc(items: TocEntry[] | undefined, out: { label: string; href: string }[] = []) {
-  for (const it of items ?? []) {
-    if (it?.href) out.push({ label: it.label ?? "", href: it.href });
-    if (it?.subitems?.length) flattenToc(it.subitems, out);
-  }
-  return out;
-}
-
-/** 取标签/查询的前导小节号（"5.6 Renormalization" → "5.6"） */
-const leadingNumber = (s: string) => normalize(s).match(/^\d+(\.\d+)*/)?.[0] ?? null;
-
-/** 匹配语义（E5 根修：要 5 章给 5.9 的病）：精确 > 前缀 > 包含，逐级短路；
- *  文本全败但查询带小节号时，按号精确命中（模型看到的注入目录可能被转义/截断，
- *  复述出的标题文本对不上，但小节号通常是对的——以号为准并在 message 里明示）；
- *  号也无命中时逐级退化到父级号（深层小节常无目录项） */
-function matchTocEntry(entries: { label: string; href: string }[], query: string) {
-  const q = normalize(query);
-  if (!q) return { kind: "none" as const };
-  const exact = entries.filter((e) => normalize(e.label) === q);
-  if (exact.length) return { kind: "hit" as const, entry: exact[0]! };
-  const prefix = entries.filter((e) => normalize(e.label).startsWith(q));
-  if (prefix.length) return { kind: "hit" as const, entry: prefix[0]! };
-  const contains = entries.filter((e) => normalize(e.label).includes(q));
-  if (contains.length === 1) return { kind: "hit" as const, entry: contains[0]! };
-  if (contains.length > 1)
-    return {
-      kind: "ambiguous" as const,
-      candidates: [...contains].sort((a, b) => a.label.length - b.label.length).slice(0, 20),
-      total: contains.length,
-    };
-  // 小节号通道：号码相等才算命中（防 "5.6" 撞 "5.61"）；再逐级退化父级号
-  const qNum = leadingNumber(q);
-  if (qNum) {
-    const byNum = entries.filter((e) => leadingNumber(e.label) === qNum);
-    if (byNum.length) return { kind: "number" as const, entry: byNum[0]!, matchedQuery: qNum };
-    const segs = qNum.split(".");
-    for (let k = segs.length - 1; k >= 1; k--) {
-      const parent = segs.slice(0, k).join(".");
-      const hit = entries.filter((e) => leadingNumber(e.label) === parent);
-      if (hit.length) return { kind: "fallback" as const, entry: hit[0]!, matchedQuery: parent };
-    }
-  }
-  return { kind: "none" as const };
-}
-
-/** TOC href → spine 下标 + 锚点 id。href 可能带 EPUB/ 前缀或与 section.id 不完全一致，做后缀归一 */
-function resolveHref(bookDoc: any, href: string): { spineIndex: number; fragment: string | null } | null {
-  const [file, frag] = href.split("#");
-  const sections: any[] = bookDoc.sections ?? [];
-  const norm = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
-  const target = norm(file ?? "");
-  let idx = sections.findIndex((s) => norm(s.id ?? "") === target);
-  if (idx < 0) idx = sections.findIndex((s) => target.endsWith(norm(s.id ?? "")) || norm(s.id ?? "").endsWith(target));
-  if (idx < 0) idx = sections.findIndex((s) => (s.id ?? "").split("/").pop() === target.split("/").pop());
-  if (idx < 0) return null;
-  return { spineIndex: idx, fragment: frag || null };
-}
-
 /**
  * 阅读助手兜底工具（P3）：按目录章节标题直读本书小节原文。
- * JS 读取层（2026-09-15 重写）：foliate 解析管线复用 openBookDocument；
- * 深层小节锚点直读、startOffset 续读、结构化提取（公式→LaTeX、表格→Markdown）；
+ * JS 读取层与 readDocument 共用 book-reading-adapter 的高保真 canonical；
+ * 深层小节锚点直读、节内 startOffset 续读、窗口图片解析；
  * 失败回退 Rust 侧 read_book_section（正则剥标签老路径）。
  */
 export const createReadBookSectionTool = (activeBookId: string | undefined) =>
@@ -140,55 +73,45 @@ export const createReadBookSectionTool = (activeBookId: string | undefined) =>
       const cap = Math.min(Math.max(maxChars ?? 8000, 500), 30000);
       const offset = Math.max(startOffset ?? 0, 0);
 
-      // ── JS 读取层（结构化：公式 LaTeX / 表格 Markdown）──
+      // ── JS 读取层（与 readDocument 共用 canonical；Rust 仅作失败兜底）──
       try {
-        const { bookDoc } = await openBookDocument(activeBookId);
-        const entries = flattenToc((bookDoc as any).toc);
-        const m = matchTocEntry(entries, chapterTitle);
-        if (m.kind === "ambiguous") {
+        const canonical = await readBookSectionCanonical(activeBookId, chapterTitle);
+        if (canonical.kind === "ambiguous") {
           return {
             results: {
               success: false,
-              message: `标题「${chapterTitle}」有 ${m.total} 个候选（按相关度列出前 ${m.candidates.length} 个），请精确后重试`,
-              candidates: m.candidates.map((c) => c.label),
+              message: `标题「${chapterTitle}」有 ${canonical.total} 个候选（按相关度列出前 ${canonical.candidates.length} 个），请精确后重试`,
+              candidates: canonical.candidates.map((candidate) => candidate.label),
             },
             meta: { reasoning, chapterTitle },
           };
         }
-        if (m.kind === "hit" || m.kind === "fallback" || m.kind === "number") {
+        if (canonical.kind === "ok") {
           const fallbackNote =
-            m.kind === "fallback"
-              ? `（查询的小节号无目录项，已从最近的父级「${m.matchedQuery}」起读）`
-              : m.kind === "number"
-                ? `（目录中无此标题文本，已按小节号 ${m.matchedQuery} 匹配——注：注入目录的标题可能被转义损坏，以此返回的目录标题为准）`
+            canonical.matchKind === "fallback"
+              ? `（查询的小节号无目录项，已从最近的父级「${canonical.matchedQuery}」起读）`
+              : canonical.matchKind === "number"
+                ? `（目录中无此标题文本，已按小节号 ${canonical.matchedQuery} 匹配——注：注入目录的标题可能被转义损坏，以此返回的目录标题为准）`
                 : "";
-          const resolved = resolveHref(bookDoc, m.entry.href);
-          if (resolved) {
-            const section = (bookDoc as any).sections[resolved.spineIndex];
-            const doc = await section?.createDocument?.();
-            if (doc) {
-              const anchor = resolved.fragment ? doc.getElementById(resolved.fragment) : null;
-              const { text, totalChars } = extractStructuredText(doc, anchor);
-              const slice = text.slice(offset, offset + cap);
-              const nextOffset = offset + slice.length;
-              const truncated = nextOffset < totalChars;
-              return {
-                results: {
-                  success: true,
-                  message: truncated
-                    ? `已读取「${m.entry.label}」${fallbackNote}（第 ${offset + 1}–${nextOffset} 字符，共 ${totalChars}；未读完——用 startOffset=${nextOffset} 续读）`
-                    : `已读取「${m.entry.label}」${fallbackNote}（${totalChars} 字符，已读完）`,
-                  matchedTitle: m.entry.label,
-                  content: slice,
-                  truncated,
-                  totalChars,
-                  nextOffset: truncated ? nextOffset : null,
-                },
-                meta: { reasoning, chapterTitle },
-              };
-            }
-          }
-          // href 解析失败：落到 Rust 老路径再试一次
+          const window = readCanonicalWindow(canonical.text, { offset, after: cap });
+          const content = await resolveBookWindowImages(activeBookId, window.text, {
+            ...canonical,
+            windowStart: window.start,
+          });
+          return {
+            results: {
+              success: true,
+              message: window.truncated
+                ? `已读取「${canonical.matchedTitle}」${fallbackNote}（第 ${window.start + 1}–${window.end} 字符，共 ${canonical.totalChars}；未读完——用 startOffset=${window.nextOffset} 续读）`
+                : `已读取「${canonical.matchedTitle}」${fallbackNote}（${canonical.totalChars} 字符，已读完）`,
+              matchedTitle: canonical.matchedTitle,
+              content,
+              truncated: window.truncated,
+              totalChars: canonical.totalChars,
+              nextOffset: window.nextOffset,
+            },
+            meta: { reasoning, chapterTitle },
+          };
         }
       } catch (error) {
         console.warn("[readBookSection] JS 读取层失败，回退 Rust 路径:", error);

@@ -1,3 +1,4 @@
+import { resolveProviderProtocol } from "@/ai/providers/protocol";
 import { getPresetProvider } from "@/utils/provider-endpoint";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
 
@@ -49,12 +50,19 @@ function toModelInfo(record: any, id: string): ProviderModelInfo {
  * 拉取模型列表（含窗口等元数据，供上下文预算使用）。
  * Always uses Tauri's HTTP client to bypass CORS issues.
  */
-export const fetchModelCatalog = async (provider: ModelProvider): Promise<ProviderModelInfo[]> => {
+export const fetchModelCatalog = async (provider: ModelProvider, modelId?: string): Promise<ProviderModelInfo[]> => {
   if (!provider.baseUrl) {
     throw new Error("Provider must have baseUrl configured");
   }
 
-  const isGemini = provider.provider === "gemini";
+  const catalogModelId = modelId?.trim() || provider.models.find((model) => model.active)?.id || provider.models[0]?.id;
+  const protocol = resolveProviderProtocol({
+    providerId: provider.provider,
+    baseUrl: provider.baseUrl,
+    modelId: catalogModelId,
+    apiStyle: provider.apiStyle,
+  });
+  const isGemini = protocol === "gemini";
   // Anthropic 兼容端点未必暴露 /models；回退到该提供商的 OpenAI Chat 根再试一次
   // （预置端点表里就有，DeepSeek/Kimi/智谱/MiniMax 用户刷新模型列表时更不容易卡住）
   const candidates = modelListBaseUrls(provider, isGemini);

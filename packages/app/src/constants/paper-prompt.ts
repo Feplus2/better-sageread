@@ -1,6 +1,6 @@
 import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_PAPER_STYLE } from "@/constants/agent-styles";
-import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope } from "@/constants/retrieval-scope";
+import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope, defaultRetrievalScope } from "@/constants/retrieval-scope";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
 import { type PaperMetadata, normalizeAuthors } from "@/pages/paper-reader/paper-metadata";
@@ -96,10 +96,10 @@ const PAPER_POLICY_VECTOR_NEW = `—— 文献库检索（新原语） ——
 • searchLibrary：语义 + 关键词混合检索；scope=current（当前论文）/ library（论文库全部论文）/ all（论文库+图书馆），也可用 doc=paper:<id> 在圈内指定单篇。scope/doc 只能收窄用户圈定范围，不能放大。
 • 命中后先看 doc/章节，再用 readDocument(doc=paper:<id>, heading=... 或 offset=...) 精读，不要一次读全文。
 • 检索策略：英文论文用英文术语；多概念问题拆 2-3 个不同措辞的子查询；命中不足换措辞/在圈内换范围再检；检索无据就明说，不要凭印象编造。
-• 分工：当前论文内容问题优先 getDocumentInfo + readDocument 读原文；searchLibrary 只用于检索已建索引论文的片段。`;
+• 分工：当前论文内容问题优先 getDocumentInfo + readDocument 读原文；已建索引文档用 searchLibrary 语义混合检索，未索引文档用关键词/标题回退，与目录/原文读取互补。library/all 若 partial 且带 next_cursor，用相同 query/参数和 cursor 续扫后续文档，直到游标消失。`;
 
-const PAPER_POLICY_NO_VECTOR_NEW = `—— 文献库检索（当前不可用） ——
-未配置嵌入模型，searchLibrary 不可用；当前论文用 getDocumentInfo + readDocument 读原文。用户需要跨论文检索时，提示其在设置中配置嵌入模型并向量化论文。`;
+const PAPER_POLICY_NO_VECTOR_NEW = `—— 文献库检索（未配置嵌入模型） ——
+未配置嵌入模型时语义检索不可用，但 searchLibrary 仍可用关键词/标题回退，与 getDocumentInfo 目录读取和 readDocument 原文窗口互补；当前论文也可直接按目录分窗读原文。library/all 若 partial 且带 next_cursor，用相同 query/参数和 cursor 续扫后续文档，直到游标消失。需要语义跨论文检索时，提示用户在设置中配置嵌入模型并向量化论文。`;
 
 const PAPER_POLICY_VECTOR = `—— 文献库检索（已启用） ——
 • paperSearch：文献库语义+关键词混合检索，可跨论文。检索范围由用户在面板中选择（本篇/论文库/论文库+图书馆）；旧版工具只支持论文（本篇或全部论文），无法包含书籍，属部分生效。
@@ -114,23 +114,19 @@ const PAPER_POLICY_NO_VECTOR = `—— 文献库检索（当前不可用） —�
  * 用户划定的检索范围（论文助手）：写在政策层，模型检索/直读前先看圈。
  * 旧工具集只能表达论文范围（本篇/全部论文），必须明确说"书籍部分不生效"。
  */
-function buildPaperScopePolicy(
-  scope: RetrievalScope,
-  docMode: "new" | "legacy" | "both",
-  currentPaperId?: string,
-): string {
+function buildPaperScopePolicy(scope: RetrievalScope, docMode: "new" | "legacy", currentPaperId?: string): string {
   const label = RETRIEVAL_SCOPE_LABELS.paper[scope];
   const currentRef = currentPaperId ? `paper:${currentPaperId}` : "（未绑定当前论文）";
   if (docMode === "legacy") {
     return `—— 检索范围（旧版工具模式） ——
-旧版工具模式不显示范围下拉（此前保存的选择只部分生效）：paperSearch 只能是「本篇」（paperIds=[当前论文]）或「全部论文」（不含书籍）；readDocument / getCitationGraph 等新原语不可用，${currentRef} 之外的直读也做不到。需要真正的「论文库+图书馆」范围时，请让用户切到新原语模式（设置 → Agent）或到全局助手处理；不要声称检索过书籍。`;
+旧版工具模式不显示范围下拉（此前保存的选择只部分生效）：paperSearch 只能是「本篇」（paperIds=[当前论文]）或「全部论文」（不含书籍）；readDocument / getCitationGraph 等新原语不可用，通用跨文档阅读不可用。getFigures/getCitations 可显式传 doc=paper:<paper_id> 读取当前范围内的论文（缺失范围记录时默认为论文库；current 时仅本篇），但不支持书籍。需要通用跨文档阅读或书籍内容时，请让用户切到新原语模式（设置 → Agent）或到全局助手处理；不要声称检索过书籍。`;
   }
   const allowed =
     scope === "current"
-      ? `只能检索/读取当前这篇论文（${currentRef}）；其它论文与书籍都在圈外。searchLibrary（若已配置嵌入模型）只在本篇内检索；readDocument/getDocumentInfo 传圈外 doc 会被拒绝；getFigures/getCitations 也只读本篇。getCitationGraph 需要扫描论文库其它论文，在当前范围会要求用户切换范围。`
+      ? `只能检索/读取当前这篇论文（${currentRef}）；其它论文与书籍都在圈外。searchLibrary 只在本篇内检索（已索引语义混合、未索引关键词/标题回退）；readDocument/getDocumentInfo 传圈外 doc 会被拒绝；getFigures/getCitations 也只读本篇。getCitationGraph 需要扫描论文库其它论文，在当前范围会要求用户切换范围。`
       : scope === "library"
-        ? "可检索/读取论文库全部论文（不含书籍）。searchLibrary（若已配置嵌入模型）搜全部论文；readDocument/getDocumentInfo/getCitationGraph 可跨论文；book:<id> 在圈外，越界会被拒绝。"
-        : "可检索/读取论文库全部论文 + 图书馆全部书籍（跨库结果 RRF 融合）。searchLibrary（若已配置嵌入模型）跨库检索；readDocument/getDocumentInfo/getCitationGraph 可读论文，readDocument/getDocumentInfo 也可读书；圈外/库外文件仍在界外。";
+        ? "可检索/读取论文库全部论文（不含书籍）。searchLibrary 搜全部论文（已索引语义混合、未索引关键词/标题回退）；readDocument/getDocumentInfo/getCitationGraph 可跨论文；book:<id> 在圈外，越界会被拒绝。"
+        : "可检索/读取论文库全部论文 + 图书馆全部书籍（跨库结果 RRF 融合，未索引文档按关键词/标题回退）。searchLibrary 跨库检索；readDocument/getDocumentInfo/getCitationGraph 可读论文，readDocument/getDocumentInfo 也可读书；圈外/库外文件仍在界外。";
   return `—— 检索范围（用户划定，本轮以此为准） ——
 用户当前选择：${label}（retrievalScope=${scope}）。
 • ${allowed}
@@ -165,7 +161,11 @@ export async function buildPaperPrompt(chatContext: ChatContext | undefined): Pr
       : hasVectorCapability
         ? PAPER_POLICY_VECTOR
         : PAPER_POLICY_NO_VECTOR;
-  const scopePolicy = buildPaperScopePolicy(chatContext?.retrievalScope ?? "current", docMode, paperId);
+  const scopePolicy = buildPaperScopePolicy(
+    chatContext?.retrievalScope ?? defaultRetrievalScope("paper"),
+    docMode,
+    paperId,
+  );
   let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${basePolicy}\n\n${retrievalPolicy}\n\n${scopePolicy}`;
 
   // 注入 scope 含 paper 的活跃技能

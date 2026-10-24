@@ -170,6 +170,155 @@ impl EpubReader {
         self.chunker.chunk_md_file_flagged(md_content, min_tokens, max_tokens)
     }
 
+    pub fn search_text<P: AsRef<Path>>(
+        &self,
+        path: P,
+        query: &str,
+        limit: usize,
+        max_sections: Option<usize>,
+        max_duration_ms: Option<u64>,
+        include_references: bool,
+    ) -> Result<EpubTextSearchResult, String> {
+        self.search_text_with_extractor(path, query, limit, max_sections, max_duration_ms, include_references, |html| {
+            self.extract_text_content(html)
+        })
+    }
+
+    fn search_text_with_extractor<P, F>(
+        &self,
+        path: P,
+        query: &str,
+        limit: usize,
+        max_sections: Option<usize>,
+        max_duration_ms: Option<u64>,
+        include_references: bool,
+        mut extractor: F,
+    ) -> Result<EpubTextSearchResult, String>
+    where
+        P: AsRef<Path>,
+        F: FnMut(&str) -> Result<String>,
+    {
+        fn find_case_insensitive(text: &str, query: &str) -> Option<(usize, usize)> {
+            if query.is_empty() {
+                return None;
+            }
+            let mut folded = String::new();
+            let mut original_indices = Vec::new();
+            for (index, ch) in text.char_indices() {
+                for lower in ch.to_lowercase() {
+                    folded.push(lower);
+                    original_indices.push(index);
+                }
+            }
+            let folded_query = query.to_lowercase();
+            let matched = folded.find(&folded_query)?;
+            let char_index = folded[..matched].chars().count();
+            let query_chars = folded_query.chars().count();
+            let start = *original_indices.get(char_index)?;
+            let last = *original_indices.get(char_index + query_chars.checked_sub(1)?)?;
+            let end = last + text[last..].chars().next()?.len_utf8();
+            Some((start, end))
+        }
+
+        fn byte_at_char(text: &str, index: usize) -> usize {
+            text.char_indices().nth(index).map(|(at, _)| at).unwrap_or(text.len())
+        }
+
+        fn snippet(text: &str, terms: &[&str]) -> String {
+            let first = terms
+                .iter()
+                .filter_map(|term| find_case_insensitive(text, term))
+                .min_by_key(|(start, _)| *start);
+            let Some((match_start, _)) = first else {
+                return text.chars().take(400).collect();
+            };
+            let char_at = text[..match_start].chars().count();
+            let start_char = char_at.saturating_sub(160);
+            let end_char = (char_at + 240).min(text.chars().count());
+            let mut out = text[byte_at_char(text, start_char)..byte_at_char(text, end_char)]
+                .trim()
+                .to_string();
+            if end_char < text.chars().count() {
+                out.push('…');
+            }
+            out
+        }
+
+        fn matches(text: &str, terms: &[&str]) -> bool {
+            terms.iter().all(|term| find_case_insensitive(text, term).is_some())
+        }
+
+        fn references_heading(heading: &str) -> bool {
+            let normalized = heading.trim().to_lowercase();
+            normalized.starts_with("references")
+                || normalized.starts_with("bibliography")
+                || normalized.contains("参考文献")
+        }
+
+        let query = query.trim();
+        if query.is_empty() {
+            return Err("query is empty".into());
+        }
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        let limit = limit.clamp(1, 30);
+        let started = std::time::Instant::now();
+        let max_duration = max_duration_ms.map(std::time::Duration::from_millis);
+        let mut doc = EpubDoc::new(path.as_ref()).map_err(|e| format!("打开 EPUB 失败: {}", e))?;
+        let num_pages = doc.get_num_pages();
+        let section_cap = max_sections.map(|value| value.clamp(1, 200).min(num_pages)).unwrap_or(num_pages);
+        let mut results = Vec::new();
+        let mut scanned_sections = 0usize;
+        let mut scan_failed = false;
+
+        for spine in 0..num_pages {
+            if scanned_sections >= section_cap
+                || max_duration.is_some_and(|duration| started.elapsed() >= duration)
+                || results.len() >= limit
+            {
+                break;
+            }
+            scanned_sections += 1;
+            if !doc.set_current_page(spine) {
+                scan_failed = true;
+                continue;
+            }
+            let Some((html, _mime)) = doc.get_current_str() else {
+                scan_failed = true;
+                continue;
+            };
+            let heading = self.extract_chapter_title(&html).unwrap_or_else(|| format!("Chapter {}", spine + 1));
+            let text = match extractor(&html) {
+                Ok(text) => text,
+                Err(error) => {
+                    scan_failed = true;
+                    log::warn!("EPUB spine {} 正文提取失败: {}", spine, error);
+                    String::new()
+                }
+            };
+            if !include_references && references_heading(&heading) {
+                continue;
+            }
+            let heading_match = matches(&heading, &terms);
+            let body_match = matches(&text, &terms);
+            if !heading_match && !body_match {
+                continue;
+            }
+            let snippet = if heading_match { snippet(&heading, &terms) } else { snippet(&text, &terms) };
+            results.push(EpubTextSearchHit {
+                heading,
+                spine,
+                snippet,
+                match_kind: if heading_match { "title" } else { "keyword" }.to_string(),
+            });
+        }
+
+        Ok(EpubTextSearchResult {
+            results,
+            scanned_sections,
+            partial: scan_failed || scanned_sections < num_pages,
+        })
+    }
+
     /// 按章节标题直读小节原文（未向量化兜底通道，不依赖索引/mdbook 产物）。
     /// 定位链：EPUB NCX/Nav 目录 → 扁平化带层级 → 标题匹配（规范化全等 → 包含）→
     /// 条目 href 映射 spine 页 → 小节 = [本条目页, 下一个同级或更高级条目页)；
@@ -370,6 +519,21 @@ impl EpubReader {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct EpubTextSearchHit {
+    pub heading: String,
+    pub spine: usize,
+    pub snippet: String,
+    pub match_kind: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EpubTextSearchResult {
+    pub results: Vec<EpubTextSearchHit>,
+    pub scanned_sections: usize,
+    pub partial: bool,
+}
+
 /// read_section 的返回（camelCase 序列化给前端）
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -493,4 +657,177 @@ fn parse_nav_toc(nav: &str, root_base: &Path) -> Vec<(String, String, usize)> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod search_text_tests {
+    use super::EpubReader;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xffff_ffffu32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & (0u32.wrapping_sub(crc & 1)));
+            }
+        }
+        !crc
+    }
+
+    fn push_u16(out: &mut Vec<u8>, value: u16) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(out: &mut Vec<u8>, value: u32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut central = Vec::new();
+        for (name, data) in entries {
+            let offset = out.len() as u32;
+            let crc = crc32(data);
+            push_u32(&mut out, 0x0403_4b50);
+            push_u16(&mut out, 20);
+            push_u16(&mut out, 0);
+            push_u16(&mut out, 0);
+            push_u16(&mut out, 0);
+            push_u16(&mut out, 0);
+            push_u32(&mut out, crc);
+            push_u32(&mut out, data.len() as u32);
+            push_u32(&mut out, data.len() as u32);
+            push_u16(&mut out, name.len() as u16);
+            push_u16(&mut out, 0);
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(data);
+
+            push_u32(&mut central, 0x0201_4b50);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, crc);
+            push_u32(&mut central, data.len() as u32);
+            push_u32(&mut central, data.len() as u32);
+            push_u16(&mut central, name.len() as u16);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, 0);
+            push_u32(&mut central, offset);
+            central.extend_from_slice(name.as_bytes());
+        }
+        let central_offset = out.len() as u32;
+        let central_size = central.len() as u32;
+        out.extend_from_slice(&central);
+        push_u32(&mut out, 0x0605_4b50);
+        push_u16(&mut out, 0);
+        push_u16(&mut out, 0);
+        push_u16(&mut out, entries.len() as u16);
+        push_u16(&mut out, entries.len() as u16);
+        push_u32(&mut out, central_size);
+        push_u32(&mut out, central_offset);
+        push_u16(&mut out, 0);
+        out
+    }
+
+    fn write_epub(dir: &Path) -> PathBuf {
+        let container = r#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#;
+        let manifest = (1..=4)
+            .map(|index| format!(r#"<item id="ch{index}" href="ch{index}.xhtml" media-type="application/xhtml+xml"/>"#))
+            .collect::<String>();
+        let spine = (1..=4)
+            .map(|index| format!(r#"<itemref idref="ch{index}"/>"#))
+            .collect::<String>();
+        let opf = format!(r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>检索夹具</dc:title><dc:creator>测试</dc:creator><dc:language>zh</dc:language></metadata><manifest>{manifest}</manifest><spine>{spine}</spine></package>"#);
+        let pages = [
+            ("导论", "没有命中"),
+            ("法律行为", "前文 意思表示 是核心，后文用于扩窗。"),
+            ("意思表示 释义", "标题命中"),
+            ("References", "ReferenceOnlyNeedle, Example Author, 2024."),
+        ];
+        let mut entries: Vec<(&str, &[u8])> = vec![
+            ("mimetype", b"application/epub+zip"),
+            ("META-INF/container.xml", container.as_bytes()),
+            ("OEBPS/content.opf", opf.as_bytes()),
+        ];
+        let html = pages.map(|(heading, body)| {
+            format!(r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>{heading}</title></head><body><h1>{heading}</h1><p>{body}</p></body></html>"#)
+        });
+        let names = ["OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml", "OEBPS/ch3.xhtml", "OEBPS/ch4.xhtml"];
+        for (index, page) in html.iter().enumerate() {
+            entries.push((names[index], page.as_bytes()));
+        }
+        let path = dir.join("search-fixture.epub");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&stored_zip(&entries)).unwrap();
+        path
+    }
+
+    #[test]
+    fn search_text_returns_anchors_and_bounded_partial_without_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let epub = write_epub(dir.path());
+        let reader = EpubReader::new().unwrap();
+
+        let full = reader.search_text(&epub, "意思表示", 30, None, None, false).unwrap();
+        assert_eq!(full.scanned_sections, 4);
+        assert!(!full.partial);
+        assert_eq!(full.results.len(), 2);
+        let body = full.results.iter().find(|hit| hit.match_kind == "keyword").unwrap();
+        assert_eq!(body.heading, "法律行为");
+        assert_eq!(body.spine, 1);
+        assert!(body.snippet.contains("意思表示"));
+        let title = full.results.iter().find(|hit| hit.match_kind == "title").unwrap();
+        assert_eq!(title.spine, 2);
+        let json = serde_json::to_value(&full).unwrap();
+        assert_eq!(json["scanned_sections"], 4);
+        assert!(json["results"][0].get("match_kind").is_some());
+        assert!(json["results"][0].get("offset").is_none());
+
+        let bounded = reader.search_text(&epub, "意思表示", 30, Some(2), None, false).unwrap();
+        assert_eq!(bounded.scanned_sections, 2);
+        assert!(bounded.partial);
+        assert_eq!(bounded.results.len(), 1);
+        assert_eq!(bounded.results[0].spine, 1);
+    }
+
+    #[test]
+    fn search_text_reference_flag_changes_real_epub_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let epub = write_epub(dir.path());
+        let reader = EpubReader::new().unwrap();
+        let excluded = reader.search_text(&epub, "ReferenceOnlyNeedle", 30, None, None, false).unwrap();
+        let included = reader.search_text(&epub, "ReferenceOnlyNeedle", 30, None, None, true).unwrap();
+        assert!(excluded.results.is_empty());
+        assert_eq!(included.results.len(), 1);
+        assert_eq!(included.results[0].spine, 3);
+    }
+
+    #[test]
+    fn search_text_marks_body_extraction_failure_partial_and_keeps_heading_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        let epub = write_epub(dir.path());
+        let reader = EpubReader::new().unwrap();
+        let result = reader
+            .search_text_with_extractor(&epub, "意思表示 释义", 30, None, None, false, |html| {
+                if html.contains("<p>标题命中</p>") {
+                    Err(anyhow::anyhow!("injected body extraction failure"))
+                } else {
+                    reader.extract_text_content(html)
+                }
+            })
+            .unwrap();
+        assert_eq!(result.scanned_sections, 4);
+        assert!(result.partial, "failed body extraction must make coverage partial");
+        assert_eq!(result.results.len(), 1, "a valid heading hit must survive body failure");
+        assert_eq!(result.results[0].match_kind, "title");
+        assert_eq!(result.results[0].spine, 2);
+    }
 }

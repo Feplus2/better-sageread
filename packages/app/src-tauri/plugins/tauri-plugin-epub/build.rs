@@ -5,6 +5,7 @@ const COMMANDS: &[&str] = &[
     "convert_to_mdbook",
     "parse_toc",
     "read_book_section",
+    "search_epub_text",
     "get_chunk_with_context",
     "get_toc_chunks",
     "get_chunks_by_range",

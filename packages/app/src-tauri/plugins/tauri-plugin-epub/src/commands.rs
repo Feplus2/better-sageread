@@ -36,6 +36,36 @@ pub async fn read_book_section<R: Runtime>(
     reader.read_section(&epub_path, chapter_title.trim(), max_chars.unwrap_or(8000).clamp(500, 30000))
 }
 
+#[tauri::command]
+pub async fn search_epub_text<R: Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, EpubState>,
+    book_id: String,
+    query: String,
+    limit: Option<usize>,
+    max_sections: Option<usize>,
+    max_duration_ms: Option<u64>,
+    include_references: Option<bool>,
+) -> Result<crate::epub::EpubTextSearchResult, String> {
+    if book_id.trim().is_empty() || query.trim().is_empty() {
+        return Err("book_id / query is empty".into());
+    }
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let epub_path = app_data_dir.join("books").join(&book_id).join("book.epub");
+    if !epub_path.is_file() {
+        return Err(format!("未找到书籍文件: {}", book_id));
+    }
+    let reader = EpubReader::new().map_err(|e| e.to_string())?;
+    reader.search_text(
+        &epub_path,
+        query.trim(),
+        limit.unwrap_or(6),
+        max_sections,
+        max_duration_ms,
+        include_references.unwrap_or(false),
+    )
+}
+
 /// Parse an EPUB under $AppData/books/{book_id} and return basic metadata.
 #[tauri::command]
 pub async fn parse_epub<R: Runtime>(
@@ -245,7 +275,7 @@ pub async fn search_db<R: Runtime>(
     let results = crate::pipeline::search_db_with_mode(
         &book_dir,
         &query,
-        limit.unwrap_or(5),
+        limit.unwrap_or(5).clamp(1, 30),
         dimension.unwrap_or(1024),
         VectorizerConfig {
             embeddings_url,
@@ -292,7 +322,7 @@ pub struct BookSearchHitDto {
     pub md_file_path: String,
 }
 
-/// 跨书库统一检索：一次 embedding，fan-out 到所有已有 vectors.sqlite 的书。
+/// 跨书库统一检索：有嵌入配置时一次 embedding fan-out；无配置时使用各书 BM25。
 #[tauri::command]
 pub async fn search_all_books_db<R: Runtime>(
     app: AppHandle<R>,
@@ -300,36 +330,81 @@ pub async fn search_all_books_db<R: Runtime>(
     query: String,
     limit: Option<usize>,
     per_book_limit: Option<usize>,
-    embeddings_url: String,
-    model: String,
+    embeddings_url: Option<String>,
+    model: Option<String>,
     api_key: Option<String>,
+    vector_weight: Option<f32>,
+    bm25_weight: Option<f32>,
+    include_references: Option<bool>,
 ) -> Result<Vec<BookSearchHitDto>, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let books_dir = app_data_dir.join("books");
     if !books_dir.is_dir() {
         return Ok(Vec::new());
     }
-    let vectorizer = TextVectorizer::new(VectorizerConfig {
-        embeddings_url,
-        model_name: model,
-        api_key,
-        usage_db: usage_db_path(&app),
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    let actual_dimension = vectorizer
-        .detect_embedding_dimension()
-        .await
-        .map_err(|e| e.to_string())?;
-    let embedding = vectorizer
-        .vectorize_text(&query)
-        .await
-        .map_err(|e| e.to_string())?;
-    let config = crate::config::get_smart_hybrid_config(&query);
-    let per_book = per_book_limit.unwrap_or(4).clamp(1, 10);
+    let vectorizer = embeddings_url
+        .filter(|url| !url.trim().is_empty())
+        .map(|url| VectorizerConfig {
+            embeddings_url: url,
+            model_name: model.unwrap_or_default(),
+            api_key,
+            usage_db: usage_db_path(&app),
+        });
+    let (actual_dimension, embedding) = match vectorizer {
+        Some(config) => {
+            let vectorizer = TextVectorizer::new(config).await.map_err(|e| e.to_string())?;
+            let dimension = vectorizer
+                .detect_embedding_dimension()
+                .await
+                .map_err(|e| e.to_string())?;
+            let embedding = vectorizer
+                .vectorize_text(&query)
+                .await
+                .map_err(|e| e.to_string())?;
+            (dimension, Some(embedding))
+        }
+        None => (1024, None),
+    };
+    let config = if vector_weight.is_some() || bm25_weight.is_some() {
+        crate::config::create_custom_hybrid_config(
+            Some(crate::models::SearchMode::Hybrid),
+            vector_weight,
+            bm25_weight,
+        )
+    } else {
+        crate::config::get_smart_hybrid_config(&query)
+    };
+    let per_book = per_book_limit.unwrap_or(4).clamp(1, 30);
+    let include_references = include_references.unwrap_or(false);
+    search_all_books_db_core(
+        &books_dir,
+        &query,
+        embedding.as_deref(),
+        actual_dimension,
+        &config,
+        per_book,
+        limit.unwrap_or(8),
+        include_references,
+    )
+}
 
+/// AppHandle-free cross-book search core used by the Tauri command and real SQLite integration tests.
+pub(crate) fn search_all_books_db_core(
+    books_dir: &std::path::Path,
+    query: &str,
+    query_embedding: Option<&[f32]>,
+    actual_dimension: usize,
+    config: &crate::models::HybridSearchConfig,
+    per_book: usize,
+    limit: usize,
+    include_references: bool,
+) -> Result<Vec<BookSearchHitDto>, String> {
+    if !books_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let per_book = per_book.clamp(1, 30);
     let mut hits: Vec<BookSearchHitDto> = Vec::new();
-    let entries = std::fs::read_dir(&books_dir).map_err(|e| e.to_string())?;
+    let entries = std::fs::read_dir(books_dir).map_err(|e| e.to_string())?;
     for entry in entries.flatten() {
         let dir = entry.path();
         if !dir.is_dir() {
@@ -348,7 +423,14 @@ pub async fn search_all_books_db<R: Runtime>(
             Ok(db) => db,
             Err(_) => continue,
         };
-        let results = match db.search_with_mode_filtered(&query, Some(&embedding), per_book, &config, None, false) {
+        let results = match db.search_with_mode_filtered(
+            query,
+            query_embedding,
+            per_book,
+            config,
+            None,
+            include_references,
+        ) {
             Ok(results) => results,
             Err(_) => continue,
         };
@@ -375,7 +457,7 @@ pub async fn search_all_books_db<R: Runtime>(
             .partial_cmp(&left.similarity)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    hits.truncate(limit.unwrap_or(8).clamp(1, 20));
+    hits.truncate(limit.clamp(1, 30));
     Ok(hits)
 }
 
@@ -784,7 +866,7 @@ pub async fn search_papers_db<R: Runtime>(
         &db_path,
         &query,
         paper_ids,
-        top_k.unwrap_or(5),
+        top_k.unwrap_or(5).clamp(1, 30),
         vectorizer,
         vector_weight,
         bm25_weight,
@@ -877,5 +959,120 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // paper.md 缺失 → 报错（调用方降级为告警，不阻断向量化结果）
         assert!(record_vectorized_source_hash(dir.path(), "paper-none").is_err());
+    }
+}
+
+#[cfg(test)]
+mod search_all_books_db_tests {
+    use super::search_all_books_db_core;
+    use crate::models::{DocumentChunk, SearchMode};
+    use std::path::Path;
+
+    fn chunk(title: &str, text: &str, embedding: Vec<f32>, is_references: bool) -> DocumentChunk {
+        DocumentChunk {
+            id: None,
+            book_title: title.to_string(),
+            book_author: "Integration Author".to_string(),
+            paper_id: String::new(),
+            md_file_path: "text/part001.md".to_string(),
+            file_order_in_book: 0,
+            related_chapter_titles: title.to_string(),
+            chunk_text: text.to_string(),
+            chunk_order_in_file: 0,
+            total_chunks_in_file: 1,
+            embedding,
+            global_chunk_index: 0,
+            is_references,
+        }
+    }
+
+    fn write_db(books_dir: &Path, book_id: &str, title: &str, embedding: Vec<f32>) {
+        let dir = books_dir.join(book_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = crate::database::VectorDatabase::new(dir.join("vectors.sqlite"), 2).unwrap();
+        let mut chunks = vec![
+            chunk(title, &format!("needle body {book_id}"), embedding.clone(), false),
+            chunk(
+                &format!("{title} references"),
+                &format!("needle reference {book_id}"),
+                embedding,
+                true,
+            ),
+        ];
+        if book_id == "book-a" {
+            chunks.push(chunk(
+                "Alpha alternate",
+                "needle alternate book-a",
+                vec![0.0, 1.0],
+                false,
+            ));
+        }
+        db.insert_chunks_batch(&chunks).unwrap();
+    }
+
+    #[test]
+    fn search_all_books_db_core_real_dbs_no_network_weights_and_reference_filter() {
+        let temp = tempfile::tempdir().unwrap();
+        let books_dir = temp.path().join("books");
+        write_db(&books_dir, "book-a", "Alpha", vec![1.0, 0.0]);
+        write_db(&books_dir, "book-b", "Beta", vec![0.0, 1.0]);
+        let custom = crate::config::create_custom_hybrid_config(
+            Some(SearchMode::Hybrid),
+            Some(0.2),
+            Some(0.8),
+        );
+
+        let excluded = search_all_books_db_core(&books_dir, "needle", None, 2, &custom, 10, 10, false)
+            .expect("BM25 without network or embedding service");
+        assert_eq!(excluded.len(), 3);
+        assert!(excluded.iter().all(|hit| !hit.content.contains("reference")));
+        assert!(excluded.iter().any(|hit| hit.book_id == "book-a"));
+        assert!(excluded.iter().any(|hit| hit.book_id == "book-b"));
+
+        let included = search_all_books_db_core(&books_dir, "needle", None, 2, &custom, 10, 10, true)
+            .expect("reference-enabled BM25 across actual vector DBs");
+        assert_eq!(included.len(), 5);
+        assert_eq!(included.iter().filter(|hit| hit.content.contains("reference")).count(), 2);
+
+        let vector_heavy = crate::config::create_custom_hybrid_config(
+            Some(SearchMode::Hybrid),
+            Some(1.0),
+            Some(0.0),
+        );
+        let bm25_heavy = crate::config::create_custom_hybrid_config(
+            Some(SearchMode::Hybrid),
+            Some(0.0),
+            Some(1.0),
+        );
+        let query_embedding = [1.0_f32, 0.0_f32];
+        let vector_hits = search_all_books_db_core(
+            &books_dir,
+            "needle",
+            Some(&query_embedding),
+            2,
+            &vector_heavy,
+            10,
+            10,
+            false,
+        )
+        .unwrap();
+        let bm25_hits = search_all_books_db_core(
+            &books_dir,
+            "needle",
+            Some(&query_embedding),
+            2,
+            &bm25_heavy,
+            10,
+            10,
+            false,
+        )
+        .unwrap();
+        let score = |hits: &[super::BookSearchHitDto], content: &str| {
+            hits.iter().find(|hit| hit.content == content).unwrap().similarity
+        };
+        let vector_alternate = score(&vector_hits, "needle alternate book-a");
+        let bm25_alternate = score(&bm25_hits, "needle alternate book-a");
+        assert!(vector_alternate < bm25_alternate);
+        assert!(score(&vector_hits, "needle body book-b") > 0.0);
     }
 }

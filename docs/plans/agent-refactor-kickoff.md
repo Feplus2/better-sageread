@@ -1,9 +1,11 @@
 # Agent 大更新 · 开工计划
 
-> 2026-10-22 · 状态：Phase 0 · G0 待评审（协议 v0 + 10 题已出，未动产品代码）
+> 2026-10-22 开工；2026-10-24 当前状态：P0/P1/P2 与发布前修复已落地，发版仍待用户决定。
 > 目标架构：docs/audits/agent-architecture-benchmark.md
 > 评测方案：docs/audits/agent-eval-plan.md
 > 现状盘点：docs/audits/research/sageread-agent-inventory.md
+>
+> **当前契约（覆盖下文历史阶段描述）**：文档工具仅有 `new` / `legacy`，默认 `new`；旧持久化 Both/非法值归一为 `new`，显式 Legacy 保留，设置页可回退。阅读助手缺省范围为 `current`，论文助手为 `library`，全局助手恒为 `all`；只补缺失记录，不改写已保存范围。New 的 `searchLibrary` 对未索引文档提供关键词/标题检索，命中以 `hit.read` 交给 `readDocument` 扩窗，与目录/原文读取互补；library/all 的 partial 结果可用 `next_cursor` 继续扫描后续文档并避免跨页重复，current/doc 语义不变。全局助手在 New/Legacy 都有论文 `getFigures/getCitations`，必须显式传 `doc=paper:<id>`；书籍与阅读助手不注册这两个 extras。请求历史仅改发送副本以兼容 direct/directory 与旧 MCP 图片，UI/DB 原消息不删不改。图片经 Rust canonical 判界并在同一调用读取，严格/宽松/完全访问按既有安全模式决定是否确认；敏感路径、目录与超限文件仍在所有模式拒绝。
 
 ## 0. 一句话
 
@@ -104,7 +106,7 @@
 - 位置：主通道是每轮注入；get_reading_position 只做逃生口（P1 后评估删除）。
 - 评测运行方式：L2 优先页面内直连 harness（CDP 9223 已验证），避免向 threads 写评测垃圾。
 
-## 9. 进度记录
+## 9. 进度记录（当时状态与数值；当前契约见文首）
 
 - 2026-10-22：0A 完成（evals/fixtures/README.md：6 个 fixture，含索引/图/引用/阅读位置）；
 - 2026-10-22：0B 草案完成（docs/design/anchor-protocol.md：7 个阅读工具 + 六类锚点 + 预算 + 错误码 + 待拍板 6 问）；

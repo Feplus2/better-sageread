@@ -33,8 +33,8 @@ function coordinateLine(p: ReadingPositionSnapshot): string {
   return parts.join(" · ");
 }
 
-/** 提示词动态段：书籍/论文统一格式；调用方负责拼到 system prompt 尾部 */
-export function formatPositionForPrompt(p: ReadingPositionSnapshot): string {
+/** 提示词动态段：书籍/论文统一格式；调用方负责拼到 system prompt 尾部并传当前文档模式 */
+export function formatPositionForPrompt(p: ReadingPositionSnapshot, documentToolMode: "new" | "legacy"): string {
   const label =
     p.scope === "reader"
       ? `章节：${p.label}${p.labelSource === "fallback" ? "（目录不可用，按 spine 定位）" : ""}`
@@ -44,8 +44,9 @@ export function formatPositionForPrompt(p: ReadingPositionSnapshot): string {
     lines.push(`spine：${p.spineIndex + 1}/${p.spineTotal}${p.cfi ? ` · CFI：${p.cfi}` : ""}`);
   }
   lines.push(`进度：全书 ${pct(p.overallPercent)}%`);
+  const readTool = documentToolMode === "new" ? "readDocument(position=true)" : "readAtReadingPosition";
   lines.push(
-    "（每轮更新，以此为准；历史消息中的位置可能已过时。需要原文时用 readAtReadingPosition 按需读取，不要凭记忆复述正文。）",
+    `（每轮更新，以此为准；历史消息中的位置可能已过时。需要原文时用 ${readTool} 按需读取，不要凭记忆复述正文。）`,
   );
   return lines.join("\n").slice(0, MAX_POSITION_PROMPT_CHARS);
 }

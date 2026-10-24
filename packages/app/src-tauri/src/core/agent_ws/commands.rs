@@ -64,16 +64,91 @@ fn truncate_chars(s: &str, max: usize) -> String {
     format!("{}…[截断]", kept)
 }
 
-// ---- agent_resolve_path ----
+// ---- agent_resolve_path / agent_read_image ----
+
+const IMAGE_MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
+
+fn resolve_image_roots(
+    app: &AppHandle,
+    root: &Option<String>,
+    additional_roots: &Option<Vec<String>>,
+) -> Result<Vec<PathBuf>, String> {
+    let mut roots = vec![app.path().app_data_dir().map_err(|e| format!("获取应用目录失败: {}", e))?];
+    roots.push(resolve_root(app, root)?);
+    for custom in additional_roots.iter().flatten() {
+        roots.push(resolve_root(app, &Some(custom.clone()))?);
+    }
+    Ok(roots)
+}
 
 #[tauri::command]
 pub fn agent_resolve_path(
     app: AppHandle,
     root: Option<String>,
     path: String,
+    additional_roots: Option<Vec<String>>,
+    include_app_data: Option<bool>,
 ) -> Result<GuardVerdict, String> {
+    if include_app_data == Some(true) {
+        let roots = resolve_image_roots(&app, &root, &additional_roots)?;
+        return Ok(super::guard_with_roots(&roots, &path));
+    }
     let root = resolve_root(&app, &root)?;
     Ok(guard(&root, &path))
+}
+
+fn read_image_bytes(
+    roots: &[PathBuf],
+    path: &str,
+    allow_outside: bool,
+    expected_path: Option<&str>,
+    expected_resolved: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let verdict = super::guard_with_roots(roots, path);
+    if is_denied_path(&verdict.resolved) {
+        return Err(DENY_MESSAGE.to_string());
+    }
+    if verdict.verdict == "out" && !allow_outside {
+        return Err(format!("路径在工作区外且未经用户确认: {}", verdict.resolved));
+    }
+    if expected_path.is_some_and(|expected| expected != path) {
+        return Err("图片读取授权的原始路径不匹配".to_string());
+    }
+    if expected_resolved.is_some_and(|expected| expected != verdict.resolved) {
+        return Err("图片的规范化路径已变化，需重新确认".to_string());
+    }
+    if verdict.verdict == "out" && (expected_path.is_none() || expected_resolved.is_none()) {
+        return Err("界外图片读取缺少原始路径或规范化路径绑定".to_string());
+    }
+    if !verdict.exists || verdict.is_dir {
+        return Err(format!("图片不存在或是目录: {}", verdict.resolved));
+    }
+    let meta = std::fs::metadata(&verdict.resolved).map_err(|e| format!("读取图片元信息失败: {}", e))?;
+    if meta.len() > IMAGE_MAX_FILE_BYTES {
+        return Err(format!("图片体积超过 20MB 上限: {}", verdict.resolved));
+    }
+    std::fs::read(&verdict.resolved).map_err(|e| format!("读取图片失败: {}", e))
+}
+
+#[tauri::command]
+pub fn agent_read_image(
+    app: AppHandle,
+    root: Option<String>,
+    additional_roots: Option<Vec<String>>,
+    path: String,
+    allow_outside: Option<bool>,
+    expected_path: Option<String>,
+    expected_resolved: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let roots = resolve_image_roots(&app, &root, &additional_roots)?;
+    let bytes = read_image_bytes(
+        &roots,
+        &path,
+        allow_outside == Some(true),
+        expected_path.as_deref(),
+        expected_resolved.as_deref(),
+    )?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ---- agent_read_file ----
@@ -480,6 +555,22 @@ fn audit_command(app: &AppHandle, root: &Path, command: &str, result: &RunResult
     }
 }
 
+fn shell_command(command: &str) -> tokio::process::Command {
+    #[cfg(windows)]
+    let cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/D", "/S", "/C"]).raw_arg(format!("\"{command}\""));
+        c
+    };
+    #[cfg(not(windows))]
+    let cmd = {
+        let mut c = tokio::process::Command::new("sh");
+        c.args(["-c", command]);
+        c
+    };
+    cmd
+}
+
 #[tauri::command]
 pub async fn agent_run_command(
     app: AppHandle,
@@ -492,15 +583,7 @@ pub async fn agent_run_command(
         .unwrap_or(RUN_DEFAULT_TIMEOUT_SECS)
         .clamp(1, RUN_MAX_TIMEOUT_SECS);
 
-    let mut cmd = if cfg!(windows) {
-        let mut c = tokio::process::Command::new("cmd");
-        c.args(["/C", &command]);
-        c
-    } else {
-        let mut c = tokio::process::Command::new("sh");
-        c.args(["-c", &command]);
-        c
-    };
+    let mut cmd = shell_command(&command);
     cmd.current_dir(&root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -554,4 +637,362 @@ pub async fn agent_run_command(
     };
     audit_command(&app, &root, &command, &result);
     Ok(result)
+}
+
+#[cfg(all(test, windows))]
+mod windows_command_tests {
+    use super::shell_command;
+    use std::path::{Path, PathBuf};
+    use std::process::{Output, Stdio};
+
+    static NEXT_WORKSPACE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    struct TestWorkspace(PathBuf);
+
+    impl TestWorkspace {
+        fn new() -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos();
+            let sequence = NEXT_WORKSPACE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "sageread agent ws {} {} {}",
+                std::process::id(),
+                unique,
+                sequence
+            ));
+            std::fs::create_dir(&path).expect("create unique test workspace");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).expect("remove test workspace");
+        }
+    }
+
+    async fn run(command: &str, cwd: &Path) -> Output {
+        let mut cmd = shell_command(command);
+        cmd.current_dir(cwd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+        cmd.creation_flags(0x08000000);
+        cmd.output().await.expect("run Windows shell command")
+    }
+
+    #[tokio::test]
+    async fn quoted_python_code_captures_stdout() {
+        let workspace = TestWorkspace::new();
+        let output = run(r#"python -c "print(123)""#, workspace.path()).await;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(output.status.code(), Some(0), "stdout={stdout:?}, stderr={stderr:?}");
+        assert_eq!(stdout.trim(), "123", "quoted Python stdout must not be empty; stderr={stderr:?}");
+    }
+
+    #[tokio::test]
+    async fn quoted_python_error_preserves_nonzero_exit_and_stderr() {
+        let workspace = TestWorkspace::new();
+        let output = run(r#"python -c "1/0""#, workspace.path()).await;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(output.status.code(), Some(1), "stdout={stdout:?}, stderr={stderr:?}");
+        assert!(stderr.contains("ZeroDivisionError"), "stdout={stdout:?}, stderr={stderr:?}");
+    }
+
+    #[tokio::test]
+    async fn chained_commands_capture_both_outputs() {
+        let workspace = TestWorkspace::new();
+        let output = run(
+            r#"python -c "print('first')" && python -c "print('second')""#,
+            workspace.path(),
+        )
+        .await;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(output.status.code(), Some(0), "stdout={stdout:?}, stderr={stderr:?}");
+        assert_eq!(stdout.lines().collect::<Vec<_>>(), ["first", "second"], "stderr={stderr:?}");
+    }
+
+    #[tokio::test]
+    async fn quoted_argument_and_workspace_path_with_spaces_are_preserved() {
+        let workspace = TestWorkspace::new();
+        let output = run(
+            r#"python -c "import os,sys; print(sys.argv[1]); print(os.getcwd())" "argument with spaces""#,
+            workspace.path(),
+        )
+        .await;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let lines = stdout.lines().collect::<Vec<_>>();
+
+        assert_eq!(output.status.code(), Some(0), "stdout={stdout:?}, stderr={stderr:?}");
+        assert_eq!(lines.first(), Some(&"argument with spaces"), "stdout={stdout:?}, stderr={stderr:?}");
+        assert_eq!(lines.get(1).map(Path::new), Some(workspace.path()), "stdout={stdout:?}, stderr={stderr:?}");
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::read_image_bytes;
+    use std::path::{Path, PathBuf};
+
+    const FAKE_PNG: &[u8] = b"\x89PNG\r\n\x1a\nTask 9 fake PNG";
+    static NEXT_WORKSPACE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    struct TestWorkspace(PathBuf);
+
+    impl TestWorkspace {
+        fn new() -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos();
+            let sequence = NEXT_WORKSPACE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "sageread-task9-image-{}-{}-{}",
+                std::process::id(),
+                unique,
+                sequence
+            ));
+            std::fs::create_dir(&path).expect("create unique image test workspace");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_fake_png(path: &Path) {
+        std::fs::create_dir_all(path.parent().expect("image has a parent")).expect("create image parent");
+        std::fs::write(path, FAKE_PNG).expect("write fake PNG");
+    }
+
+    fn resolved(path: &Path) -> String {
+        super::display_path(&std::fs::canonicalize(path).expect("canonicalize test image"))
+    }
+
+    #[test]
+    fn image_read_accepts_app_data_shared_and_per_agent_roots() {
+        let workspace = TestWorkspace::new();
+        let roots = vec![
+            workspace.path().join("appdata"),
+            workspace.path().join("shared"),
+            workspace.path().join("reader-agent"),
+        ];
+        for root in &roots {
+            let image = root.join("figure.png");
+            write_fake_png(&image);
+        }
+
+        for root in &roots {
+            let image = root.join("figure.png");
+            let bytes = read_image_bytes(&roots, image.to_str().unwrap(), false, None, None)
+                .expect("each configured image root should be readable");
+            assert_eq!(bytes, FAKE_PNG);
+        }
+    }
+
+    #[test]
+    fn image_read_parent_traversal_requires_a_bound_outside_grant() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        let outside = workspace.path().join("outside.png");
+        std::fs::create_dir(&root).expect("create allowed root");
+        write_fake_png(&outside);
+        let original = root.join("..").join("outside.png");
+        let original = original.to_str().unwrap();
+        let resolved = resolved(&outside);
+
+        let error = read_image_bytes(&[root.clone()], original, false, None, None)
+            .expect_err("parent traversal must not bypass the outside check");
+        assert!(error.contains("工作区外"), "unexpected error: {error}");
+        let bytes = read_image_bytes(
+            &[root],
+            original,
+            true,
+            Some(original),
+            Some(&resolved),
+        )
+        .expect("an exact original-path and canonical-target grant should allow an outside read");
+        assert_eq!(bytes, FAKE_PNG);
+    }
+
+    #[test]
+    fn image_read_outside_grant_rejects_a_different_original_path() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        let outside = workspace.path().join("outside.png");
+        std::fs::create_dir(&root).expect("create allowed root");
+        write_fake_png(&outside);
+        let original = outside.to_str().unwrap();
+        let alias = workspace.path().join("nested").join("..").join("outside.png");
+        let resolved = resolved(&outside);
+
+        let error = read_image_bytes(
+            &[root],
+            alias.to_str().unwrap(),
+            true,
+            Some(original),
+            Some(&resolved),
+        )
+        .expect_err("a grant must not be reusable with a different original path");
+        assert!(error.contains("原始路径"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn image_read_rejects_a_changed_expected_resolved_target() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        let first = workspace.path().join("first.png");
+        let second = workspace.path().join("second.png");
+        write_fake_png(&first);
+        write_fake_png(&second);
+        let first_path = first.to_str().unwrap();
+
+        let error = read_image_bytes(
+            &[root],
+            first_path,
+            true,
+            Some(first_path),
+            Some(&resolved(&second)),
+        )
+        .expect_err("the canonical target must match the approved target");
+        assert!(error.contains("规范化路径"), "unexpected error: {error}");
+    }
+
+    #[cfg(windows)]
+    fn make_junction(link: &Path, target: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("run mklink /J");
+        assert!(
+            output.status.success(),
+            "mklink /J failed: stdout={:?}, stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    fn remove_junction(link: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/D", "/C", "rmdir"])
+            .arg(link)
+            .output()
+            .expect("remove test junction");
+        assert!(output.status.success(), "rmdir junction failed: {output:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn image_read_windows_junction_cannot_escape_or_be_retargeted_after_approval() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        let outside_a = workspace.path().join("outside-a");
+        let outside_b = workspace.path().join("outside-b");
+        std::fs::create_dir(&root).expect("create allowed root");
+        write_fake_png(&outside_a.join("figure.png"));
+        write_fake_png(&outside_b.join("figure.png"));
+        let junction = root.join("figure-link");
+        make_junction(&junction, &outside_a);
+        let original_path = junction.join("figure.png");
+        let original = original_path.to_str().unwrap();
+        let approved_resolved = resolved(&outside_a.join("figure.png"));
+
+        let error = read_image_bytes(&[root.clone()], original, false, None, None)
+            .expect_err("a junction into an outside directory is still outside");
+        assert!(error.contains("工作区外"), "unexpected error: {error}");
+        let approved = read_image_bytes(
+            &[root.clone()],
+            original,
+            true,
+            Some(original),
+            Some(&approved_resolved),
+        )
+        .expect("the explicitly approved junction target should be readable");
+        assert_eq!(approved, FAKE_PNG);
+
+        remove_junction(&junction);
+        make_junction(&junction, &outside_b);
+        let error = read_image_bytes(
+            &[root],
+            original,
+            true,
+            Some(original),
+            Some(&approved_resolved),
+        )
+        .expect_err("retargeting the junction after approval must invalidate the grant");
+        assert!(error.contains("规范化路径"), "unexpected error: {error}");
+        remove_junction(&junction);
+    }
+
+    #[test]
+    fn image_read_sensitive_filename_is_denied_even_with_png_bytes_and_outside_grant() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        let inside = root.join("model-provider.json");
+        let outside = workspace.path().join("model-provider.json");
+        write_fake_png(&inside);
+        write_fake_png(&outside);
+
+        let inside_error = read_image_bytes(&[root.clone()], inside.to_str().unwrap(), false, None, None)
+            .expect_err("sensitive names are denied inside the roots");
+        assert!(inside_error.contains("凭据"), "unexpected error: {inside_error}");
+        let outside_path = outside.to_str().unwrap();
+        let outside_error = read_image_bytes(
+            &[root],
+            outside_path,
+            true,
+            Some(outside_path),
+            Some(&resolved(&outside)),
+        )
+        .expect_err("an outside grant must not override the sensitive-path denylist");
+        assert!(outside_error.contains("凭据"), "unexpected error: {outside_error}");
+    }
+
+    #[test]
+    fn image_read_rejects_directories() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        std::fs::create_dir(&root).expect("create allowed root");
+
+        let error = read_image_bytes(&[root.clone()], root.to_str().unwrap(), false, None, None)
+            .expect_err("a directory is not an image byte stream");
+        assert!(error.contains("目录"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn image_read_enforces_the_twenty_mib_limit() {
+        let workspace = TestWorkspace::new();
+        let root = workspace.path().join("allowed");
+        std::fs::create_dir(&root).expect("create allowed root");
+        let image = root.join("oversize.png");
+        let file = std::fs::File::create(&image).expect("create oversize image");
+        file.set_len(20 * 1024 * 1024 + 1).expect("size oversize image");
+
+        let error = read_image_bytes(&[root], image.to_str().unwrap(), false, None, None)
+            .expect_err("images larger than 20 MiB must be rejected before reading");
+        assert!(error.contains("20MB"), "unexpected error: {error}");
+    }
 }

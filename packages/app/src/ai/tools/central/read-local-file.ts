@@ -33,7 +33,7 @@ read：带行号的内容（格式 "行号<TAB>内容"）、总行数、是否�
 
 ⚠️ **什么时候别用**：
 • 不知道文件在哪时先 searchFiles 找，别逐个目录翻
-• 读取书籍正文/论文内容用各自的领域工具（readPaperSection 等），这里只读工作区与本地文件`,
+• 不要用本工具绕过文献库范围或权限读取书籍/论文正文；这里只读工作区与本地文件`,
 
   inputSchema: z.object({
     reasoning: z.string().min(1).describe("调用此工具的原因"),

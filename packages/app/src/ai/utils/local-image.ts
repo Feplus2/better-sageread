@@ -1,6 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
-
-/** P0 本地图片读取：路径 → 魔数嗅探 → 尺寸/体积限制 → 超长边降采样 → dataUrl。 */
+/** P0 本地图片处理：ArrayBuffer → 魔数嗅探 → 尺寸/体积限制 → 超长边降采样 → dataUrl。 */
 
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 /** 长边上限：2026-10-22 从 2048 下调——实测两张 2048 图同轮会让单次请求拖到 7 分钟；1536 已足够看清图注小字 */
@@ -102,28 +100,23 @@ function canvasToImageDataUrl(
 }
 
 /**
- * 读取本地绝对路径图片；体积超限/非图片抛错。
+ * 处理 canonical Rust 通道返回的图片字节；体积超限/非图片抛错。
  * 长边按 maxEdge（默认 1024，上限 1536）降采样；并把 dataUrl 控到 targetDataUrlChars 内
  * （默认约 420k 字符；批量看图时调用方按张数摊分预算，降质量 → 降尺寸）。
  */
 export async function loadLocalImageAsDataUrl(
-  filePath: string,
+  buffer: ArrayBuffer,
   options?: { maxEdge?: number; targetDataUrlChars?: number },
 ): Promise<LocalImageResult> {
-  const assetUrl = convertFileSrc(filePath);
-  const response = await fetch(assetUrl);
-  if (!response.ok) {
-    throw new Error(`读取图片失败（HTTP ${response.status}）：${filePath}`);
+  if (buffer.byteLength > MAX_IMAGE_BYTES) {
+    throw new Error(`图片体积 ${(buffer.byteLength / 1048576).toFixed(1)}MB 超过 20MB 上限`);
   }
-  const blob = await response.blob();
-  if (blob.size > MAX_IMAGE_BYTES) {
-    throw new Error(`图片体积 ${(blob.size / 1048576).toFixed(1)}MB 超过 20MB 上限`);
-  }
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const bytes = new Uint8Array(buffer);
   const sniffed = sniffImageMediaTypeFromBytes(bytes);
   if (!sniffed) {
     throw new Error("不是可识别的图片格式（支持 jpeg/png/gif/webp）");
   }
+  const blob = new Blob([buffer], { type: sniffed });
   const rawDataUrl = await blobToDataUrl(blob);
   const img = await decodeImage(rawDataUrl);
   const width = img.naturalWidth;

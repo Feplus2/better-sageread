@@ -1,7 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RETRIEVAL_SCOPE_OPTIONS, type RetrievalScopeRole, isRetrievalScope } from "@/constants/retrieval-scope";
-import { useAgentSettingsStore } from "@/store/agent-settings-store";
+import { normalizeDocumentToolMode, useAgentSettingsStore } from "@/store/agent-settings-store";
 import { useRetrievalScopeFor, useRetrievalScopeStore } from "@/store/retrieval-scope-store";
 
 interface RetrievalScopeSelectProps {
@@ -13,7 +13,7 @@ interface RetrievalScopeSelectProps {
 
 /**
  * 检索范围下拉（阅读助手：本书 / 图书馆 / 图书馆+论文库；论文助手：本篇 / 论文库 / 论文库+图书馆）。
- * - 按每本书/每篇论文持久化，默认 current；
+ * - 按每本书/每篇论文持久化，reader 缺省本书、paper 缺省论文库；
  * - 旧版文档工具模式下隐藏：旧工具集无法完整兑现三档语义，避免给出误导性的范围承诺。
  * 全局助手不渲染本组件（无下拉，恒为全部/全能）。
  */
@@ -21,7 +21,7 @@ export function RetrievalScopeSelect({ role, docId, className }: RetrievalScopeS
   // 订阅设置变化；同时尊重评测/调试用的 window 覆盖（mode.ts 的 __SAGEREAD_DOC_TOOL_MODE__）
   const documentToolMode = useAgentSettingsStore((state) => {
     const override = typeof window !== "undefined" ? window.__SAGEREAD_DOC_TOOL_MODE__ : undefined;
-    return override === "new" || override === "legacy" || override === "both" ? override : state.documentToolMode;
+    return override !== undefined ? normalizeDocumentToolMode(override) : state.documentToolMode;
   });
   const scope = useRetrievalScopeFor(role, docId);
   const setScope = useRetrievalScopeStore((state) => state.setScope);

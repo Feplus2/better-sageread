@@ -66,6 +66,20 @@ function toolContent(files) {
   });
 }
 
+function assistantToolCall(id, name, input) {
+  return {
+    role: "assistant",
+    content: "",
+    tool_calls: [
+      {
+        id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(input ?? {}) },
+      },
+    ],
+  };
+}
+
 async function transform(body) {
   const captured = { body: null };
   const fakeFetch = async (_input, init) => {
@@ -324,7 +338,94 @@ console.log("[6] 非 JSON / 无图片请求原样透传");
   check("非 JSON body 原样透传", captured[1] === "not-json", captured[1]);
 }
 
-console.log("[7] 落库 sanitize：图片字节不写进线程（内存消息不动）");
+console.log("[7] raw MCP image/file-data：toolCallId→名称（含 useTool）；历史零回灌也写回 sanitize；live 可看图");
+{
+  bridge.clearToolImageCache();
+  const RAW_MCP = Buffer.from("chat-bridge-raw-mcp").toString("base64");
+  const rawWithPath = {
+    content: [
+      { type: "text", text: "<path>C:/ws/legacy-mcp.png</path>" },
+      { type: "image", data: RAW_MCP, mimeType: "image/png" },
+    ],
+    structuredContent: { page: 9 },
+    customField: "keep-chat-history",
+  };
+  const rawForwarded = {
+    content: [
+      {
+        type: "file",
+        mediaType: "image/png",
+        data: { type: "data", data: RAW_MCP },
+      },
+    ],
+    structuredContent: { forwarded: true },
+  };
+  const historyBody = {
+    model: "deepseek-chat",
+    messages: [
+      { role: "user", content: "上一轮" },
+      assistantToolCall("raw-mcp-history", "mcp_demo_render", { page: 9 }),
+      { role: "tool", tool_call_id: "raw-mcp-history", content: JSON.stringify(rawWithPath) },
+      assistantToolCall("raw-mcp-forwarded", "useTool", { tool: "mcp_demo_render", args: {} }),
+      { role: "tool", tool_call_id: "raw-mcp-forwarded", content: JSON.stringify(rawForwarded) },
+      { role: "assistant", content: "上轮回答" },
+      { role: "user", content: "新问题" },
+    ],
+  };
+  const historyOut = await transform(historyBody);
+  const historyTools = toolTexts(historyOut);
+  const historyJson = historyTools.join("\n");
+  check(
+    "历史 raw MCP 零回灌：不新增图片 user 消息，消息数不变",
+    imageUrls(historyOut).length === 0 && historyOut.messages.length === historyBody.messages.length,
+    { images: imageUrls(historyOut).length, before: historyBody.messages.length, after: historyOut.messages.length },
+  );
+  check(
+    "即使零回灌也写回 sanitized content：raw image/file-data 与 base64 均消失",
+    historyTools.length === 2 &&
+      historyTools.every((text) => text.length > 0 && !text.includes(RAW_MCP)) &&
+      !historyJson.includes('"type":"image"') &&
+      !historyJson.includes('"type":"file"'),
+    historyTools,
+  );
+  check(
+    "历史有路径保留路径，无路径诚实要求重调 MCP 且不编造缓存路径",
+    historyTools[0].includes("C:/ws/legacy-mcp.png") &&
+      historyTools[1].includes("重新调用该 MCP 工具") &&
+      !historyTools[1].includes("image-cache"),
+    historyTools,
+  );
+  check(
+    "chat sanitize 保留 structuredContent/custom 字段",
+    historyTools[0].includes('"page":9') &&
+      historyTools[0].includes("keep-chat-history") &&
+      historyTools[1].includes('"forwarded":true'),
+    historyTools,
+  );
+
+  const liveBody = {
+    model: "deepseek-chat",
+    messages: [
+      { role: "user", content: "这一轮看图" },
+      assistantToolCall("raw-mcp-live", "useTool", { tool: "mcp_demo_render", args: {} }),
+      { role: "tool", tool_call_id: "raw-mcp-live", content: JSON.stringify(rawForwarded) },
+    ],
+  };
+  const liveOut = await transform(liveBody);
+  check(
+    "useTool 转发的 live 官方 file-data 仍识别并改挂 image_url",
+    imageUrls(liveOut).length === 1 && imageUrls(liveOut)[0].includes(RAW_MCP),
+    imageUrls(liveOut),
+  );
+  check(
+    "live tool content 已剥图片字节但结构字段仍在",
+    toolTexts(liveOut).every((text) => !text.includes(RAW_MCP) && text.includes('"forwarded":true')),
+    toolTexts(liveOut),
+  );
+  bridge.clearToolImageCache();
+}
+
+console.log("[8] 落库 sanitize：图片字节不写进线程（内存消息不动）");
 {
   const big = dataUrl(5000);
   const envelope = (path) => ({

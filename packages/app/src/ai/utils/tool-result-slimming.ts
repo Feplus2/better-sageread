@@ -16,7 +16,7 @@ import { cacheToolImages } from "./tool-image-cache";
  * clear_at_least：本批可清除量不足下限则整批推迟（缓存重启要断够本）。
  *
  * D8 目录牌模式兼容：useTool 转发的结果 part 名为 tool-useTool，原始工具名从 input.tool
- * 还原后按同名规则走 L1/L2（不改 part 名——stripUnknownToolParts 的 v7 兼容语义依赖现名）。
+ * 还原后按同名规则走 L1/L2（不改 UI/DB part 名；请求副本的历史适配另行处理）。
  *
  * 两层都只改副本/写盘内容，永不改动内存中的原消息（请求期副本语义）。
  */
@@ -74,10 +74,11 @@ const IMAGE_BYTES_PLACEHOLDER =
 // （MCP execute 收口 / 目录牌 useTool / 落库 L1 / native toModelOutput）统一走这里的识别器，
 // 避免各写一套正则导致某条路径漏剥 base64。
 
-/** 工具结果里的图片字节（dataUrl 自带 MIME 前缀与 base64） */
+/** 工具结果里的图片字节（dataUrl 自带 MIME 前缀与 base64）；path 仅来自结果自身的真实路径 */
 export interface ToolImageBytes {
   dataUrl: string;
   mediaType: string;
+  path?: string;
 }
 
 /** 图片占位文案（目录牌 useTool 与 MCP execute 共用；#N 与缓存里的图片顺序一一对应） */
@@ -93,6 +94,11 @@ export function mcpImageSavedPlaceholder(path: string): string {
 /** MCP 图片落盘失败的降级占位：字节省略，明确告知重看要重新调用 MCP 工具 */
 export function mcpImageSaveFailedPlaceholder(seq: number): string {
   return `[MCP 图片 #${seq} 落盘失败已省略（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具]`;
+}
+
+/** 无路径的旧 MCP 历史不能假装还能从缓存重看，只能诚实要求重新调用原 MCP 工具 */
+export function mcpImageHistoryPlaceholder(seq: number): string {
+  return `[历史 MCP 图片 #${seq} 未保留可重看路径（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具]`;
 }
 
 function dataUrlMediaType(dataUrl: string): string {
@@ -117,6 +123,7 @@ export function toolImageBytesFromNode(node: unknown): ToolImageBytes | null {
   if (isImageDataUrl(node)) return { dataUrl: node, mediaType: dataUrlMediaType(node) };
   if (!node || typeof node !== "object" || Array.isArray(node)) return null;
   const record = node as Record<string, unknown>;
+  const path = typeof record.path === "string" && record.path.trim() ? record.path : undefined;
   if (record.type === "image") {
     if (typeof record.data !== "string" || record.data.length === 0) return null;
     const declaredType =
@@ -127,15 +134,20 @@ export function toolImageBytesFromNode(node: unknown): ToolImageBytes | null {
           : "image/jpeg";
     // MCP ImageContent.data 是裸 base64；也兼容服务端直接回 dataUrl 的写法
     if (record.data.startsWith("data:")) {
-      return { dataUrl: record.data, mediaType: dataUrlMediaType(record.data) };
+      return { dataUrl: record.data, mediaType: dataUrlMediaType(record.data), ...(path ? { path } : {}) };
     }
-    return { dataUrl: `data:${declaredType};base64,${record.data}`, mediaType: declaredType };
+    return {
+      dataUrl: `data:${declaredType};base64,${record.data}`,
+      mediaType: declaredType,
+      ...(path ? { path } : {}),
+    };
   }
   if (record.type === "file") {
     if (isImageDataUrl(record.url)) {
       return {
         dataUrl: record.url,
         mediaType: typeof record.mediaType === "string" ? record.mediaType : dataUrlMediaType(record.url),
+        ...(path ? { path } : {}),
       };
     }
     const data = record.data as { type?: string; data?: unknown } | undefined;
@@ -143,7 +155,7 @@ export function toolImageBytesFromNode(node: unknown): ToolImageBytes | null {
       const mediaType = typeof record.mediaType === "string" ? record.mediaType : "";
       // 只认图片：官方 file part 也可能是 PDF/文本，误当图片会破坏文本型结果
       if (!mediaType.startsWith("image/")) return null;
-      return { dataUrl: `data:${mediaType};base64,${data.data}`, mediaType };
+      return { dataUrl: `data:${mediaType};base64,${data.data}`, mediaType, ...(path ? { path } : {}) };
     }
   }
   return null;
@@ -182,6 +194,32 @@ export function collectToolImages(node: unknown): ToolImageBytes[] {
   return images;
 }
 
+function collectToolImagePathsWalk(node: unknown, paths: string[]): void {
+  if (typeof node === "string") {
+    const matched = /<path>([^<]+)<\/path>/.exec(node);
+    if (matched?.[1]?.trim()) paths.push(matched[1].trim());
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectToolImagePathsWalk(item, paths);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const image = toolImageBytesFromNode(node);
+  if (image) {
+    if (image.path) paths.push(image.path);
+    return;
+  }
+  for (const item of Object.values(node as Record<string, unknown>)) collectToolImagePathsWalk(item, paths);
+}
+
+/** 只收集结果中已经存在的路径，不为缺失图片编造缓存位置 */
+export function collectToolImagePaths(node: unknown): string[] {
+  const paths: string[] = [];
+  collectToolImagePathsWalk(node, paths);
+  return paths;
+}
+
 /** 递归把图片节点换成带序号占位；只改副本（无图片返回原引用，保证文本型结果零开销） */
 function replaceImageBytesWalk(
   node: unknown,
@@ -193,7 +231,23 @@ function replaceImageBytesWalk(
   if (image) {
     images.push(image);
     seq.count += 1;
-    return { value: placeholderFor(seq.count, image), changed: true };
+    const replacement = placeholderFor(seq.count, image);
+    if (
+      node &&
+      typeof node === "object" &&
+      !Array.isArray(node) &&
+      replacement &&
+      typeof replacement === "object" &&
+      !Array.isArray(replacement)
+    ) {
+      const nodeFields = Object.fromEntries(
+        Object.entries(node as Record<string, unknown>).filter(
+          ([key]) => key !== "type" && key !== "data" && key !== "url",
+        ),
+      );
+      return { value: { ...nodeFields, ...replacement }, changed: true };
+    }
+    return { value: replacement, changed: true };
   }
   if (Array.isArray(node)) {
     let changed = false;
@@ -237,6 +291,20 @@ export function stripToolImageBytes(
   );
   if (!walked.changed) return null;
   return { output: walked.value, images };
+}
+
+/** 请求开始前的旧 MCP 输出：有真实路径就保留，无路径只留重新调用原工具的诚实说明 */
+export function sanitizeLegacyMcpHistoryOutput(node: unknown): { output: unknown; images: ToolImageBytes[] } | null {
+  const paths = collectToolImagePaths(node);
+  return stripToolImageBytes(node, {
+    placeholderFor: (seq, image) => {
+      const path = image.path ?? paths[seq - 1];
+      return {
+        type: "text",
+        text: path ? mcpImageSavedPlaceholder(path) : mcpImageHistoryPlaceholder(seq),
+      };
+    },
+  });
 }
 
 /** MCP 图片落盘回调：成功返回图片绝对路径，返回 null / 抛错表示落盘失败（降级纯占位） */

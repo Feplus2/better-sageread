@@ -30,6 +30,7 @@ writeFileSync(
     `export { wrapToolsForNativeImages } from "${toPosix(join(src, "ai/providers/native-tool-output.ts"))}";`,
     `export { buildLazyToolset } from "${toPosix(join(src, "ai/tools/lazy-toolset.ts"))}";`,
     `export { wrapOpenAICompatToolImagesFetch } from "${toPosix(join(src, "ai/providers/tool-image-bridge.ts"))}";`,
+    `export * as messageProcessor from "${toPosix(join(src, "ai/utils/message-processor.ts"))}";`,
   ].join("\n"),
 );
 const outfile = join(outDir, "pipeline.mjs");
@@ -210,6 +211,41 @@ console.log("[2] MCP execute 收口：图片落盘为带路径占位；当轮缓
   check(
     "无 toolCallId 仍落盘 + 路径占位（不把 base64 交给 UI/落库）",
     !JSON.stringify(noId).includes(PNG) && JSON.stringify(noId).includes("no-id.png"),
+  );
+
+  const nodeMetaRaw = {
+    content: [
+      {
+        type: "image",
+        data: PNG,
+        mimeType: "image/png",
+        filename: "figure-7.png",
+        path: "C:/ws/figure-7.png",
+        _meta: { caption: "Figure 7", score: 0.75 },
+        customField: { keepNodeField: true },
+      },
+    ],
+  };
+  const strippedNodeMeta = pipeline.stripToolImageBytes(nodeMetaRaw);
+  const roundTripNodeMeta = JSON.parse(JSON.stringify(strippedNodeMeta.output)).content[0];
+  check(
+    "图片节点剥字节后的 JSON round-trip 保留 _meta/filename/custom/mime/path 非字节字段",
+    roundTripNodeMeta.type === "text" &&
+      roundTripNodeMeta.mimeType === "image/png" &&
+      roundTripNodeMeta.filename === "figure-7.png" &&
+      roundTripNodeMeta.path === "C:/ws/figure-7.png" &&
+      roundTripNodeMeta._meta?.caption === "Figure 7" &&
+      roundTripNodeMeta._meta?.score === 0.75 &&
+      roundTripNodeMeta.customField?.keepNodeField === true,
+    roundTripNodeMeta,
+  );
+  check(
+    "图片节点元数据保留时不夹带 data/url 字节字段",
+    !("data" in roundTripNodeMeta) &&
+      !("url" in roundTripNodeMeta) &&
+      !JSON.stringify(roundTripNodeMeta).includes(PNG) &&
+      roundTripNodeMeta.text.includes("图片 #1"),
+    roundTripNodeMeta,
   );
 }
 
@@ -422,9 +458,26 @@ console.log("[5] native toModelOutput：历史 MCP 不回灌；当轮 live 可�
 
   // 目录牌模式：模型实际调 useTool，mcp-manager 把缓存记在 useTool 的 toolCallId 上；
   // 原生协议下 useTool.toModelOutput 也必须把当轮 live MCP 图回灌（历史同样按 origin 跳过）
-  const nativeDir = pipeline.wrapToolsForNativeImages({
-    useTool: { description: "目录牌转发", inputSchema: { type: "object", properties: {} }, execute: async () => ({}) },
-  });
+  const nativeDir = pipeline.wrapToolsForNativeImages(
+    {
+      useTool: {
+        description: "目录牌转发",
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => ({}),
+      },
+    },
+    {
+      mcp_demo_render: { description: "渲染", inputSchema: { type: "object", properties: {} } },
+      mcp_demo_text: {
+        description: "文本",
+        inputSchema: { type: "object", properties: {} },
+        toModelOutput: ({ output, input, toolCallId }) => ({
+          type: "text",
+          value: `SDK:${output.content[0].text}|${input.query}|${toolCallId}`,
+        }),
+      },
+    },
+  );
   nativeDir.useTool.toModelOutput({ output: { type: "text", value: "snapshot" }, toolCallId: "dir-warmup" });
   pipeline.cacheToolImages("usetool-live", [
     {
@@ -435,24 +488,97 @@ console.log("[5] native toModelOutput：历史 MCP 不回灌；当轮 live 可�
     },
   ]);
   const dirLive = nativeDir.useTool.toModelOutput({
-    output: { type: "content", value: [{ type: "text", text: savedText(`${SAVE_ROOT}/live.webp`) }] },
+    output: {
+      content: [{ type: "text", text: savedText(`${SAVE_ROOT}/live.webp`) }],
+      structuredContent: { forwarded: true },
+      isError: false,
+      _meta: { channel: "directory" },
+      customField: "keep-directory-custom",
+    },
     toolCallId: "usetool-live",
+    input: { tool: "mcp_demo_render", args: {} },
   });
   check(
     "目录牌 useTool 当轮 live MCP 图仍回灌（原生协议目录牌模式）",
     dirLive.type === "content" && dirLive.value.some((part) => part.type === "file" && part.data.data === LIVE),
     dirLive,
   );
+  let dirText;
+  try {
+    dirText = JSON.parse(dirLive.value[0].text);
+  } catch {
+    dirText = null;
+  }
+  check(
+    "useTool→MCP 的完整结构也在 text JSON（不是只留拼接文本）",
+    dirText?.structuredContent?.forwarded === true &&
+      dirText?.isError === false &&
+      dirText?._meta?.channel === "directory" &&
+      dirText?.customField === "keep-directory-custom",
+    dirLive.value[0],
+  );
 
-  // 直接调用（原始 MCP image content，未落盘）时 walk 仍能识别 → 当轮可见
+  const dirPlainText = nativeDir.useTool.toModelOutput({
+    output: { content: [{ type: "text", text: "hello-forwarded" }] },
+    toolCallId: "dir-plain-text",
+    input: { tool: "mcp_demo_text", args: { query: "forwarded-args" } },
+  });
+  check(
+    "目录牌纯文本 MCP 委托原 SDK converter，并传转发 args 而非 useTool 外壳 input",
+    dirPlainText.type === "text" && dirPlainText.value === "SDK:hello-forwarded|forwarded-args|dir-plain-text",
+    dirPlainText,
+  );
+
+  // 直接调用（原始 MCP image content，未落盘）时 walk 仍能识别 → 当轮可见；
+  // 带图 MCP 必须把剥离字节后的完整结果序列化进唯一 text part，再附官方 file-data。
+  const directRaw = {
+    content: [{ type: "text", text: "rendered" }, mcpImage(PNG, "image/png")],
+    structuredContent: { title: "figure", page: 3 },
+    isError: false,
+    _meta: { requestId: "meta-1" },
+    customField: { nested: ["keep", 42] },
+  };
   const direct = native.mcp_demo_render.toModelOutput({
-    output: { content: [{ type: "text", text: "rendered" }, mcpImage(PNG, "image/png")] },
+    output: directRaw,
     toolCallId: "native-direct",
   });
   check(
     "原始 MCP image content 直出仍转 native file part",
     direct.type === "content" && direct.value.some((part) => part.type === "file" && part.data.data === PNG),
     direct,
+  );
+  let directText;
+  try {
+    directText = JSON.parse(direct.value[0].text);
+  } catch {
+    directText = null;
+  }
+  check(
+    "带图 MCP：structuredContent/isError/_meta/自定义字段完整进入 text JSON",
+    directText?.structuredContent?.title === "figure" &&
+      directText?.structuredContent?.page === 3 &&
+      directText?.isError === false &&
+      directText?._meta?.requestId === "meta-1" &&
+      directText?.customField?.nested?.[1] === 42 &&
+      directText?.content?.[0]?.text === "rendered",
+    direct.value[0],
+  );
+  check(
+    "带图 MCP：text 不含 base64，图片节点剥为文本，官方 file-data 紧随其后",
+    direct.value.length === 2 &&
+      direct.value[0].type === "text" &&
+      !direct.value[0].text.includes(PNG) &&
+      directText?.content?.[1]?.type === "text" &&
+      direct.value[1].type === "file" &&
+      direct.value[1].mediaType === "image/png" &&
+      direct.value[1].data.type === "data" &&
+      direct.value[1].data.data === PNG,
+    direct,
+  );
+  check(
+    "MCP 自定义字段不冒充 ToolResultOutput 顶层字段",
+    Object.keys(direct).sort().join(",") === "type,value" && direct.customField === undefined,
+    Object.keys(direct),
   );
 
   // 回归：会话里第一次看图（请求开始时缓存为空）——当时新产生的工具图必须算 live，
@@ -483,10 +609,129 @@ console.log("[5] native toModelOutput：历史 MCP 不回灌；当轮 live 可�
     toolCallId: "native-text",
   });
   check("文本型 MCP 工具沿用 SDK toModelOutput（行为不变）", textOut.value === "SDK:hello", textOut);
+
+  const markerLiteral = savedText(`${SAVE_ROOT}/literal-only.png`);
+  const ordinaryMarkerText = `普通文本引用占位文案：${markerLiteral}（并非图片节点）`;
+  const markerControl = native.mcp_demo_text.toModelOutput({
+    output: {
+      content: [{ type: "text", text: ordinaryMarkerText }],
+      customField: "[历史 MCP 图片 #9 未保留可重看路径（字节不写入聊天记录）；需要重看时请重新调用该 MCP 工具]",
+    },
+    toolCallId: "native-marker-control",
+  });
+  check(
+    "普通/自定义文本仅含 marker 字面值不算图片证据，仍走 SDK converter",
+    markerControl.type === "text" && markerControl.value === `SDK:${ordinaryMarkerText}`,
+    markerControl,
+  );
   check("非图片类普通工具不包装", native.getBooks.toModelOutput === undefined);
 }
 
-console.log("[6] chat 图片桥：MCP 图只在当前轮回灌；历史消息跳过；内置历史不变");
+console.log("[6] 请求开始旧 raw MCP：native 历史无字节/file part；路径/结构保留；live 对照仍看图");
+{
+  pipeline.clearToolImageCache();
+  const sanitizeHistory = pipeline.messageProcessor.sanitizeLegacyMcpHistoryImages;
+  check("sanitizeLegacyMcpHistoryImages 已导出", typeof sanitizeHistory === "function");
+  if (typeof sanitizeHistory === "function") {
+    const rawWithPath = {
+      content: [{ type: "text", text: `<path>${SAVE_ROOT}/legacy.png</path>` }, mcpImage(PNG, "image/png")],
+      structuredContent: { page: 11 },
+      isError: false,
+      _meta: { legacy: true },
+      customField: "keep-history-custom",
+    };
+    const rawNoPath = {
+      content: [{ type: "file", mediaType: "image/jpeg", data: { type: "data", data: JPG } }],
+      structuredContent: { noPath: true },
+    };
+    const history = [
+      {
+        id: "legacy-history",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-mcp_demo_render",
+            toolCallId: "legacy-with-path",
+            state: "output-available",
+            input: {},
+            output: rawWithPath,
+          },
+          {
+            type: "tool-mcp_demo_render",
+            toolCallId: "legacy-without-path",
+            state: "output-available",
+            input: {},
+            output: rawNoPath,
+          },
+        ],
+      },
+    ];
+    const sanitized = sanitizeHistory(history);
+    const sanitizedJson = JSON.stringify(sanitized);
+    check(
+      "旧 raw image/file-data 均无图片字节或图片 part",
+      !sanitizedJson.includes(PNG) &&
+        !sanitizedJson.includes(JPG) &&
+        !sanitizedJson.includes('"type":"image"') &&
+        !sanitizedJson.includes('"type":"file"'),
+    );
+    check(
+      "有路径保留真实路径；无路径诚实要求重调 MCP 且不编造缓存路径",
+      sanitizedJson.includes(`${SAVE_ROOT}/legacy.png`) &&
+        sanitized[0].parts[1].output.content[0].text.includes("重新调用该 MCP 工具") &&
+        !sanitized[0].parts[1].output.content[0].text.includes("image-cache"),
+      sanitized[0].parts,
+    );
+    check(
+      "sanitize 不改 live/DB 原消息",
+      rawWithPath.content[1].data === PNG && rawNoPath.content[0].data.data === JPG,
+    );
+
+    const nativeHistory = pipeline.wrapToolsForNativeImages({
+      mcp_demo_render: {
+        description: "渲染",
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => ({}),
+        toModelOutput: ({ output }) => ({ type: "text", value: `SDK:${output.content[0].text}` }),
+      },
+    });
+    const historyOutput = nativeHistory.mcp_demo_render.toModelOutput({
+      output: sanitized[0].parts[0].output,
+      toolCallId: "legacy-with-path",
+    });
+    const historyTextValue = historyOutput.type === "text" ? historyOutput.value : historyOutput.value?.[0]?.text;
+    const historyFileParts =
+      historyOutput.type === "content" ? historyOutput.value.filter((part) => part.type === "file") : [];
+    let historyText;
+    try {
+      historyText = JSON.parse(historyTextValue);
+    } catch {
+      historyText = null;
+    }
+    check(
+      "无缓存 native 历史只发完整 byte-stripped text JSON，不发 file part，也不丢结构字段",
+      (historyOutput.type === "text" || historyOutput.type === "content") &&
+        historyFileParts.length === 0 &&
+        historyText?.structuredContent?.page === 11 &&
+        historyText?.isError === false &&
+        historyText?._meta?.legacy === true &&
+        historyText?.customField === "keep-history-custom" &&
+        !JSON.stringify(historyOutput).includes(PNG),
+      historyOutput,
+    );
+    const liveOutput = nativeHistory.mcp_demo_render.toModelOutput({
+      output: rawNoPath,
+      toolCallId: "live-after-history-sanitize",
+    });
+    check(
+      "live 对照未受请求开始 sanitize 影响，仍生成官方图片 file-data",
+      liveOutput.type === "content" && liveOutput.value.some((part) => part.type === "file" && part.data.data === JPG),
+      liveOutput,
+    );
+  }
+}
+
+console.log("[7] chat 图片桥：MCP 图只在当前轮回灌；历史消息跳过；内置历史不变");
 {
   pipeline.clearToolImageCache();
   pipeline.cacheToolImages("call-builtin-hist", [

@@ -9,10 +9,6 @@ import {
 } from "@/services/reading-position/position-service";
 import { buildTimestampLookup, composeDynamicTail, withMessageTimestamps } from "@/services/time-awareness";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
-import { injectConversationSummary } from "./utils/conversation-summary-message";
-import { resolveContextBudget } from "./providers/context-window";
-import { wrapToolsForNativeImages } from "./providers/native-tool-output";
-import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
 import { useProviderStore } from "@/store/provider-store";
 import type { UIMessage } from "@ai-sdk/react";
 import {
@@ -28,20 +24,27 @@ import {
 } from "ai";
 import { toast } from "sonner";
 import { getMcpToolsForScope } from "./mcp/mcp-manager";
+import { resolveContextBudget } from "./providers/context-window";
+import { wrapToolsForNativeImages } from "./providers/native-tool-output";
+import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
 import { chatReasoningProviderOptions } from "./providers/reasoning-map";
 import { modelSupportsVision } from "./providers/vision-map";
+import { getDocumentToolMode } from "./tools/document/mode";
 import { buildLazyToolset, buildToolDirectoryBoard, shouldUseDirectoryMode } from "./tools/lazy-toolset";
 import { getToolsForScope } from "./tools/registry";
 import {
+  adaptToolHistoryForRequest,
   loadMemorySection,
   loadWorkspaceSection,
   processQuoteMessages,
   resolveImageAttachmentsForRequest,
+  sanitizeLegacyMcpHistoryImages,
   sanitizeMessageParts,
   selectMessagesWithinBudget,
   stripFileParts,
-  stripUnknownToolParts,
+  withUnavailableDynamicHistoryStubs,
 } from "./utils";
+import { injectConversationSummary } from "./utils/conversation-summary-message";
 import { repairImageDataUrl, sniffImageMediaType } from "./utils/media-sniff";
 import { wrapToolsWithGuard } from "./utils/tool-guard";
 import { compactAgedRagResults } from "./utils/tool-result-slimming";
@@ -54,8 +57,8 @@ import { compactAgedRagResults } from "./utils/tool-result-slimming";
  * 2026-10-20 阅读位置桥改造（用户拍板）：
  * - 书籍与论文统一注入"精确坐标"（mdbook 文件 + 字符偏移 + 估算分块区间 + 进度），
  *   位置来自活位置注册表（渲染层实时写入），以本轮为准；目录不可用时按 spine 兜底；
- * - 不再注入论文当前小节正文（目录崩坏时会退化成整篇灌入；改为模型按需调用
- *   readAtReadingPosition 扩窗读取）；
+ * - 不再注入论文当前小节正文（目录崩坏时会退化成整篇灌入；改为模型按当前文档模式
+ *   使用 readDocument(position=true) 或 Legacy readAtReadingPosition 扩窗读取）；
  * - 坐标换算失败时降级为章节/小节名，不阻塞聊天。
  */
 async function buildDynamicStateSection(chatContext: ChatContext | undefined): Promise<string> {
@@ -66,13 +69,13 @@ async function buildDynamicStateSection(chatContext: ChatContext | undefined): P
   if (agentScope === "reader") {
     // 分支调用而非传联合 scope：getLiveReadingPosition/resolveLiveReadingPosition 的重载按 scope 收窄
     const snapshot = await resolveLiveReadingPosition("reader", docId);
-    if (snapshot) return formatPositionForPrompt(snapshot);
+    if (snapshot) return formatPositionForPrompt(snapshot, getDocumentToolMode());
     // 坐标暂不可用：至少给出章节/小节名（并在文案里声明历史位置可能过时）
     return formatFallbackPosition(getLiveReadingPosition("reader", docId));
   }
   if (agentScope === "paper") {
     const snapshot = await resolveLiveReadingPosition("paper", docId);
-    if (snapshot) return formatPositionForPrompt(snapshot);
+    if (snapshot) return formatPositionForPrompt(snapshot, getDocumentToolMode());
     return formatFallbackPosition(getLiveReadingPosition("paper", docId));
   }
   return "";
@@ -190,7 +193,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // 置于水位活塞之后——已被泄压丢弃的消息无需再处理
     const selectedMessages = compactAgedRagResults(budgetedMessages);
 
-    // 超预算裁掉的旧消息：滚动压缩为摘要（按对话持久化到 thread.metadata），注入 system prompt
+    // 超预算裁掉的旧消息：滚动压缩为摘要并持久化到 thread.metadata；稍后注入保留段切点 user 消息
     let summaryText: string | null = null;
     if (dropped.length > 0) {
       if (chatContext?.threadId) {
@@ -258,16 +261,23 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       : "chat";
     // 原生工具图只按协议判定不够：切到纯文本模型后历史工具图会以图片 part 重发导致 400
     const toolsForModel =
-      supportsNativeToolImages(providerProtocol) && visionOk ? wrapToolsForNativeImages(tools) : tools;
+      supportsNativeToolImages(providerProtocol) && visionOk ? wrapToolsForNativeImages(tools, guardedTools) : tools;
 
     // MCP 连接生命周期跟随本次请求：流结束或用户中止时关闭（closeAll 幂等，双保险）
     options.abortSignal?.addEventListener("abort", () => void mcp.closeAll(), { once: true });
 
     // sanitizeMessageParts：中断残留的 undefined text part 归一（否则 convert 后 zod 校验报 Invalid prompt）
-    // v6 起 convertToModelMessages 为异步（v3 规范），必须 await
-    const modelInputMessages = stripUnknownToolParts(sanitizeMessageParts(selectedMessages), toolsForModel);
+    // 请求开始快照先剥旧 raw MCP 图片，再做 direct↔directory；之后执行的 live MCP 结果不经过历史 sanitize。
+    const sanitizedHistory = sanitizeLegacyMcpHistoryImages(sanitizeMessageParts(selectedMessages));
+    const modelInputMessages = adaptToolHistoryForRequest(sanitizedHistory, {
+      directoryMode,
+      tools: guardedTools,
+    });
+    // v6 起 convertToModelMessages 为异步（v3 规范），必须 await。
+    // dynamic:false 的缺失工具 stub 仅进转换副本；streamText 仍只用下面的 toolsForModel，不扩大 live 工具面。
+    const conversionTools = withUnavailableDynamicHistoryStubs(modelInputMessages, toolsForModel);
     const convertedMessages = await convertToModelMessages(modelInputMessages, {
-      tools: toolsForModel,
+      tools: conversionTools,
       ignoreIncompleteToolCalls: true,
     });
 
@@ -283,9 +293,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const messagesForModel = injectConversationSummary(timestampedMessages, summaryText);
 
     // D3 静态优先布局：buildPrompt（基词+静态段+技能+metadata，按书稳定）在前，
-    // 工作区/记忆段（准静态）居中，前情摘要（稀有）次之，每轮可能变化的动态状态殿后。
+    // 工作区/记忆段（准静态）居中，每轮可能变化的动态状态殿后；前情摘要走上面的消息切点。
     const dynamicSection = await buildDynamicStateSection(chatContext);
-    // 动态段顺序：前情摘要（稀有）→【当前阅读位置】（翻页变）→【当前时间】（每轮必变）。
+    // 动态段顺序：【当前阅读位置】（翻页变）→【当前时间】（每轮必变）。
     // 当前时间必须压在 system prompt 最尾部：这样它前面的所有段（含阅读位置）保持逐字节稳定，
     // 每轮只击穿这一段，前缀缓存命中最大化；位置段为空/降级时也仍要注入当前时间。
     const dynamicTail = composeDynamicTail(dynamicSection);

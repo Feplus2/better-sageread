@@ -4,6 +4,7 @@
  * 决策表集中在 GUARDED_TOOLS + 本文件（改分档只动这里）：
  * - fileWrite（writeFile/editFile）：界内静默；界外 strict/relaxed 确认卡、full 静默
  * - fileRead（readLocalFile/searchFiles）：界内静默；界外 strict 确认卡、relaxed/full 静默
+ * - imageRead（readImage/viewImages）：本地路径同 fileRead；批量界外路径聚合一张确认卡，附件直通
  * - command（runCommand）：strict/relaxed 确认卡、full 静默；任何模式 Rust 侧写审计日志
  * - network（httpRequest）：GET 静默；非 GET 任何模式确认卡（数据离机通道）
  * - mcp_*（批次 B4）：远程 MCP 工具 strict/relaxed 确认卡（server 名 + 工具名 + 参数摘要），
@@ -20,6 +21,8 @@ import { resolveWorkspaceRootForScope, useAgentSettingsStore } from "@/store/age
 import { invoke } from "@tauri-apps/api/core";
 import type { Tool } from "ai";
 import { parseMcpToolName } from "../mcp/mcp-manager";
+import { collectImageTargets, imageRootsFromSettings } from "../tools/image-shared";
+import type { ImageReadGrant } from "../tools/image-shared";
 import type { AgentScope } from "../tools/registry";
 
 interface GuardVerdict {
@@ -29,7 +32,7 @@ interface GuardVerdict {
   isDir: boolean;
 }
 
-type GuardAction = "fileWrite" | "fileRead" | "command" | "network";
+type GuardAction = "fileWrite" | "fileRead" | "imageRead" | "command" | "network";
 
 interface GuardSpec {
   action: GuardAction;
@@ -43,6 +46,8 @@ const GUARDED_TOOLS: Record<string, GuardSpec> = {
   editFile: { action: "fileWrite", pathArg: "path", title: "修改工作区外文件" },
   readLocalFile: { action: "fileRead", pathArg: "path", title: "读取工作区外路径" },
   searchFiles: { action: "fileRead", pathArg: "subdir", title: "搜索工作区外目录" },
+  readImage: { action: "imageRead", pathArg: "path", title: "读取工作区外图片" },
+  viewImages: { action: "imageRead", pathArg: "paths", title: "读取工作区外图片" },
   runCommand: { action: "command", pathArg: "", title: "执行命令" },
   httpRequest: { action: "network", pathArg: "", title: "发送网络请求" },
   // 2026-10-22 审计补齐：解压/下载都会写盘，界外写入需确认（zip-slip 已在工具内拒绝）
@@ -387,8 +392,61 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
           let dontAskKey = "";
           // 界外写入时确认通过/模式放行后注入 Rust 侧放行标记
           let grant: Record<string, unknown> = {};
+          const imageRoots = spec.action === "imageRead" ? imageRootsFromSettings() : undefined;
           // scope 生效根注入（不进模型 schema，与 allowOutside 同通道）；network 类无根概念
-          const baseArgs = spec.action === "network" ? args : { ...args, rootOverride: scopeRoot };
+          const baseArgs =
+            spec.action === "network"
+              ? args
+              : spec.action === "imageRead"
+                ? { ...args, imageRoots }
+                : { ...args, rootOverride: scopeRoot };
+
+          if (spec.action === "imageRead") {
+            const singleTarget = name === "readImage" ? (args?.path ?? args?.ref) : undefined;
+            const localPaths =
+              name === "viewImages"
+                ? collectImageTargets(args?.paths, args?.refs)
+                    .filter((target) => target.kind === "path")
+                    .map((target) => target.value)
+                : typeof singleTarget === "string" && singleTarget && !singleTarget.startsWith("attachment://")
+                  ? [singleTarget]
+                  : [];
+            if (localPaths.length === 0) {
+              return await originalExecute(baseArgs, options);
+            }
+
+            const imageGrants: ImageReadGrant[] = [];
+            const outside: Array<{ path: string; resolved: string }> = [];
+            for (const rawPath of localPaths) {
+              const verdict = await invoke<GuardVerdict>("agent_resolve_path", {
+                root: imageRoots?.root ?? null,
+                path: rawPath,
+                additionalRoots: imageRoots?.additionalRoots ?? [],
+                includeAppData: true,
+              });
+              const allowOutside = verdict.verdict === "out";
+              imageGrants.push({ path: rawPath, allowOutside, expectedResolved: verdict.resolved });
+              if (allowOutside) outside.push({ path: rawPath, resolved: verdict.resolved });
+            }
+            const imageGrantArgs = name === "readImage" ? { imageGrant: imageGrants[0] } : { imageGrants };
+            if (outside.length === 0 || safetyMode !== "strict") {
+              return await originalExecute({ ...baseArgs, ...imageGrantArgs }, options);
+            }
+
+            const approved = await requestWithAbort(
+              {
+                toolName: name,
+                title: spec.title,
+                detail: outside
+                  .map((item) => (item.path === item.resolved ? item.path : `${item.path}\n→ ${item.resolved}`))
+                  .join("\n"),
+                dontAskKey: `${name}:${outside.map((item) => `${item.path}=>${item.resolved}`).join("\n")}`,
+              },
+              options?.abortSignal as AbortSignal | undefined,
+            );
+            if (!approved) return cancelledResult();
+            return await originalExecute({ ...baseArgs, ...imageGrantArgs }, options);
+          }
 
           if (spec.action === "fileWrite" || spec.action === "fileRead") {
             const rawPath = args?.[spec.pathArg];

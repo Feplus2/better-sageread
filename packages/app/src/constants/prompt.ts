@@ -3,7 +3,7 @@ import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_READER_STYLE } from "@/constants/agent-styles";
 import { buildCentralPrompt } from "@/constants/central-prompt";
 import { buildPaperPrompt } from "@/constants/paper-prompt";
-import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope } from "@/constants/retrieval-scope";
+import { RETRIEVAL_SCOPE_LABELS, type RetrievalScope, defaultRetrievalScope } from "@/constants/retrieval-scope";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
 import type { ChatContext } from "@/hooks/use-chat-state";
 import { getActivePresetContent, migrateLegacyReaderBaseIfNeeded } from "@/services/prompt-preset-service";
@@ -29,10 +29,8 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
   const docMode = getDocumentToolMode();
   const docModeNote =
     docMode === "new"
-      ? "\n\n【文档工具模式：新原语】当前只启用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（只能在用户圈定范围内读、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索用 searchLibrary（scope 只能在用户圈定范围内收窄，详见【检索范围】段）。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。遇到未索引文档（getDocumentInfo 返回 index.status=not_indexed）按目录读目标小节即可，回答时提醒用户可向量化提速。"
-      : docMode === "legacy"
-        ? "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。"
-        : "";
+      ? "\n\n【文档工具模式：新原语】当前文档阅读使用 readDocument / getDocumentInfo / searchLibrary：读原文用 readDocument（只能在用户圈定范围内读、支持 heading/offset/position），看目录/元信息用 getDocumentInfo，检索用 searchLibrary（scope 只能在用户圈定范围内收窄，详见【检索范围】段）。旧的 readPaperSection、readPaperFull、readAtReadingPosition、getPaperToc、getPaperInfo、paperSearch、ragSearch/ragToc/ragContext/ragRange、readBookSection 在本模式不可用，不要调用；需要当前位置原文时用 readDocument(position=true)。未索引文档（getDocumentInfo 返回 index.status=not_indexed）仍可用 searchLibrary 的关键词/标题回退，与 getDocumentInfo 目录读取和 readDocument 原文窗口互补；library/all 若 partial 且带 next_cursor，用相同 query/参数和 cursor 续扫后续文档，直到游标消失；回答时提醒用户可向量化提速。"
+      : "\n\n【文档工具模式：旧版】当前使用旧版阅读工具；readDocument / getDocumentInfo / searchLibrary 未启用。";
   return `${base}\n\n${libraryGuide}${docModeNote}`;
 }
 
@@ -41,10 +39,10 @@ export async function buildPrompt(chatContext: ChatContext | undefined): Promise
  * 预设只替换风格层，永远覆盖不到本段。历史上的"DB 系统技能基词"已退役——
  * 工具策略收编于此，与注册表（ai/tools/registry.ts）对齐维护。
  *
- * 按向量能力分两档：有索引时 RAG 为主通道、readBookSection 为兜底；
- * 无索引时 readBookSection 是唯一正文通道。
+ * Legacy 按向量能力选择 RAG/readBookSection；New 使用通用文档原语，
+ * 未索引文档以关键词/标题回退和目录/原文读取互补。
  */
-function buildReaderPolicy(hasVectorCapability: boolean, docMode: "new" | "legacy" | "both"): string {
+function buildReaderPolicy(hasVectorCapability: boolean, docMode: "new" | "legacy"): string {
   const indexedRetrieval = `—— 内容检索（RAG 已启用） ——
 • 主通道：ragSearch 快速定位（BM25 + 向量混合检索，返回片段与 chunk_id）→ ragContext 扩展上下文（默认 prev=2/next=2，最多调用 4 次）→ ragRange 按全局索引连续取块（范围来自检索返回的全局索引，单次 ≤20 块）→ ragToc 取整章正文（重操作，仅用户明确要求读全章时使用）。
 • 查询构造：检索词即查询质量——英文书用英文术语检索（中文问题先把核心概念译成英文术语）；复杂问题拆 2-3 个不同措辞分次检索，比一次长查询召回更全。
@@ -72,8 +70,8 @@ RAG 返回内容含图片时：完整复制返回的原始路径（一个字符�
 —— 引用与图片规范 ——
 • 引用给章节标题 / 图号 / 表号 / 参考文献编号，不编造页码。
 • 图片：检索/读原文结果里给出的图片绝对路径（Markdown 图片语法或 image_path 字段）可直接用 readImage(path=...) 查看；书籍没有独立的“图片清单”工具，不要调用 getFigures。没有真正调用 readImage 时不要声称看过图。`
-        : `—— 内容读取（新原语，当前书未建索引） ——
-本书未建向量索引，不能用 searchLibrary 检索本书。先 getDocumentInfo(doc=book:<id>) 取目录（无索引时回退 EPUB TOC），再用 readDocument(doc=book:<id>, heading=... 或 position=true) 读原文；目录缺失时用 offset 从开头按窗口读。
+        : `—— 内容检索与读取（新原语，当前书未建索引） ——
+本书未建向量索引，searchLibrary 不能语义检索本书，但仍可用关键词/标题回退，与目录/原文读取互补。精确术语先用 searchLibrary(doc=book:<id>, query=...)；回退无命中或需要完整上下文时，用 getDocumentInfo(doc=book:<id>) 取目录（无索引时回退 EPUB TOC），再用 readDocument(doc=book:<id>, heading=... 或 position=true) 读原文；目录缺失时用 offset 从开头按窗口读。
 回答里明确告诉用户「本书尚未向量化，按原文读取较慢；在设置里向量化后可提速」；未读原文前不得凭印象编造。`
       : hasVectorCapability
         ? indexedRetrieval
@@ -134,11 +132,7 @@ ${fileTools}
  * 用户划定的检索范围（阅读助手）：写在政策层，模型检索/直读前先看圈。
  * 旧工具集无法兑现跨文档范围，必须明确说"只部分生效"，不能让模型口头承诺越界能力。
  */
-function buildReaderScopePolicy(
-  scope: RetrievalScope,
-  docMode: "new" | "legacy" | "both",
-  currentBookId?: string,
-): string {
+function buildReaderScopePolicy(scope: RetrievalScope, docMode: "new" | "legacy", currentBookId?: string): string {
   const label = RETRIEVAL_SCOPE_LABELS.reader[scope];
   const currentRef = currentBookId ? `book:${currentBookId}` : "（未绑定当前书）";
   if (docMode === "legacy") {
@@ -147,10 +141,10 @@ function buildReaderScopePolicy(
   }
   const allowed =
     scope === "current"
-      ? `只能检索/读取当前这本书（${currentRef}）；其它书与论文都在圈外。searchLibrary（本书已建索引时）只在本书内检索；readDocument/getDocumentInfo 传圈外 doc 会被拒绝。`
+      ? `只能检索/读取当前这本书（${currentRef}）；其它书与论文都在圈外。searchLibrary 只在本书内检索（已索引语义混合、未索引关键词/标题回退）；readDocument/getDocumentInfo 传圈外 doc 会被拒绝。`
       : scope === "library"
-        ? "可检索/读取图书馆全部书籍（不含论文）。searchLibrary（已索引的书）搜全部书籍；readDocument/getDocumentInfo 可读圈内任意书。paper:<id> 在圈外，越界会被拒绝。"
-        : "可检索/读取图书馆全部书籍 + 论文库全部论文（跨库结果 RRF 融合）。searchLibrary（已配置嵌入模型时）跨库检索；readDocument/getDocumentInfo 可读书或论文；圈外/库外文件仍在界外。";
+        ? "可检索/读取图书馆全部书籍（不含论文）。searchLibrary 搜全部书籍（已索引语义混合、未索引关键词/标题回退）；readDocument/getDocumentInfo 可读圈内任意书。paper:<id> 在圈外，越界会被拒绝。"
+        : "可检索/读取图书馆全部书籍 + 论文库全部论文（跨库结果 RRF 融合，未索引文档按关键词/标题回退）。searchLibrary 跨库检索；readDocument/getDocumentInfo 可读书或论文；圈外/库外文件仍在界外。";
   return `—— 检索范围（用户划定，本轮以此为准） ——
 用户当前选择：${label}（retrievalScope=${scope}）。
 • ${allowed}
@@ -187,7 +181,11 @@ export async function buildReadingPrompt(chatContext: ChatContext | undefined): 
   const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
 
   const docMode = getDocumentToolMode();
-  const scopePolicy = buildReaderScopePolicy(chatContext?.retrievalScope ?? "current", docMode, activeBookId);
+  const scopePolicy = buildReaderScopePolicy(
+    chatContext?.retrievalScope ?? defaultRetrievalScope("reader"),
+    docMode,
+    activeBookId,
+  );
   let prompt = `${style}\n\n${SHARED_HOUSE_RULES}\n\n${buildReaderPolicy(hasVectorCapability, docMode)}\n\n${scopePolicy}`;
 
   if (activeSkillNames.length > 0) {

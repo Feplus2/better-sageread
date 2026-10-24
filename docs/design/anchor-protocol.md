@@ -1,8 +1,9 @@
-# DocRef 与锚点协议 v0（草案）
+# DocRef 与锚点协议 v0（设计记录）与当前实现口径
 
-> 2026-10-22 · 状态：G0 待评审 · 本版只写契约，不写产品代码
+> 2026-10-22 · G0 已通过；§1–§11 保留当时 v0 设计记录，不作为当前行为的唯一依据。
 > 目标：把「找、读、看图」收敛为少数通用原语；场景差异上移到可见性、上下文注入与工具 guidance。
 > 关联：docs/audits/agent-architecture-benchmark.md（目标架构）、docs/plans/agent-refactor-kickoff.md（顺序与门禁）。
+> **当前契约以 §12 为准**：设计名 outline/read/search/view 分别对应现有 `getDocumentInfo/readDocument/searchLibrary/readImage/viewImages`；旧工具仅在 Legacy 回退模式注册，不与 New 组成并集。
 
 ## 1. 范围
 
@@ -206,3 +207,36 @@ position：与注入段同源（同一 ReadingPositionSnapshot）；书走 mdboo
 
 - v0：本文件，G0 冻结。
 - 变更需记录：日期、变更点、受影响金标（evals/tasks）。
+
+## 12. 当前实现口径（2026-10-23）
+
+### 12.1 模式与范围
+
+- `DocumentToolMode` 只有 `new | legacy`，默认 `new`。旧持久化 Both/非法值归一为 `new`，显式 Legacy 保留；两者互斥，不形成工具并集。Legacy 是回退路径，不保证新原语的跨文档能力。
+- 缺省检索范围按角色解析：reader=`current`、paper=`library`、central=`all`。只有 persisted key 缺失时才使用默认值；不回填、不覆盖已保存选择。Legacy paper 的 `current` 映射为本篇，`library/all` 映射为全部论文；旧工具不能表达书籍跨库检索。
+- 共享文件五件套、`exportNotes`、`askAppHelp`、笔记/对话召回与图片工具不随 New/Legacy 裁剪。
+
+### 12.2 规范文本、读取与检索
+
+- 论文正文为 `paper.md` 的 canonical body；heading 与普通 offset 都是正文绝对 UTF-16 坐标。窗口为半开区间，`next_offset` 可精确续读。
+- 书籍 New/Legacy 共用 JS 高保真 canonical；保留 TeX/MathML、表格和图片。heading/spine 的 offset 为节内坐标；无 heading 的显式 offset 为全书 canonical 绝对坐标；`position + offset` 为当前 md 文件坐标。图片路径在切片后解析，缺盘资源仅物化窗口内图片到 AppData EPUB cache。
+- `readDocument` 返回真实 `range`、可重放的 `read`、`next_offset/truncated`；搜索命中的 `hit.read` 可直接传入并叠加 `before/after`，不会把不兼容坐标套到 Rust 扁平文本。
+- `searchLibrary` 支持 `topK=1..30`（默认 6）、`vectorWeight/bm25Weight`（默认 0.7/0.3）与 `includeReferences`（默认 false）。命中带 `source/index/read/anchor_precision`；只有验证过的 canonical offset 才标 `exact`。
+- 未索引不是“只能盲读”：关键词/标题通道独立于向量配置，与 `getDocumentInfo` 目录和 `readDocument` 原文互补。current/显式 doc 可完整扫描；library/all 的标题覆盖完整、正文扫描有并发/时间/结果边界，并以 `partial/truncated` 如实标记覆盖不完整。通道各自 `allSettled`，单通道失败不抹掉其他结果。
+- library/all 还支持可选 `cursor`：结果含 `next_cursor` 时，以相同 query/参数继续调用即可从后续文档续扫，直到游标消失。游标无服务端状态，绑定 kind/query/includeReferences，并记录已返回命中以防跨页重复；current/doc 不返回也不接受 cursor。每页仍遵守相同的并发、时间与结果上限。
+
+### 12.3 论文 extras
+
+- `getFigures/getCitations` 属于论文能力，不为书籍注册独立版本。paper 可省略 doc 以读取绑定论文；显式 doc 仍受范围门禁。
+- central 在 New/Legacy 都注册这两个 extras，且必须显式传 `doc=paper:<id>`；缺 doc 或 `book:<id>` 返回错误。reader 不注册 extras。
+
+### 12.4 图片与授权根
+
+- 本地图片根为 AppData、共享工作区和所有 per-agent roots。`agent_resolve_path` 只做预检；真正的 canonical 判界、敏感路径拒绝、目录/20MiB 检查、授权复核与字节读取集中在同一次 Rust `agent_read_image` 调用，返回原始 `ArrayBuffer`。
+- strict 的界外图片在读取字节前确认；relaxed/full 按界外读语义免确认，但仍注入逐路径、绑定原始 path 与 `expectedResolved` 的授权。确认后 junction/目标变化或原始路径不同均拒绝；敏感文件名在所有模式和授权下拒绝。
+- `viewImages` 与 guard 共用 `collectImageTargets` 做 trim/分类/去重；混合批次聚合一张确认卡、逐路径 grants，无整批界外放行。`attachment://` 继续走附件服务，不进入本地判界。前端仍做魔数嗅探、20MiB 二次检查、解码与长边/预算降采样；单批 1–6 张，长边默认 1024、最大 1536。
+
+### 12.5 请求历史兼容
+
+- 发送前只在请求副本上执行旧 raw MCP 图片 sanitize、direct↔directory 历史适配和 `await convertToModelMessages`；UI/DB 原消息不改。
+- 未知/已下线工具不删除，toolCallId/output/approval/metadata 保留；conversion-only stub 不扩大 live 工具面。旧 MCP 历史仅留路径或诚实重读占位，当前轮 live MCP 图片行为不变；内置图片继续按既有预算回灌。

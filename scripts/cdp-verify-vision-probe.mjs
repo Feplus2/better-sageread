@@ -9,9 +9,15 @@ ws.onmessage = (e) => { const m = JSON.parse(e.data); const p = pending.get(m.id
 const call = (method, params) => new Promise((resolve) => { const id = ++mid; pending.set(id, { resolve }); ws.send(JSON.stringify({ id, method, params })); });
 const evalJS = async (expr, timeoutMs) => { const r = await Promise.race([call("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }), new Promise((res) => setTimeout(() => res({ __timeout: true }), timeoutMs || 240000))]); if (!r || r.__timeout) throw new Error("CDP timeout"); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text); return r.result.value; };
 const prompt = "请调用 readImage 工具查看这张图片（绝对路径：" + "C:/Users/20995/AppData/Roaming/com.bettersageread.dev/agent-workspace/vision-probe.png" + "），然后如实回答：1) 图中那行字符串是什么？2) 红色形状是什么？3) 蓝色形状是什么？不要凭猜测，必须基于图片内容回答。";
-const MODE = process.argv[2] === "legacy" ? "legacy" : (process.argv[2] === "new" ? "new" : "both");
+const MODE = process.argv[2] === "legacy" ? "legacy" : "new";
 const KEEP_DIRECTORY = process.argv[3] === "keep-directory";
 const out = await evalJS(`(async () => {
+  const hadDocMode = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DOC_TOOL_MODE__");
+  const previousDocMode = window.__SAGEREAD_DOC_TOOL_MODE__;
+  const hadDisableDirectory = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DISABLE_DIRECTORY__");
+  const previousDisableDirectory = window.__SAGEREAD_DISABLE_DIRECTORY__;
+  const hadImageDebug = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_IMAGE_BRIDGE_DEBUG__");
+  const previousImageDebug = window.__SAGEREAD_IMAGE_BRIDGE_DEBUG__;
   window.__SAGEREAD_DOC_TOOL_MODE__ = "${MODE}";
   window.__SAGEREAD_DISABLE_DIRECTORY__ = ${KEEP_DIRECTORY ? "false" : "true"};
   window.__SAGEREAD_IMAGE_BRIDGE_DEBUG__ = true;
@@ -24,6 +30,9 @@ const out = await evalJS(`(async () => {
   for (let i = 0; i < 30; i++) { const s = store.getState(); if (s.selectedModel && s.modelProviders.length > 0) break; await sleep(300); }
   const selected = store.getState().selectedModel;
   const before = { activeTabId: layout.useLayoutStore.getState().activeTabId, tabIds: layout.useLayoutStore.getState().tabs.map((t) => t.id) };
+  const beforeLatest = await threadSvc.getLatestThreadBybookId("a27b187c6bd02d3c", "book");
+  const beforeLatestId = beforeLatest?.id || null;
+  const openedPaper = !before.tabIds.includes("paper-a27b187c6bd02d3c");
   layout.useLayoutStore.getState().openPaper("a27b187c6bd02d3c", "Rational design");
   await sleep(2500);
   const VIS = (el) => { if (!el) return false; let n = el; while (n) { const cs = getComputedStyle(n); if (cs.display === "none" || cs.visibility === "hidden") return false; n = n.parentElement; } const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
@@ -63,11 +72,16 @@ const out = await evalJS(`(async () => {
   const usage = lastA && lastA.metadata ? lastA.metadata.totalUsage : null;
   const bridgeLog = (window.__sagereadImageBridgeLog || []).slice(-12);
   const threadJsonLen = thread ? JSON.stringify(thread.messages || []).length : 0;
-  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, usage, model: selected && selected.modelId, bridgeLog, threadJsonLen };
-  if (thread) { try { await threadSvc.deleteThread(thread.id); } catch (e) {} }
-  delete window.__SAGEREAD_DOC_TOOL_MODE__;
-  delete window.__SAGEREAD_DISABLE_DIRECTORY__;
-  try { layout.useLayoutStore.getState().removeTab("paper-a27b187c6bd02d3c"); } catch (e) {}
+  const threadIsNew = !!thread && thread.id !== beforeLatestId;
+  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, usage, model: selected && selected.modelId, bridgeLog, threadJsonLen, threadIsNew };
+  if (threadIsNew) { try { await threadSvc.deleteThread(thread.id); } catch (e) {} }
+  if (hadDocMode) window.__SAGEREAD_DOC_TOOL_MODE__ = previousDocMode;
+  else delete window.__SAGEREAD_DOC_TOOL_MODE__;
+  if (hadDisableDirectory) window.__SAGEREAD_DISABLE_DIRECTORY__ = previousDisableDirectory;
+  else delete window.__SAGEREAD_DISABLE_DIRECTORY__;
+  if (hadImageDebug) window.__SAGEREAD_IMAGE_BRIDGE_DEBUG__ = previousImageDebug;
+  else delete window.__SAGEREAD_IMAGE_BRIDGE_DEBUG__;
+  if (openedPaper) { try { layout.useLayoutStore.getState().removeTab("paper-a27b187c6bd02d3c"); } catch (e) {} }
   if (before.activeTabId) { try { layout.useLayoutStore.getState().activateTab(before.activeTabId); } catch (e) {} }
   return result;
 })()`);
@@ -76,8 +90,8 @@ const hasString = ans.includes("SAGEREAD-VISION-42");
 const hasTriangle = /三角|triangle/i.test(ans);
 const hasCircle = /圆|circle/i.test(ans);
 const hasReadImage = (out.toolCalls || []).some((t) => t.name === "readImage" || (t.name === "useTool" && t.input && t.input.tool === "readImage"));
-console.log(JSON.stringify({ mode: process.argv[2], keepDirectory: KEEP_DIRECTORY, threadJsonLen: out.threadJsonLen, done: out.done, elapsedMs: out.elapsedMs, hasReadImage, hasString, hasTriangle, hasCircle, tokens: out.usage && out.usage.totalTokens, answer: ans.slice(0, 600), calls: (out.toolCalls || []).map((t) => t.name), bridgeLog: out.bridgeLog }, null, 2));
-const pass = out.done && hasReadImage && hasString && hasTriangle && hasCircle;
+console.log(JSON.stringify({ mode: process.argv[2], keepDirectory: KEEP_DIRECTORY, threadJsonLen: out.threadJsonLen, threadIsNew: out.threadIsNew, done: out.done, elapsedMs: out.elapsedMs, hasReadImage, hasString, hasTriangle, hasCircle, tokens: out.usage && out.usage.totalTokens, answer: ans.slice(0, 600), calls: (out.toolCalls || []).map((t) => t.name), bridgeLog: out.bridgeLog }, null, 2));
+const pass = out.done && out.threadIsNew && hasReadImage && hasString && hasTriangle && hasCircle;
 console.log(pass ? "PASS vision probe" : "FAIL vision probe");
 ws.close();
 process.exit(pass ? 0 : 1);

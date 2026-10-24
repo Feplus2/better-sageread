@@ -1,4 +1,6 @@
-import type { RetrievalScope } from "@/constants/retrieval-scope";
+import { readPaperMarkdown } from "@/ai/tools/paper/shared";
+import { type RetrievalScope, defaultRetrievalScope } from "@/constants/retrieval-scope";
+import { type PaperMetadata, normalizeAuthors, parsePaperMarkdown } from "@/pages/paper-reader/paper-metadata";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
@@ -15,7 +17,7 @@ export interface DocRef {
 export interface AgentDocScope {
   scope: "reader" | "paper" | "central";
   currentId?: string;
-  /** 用户划定的检索范围；缺省 current。central 恒按 all 处理（全局助手无下拉）。 */
+  /** 用户划定的检索范围；缺省按角色回退（reader=current / paper=library / central=all）。 */
   retrievalScope?: RetrievalScope;
   /** 旧版论文工具 paperSearch 的检索范围（仅 legacy 模式；新原语不使用） */
   paperScopeIds?: string[] | null;
@@ -31,8 +33,8 @@ export class RetrievalScopeError extends Error {
 
 /** 解析本轮生效范围：用户圈定值优先；central 恒为 all。 */
 export function resolveRetrievalScope(ctx: AgentDocScope): RetrievalScope {
-  if (ctx.scope === "central") return "all";
-  return ctx.retrievalScope ?? "current";
+  if (ctx.scope === "central") return defaultRetrievalScope("central");
+  return ctx.retrievalScope ?? defaultRetrievalScope(ctx.scope);
 }
 
 export function retrievalScopeLabel(scope: AgentDocScope["scope"], value: RetrievalScope): string {
@@ -118,14 +120,72 @@ export async function docDir(docId: string): Promise<string> {
 export interface DocMetadata {
   title?: string;
   author?: string;
+  authors?: string[];
   language?: string;
   published?: string;
+  date?: string;
+  abstract?: string;
+  keywords?: string[];
+  volume?: string;
+  issue?: string;
+  page?: string;
   doi?: string;
   venue?: string;
   raw: Record<string, unknown> | null;
 }
 
-export async function readDocMetadata(doc: DocRef): Promise<DocMetadata> {
+export type DocMetadataErrorHandler = (error: unknown) => void;
+
+function isNotFoundError(error: unknown): boolean {
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  if (code === "ENOENT") return true;
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return message.includes("enoent") || message.includes("no such file") || message.includes("os error 2");
+}
+
+async function readPaperDocMetadata(docId: string, onError?: DocMetadataErrorHandler): Promise<DocMetadata> {
+  let json: Record<string, unknown> = {};
+  let frontmatter: PaperMetadata = {};
+  try {
+    const metaPath = `${await docDir(docId)}/metadata.json`;
+    if (await exists(metaPath)) {
+      const parsed = JSON.parse(await readTextFile(metaPath)) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        json = parsed as Record<string, unknown>;
+      } else {
+        onError?.(new Error(`metadata.json 必须是对象: ${docId}`));
+      }
+    }
+  } catch (error) {
+    if (!isNotFoundError(error)) onError?.(error);
+  }
+  try {
+    frontmatter = parsePaperMarkdown(await readPaperMarkdown(docId)).metadata;
+  } catch (error) {
+    if (!isNotFoundError(error)) onError?.(error);
+  }
+
+  const merged = { ...frontmatter, ...json } as PaperMetadata & Record<string, unknown>;
+  return {
+    title: merged.title,
+    authors: normalizeAuthors(merged.author),
+    language: merged.lang,
+    published: merged.date,
+    date: merged.date,
+    abstract: merged.abstract,
+    keywords: merged.keywords,
+    volume: merged.volume,
+    issue: merged.issue,
+    page: merged.page,
+    doi: merged.doi,
+    venue: merged["container-title"],
+    raw: Object.keys(merged).length > 0 ? merged : null,
+  };
+}
+
+export async function readDocMetadata(doc: DocRef, onError?: DocMetadataErrorHandler): Promise<DocMetadata> {
+  if (doc.kind === "paper") return readPaperDocMetadata(doc.id, onError);
   try {
     const metaPath = `${await docDir(doc.id)}/metadata.json`;
     if (!(await exists(metaPath))) return { raw: null };
@@ -146,7 +206,8 @@ export async function readDocMetadata(doc: DocRef): Promise<DocMetadata> {
       venue: typeof raw["container-title"] === "string" ? (raw["container-title"] as string) : undefined,
       raw,
     };
-  } catch {
+  } catch (error) {
+    if (!isNotFoundError(error)) onError?.(error);
     return { raw: null };
   }
 }

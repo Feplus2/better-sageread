@@ -8,8 +8,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
  * Agent 写操作安全模式（2026-08-05 拍板三档，对三个助手一致生效）：
  * - strict（默认）：工作区内读写静默；界外读/写/命令执行均弹确认卡
  * - relaxed：界外读也静默；界外写/命令执行确认卡
- * - full：全部静默（仍有审计日志）
- * 网络外发（httpRequest 非 GET）任何模式都弹确认卡。判定表集中在 ai/utils/tool-guard.ts。
+ * - full：常规读写/命令静默（仍有审计日志）；恒确认例外与敏感路径拒绝不取消
+ * 网络非 GET、携带密钥引用的外发及破坏性/密钥操作按判定表恒确认；集中在 ai/utils/tool-guard.ts。
  */
 export type AgentSafetyMode = "strict" | "relaxed" | "full";
 
@@ -19,8 +19,12 @@ export type AgentWorkspaceScope = "central" | "reader" | "paper";
 /** 按助手覆盖的工作区根；缺项/空串 = 跟随共享根（2026-08-05 拍板：共享根 + 按助手覆盖） */
 export type PerAgentRoots = Partial<Record<AgentWorkspaceScope, string>>;
 
-/** 文档工具模式：new=通用文档原语（默认）；both=新旧并存（调试）；legacy=旧工具（回退位） */
-export type DocumentToolMode = "both" | "new" | "legacy";
+/** 文档工具模式：new=通用文档原语（默认）；legacy=旧工具（回退位）。 */
+export type DocumentToolMode = "new" | "legacy";
+
+export function normalizeDocumentToolMode(value: unknown): DocumentToolMode {
+  return value === "legacy" ? "legacy" : "new";
+}
 
 interface AgentSettingsState {
   safetyMode: AgentSafetyMode;
@@ -65,13 +69,11 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
     {
       name: tauriStorageKey.agentSettings,
       storage: createJSONStorage(() => tauriStorage),
-      version: 2,
-      // v2：文档工具模式默认值从 both 切到 new——旧版本持久化的 both 迁移到 new（用户仍可在设置里切回）
-      migrate: (persisted, version) => {
+      version: 3,
+      // v3：文档工具只保留 new/legacy；历史值与非法值统一回退 new。
+      migrate: (persisted) => {
         const state = persisted as Partial<AgentSettingsState> | undefined;
-        if (state && version < 2 && state.documentToolMode === "both") {
-          state.documentToolMode = "new";
-        }
+        if (state) state.documentToolMode = normalizeDocumentToolMode(state.documentToolMode);
         return state as AgentSettingsState;
       },
       partialize: (state) => ({
@@ -89,13 +91,7 @@ export const useAgentSettingsStore = create<AgentSettingsState>()(
           merged.workspaceRoot = null;
           merged.perAgentRoots = {};
         }
-        if (
-          merged.documentToolMode !== "new" &&
-          merged.documentToolMode !== "legacy" &&
-          merged.documentToolMode !== "both"
-        ) {
-          merged.documentToolMode = "new";
-        }
+        merged.documentToolMode = normalizeDocumentToolMode(merged.documentToolMode);
         return merged;
       },
     },

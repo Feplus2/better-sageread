@@ -100,6 +100,22 @@ console.log("[4] library-guide.ts：不得再出现「文件工具不可用」�
   const source = read("packages/app/src/ai/prompts/library-guide.ts");
   check("Library guide 无「不可用」表述", !source.includes("不可用"));
   check("Library guide 仍保留文献库只读边界", source.includes("文献库只读") && source.includes("runCommand"), "");
+  check("未索引关键词/标题回退与目录读取互补", source.includes("关键词/标题") && source.includes("互补"), "");
+  check("不再称未索引只能按目录直读", !source.includes("只能按目录/原文读取"), "");
+}
+
+console.log("[5] 模式感知工具说明书收口");
+{
+  const sciverse = read("packages/app/src/ai/tools/sciverse-search.ts");
+  check("sciverseSearch 不固定推荐 ragSearch/paperSearch", !/ragSearch|paperSearch/.test(sciverse), "");
+  const local = read("packages/app/src/ai/tools/central/read-local-file.ts");
+  check("readLocalFile 不固定推荐 readPaperSection", !local.includes("readPaperSection"), "");
+  const devDocs = read("packages/app/src/ai/tools/central/search-dev-docs.ts");
+  check("searchDevDocs 不固定推荐 RAG/paperSearch", !/RAG\/paperSearch/.test(devDocs), "");
+  const paperPrompt = read("packages/app/src/constants/paper-prompt.ts");
+  const noVector = templateSection(paperPrompt, "const PAPER_POLICY_NO_VECTOR_NEW");
+  check("paper 无向量时仍提示关键词/标题回退", noVector.includes("关键词/标题"), noVector.slice(0, 220));
+  check("paper 无向量时不再称 searchLibrary 不可用", !noVector.includes("searchLibrary 不可用"), noVector.slice(0, 220));
 }
 
 console.log(`\n结果：${passed} passed, ${failed} failed`);

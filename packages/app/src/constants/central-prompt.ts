@@ -1,6 +1,7 @@
 import { getDocumentToolMode } from "@/ai/tools/document/mode";
 import { DEFAULT_CENTRAL_STYLE } from "@/constants/agent-styles";
 import { SHARED_HOUSE_RULES } from "@/constants/shared-policy";
+import { useLlamaStore } from "@/store/llama-store";
 
 /**
  * 全局助手系统策略（2026-09 提示词分层重构）：代码持有、随版本更新，用户不可见。
@@ -22,7 +23,7 @@ const CENTRAL_POLICY = `—— 行为准则 ——
 • manageNotes（长文笔记面板）与 notes（划线标注查询）、exportNotes（划线导出）是两套概念：查划线用 notes，导划线用 exportNotes，读写长文笔记用 manageNotes（bookId 先用 getBooks 查得）。
 • manageThreads：对话管理；export 时每个对话独立一个文件。
 • readThread：召回对话完整问答（缺省当前对话；整理本次对话为笔记或回顾被压缩截断的早期内容前必用，不能只凭残存上下文；读其他对话先用 manageThreads 的 list/search 拿 threadId。仅在有进行中的对话时可用）。
-• 文献检索与阅读：按下方【文档工具模式】段落执行（新模式用 searchLibrary/readDocument，旧模式用 paperSearch/paperContext；两者不要混用）。
+• 文献检索与阅读：按下方【文档工具模式】段落和实际注册工具执行；未提供的检索工具不要调用，不要混用新旧工具。
 • sciverseSearch：科研问答、学术概念/方法/实验细节等需要论文原文证据的问题优先于 webSearch；返回带出处坐标的原文片段，引用须注明论文。
 • importPaper（解析论文进文献库）与 importBook（书籍进书库）是两条链路，文案需区分。
 • askAppHelp：使用帮助问答（用户问"怎么用/在哪里/能不能"时优先）；searchDevDocs：开发者 wiki（用户问"这个项目怎么实现的"或要基于现状做扩展自查时用）。
@@ -79,14 +80,20 @@ const CENTRAL_POLICY = `—— 行为准则 ——
  */
 export async function buildCentralPrompt(): Promise<string> {
   const docMode = getDocumentToolMode();
+  const hasVectorCapability = useLlamaStore.getState().hasVectorCapability();
+  const legacyRetrievalPolicy = hasVectorCapability
+    ? "• paperSearch：文献库语义检索（跨论文主题调研、按主题/方法找论文；英文术语构造 query 命中率更高；结果自带论文标题，引用须注明出自哪篇）。命中片段不足时用 paperContext 按 chunk_id 扩展同论文前后文。"
+    : "• 未配置嵌入模型，paperSearch/paperContext 未注册，文献库语义检索不可用，不要调用。";
   const docToolsPolicy =
     docMode === "new"
       ? `—— 文档工具模式（新原语） ——
-• searchLibrary：书库+论文库统一混合检索（需已配置向量模型）；结果带 kind=book/paper 与章节标题，引用须注明出处文档。
+• searchLibrary：书库+论文库统一检索；已建索引文档用语义混合检索，未索引文档用关键词/标题回退，与 getDocumentInfo 目录读取和 readDocument 原文窗口互补。结果带 kind=book/paper 与章节标题，引用须注明出处文档；partial 且带 next_cursor 时，用相同 query/参数和 cursor 续扫后续文档，直到游标消失。
 • readDocument：按 doc=book:<id> / paper:<id> 读原文窗口（heading/offset/position + 窗口续读）；getDocumentInfo 看元数据/目录/索引状态；getCitationGraph 查库内引用关系。
+• getFigures / getCitations：读取论文图片清单或参考文献；全局助手没有当前论文，必须显式传 doc=paper:<paper_id>，不支持书籍 doc。
 • 旧的 paperSearch/paperContext/readPaperSection/readBookSection/ragSearch/ragToc/ragContext/ragRange 在本模式不可用，不要调用。`
       : `—— 文档工具模式（旧版） ——
-• paperSearch：文献库语义检索（需已配置向量模型；跨论文主题调研、按主题/方法找论文；英文术语构造 query 命中率更高；结果自带论文标题，引用须注明出自哪篇）。命中片段不足时用 paperContext 按 chunk_id 扩展同论文前后文。
+${legacyRetrievalPolicy}
+• getFigures / getCitations：读取论文图片清单或参考文献；全局助手没有当前论文，必须显式传 doc=paper:<paper_id>，不支持书籍 doc。
 • readDocument / getDocumentInfo / searchLibrary / getCitationGraph 在本模式不可用。`;
   let prompt = `${DEFAULT_CENTRAL_STYLE}\n\n${SHARED_HOUSE_RULES}\n\n${CENTRAL_POLICY}\n\n${docToolsPolicy}`;
 

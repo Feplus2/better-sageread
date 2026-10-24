@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { isLocalEndpoint } from "@/utils/provider-url";
 import {
   buildRequestPathPreview,
   findCurrentEndpoint,
@@ -10,14 +9,15 @@ import {
   getPresetDefaultEndpoint,
   nativeImageHint,
 } from "@/utils/provider-endpoint";
+import { isLocalEndpoint } from "@/utils/provider-url";
 import SecretInput from "./secret-input";
 
 interface ApiConfigSectionProps {
   provider: ModelProvider;
-  onFieldChange: (field: string, value: any) => void;
+  onFieldsChange: (updates: Partial<ModelProvider>) => void;
 }
 
-export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigSectionProps) {
+export default function ApiConfigSection({ provider, onFieldsChange }: ApiConfigSectionProps) {
   const providerName = provider.name;
   const isCustomProvider = provider.provider.startsWith("custom-");
   const isLocal = isLocalEndpoint(provider.baseUrl);
@@ -41,8 +41,7 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
   const applyEndpoint = (protocol: ChatProtocol) => {
     const option = endpointOptions.find((item) => item.protocol === protocol);
     if (!option) return;
-    onFieldChange("apiStyle", option.protocol);
-    onFieldChange("baseUrl", option.baseUrl);
+    onFieldsChange({ apiStyle: option.protocol, baseUrl: option.baseUrl });
   };
 
   return (
@@ -84,8 +83,8 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           id="apiKey"
           placeholder={isLocal ? "本地服务可留空" : "输入 API Key..."}
           className="h-8"
-          onSaved={(value) => onFieldChange("apiKey", value)}
-          onCleared={() => onFieldChange("apiKey", "")}
+          onSaved={(value) => onFieldsChange({ apiKey: value })}
+          onCleared={() => onFieldsChange({ apiKey: "" })}
         />
       </div>
 
@@ -143,7 +142,7 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           type="text"
           className="h-8"
           value={provider?.baseUrl ?? ""}
-          onChange={(e) => onFieldChange("baseUrl", e.target.value)}
+          onChange={(e) => onFieldsChange({ baseUrl: e.target.value })}
           placeholder="https://api.example.com/v1"
         />
         {preview && (
@@ -157,7 +156,10 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           <p className="text-neutral-500 text-xs dark:text-neutral-400">
             Base URL 只决定端点；协议决定用哪一代 API。自定义代理/中转站请按实际支持的格式选择。
           </p>
-          <Select value={provider.apiStyle ?? "auto"} onValueChange={(value) => onFieldChange("apiStyle", value)}>
+          <Select
+            value={provider.apiStyle ?? "auto"}
+            onValueChange={(value) => onFieldsChange({ apiStyle: value as ModelApiStyle })}
+          >
             <SelectTrigger className="h-8">
               <SelectValue placeholder="自动" />
             </SelectTrigger>
@@ -185,8 +187,7 @@ export default function ApiConfigSection({ provider, onFieldChange }: ApiConfigS
           onClick={() => {
             const option = getPresetDefaultEndpoint(provider);
             if (option) {
-              onFieldChange("apiStyle", option.protocol);
-              onFieldChange("baseUrl", option.baseUrl);
+              onFieldsChange({ apiStyle: option.protocol, baseUrl: option.baseUrl });
             }
           }}
         >

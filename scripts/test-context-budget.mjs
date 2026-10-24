@@ -45,8 +45,19 @@ check("输出预留生效（DSH 公式 min(0.8W, W-O-B)）", deepseekOut.highWat
 const unknown = lib.resolveContextBudget("some-unknown-model");
 check("未知模型默认 1M（现代 Agent 模型口径）", unknown.contextWindow === lib.DEFAULT_CONTEXT_WINDOW && unknown.source === "default" && unknown.contextWindow === 1_000_000, unknown);
 check("未知模型触发线 800000 / 保留 300000", unknown.highWater === 800_000 && unknown.lowWater === 300_000, unknown);
-const tiny = lib.resolveContextBudget("x", 10_000);
-check("极小窗口有历史下限", tiny.highWater === 24_000 && tiny.lowWater === 12_000, tiny);
+const tiny = lib.resolveContextBudget("x", 10_000, 1_000);
+check("10k 窗口 / 1k 输出预留的水位为 8000 / 6000", tiny.highWater === 8_000 && tiny.lowWater === 6_000, tiny);
+for (const window of [8_000, 10_000, 16_000, 32_000, 128_000, 1_000_000]) {
+  const outputReserves = [0, 1_000, Math.floor(window * 0.25), window];
+  const budgets = outputReserves.map((output) => ({ output, budget: lib.resolveContextBudget("x", window, output) }));
+  check(
+    `${window} 窗口扫描满足 0 < low <= high <= floor(W*0.8)`,
+    budgets.every(
+      ({ budget }) => budget.lowWater > 0 && budget.lowWater <= budget.highWater && budget.highWater <= Math.floor(window * 0.8),
+    ),
+    budgets,
+  );
+}
 
 console.log("[2] token 估算补齐");
 const bigAscii = "a".repeat(40_000);

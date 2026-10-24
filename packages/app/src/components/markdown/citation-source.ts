@@ -9,7 +9,7 @@ import { createContext } from "react";
  * - tool-paperContext.output.results[]：chunk_id + paper_title（无 paper_id，只补缺不覆盖）
  * - tool-ragSearch.output：meta.book_id + results[].position.chunk_id（书籍场景）
  * - D8 目录牌模式：tool-useTool 为转发入口，真实工具名在 input.tool，output 即原工具结果结构，
- *   还原原名后按上述同口径解析（part 名不改写——stripUnknownToolParts 的 v7 兼容语义依赖现名）
+ *   还原原名后按上述同口径解析（请求历史适配只改发送副本，UI/DB 中的 part 名不改写）
  */
 export type CitationSource =
   | { kind: "paper"; paperId?: string; title?: string }

@@ -102,9 +102,17 @@ pub(crate) fn display_path(p: &Path) -> String {
 
 /// 界内/界外判定。root 调用方保证已存在（resolve_root 负责）。
 pub(crate) fn guard(root: &Path, path: &str) -> GuardVerdict {
-    let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let target = resolve_absolute(root, path);
-    let inside = target.starts_with(&canon_root);
+    guard_with_roots(&[root], path)
+}
+
+/// 同一 canonical 目标可属于任一允许根；相对路径仍以第一个根解析。
+pub(crate) fn guard_with_roots<P: AsRef<Path>>(roots: &[P], path: &str) -> GuardVerdict {
+    let target = resolve_absolute(roots.first().map(|root| root.as_ref()).unwrap_or_else(|| Path::new(".")), path);
+    let inside = roots.iter().any(|root| {
+        let root = root.as_ref();
+        let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        target.starts_with(canon_root)
+    });
     let meta = std::fs::metadata(&target).ok();
     GuardVerdict {
         verdict: if inside { "in" } else { "out" },

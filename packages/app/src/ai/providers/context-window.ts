@@ -9,8 +9,8 @@
  *   O = 模型单次最大输出（模型列表 max_output_tokens，缺省 0）
  *   IR = max(W − O, 0.2W)                 // 可用于历史/输入的预算
  *   B = clamp(0.1W, 8k, 64k)              // 给 system/tools/本轮工具结果的余量
- *   触发线 = max(MIN, min(0.8W, IR − B))
- *   压缩后保留 = max(12k, min(0.3×IR, 0.75×触发线))，最近消息最少保留（selector 内保证）
+ *   触发线 = min(0.8W, max(MIN, IR − B))
+ *   压缩后保留 = min(0.75×触发线, max(12k, 0.3×IR))，最近消息最少保留（selector 内保证）
  *
  * 容量来源优先级：模型列表接口 context_window > 内置家族表 > 默认 1M。
  * 2026-10 用户拍板：现代 Agent 模型基本 1M 标配，128k/256k 兜底过于保守会频繁误压。
@@ -105,10 +105,10 @@ export function resolveContextBudget(
       : 0;
   const inputRoom = Math.max(W - O, Math.floor(W * 0.2));
   const headroom = Math.min(MAX_HEADROOM, Math.max(MIN_HEADROOM, Math.floor(W * 0.1)));
-  const highWater = Math.max(MIN_HISTORY_BUDGET, Math.min(Math.floor(W * TRIGGER_RATIO), inputRoom - headroom));
-  const lowWater = Math.max(
-    MIN_KEEP_BUDGET,
-    Math.min(Math.floor(inputRoom * KEEP_RATIO), Math.floor(highWater * 0.75)),
+  const highWater = Math.min(Math.floor(W * TRIGGER_RATIO), Math.max(MIN_HISTORY_BUDGET, inputRoom - headroom));
+  const lowWater = Math.min(
+    Math.floor(highWater * 0.75),
+    Math.max(MIN_KEEP_BUDGET, Math.floor(inputRoom * KEEP_RATIO)),
   );
   return { highWater, lowWater, floor: RECENT_MESSAGE_FLOOR, contextWindow: W, source, outputReserve: O, headroom };
 }

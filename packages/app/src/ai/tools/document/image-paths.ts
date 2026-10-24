@@ -5,7 +5,8 @@ import type { DocRef } from "./shared";
  *
  * new 模式默认读原文，论文 paper.md / 书籍 mdbook 的 Markdown 里图片是相对路径
  * （如 images/p049.jpg），而 readImage 只收绝对路径。这里在返回文本前把「能解析到
- * 实际文件」的相对图片链接重写为绝对路径；解析不到/文件不存在保留原文，不编造。
+ * 实际文件」的相对图片链接重写为绝对路径；解析不到时保留原文。
+ * 调用方可用 resolveMissing 在磁盘未命中后解析并物化窗口资源（如 EPUB blob）。
  *
  * 库结构（与 getFigures、阅读位置桥一致）：
  * - 论文：{appData}/books/{paperId}/paper.md + {appData}/books/{paperId}/images/…
@@ -27,11 +28,16 @@ export interface DocImageContext {
   kind: DocRef["kind"];
   /** {appData}/books/<docId>（论文与书籍同根） */
   docDir: string;
-  /** 书籍 position 读取时的 mdbook 相对路径（相对 mdbook src 根，如 "EPUB/chapter_003.md"） */
+  /** 书籍 position 或 canonical segment 的 mdbook 相对路径（相对 mdbook src 根）。 */
   mdRelPath?: string;
+  /** 全局 fallback 之前按 occurrence 解析（segment 结果不共享）；用于 canonical-book 窗口。 */
+  resolveOccurrence?: (ref: string, index: number) => Promise<string | null>;
+  /** 全局 fallback 仍未命中时按 occurrence 解析或物化资源。 */
+  resolveMissing?: (ref: string, index: number) => Promise<string | null>;
 }
 
-const MARKDOWN_IMAGE_RE = /(?<!\\)!\[([^\]]*)\]\(\s*(<[^>\n]*>|[^)\s]+)((?:\s+"[^"]*"|\s+'[^']*'|\s+\([^)]*\))?)\s*\)/g;
+const MARKDOWN_IMAGE_RE =
+  /(?<!\\)!\[((?:\\[\s\S]|[^\\\]])*)\]\(\s*(<[^>\n]*>|[^)\s]+)((?:\s+"[^"]*"|\s+'[^']*'|\s+\([^)]*\))?)\s*\)/g;
 const HTML_IMG_RE = /<img\b([^>]*?)\bsrc\s*=\s*("([^"]*)"|'([^']*)')([^>]*)>/gi;
 
 function toSlashed(value: string): string {
@@ -145,26 +151,55 @@ async function resolvePaperImagePath(ref: string, ctx: DocImageContext, fs: DocI
   return null;
 }
 
-/** 先收集所有可解析的本地相对图片引用（同一引用只探测一次）。 */
+export function resolveDocumentImagePath(ref: string, ctx: DocImageContext, fs: DocImageFs): Promise<string | null> {
+  return ctx.kind === "paper" ? resolvePaperImagePath(ref, ctx, fs) : resolveBookImagePath(ref, ctx, fs);
+}
+
+interface ImageRefOccurrence {
+  ref: string;
+  index: number;
+  key: string;
+}
+
+/** occurrence 优先；仅全局 fallback 按 ref 缓存，避免跨 spine 共享 segment 结果。 */
 async function collectResolvedRefs(text: string, ctx: DocImageContext, fs: DocImageFs): Promise<Map<string, string>> {
   const resolved = new Map<string, string>();
-  const refs = new Set<string>();
+  const diskResolved = new Map<string, string | null>();
+  const occurrences: ImageRefOccurrence[] = [];
+  let markdownOrdinal = 0;
+  let htmlOrdinal = 0;
   MARKDOWN_IMAGE_RE.lastIndex = 0;
   HTML_IMG_RE.lastIndex = 0;
   for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) {
-    refs.add(match[2]);
+    occurrences.push({ ref: match[2], index: match.index ?? 0, key: `markdown:${markdownOrdinal++}` });
   }
   for (const match of text.matchAll(HTML_IMG_RE)) {
-    refs.add(match[3] ?? match[4] ?? "");
+    occurrences.push({ ref: match[3] ?? match[4] ?? "", index: match.index ?? 0, key: `html:${htmlOrdinal++}` });
   }
-  for (const ref of refs) {
+  for (const occurrence of occurrences) {
+    const { ref, index, key } = occurrence;
     if (!isLocalRelativeImageRef(ref)) continue;
     const refPath = stripAngle(ref);
-    const absolute =
-      ctx.kind === "paper"
-        ? await resolvePaperImagePath(refPath, ctx, fs)
-        : await resolveBookImagePath(refPath, ctx, fs);
-    if (absolute) resolved.set(ref, absolute);
+    let absolute: string | null = null;
+    if (ctx.resolveOccurrence) {
+      try {
+        absolute = await ctx.resolveOccurrence(refPath, index);
+      } catch {
+        absolute = null;
+      }
+    }
+    if (!absolute) {
+      if (!diskResolved.has(refPath)) diskResolved.set(refPath, await resolveDocumentImagePath(refPath, ctx, fs));
+      absolute = diskResolved.get(refPath) ?? null;
+    }
+    if (!absolute && ctx.resolveMissing) {
+      try {
+        absolute = await ctx.resolveMissing(refPath, index);
+      } catch {
+        absolute = null;
+      }
+    }
+    if (absolute) resolved.set(key, absolute);
   }
   return resolved;
 }
@@ -181,12 +216,14 @@ export async function rewriteDocumentImagePaths(text: string, ctx: DocImageConte
   if (resolved.size === 0) return text;
 
   let changed = false;
+  let markdownOrdinal = 0;
+  let htmlOrdinal = 0;
   MARKDOWN_IMAGE_RE.lastIndex = 0;
   HTML_IMG_RE.lastIndex = 0;
   const withMarkdown = text.replace(
     MARKDOWN_IMAGE_RE,
-    (whole: string, alt: string, destination: string, title = "") => {
-      const absolute = resolved.get(destination);
+    (whole: string, alt: string, _destination: string, title = "") => {
+      const absolute = resolved.get(`markdown:${markdownOrdinal++}`);
       if (!absolute) return whole;
       changed = true;
       return `![${alt}](${absolute}${title ? ` ${title.trim()}` : ""})`;
@@ -195,9 +232,8 @@ export async function rewriteDocumentImagePaths(text: string, ctx: DocImageConte
   HTML_IMG_RE.lastIndex = 0;
   const rewritten = withMarkdown.replace(
     HTML_IMG_RE,
-    (whole: string, before: string, quoted: string, doubleQuoted?: string, singleQuoted?: string, after = "") => {
-      const ref = doubleQuoted ?? singleQuoted ?? "";
-      const absolute = resolved.get(ref);
+    (whole: string, before: string, quoted: string, _doubleQuoted?: string, _singleQuoted?: string, after = "") => {
+      const absolute = resolved.get(`html:${htmlOrdinal++}`);
       if (!absolute) return whole;
       changed = true;
       const quote = quoted.startsWith("'") ? "'" : '"';

@@ -69,7 +69,7 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
         const parsed = parsePaperSections(markdown);
         let paperIndex: { status: "indexed" | "not_indexed"; chunk_count?: number; note: string } = {
           status: "not_indexed",
-          note: "未能读取论文索引状态（按未索引处理）：只能按原文读取；如确有索引，可改用 searchLibrary 语义检索。",
+          note: "未能读取论文索引状态（按未索引处理，直读较慢）：searchLibrary 仍可用关键词/标题回退，与 getDocumentInfo 目录和 readDocument 原文窗口互补；如确有索引，可用语义检索。",
         };
         try {
           const status = await invoke<{ indexed: boolean; chunkCount: number }>("plugin:epub|paper_index_status", {
@@ -80,7 +80,7 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
             : {
                 status: "not_indexed",
                 chunk_count: status.chunkCount,
-                note: "这篇论文未建向量索引（论文向量库中没有它的分块），只能按原文读取（较慢）；回答时提醒用户可在设置中向量化后再检索。",
+                note: "这篇论文未建向量索引（论文向量库中没有它的分块，直读较慢）；searchLibrary 仍可用关键词/标题回退，与 getDocumentInfo 目录和 readDocument 原文窗口互补；需要语义检索时可再向量化提速。",
               };
         } catch {
           // 保持保守状态
@@ -93,10 +93,16 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
         return {
           doc: { ref: docRefString(doc), kind: doc.kind, id: doc.id, title: metadata.title ?? null },
           metadata: {
-            authors: metadata.author ?? null,
-            venue: metadata.venue ?? null,
-            doi: metadata.doi ?? null,
+            authors: metadata.authors ?? [],
+            date: metadata.date ?? null,
             published: metadata.published ?? null,
+            abstract: metadata.abstract ?? null,
+            keywords: metadata.keywords ?? [],
+            venue: metadata.venue ?? null,
+            volume: metadata.volume ?? null,
+            issue: metadata.issue ?? null,
+            page: metadata.page ?? null,
+            doi: metadata.doi ?? null,
             language: metadata.language ?? null,
           },
           index: paperIndex,
@@ -151,7 +157,7 @@ export const createGetDocumentInfoTool = (ctx: AgentDocScope) =>
           status: indexed ? "indexed" : "not_indexed",
           note: indexed
             ? "已建向量索引"
-            : "本书未建向量索引，只能按目录/原文读取（较慢）；建议告诉用户可在设置中向量化后再检索，速度会快很多。",
+            : "本书未建向量索引（直读较慢）；searchLibrary 仍可用关键词/标题回退，与 getDocumentInfo 目录和 readDocument 原文窗口互补；需要语义检索时可再向量化提速。",
         },
         outline: {
           total: tocTotal,

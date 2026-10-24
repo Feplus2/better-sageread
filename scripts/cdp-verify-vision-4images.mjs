@@ -176,6 +176,12 @@ async function runOne(profile) {
   const PROMPT = ${JSON.stringify(makePrompt())};
   const DOC_MODE = ${JSON.stringify(profile.docMode)};
   const DISABLE_DIRECTORY = ${profile.disableDirectory};
+  const hadDocMode = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DOC_TOOL_MODE__");
+  const previousDocMode = window.__SAGEREAD_DOC_TOOL_MODE__;
+  const hadDisableDirectory = Object.prototype.hasOwnProperty.call(window, "__SAGEREAD_DISABLE_DIRECTORY__");
+  const previousDisableDirectory = window.__SAGEREAD_DISABLE_DIRECTORY__;
+  const previousImageBridgeLog = window.__sagereadImageBridgeLog;
+  const previousLazyImageLog = window.__sagereadLazyImageLog;
   window.__SAGEREAD_DOC_TOOL_MODE__ = DOC_MODE;
   window.__SAGEREAD_DISABLE_DIRECTORY__ = DISABLE_DIRECTORY;
   delete window.__sagereadImageBridgeLog;
@@ -188,7 +194,10 @@ async function runOne(profile) {
   const store = provider.useProviderStore;
   for (let i = 0; i < 30; i++) { const s = store.getState(); if (s.selectedModel && s.modelProviders.length > 0) break; await sleep(300); }
   const selected = store.getState().selectedModel;
-  const before = { activeTabId: layout.useLayoutStore.getState().activeTabId };
+  const before = { activeTabId: layout.useLayoutStore.getState().activeTabId, tabIds: layout.useLayoutStore.getState().tabs.map((t) => t.id) };
+  const beforeLatest = await threadSvc.getLatestThreadBybookId("a27b187c6bd02d3c", "book");
+  const beforeLatestId = beforeLatest?.id || null;
+  const openedPaper = !before.tabIds.includes("paper-a27b187c6bd02d3c");
   layout.useLayoutStore.getState().openPaper("a27b187c6bd02d3c", "Rational design");
   await sleep(2500);
   const VIS = (el) => { if (!el) return false; let n = el; while (n) { const cs = getComputedStyle(n); if (cs.display === "none" || cs.visibility === "hidden") return false; n = n.parentElement; } const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
@@ -249,11 +258,18 @@ async function runOne(profile) {
   const threadJson = thread ? JSON.stringify(thread.messages || []) : "";
   const threadJsonLen = threadJson.length;
   const threadHasBase64 = threadJson.includes("data:image/");
-  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, toolFileParts, toolOutputs, usage, model: selected && selected.modelId, bridgeLog, lazyLog, threadJsonLen, threadHasBase64, docMode: DOC_MODE, disableDirectory: DISABLE_DIRECTORY };
-  if (thread) { try { await threadSvc.deleteThread(thread.id); } catch (e) {} }
-  delete window.__SAGEREAD_DOC_TOOL_MODE__;
-  delete window.__SAGEREAD_DISABLE_DIRECTORY__;
-  try { layout.useLayoutStore.getState().removeTab("paper-a27b187c6bd02d3c"); } catch (e) {}
+  const threadIsNew = !!thread && thread.id !== beforeLatestId;
+  const result = { done, elapsedMs: Date.now() - t0, answer, toolCalls, toolFileParts, toolOutputs, usage, model: selected && selected.modelId, bridgeLog, lazyLog, threadJsonLen, threadHasBase64, docMode: DOC_MODE, disableDirectory: DISABLE_DIRECTORY, threadIsNew };
+  if (threadIsNew) { try { await threadSvc.deleteThread(thread.id); } catch (e) {} }
+  if (hadDocMode) window.__SAGEREAD_DOC_TOOL_MODE__ = previousDocMode;
+  else delete window.__SAGEREAD_DOC_TOOL_MODE__;
+  if (hadDisableDirectory) window.__SAGEREAD_DISABLE_DIRECTORY__ = previousDisableDirectory;
+  else delete window.__SAGEREAD_DISABLE_DIRECTORY__;
+  if (previousImageBridgeLog === undefined) delete window.__sagereadImageBridgeLog;
+  else window.__sagereadImageBridgeLog = previousImageBridgeLog;
+  if (previousLazyImageLog === undefined) delete window.__sagereadLazyImageLog;
+  else window.__sagereadLazyImageLog = previousLazyImageLog;
+  if (openedPaper) { try { layout.useLayoutStore.getState().removeTab("paper-a27b187c6bd02d3c"); } catch (e) {} }
   if (before.activeTabId) { try { layout.useLayoutStore.getState().activateTab(before.activeTabId); } catch (e) {} }
   return result;
 })()`;
@@ -313,7 +329,7 @@ function judge(out) {
     mappingOk(answer, index + 1, image.code, image.colorWord, image.shapeWord),
   );
   const viewedAll = allPathsViewed || readCalls.length + viewCalls.length >= 4;
-  const pass = Boolean(out.done) && viewedAll && codes.every(Boolean) && mappings.every(Boolean);
+  const pass = Boolean(out.done) && Boolean(out.threadIsNew) && viewedAll && codes.every(Boolean) && mappings.every(Boolean);
   return {
     pass,
     batch4,
@@ -334,12 +350,12 @@ for (const image of IMAGES) console.log(`  ${image.file}  ${image.code} / ${imag
 const profiles =
   MODE === "both"
     ? [
-        { label: "direct", docMode: "both", disableDirectory: true },
+        { label: "direct", docMode: "new", disableDirectory: true },
         { label: "directory", docMode: "new", disableDirectory: false },
       ]
     : MODE === "directory"
       ? [{ label: "directory", docMode: "new", disableDirectory: false }]
-      : [{ label: "direct", docMode: "both", disableDirectory: true }];
+      : [{ label: "direct", docMode: "new", disableDirectory: true }];
 
 const results = [];
 for (const profile of profiles) {

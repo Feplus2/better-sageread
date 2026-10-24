@@ -375,10 +375,10 @@ registerTools([
  */
 export function getToolsForScope(agentScope: AgentScope, context?: ToolContext): Record<string, Tool> {
   const tools: Record<string, Tool> = {};
-  // P1-2 文档工具可见性：both=过渡（新旧并存）；new=只暴露通用原语；legacy=旧工具（回退位）
+  // P1-2 文档工具可见性：new=只暴露通用原语；legacy=旧工具（回退位）。
   const docToolMode = getDocumentToolMode();
-  const useLegacyDocTools = docToolMode !== "new";
-  const useNewDocTools = docToolMode !== "legacy";
+  const useLegacyDocTools = docToolMode === "legacy";
+  const useNewDocTools = docToolMode === "new";
 
   // 1. 注入共享工具（2026-10-23 用户拍板：new 模式也恢复文件五件套，reader/paper 不再隐藏
   // 工作区/命令类工具；写/命令仍由 tool-guard 的确认卡裁决。目录牌/守卫顺序不变。）
@@ -453,7 +453,7 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     // 阅读位置桥（常驻；new 模式作为结构化字段的逃生口）
     tools.getReadingPosition = createGetReadingPositionTool("paper", context.paperId) as Tool;
     // 领域锚点工具保留（图片/引用不是通用原语能替代的）
-    tools.getCitations = createGetCitationsTool(context.paperId) as Tool;
+    tools.getCitations = createGetCitationsTool(context.paperId, paperDocCtx) as Tool;
     tools.getFigures = createGetFiguresTool(context.paperId, paperDocCtx) as Tool;
     // P1 通用阅读原语（DocRef + 锚点）：可读圈内任意论文/书籍；searchLibrary 在用户圈定范围内检索
     if (useNewDocTools) {
@@ -481,13 +481,17 @@ export function getToolsForScope(agentScope: AgentScope, context?: ToolContext):
     tools.paperContext = createPaperContextTool() as Tool;
   }
 
-  // 5.5 P1 通用文档原语（central 无默认文档，必须显式传 doc）
-  if (useNewDocTools && agentScope === "central") {
+  // 5.5 central 论文 extras 两种模式常驻；没有绑定论文，调用时必须显式传 doc=paper:<id>。
+  if (agentScope === "central") {
     const centralDocCtx = { scope: "central" as const };
-    tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
-    tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;
-    tools.searchLibrary = createSearchLibraryTool(centralDocCtx) as Tool;
-    tools.getCitationGraph = createGetCitationGraphTool(centralDocCtx) as Tool;
+    tools.getCitations = createGetCitationsTool(undefined, centralDocCtx) as Tool;
+    tools.getFigures = createGetFiguresTool(undefined, centralDocCtx) as Tool;
+    if (useNewDocTools) {
+      tools.readDocument = createReadDocumentTool(centralDocCtx) as Tool;
+      tools.getDocumentInfo = createGetDocumentInfoTool(centralDocCtx) as Tool;
+      tools.searchLibrary = createSearchLibraryTool(centralDocCtx) as Tool;
+      tools.getCitationGraph = createGetCitationGraphTool(centralDocCtx) as Tool;
+    }
   }
 
   // 6. MCP 工具注入点（批次 B3）：远程 MCP 工具需异步连接且生命周期跟随单次聊天请求
@@ -509,29 +513,53 @@ export function getToolDescriptions(agentScope: AgentScope): string[] {
     }
   }
 
-  // 论文助手工具为上下文工厂创建（不在静态注册表），描述在此手动同步
+  const docToolMode = getDocumentToolMode();
+  // 上下文工厂创建的文档工具按实际模式列出，避免推荐当前不可用的调用面。
   if (agentScope === "paper") {
+    if (docToolMode === "new") {
+      descriptions.push(
+        "- readDocument: 按 doc 读取论文/书籍原文窗口",
+        "- getDocumentInfo: 获取文档元数据、目录与索引状态",
+        "- searchLibrary: 在用户圈定范围内检索书籍与论文",
+        "- getCitationGraph: 查询论文在库内的引用关系",
+      );
+    } else if (docToolMode === "legacy") {
+      descriptions.push(
+        "- getPaperToc: 获取当前论文的目录结构",
+        "- readPaperSection: 按标题读取当前论文小节正文",
+        "- readPaperFull: 通读当前论文全文",
+        "- getPaperInfo: 获取当前论文元数据",
+        "- readAtReadingPosition: 按当前位置读取 paper.md 原文窗口（可 before/after 扩窗、next_offset 续读）",
+      );
+      if (useLlamaStore.getState().hasVectorCapability()) {
+        descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");
+        descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
+      }
+    }
     descriptions.push(
-      "- getPaperToc: 获取当前论文的目录结构",
-      "- readPaperSection: 按标题读取当前论文小节正文",
-      "- readPaperFull: 通读当前论文全文",
-      "- getPaperInfo: 获取当前论文元数据",
       "- getCitations: 提取当前论文的参考文献列表",
       "- getFigures: 提取当前论文的图片清单（图注与所在小节）",
       "- getReadingPosition: 获取用户当前阅读位置（精确坐标：paper.md 字符偏移 + 估算分块区间 + 进度）",
-      "- readAtReadingPosition: 按当前位置读取 paper.md 原文窗口（可 before/after 扩窗、next_offset 续读）",
       "- manageNotes: 笔记面板管理（列出/读取/新建/修改/星标/导出当前论文的笔记）",
     );
-    if (useLlamaStore.getState().hasVectorCapability()) {
-      descriptions.push("- paperSearch: 文献库语义检索（范围由用户选择）");
-      descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
-    }
   }
 
-  // 全局助手的语义检索同为工厂创建（P4-3），描述手动同步
-  if (agentScope === "central" && useLlamaStore.getState().hasVectorCapability()) {
-    descriptions.push("- paperSearch: 文献库语义检索（全库范围，跨论文主题检索/按主题找论文）");
-    descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
+  if (agentScope === "central") {
+    descriptions.push(
+      "- getCitations: 提取指定论文的参考文献列表（必须显式传 doc=paper:<id>）",
+      "- getFigures: 提取指定论文的图片清单（必须显式传 doc=paper:<id>）",
+    );
+    if (docToolMode === "new") {
+      descriptions.push(
+        "- readDocument: 按显式 doc 读取论文/书籍原文窗口",
+        "- getDocumentInfo: 获取指定文档的元数据、目录与索引状态",
+        "- searchLibrary: 跨书库与论文库检索",
+        "- getCitationGraph: 查询指定论文在库内的引用关系",
+      );
+    } else if (docToolMode === "legacy" && useLlamaStore.getState().hasVectorCapability()) {
+      descriptions.push("- paperSearch: 文献库语义检索（全库范围，跨论文主题检索/按主题找论文）");
+      descriptions.push("- paperContext: 扩展 paperSearch 命中片段的前后上下文");
+    }
   }
 
   // 对话召回（readThread 为工厂创建，注入条件=context.threadId，聊天场景下除新对话首条外恒注入）

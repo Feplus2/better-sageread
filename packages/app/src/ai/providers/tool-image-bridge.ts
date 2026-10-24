@@ -18,6 +18,7 @@
 
 import { getToolImageBudgetChars } from "@/ai/utils/tool-image-budget";
 import { getCachedToolImages } from "@/ai/utils/tool-image-cache";
+import { sanitizeLegacyMcpHistoryOutput, toolImageBytesFromNode } from "@/ai/utils/tool-result-slimming";
 
 const TOOL_IMAGE_MARK = "[工具读取的图片";
 const INLINE_IMAGE_TEXT = "[图片已附在随后的用户消息中]";
@@ -47,10 +48,6 @@ function debugLog(line: string): void {
   }
 }
 
-function isImageDataUrl(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("data:image/");
-}
-
 function extractPath(text: string): string | undefined {
   const matched = /<path>([^<]+)<\/path>/.exec(text);
   return matched?.[1]?.trim();
@@ -59,8 +56,9 @@ function extractPath(text: string): string | undefined {
 /** 递归遍历任意 JSON 结构：把图片节点替换成文字占位，并收集图片与可读路径。 */
 function walkImages(node: unknown, images: ExtractedImage[], paths: string[]): unknown {
   if (typeof node === "string") {
-    if (isImageDataUrl(node)) {
-      images.push({ dataUrl: node, mediaType: "image/jpeg" });
+    const image = toolImageBytesFromNode(node);
+    if (image) {
+      images.push(image);
       return INLINE_IMAGE_TEXT;
     }
     const path = extractPath(node);
@@ -71,28 +69,31 @@ function walkImages(node: unknown, images: ExtractedImage[], paths: string[]): u
     return node.map((item) => walkImages(item, images, paths));
   }
   if (node && typeof node === "object") {
-    const record = node as Record<string, unknown>;
-    if (record.type === "file" && isImageDataUrl(record.url)) {
-      images.push({
-        dataUrl: record.url,
-        mediaType: typeof record.mediaType === "string" ? record.mediaType : "image/jpeg",
-      });
+    const image = toolImageBytesFromNode(node);
+    if (image) {
+      images.push(image);
       return { type: "text", text: INLINE_IMAGE_TEXT };
     }
     const next: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(record)) next[key] = walkImages(value, images, paths);
+    for (const [key, value] of Object.entries(node as Record<string, unknown>))
+      next[key] = walkImages(value, images, paths);
     return next;
   }
   return node;
 }
 
-function extractToolImages(content: unknown): ToolImageExtraction | null {
-  if (typeof content !== "string" || !content.includes("data:image/")) return null;
+function extractToolImages(content: unknown, historicalMcp = false): ToolImageExtraction | null {
+  if (typeof content !== "string") return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
     return null;
+  }
+  if (historicalMcp) {
+    const stripped = sanitizeLegacyMcpHistoryOutput(parsed);
+    if (!stripped) return null;
+    return { content: JSON.stringify(stripped.output), images: stripped.images };
   }
   const images: ExtractedImage[] = [];
   const paths: string[] = [];
@@ -102,7 +103,7 @@ function extractToolImages(content: unknown): ToolImageExtraction | null {
   // 数量对不上时退回首条路径，至少不让占位丢路径。
   const fallbackPath = paths[0];
   images.forEach((image, index) => {
-    image.path = paths[index] ?? fallbackPath;
+    image.path = image.path ?? paths[index] ?? fallbackPath;
   });
   return { content: JSON.stringify(next), images };
 }
@@ -156,24 +157,52 @@ function transformBody(bodyText: string): string {
     if ((message as Record<string, unknown>).role === "user") lastUserIndex = index;
   });
 
+  const toolNames = new Map<string, string>();
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const record = message as Record<string, unknown>;
+    if (record.role !== "assistant" || !Array.isArray(record.tool_calls)) continue;
+    for (const call of record.tool_calls) {
+      const id = call?.id;
+      const fn = call?.function;
+      if (typeof id !== "string" || typeof fn?.name !== "string") continue;
+      let name = fn.name;
+      if (name === "useTool") {
+        try {
+          const input = typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : fn.arguments;
+          if (typeof input?.tool === "string" && input.tool) name = input.tool;
+        } catch {
+          // 参数残缺时仍保留 useTool 名称，不猜测转发目标
+        }
+      }
+      toolNames.set(id, name);
+    }
+  }
+
   const extractions = new Map<number, ToolImageExtraction>();
   messages.forEach((message, index) => {
     if (!message || typeof message !== "object") return;
     const record = message as Record<string, unknown>;
     if (record.role !== "tool") return;
     const rawContent = typeof record.content === "string" ? record.content : "";
-    const extracted = extractToolImages(rawContent);
     const toolCallId = typeof record.tool_call_id === "string" ? record.tool_call_id : null;
+    const toolName = toolCallId ? toolNames.get(toolCallId) : undefined;
+    const historicalMcp = !!toolName?.startsWith("mcp_") && index <= lastUserIndex;
+    const extracted = extractToolImages(rawContent, historicalMcp);
     const cached = toolCallId ? getCachedToolImages(toolCallId) : undefined;
     // 目录牌模式：工具结果里的 dataUrl 已被 useTool 摘到内存缓存，这里按 toolCallId 取回；
     // MCP 来源（origin=mcp）只有当前轮 live 才可回灌，历史消息跳过（内置图不受影响）
-    const cachedReplay = (cached ?? []).filter((image) => image.origin !== "mcp" || index > lastUserIndex);
+    const cachedReplay = historicalMcp
+      ? []
+      : (cached ?? []).filter((image) => image.origin !== "mcp" || index > lastUserIndex);
     const contentPath = extractPath(rawContent);
-    const images = (extracted && extracted.images.length > 0 ? extracted.images : cachedReplay).map((image) => ({
+    const directImages = historicalMcp ? [] : (extracted?.images ?? []);
+    const images = (directImages.length > 0 ? directImages : cachedReplay).map((image) => ({
       ...image,
       path: image.path ?? contentPath,
     }));
-    if (images.length === 0) return;
+    // 历史 raw MCP 即使零回灌，也必须把剥离图片字节后的 content 写回请求体。
+    if (!extracted && images.length === 0) return;
     extractions.set(index, { content: extracted ? extracted.content : rawContent, images });
   });
   if (extractions.size === 0) {

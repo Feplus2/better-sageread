@@ -1,4 +1,4 @@
-import { type AgentDocScope, assertDocInRetrievalScope } from "@/ai/tools/document/shared";
+import { type AgentDocScope, assertDocInRetrievalScope, resolveDocRef } from "@/ai/tools/document/shared";
 import { appDataDir } from "@tauri-apps/api/path";
 import { tool } from "ai";
 import { z } from "zod";
@@ -8,6 +8,28 @@ import { readPaperMarkdown } from "./shared";
 const MAX_CITATIONS_CHARS = 8000;
 /** getFigures 返回的图片条数上限 */
 const MAX_FIGURES = 50;
+
+export function resolvePaperExtraDoc(
+  doc: string | undefined,
+  paperId: string | undefined,
+  scopeCtx?: AgentDocScope,
+): string {
+  const isCentral = scopeCtx?.scope === "central";
+  if (isCentral && !doc?.trim()) {
+    throw new Error("全局助手使用论文图片/参考文献工具时必须显式传 doc=paper:<paper_id>");
+  }
+  if (!isCentral && !doc?.trim() && !paperId) {
+    throw new Error("未找到当前论文，请先在文献库中打开一篇论文");
+  }
+  const resolved = doc?.trim()
+    ? resolveDocRef(doc, scopeCtx ?? { scope: "paper", currentId: paperId })
+    : { kind: "paper" as const, id: paperId as string };
+  if (resolved.kind !== "paper") {
+    throw new Error(`论文图片/参考文献工具仅支持论文，doc 必须是 paper:<paper_id>，收到 doc=book:${resolved.id}`);
+  }
+  if (scopeCtx) assertDocInRetrievalScope(resolved, scopeCtx);
+  return resolved.id;
+}
 
 /** 标题行匹配：返回 { level, text } 或 null */
 function matchHeading(line: string): { level: number; text: string } | null {
@@ -47,10 +69,11 @@ function splitCitationEntries(block: string): string[] {
   return entries;
 }
 
-/** 提取当前论文的参考文献列表（基础层工具，直接读 paper.md，无需向量能力） */
-export const createGetCitationsTool = (paperId: string | undefined) =>
+/** 提取论文的参考文献列表（基础层工具，直接读 paper.md，无需向量能力） */
+export const createGetCitationsTool = (paperId: string | undefined, scopeCtx?: AgentDocScope) =>
   tool({
-    description: `提取当前论文的参考文献（References / 参考文献小节）列表。
+    description: `提取论文的参考文献（References / 参考文献小节）列表。
+论文助手省略 doc 时读取本篇；全局助手必须显式传 doc=paper:<paper_id>。
 
 📖 **使用场景**：
 • 用户问"这篇论文引用了哪些文献""参考文献里有没有某某的工作"
@@ -60,17 +83,15 @@ export const createGetCitationsTool = (paperId: string | undefined) =>
 {heading, entries[], total, truncated}；整体超过 ${MAX_CITATIONS_CHARS} 字符会截断并标注
 
 ⚠️ **什么时候别用**：
-• 用户问的是正文内容而非参考文献——用 readPaperSection
+• 用户问的是正文内容而非参考文献——本工具只提取参考文献，不读取或替代正文阅读
 • 论文没有 References / 参考文献标题时会返回明确提示，不要反复重试`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想查看这篇论文的参考文献'"),
+      doc: z.string().optional().describe("论文 DocRef：paper:<paper_id>；全局助手必传，论文助手缺省为本篇"),
     }),
-    execute: async ({ reasoning }: { reasoning: string }) => {
-      if (!paperId) {
-        throw new Error("未找到当前论文，请先在文献库中打开一篇论文");
-      }
-
-      const markdown = await readPaperMarkdown(paperId);
+    execute: async ({ reasoning, doc }: { reasoning: string; doc?: string }) => {
+      const resolvedPaperId = resolvePaperExtraDoc(doc, paperId, scopeCtx);
+      const markdown = await readPaperMarkdown(resolvedPaperId);
       const lines = markdown.split("\n");
 
       // 定位参考文献标题，取其到下一同级或更高级标题之间的文本
@@ -124,11 +145,11 @@ export const createGetCitationsTool = (paperId: string | undefined) =>
     },
   });
 
-/** 提取当前论文的图片清单（基础层工具，直接读 paper.md，无需向量能力）。
- *  只读绑定论文、不接收 doc；仍走统一门禁兜底（绑定论文必须在用户圈内）。 */
+/** 提取论文的图片清单（基础层工具，直接读 paper.md，无需向量能力）。 */
 export const createGetFiguresTool = (paperId: string | undefined, scopeCtx?: AgentDocScope) =>
   tool({
-    description: `提取当前论文中的图片清单（含图注与所在小节）。
+    description: `提取论文中的图片清单（含图注与所在小节）。
+论文助手省略 doc 时读取本篇；全局助手必须显式传 doc=paper:<paper_id>。
 
 📖 **使用场景**：
 • 用户问"这篇论文有哪些图""图 X 在哪里/讲什么"
@@ -143,16 +164,12 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
 📌 **看图**：要理解图片内容，直接调用 readImage(path=image_path)；没有真正调用 readImage 时，不要只凭图注猜图中细节。`,
     inputSchema: z.object({
       reasoning: z.string().min(1).describe("调用此工具的原因和目的，例如：'用户想浏览论文中的所有图片'"),
+      doc: z.string().optional().describe("论文 DocRef：paper:<paper_id>；全局助手必传，论文助手缺省为本篇"),
     }),
-    execute: async ({ reasoning }: { reasoning: string }) => {
-      if (!paperId) {
-        throw new Error("未找到当前论文，请先在文献库中打开一篇论文");
-      }
-      // 直读门禁：本篇图片清单只属于绑定论文；若调用上下文异常（绑定论文不在圈内）明确报错
-      if (scopeCtx) assertDocInRetrievalScope({ kind: "paper", id: paperId }, scopeCtx);
-
+    execute: async ({ reasoning, doc }: { reasoning: string; doc?: string }) => {
+      const resolvedPaperId = resolvePaperExtraDoc(doc, paperId, scopeCtx);
       const baseDir = (await appDataDir()).replace(/\\/g, "/");
-      const markdown = await readPaperMarkdown(paperId);
+      const markdown = await readPaperMarkdown(resolvedPaperId);
       const lines = markdown.split("\n");
 
       // 图注段落："Figure 1:" / "Fig. 1." / "图 1" / "表2" / "Table 3" 等编号开头
@@ -212,7 +229,7 @@ message 会报告游离图注数（有编号文本但附近没有图片，可能
           }
           figures.push({
             image: src,
-            image_path: `${baseDir}/books/${paperId}/${src}`,
+            image_path: `${baseDir}/books/${resolvedPaperId}/${src}`,
             caption,
             captionFrom,
             section: lastHeading,

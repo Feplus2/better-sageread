@@ -3,8 +3,8 @@
 mod core;
 use crate::core::{
     agent_ws::commands::{
-        agent_edit_file, agent_list_dir, agent_read_file, agent_resolve_path, agent_run_command,
-        agent_search_files, agent_write_file,
+        agent_edit_file, agent_list_dir, agent_read_file, agent_read_image, agent_resolve_path,
+        agent_run_command, agent_search_files, agent_write_file,
     },
     ai_usage::{get_ai_usage_entries, record_ai_usage},
     books::commands::{
@@ -390,6 +390,7 @@ pub fn run() {
             // agent workspace (P1：写工具/执行命令，路径守卫 + 审计)
             agent_resolve_path,
             agent_read_file,
+            agent_read_image,
             agent_write_file,
             agent_edit_file,
             agent_search_files,

@@ -1,7 +1,7 @@
-import { useAgentSettingsStore } from "@/store/agent-settings-store";
+import { normalizeDocumentToolMode, useAgentSettingsStore } from "@/store/agent-settings-store";
 
-/** P1-2 文档工具可见性模式：both=新旧并存；new=只暴露通用文档原语；legacy=旧工具（回退位）。 */
-export type DocumentToolMode = "both" | "new" | "legacy";
+/** P1-2 文档工具可见性模式：new=只暴露通用文档原语；legacy=旧工具（回退位）。 */
+export type DocumentToolMode = "new" | "legacy";
 
 declare global {
   interface Window {
@@ -13,7 +13,7 @@ declare global {
 export function getDocumentToolMode(): DocumentToolMode {
   if (typeof window !== "undefined") {
     const override = window.__SAGEREAD_DOC_TOOL_MODE__;
-    if (override === "new" || override === "legacy" || override === "both") return override;
+    if (override !== undefined) return normalizeDocumentToolMode(override);
   }
-  return useAgentSettingsStore.getState().documentToolMode ?? "new";
+  return normalizeDocumentToolMode(useAgentSettingsStore.getState().documentToolMode);
 }

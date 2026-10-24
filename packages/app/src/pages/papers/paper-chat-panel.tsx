@@ -13,6 +13,7 @@ import { useMessageSelection } from "@/components/side-chat/use-message-selectio
 import { MindmapDialog } from "@/components/tools/mindmap-dialog";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { legacyPaperScopeIds } from "@/constants/retrieval-scope";
 import { useChatState } from "@/hooks/use-chat-state";
 import { exportMessagesToHtml } from "@/lib/export-thread-html";
 import { exportMessagesToImage } from "@/lib/export-thread-image";
@@ -34,7 +35,7 @@ interface PaperChatPanelProps {
 export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
   const { autoScroll } = useThemeStore();
   const [currentThread, setCurrentThread] = useState<Thread | null>(null);
-  // 用户划定的检索范围（按论文持久化；默认本篇）。同时约束向量检索与文档直读。
+  // 用户划定的检索范围（按论文持久化；仅缺失记录时默认论文库，显式保存的选择不变）。同时约束向量检索与文档直读。
   const retrievalScope = useRetrievalScopeFor("paper", paperId);
   // StickToBottom 上下文 ref：随 ChatContainerRoot contextRef 下发并透传 ChatMessages（命令式读
   // scrollToBottom，避免 context 值对象重建把整条消息列表拖入切 tab 重渲，见 chat-messages.tsx 注释）
@@ -61,7 +62,7 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
   /** 旧版论文工具 paperSearch 的范围映射：本篇=[paperId]；论文库/论文库+图书馆=null（全部论文）。
    *  旧工具集无法表达"论文库+图书馆"里的书籍部分，故旧模式只部分生效（该模式下下拉隐藏）。 */
   const paperScopeIds = useMemo((): string[] | null => {
-    return retrievalScope === "current" ? [paperId] : null;
+    return legacyPaperScopeIds(retrievalScope, paperId);
   }, [retrievalScope, paperId]);
 
   const {

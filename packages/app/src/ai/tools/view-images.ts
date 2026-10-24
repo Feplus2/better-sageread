@@ -5,7 +5,8 @@ import { z } from "zod";
 import { modelSupportsVision } from "../providers/vision-map";
 import { DEFAULT_TARGET_DATA_URL_CHARS, loadLocalImageAsDataUrl } from "../utils/local-image";
 import { getToolImageBudgetChars } from "../utils/tool-image-budget";
-import { assertAllowedPath, imageEnvelope, isAbsoluteImagePath } from "./image-shared";
+import { collectImageTargets, imageEnvelope, isAbsoluteImagePath, readLocalImageBytes } from "./image-shared";
+import type { ImageReadGrant, ImageRoots } from "./image-shared";
 
 /**
  * 批量看图（2026-10-22）：一次工具调用返回多张图（同一 tool result 的多个 file part），
@@ -22,32 +23,6 @@ const MAX_VIEW_IMAGES = 6;
 const MIN_PER_IMAGE_CHARS = 40_000;
 
 const errorText = (value: string) => ({ type: "error-text" as const, value });
-
-interface ResolvedTarget {
-  /** attachment:// 引用还是本地绝对路径（按值判定，模型把字段传反也能用） */
-  kind: "ref" | "path";
-  value: string;
-}
-
-function resolveTarget(raw: string): ResolvedTarget {
-  const value = raw.trim();
-  if (value.startsWith("attachment://")) return { kind: "ref", value };
-  return { kind: "path", value };
-}
-
-function collectTargets(paths?: string[], refs?: string[]): ResolvedTarget[] {
-  const out: ResolvedTarget[] = [];
-  const seen = new Set<string>();
-  for (const raw of [...(paths ?? []), ...(refs ?? [])]) {
-    if (typeof raw !== "string" || !raw.trim()) continue;
-    const target = resolveTarget(raw);
-    const key = target.value.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(target);
-  }
-  return out;
-}
 
 export const viewImagesTool = tool({
   description:
@@ -71,8 +46,20 @@ export const viewImagesTool = tool({
       .optional()
       .describe("单图长边像素上限，默认 1024、最大 1536；多图时建议保持默认以控制请求体"),
   }),
-  execute: async ({ paths, refs, maxEdge }: { paths?: string[]; refs?: string[]; maxEdge?: number }) => {
-    const targets = collectTargets(paths, refs);
+  execute: async ({
+    paths,
+    refs,
+    maxEdge,
+    imageRoots,
+    imageGrants,
+  }: {
+    paths?: string[];
+    refs?: string[];
+    maxEdge?: number;
+    imageRoots?: ImageRoots;
+    imageGrants?: ImageReadGrant[];
+  }) => {
+    const targets = collectImageTargets(paths, refs);
     if (targets.length === 0) {
       return errorText("需要提供 paths（本地图片绝对路径数组）或 refs（聊天图片附件引用数组），至少 1 张、最多 6 张");
     }
@@ -123,8 +110,9 @@ export const viewImagesTool = tool({
           failures.push(`${ordinal}${target.value}（需要绝对路径，不能传 Markdown 相对路径）`);
           continue;
         }
-        await assertAllowedPath(target.value);
-        const loaded = await loadLocalImageAsDataUrl(target.value, {
+        const grant = imageGrants?.find((candidate) => candidate.path === target.value);
+        const bytes = await readLocalImageBytes(target.value, { roots: imageRoots, grant });
+        const loaded = await loadLocalImageAsDataUrl(bytes, {
           maxEdge,
           targetDataUrlChars: perImageChars,
         });

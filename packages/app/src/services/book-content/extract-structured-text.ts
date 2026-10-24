@@ -1,8 +1,8 @@
 /**
  * 书籍章节 DOM → 结构化文本（Agent 内容保真层）：
- * - <math> → LaTeX（mathml-to-latex 反解；失败回退原样 MathML，绝不出扁平文本）
- * - <table> → Markdown 表格（大模型读表格的最优格式）
- * - 块级边界 → 换行；图片 → ![图]
+ * - <math> → LaTeX（TeX annotation 优先，其次 mathml-to-latex；失败回退原样 MathML）
+ * - <table> → Markdown 表格（单元格按 inline 结构化序列化，保留公式与图片）
+ * - 块级边界 → 换行；图片 → ![alt](src)
  * 转换器残留裸 LaTeX（\(...\) / \[...\]）本就是精确源码，原样保留。
  */
 import { MathMLToLaTeX } from "mathml-to-latex";
@@ -30,39 +30,113 @@ const BLOCK_TAGS = new Set([
   "dd",
 ]);
 
+/** MathML 的 TeX annotation 优先，alttext 兜底；翻译与 Agent 读取共用。 */
+export function mathTexOf(el: Element): { tex: string; display: boolean } | null {
+  const annotation = Array.from(el.querySelectorAll("annotation")).find((item) =>
+    (item.getAttribute("encoding") ?? "").toLowerCase().includes("tex"),
+  );
+  const tex = (annotation?.textContent ?? el.getAttribute("alttext") ?? "").trim();
+  if (!tex) return null;
+  return { tex, display: el.getAttribute("display") === "block" };
+}
+
+/** 有 TeX 源时输出紧凑定界符；无 TeX 源返回 null，让调用方选择 MathML 反解或原样回退。 */
+export function serializeMathElement(el: Element): string | null {
+  const math = mathTexOf(el);
+  if (!math) return null;
+  return math.display ? `$$${math.tex}$$` : `$${math.tex}$`;
+}
+
 /** math 元素 → LaTeX 文本；display 决定 $ 还是 $$ 包裹 */
 export function mathElementToLatex(math: Element, display: boolean): string {
+  const source = mathTexOf(math);
+  if (source) return display ? `\n$$\n${source.tex}\n$$\n` : `$${source.tex}$`;
   try {
     const latex = MathMLToLaTeX.convert(math.outerHTML);
-    if (latex?.trim()) return display ? `\n$$\n${latex.trim()}\n$$\n` : ` $${latex.trim()}$ `;
+    if (latex?.trim()) return display ? `\n$$\n${latex.trim()}\n$$\n` : `$${latex.trim()}$`;
   } catch {
     /* fall through */
   }
   // 回退：原样 MathML（精确但啰嗦）——绝不出扁平文本
-  return display ? `\n[MathML] ${math.outerHTML}\n` : ` ${math.outerHTML} `;
+  return display ? `\n[MathML] ${math.outerHTML}\n` : math.outerHTML;
 }
 
-/** HTMLTableElement → Markdown 表格；colspan/rowspan 近似展开（跨格列重复内容不补，留空位） */
-export function tableToMarkdown(table: HTMLTableElement): string {
-  const rows: string[][] = [];
-  let maxCols = 0;
-  for (const tr of Array.from(table.rows)) {
-    const cells: string[] = [];
-    for (const cell of Array.from(tr.cells)) {
-      const text = (cell.textContent ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
-      cells.push(text);
-      for (let i = 1; i < (cell.colSpan || 1); i++) cells.push("");
+function imageElementToMarkdown(img: Element): string {
+  const alt = (img.getAttribute("alt") ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\\/g, "\\\\")
+    .replace(/([\[\]])/g, "\\$1");
+  const src = (img.getAttribute("src") ?? "").trim();
+  const destination = /[\s()]/.test(src) ? `<${src.replace(/</g, "%3C").replace(/>/g, "%3E")}>` : src;
+  return `![${alt}](${destination})`;
+}
+
+/** 表格单元格只允许 inline 内容，避免 display 公式或 <br> 破坏 Markdown 行。 */
+function inlineStructuredText(root: Element): string {
+  let out = "";
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.nodeValue ?? "";
+      return;
     }
-    rows.push(cells);
-    maxCols = Math.max(maxCols, cells.length);
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as Element;
+    const tag = el.localName?.toLowerCase() ?? "";
+    if (tag === "script" || tag === "style" || tag === "head" || tag === "title") return;
+    if (tag === "math") {
+      out += mathElementToLatex(el, false);
+      return;
+    }
+    if (tag === "img") {
+      out += ` ${imageElementToMarkdown(el)} `;
+      return;
+    }
+    if (tag === "br") {
+      out += " ";
+      return;
+    }
+    for (const child of Array.from(el.childNodes)) walk(child);
+  };
+  walk(root);
+  return out.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+}
+
+/** HTMLTableElement → Markdown 表格；colspan/rowspan 近似展开（跨格重复内容不补，留空位）。 */
+export function tableToMarkdown(table: HTMLTableElement): string {
+  const tableRows = Array.from(table.rows);
+  const rows: string[][] = [];
+  const occupied = new Set<string>();
+  let maxCols = 0;
+  for (const [rowIndex, tr] of tableRows.entries()) {
+    rows[rowIndex] ??= [];
+    const row = rows[rowIndex];
+    let column = 0;
+    for (const cell of Array.from(tr.cells)) {
+      while (occupied.has(`${rowIndex}:${column}`)) column += 1;
+      const colSpan = Math.max(cell.colSpan || 1, 1);
+      const rowSpan = Math.max(cell.rowSpan || 1, 1);
+      row[column] = inlineStructuredText(cell);
+      for (let c = column + 1; c < column + colSpan; c++) row[c] = "";
+      for (let r = rowIndex + 1; r < Math.min(tableRows.length, rowIndex + rowSpan); r++) {
+        rows[r] ??= [];
+        const future = rows[r];
+        for (let c = column; c < column + colSpan; c++) {
+          occupied.add(`${r}:${c}`);
+          future[c] = "";
+        }
+      }
+      column += colSpan;
+      maxCols = Math.max(maxCols, column);
+    }
   }
   if (rows.length === 0 || maxCols === 0) return "";
-  const norm = (r: string[]) => [...r, ...Array(Math.max(0, maxCols - r.length)).fill("")];
+  const norm = (row: string[]) => Array.from({ length: maxCols }, (_, index) => row[index] ?? "");
   const head = norm(rows[0]);
   const lines = [
     `| ${head.join(" | ")} |`,
     `| ${head.map(() => "---").join(" | ")} |`,
-    ...rows.slice(1).map((r) => `| ${norm(r).join(" | ")} |`),
+    ...rows.slice(1).map((row) => `| ${norm(row).join(" | ")} |`),
   ];
   return `\n${lines.join("\n")}\n`;
 }
@@ -105,9 +179,10 @@ export function extractStructuredText(doc: Document, startElement: Element | nul
     if (tag === "script" || tag === "style" || tag === "head" || tag === "title") return;
 
     if (tag === "math") {
-      pushBlockBreak();
-      pushText(mathElementToLatex(el, el.getAttribute("display") === "block"));
-      pushBlockBreak();
+      const display = el.getAttribute("display") === "block";
+      if (display) pushBlockBreak();
+      pushText(mathElementToLatex(el, display));
+      if (display) pushBlockBreak();
       return;
     }
     if (tag === "table") {
@@ -117,7 +192,7 @@ export function extractStructuredText(doc: Document, startElement: Element | nul
       return;
     }
     if (tag === "img") {
-      pushText(" ![图] ");
+      pushText(` ${imageElementToMarkdown(el)} `);
       return;
     }
     if (tag === "br") {

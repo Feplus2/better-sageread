@@ -1,7 +1,7 @@
 import {
-  DEFAULT_RETRIEVAL_SCOPE,
   type RetrievalScope,
   type RetrievalScopeRole,
+  defaultRetrievalScope,
   isRetrievalScope,
 } from "@/constants/retrieval-scope";
 import { tauriStorageKey } from "@/constants/tauri-storage";
@@ -10,7 +10,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 /** 按「每本书 / 每篇论文」记住上次选择：reader:<bookId> / paper:<paperId>。
- *  不给全局单值——不同书/论文可以有不同的圈定范围；默认 current。 */
+ *  不给全局单值；缺省读取按角色回退，不回填 scopes。 */
 export function retrievalScopeKey(role: RetrievalScopeRole, docId: string): string {
   return `${role}:${docId}`;
 }
@@ -51,9 +51,10 @@ export const useRetrievalScopeStore = create<RetrievalScopeState>()(
   ),
 );
 
-/** 读取某本书/某篇论文上次选择的范围；无记录时 current。 */
+/** 读取上次选择的范围；只有缺失记录才使用角色默认值。 */
 export function useRetrievalScopeFor(role: RetrievalScopeRole, docId: string | undefined): RetrievalScope {
+  const fallback = defaultRetrievalScope(role);
   return useRetrievalScopeStore((state) =>
-    docId ? (state.scopes[retrievalScopeKey(role, docId)] ?? DEFAULT_RETRIEVAL_SCOPE) : DEFAULT_RETRIEVAL_SCOPE,
+    docId ? (state.scopes[retrievalScopeKey(role, docId)] ?? fallback) : fallback,
   );
 }
