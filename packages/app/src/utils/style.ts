@@ -98,7 +98,7 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
     }
     html {
       background-color: ${hasSceneBackground ? "transparent" : "var(--theme-bg-color, transparent)"};
-      background: ${hasSceneBackground ? "none" : "var(--background-set, none)"};
+      background: ${hasSceneBackground ? "none" : "var(--background-set, var(--theme-bg-color, transparent))"};
     }
     /* 主题自带的背景纹理（如羊皮纸噪点）；场景/自定义/半透明背景由应用侧接管，书籍侧不再叠加 */
     ${texture && !transparentElements ? `html, body { background-image: ${texture}; }` : ""}
@@ -560,7 +560,7 @@ export const getThemeCode = () => {
   if (!currentTheme) currentTheme = themes[0];
   const defaultPalette = isDarkMode ? currentTheme!.colors.dark : currentTheme!.colors.light;
 
-  // 阅读区背景配置：纯色沿用 palette；场景/自定义图片叠背景图 + 遮罩，文字色可被自定义覆盖
+  // 默认纯色跟随全局主题底色；场景/自定义图片沿用阅读调色板并叠背景图 + 遮罩，文字色可被自定义覆盖
   let fg = defaultPalette["base-content"];
   let backgroundImage: ThemeCode["backgroundImage"];
 
@@ -602,9 +602,18 @@ export const getThemeCode = () => {
   const videoWallpaper = docRootStyles?.getPropertyValue("--bg-video").includes("url(") ?? false;
   const solidAlphaVar = Number.parseFloat(docRootStyles?.getPropertyValue("--reader-solid-alpha") ?? "");
   const solidAlpha = Number.isFinite(solidAlphaVar) ? solidAlphaVar : isDarkMode ? 0.82 : 0.7;
+  const globalBackground = docRootStyles?.getPropertyValue("--background").trim();
+  const followsGlobalSolid =
+    readerBg?.kind === "solid" &&
+    typeof window !== "undefined" &&
+    !!localStorage.getItem("globalTheme") &&
+    !!globalBackground &&
+    tinycolor(globalBackground).isValid();
+  // 去掉主题变量原有的 alpha（尤其怜烟），再由阅读设置决定自己的遮罩浓度。
+  const bg = followsGlobalSolid ? tinycolor(globalBackground).toHexString() : defaultPalette["base-100"];
 
   return {
-    bg: defaultPalette["base-100"],
+    bg,
     fg,
     primary: defaultPalette.primary,
     // 全局主题主色（hover 联动等需与全局主题对齐的场景）：读 document root --primary 真值，
