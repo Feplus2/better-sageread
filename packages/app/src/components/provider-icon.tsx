@@ -7,10 +7,13 @@ import {
   Gemini,
   Grok,
   LMStudio,
+  MiniMax,
   Moonshot,
   Ollama,
   OpenAI,
   OpenRouter,
+  StepFun,
+  TencentCloud,
   XiaomiMiMo,
 } from "@/components/icons";
 import { isLMStudioEndpoint, isOllamaEndpoint } from "@/utils/provider-url";
@@ -45,6 +48,12 @@ export function ProviderIcon({ providerId, provider, className = "h-4 w-4" }: Pr
       return <ChatGLM className={className} />;
     case "kimi":
       return <Moonshot className={className} />;
+    case "minimax":
+      return <MiniMax className={className} />;
+    case "stepfun":
+      return <StepFun className={className} />;
+    case "tencent":
+      return <TencentCloud className={className} />;
     case "xiaomi":
       return <XiaomiMiMo className={className} />;
     case "qwen":
