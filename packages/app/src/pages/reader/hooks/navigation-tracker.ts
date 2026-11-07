@@ -31,6 +31,16 @@ export function isProgrammaticNavigation(bookId: string): boolean {
   return at !== undefined && Date.now() - at < PROGRAMMATIC_WINDOW_MS;
 }
 
+/** 是否有尚未落到 history 的同步转跳；按钮不能因慢加载而把它误当成用户操作 */
+export function hasPendingProgrammaticNavigation(bookId: string): boolean {
+  return programmaticNavigationAt.has(bookId);
+}
+
+/** 消费一次程序化转跳标记，避免同步入栈被当成用户主动转跳；后续用户转跳不受影响 */
+export function consumeProgrammaticNavigation(bookId: string): boolean {
+  return programmaticNavigationAt.delete(bookId);
+}
+
 /**
  * 同步已落地但阅读器未跳转的书：远端位置待采纳（防跳动分支只提示不跳转）。
  * 此期间阅读器仍持旧位置，其自动保存必须跳过，否则把陈旧位置回写覆盖刚同步的行。

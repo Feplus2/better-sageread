@@ -560,7 +560,7 @@ export const getThemeCode = () => {
   if (!currentTheme) currentTheme = themes[0];
   const defaultPalette = isDarkMode ? currentTheme!.colors.dark : currentTheme!.colors.light;
 
-  // 默认纯色跟随全局主题底色；场景/自定义图片沿用阅读调色板并叠背景图 + 遮罩，文字色可被自定义覆盖
+  // 仅阅读配色为 default 时让纯色跟随全局底色；显式阅读配色与场景/自定义图片保留各自调色板
   let fg = defaultPalette["base-content"];
   let backgroundImage: ThemeCode["backgroundImage"];
 
@@ -605,6 +605,7 @@ export const getThemeCode = () => {
   const globalBackground = docRootStyles?.getPropertyValue("--background").trim();
   const followsGlobalSolid =
     readerBg?.kind === "solid" &&
+    themeColor === "default" &&
     typeof window !== "undefined" &&
     !!localStorage.getItem("globalTheme") &&
     !!globalBackground &&

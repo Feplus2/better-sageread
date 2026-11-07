@@ -355,6 +355,7 @@ export class View extends HTMLElement {
       sectionIndex: index,
       sectionHref: this.book.sections[index]?.id ?? "",
       sectionFraction: fraction ?? 0,
+      size,
       spineTotal: this.#sectionProgress?.sizes?.length ?? this.book.sections.length,
     };
     if (reason === "snap" || reason === "page" || reason === "scroll") this.history.replaceState(cfi);

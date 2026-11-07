@@ -24,6 +24,12 @@ export interface FoliateView extends HTMLElement {
     locale?: string;
     isCJK?: boolean;
   };
+  lastLocation?: {
+    cfi?: string;
+    fraction?: number;
+    sectionFraction?: number;
+    size?: number;
+  };
   history: EventTarget & {
     canGoBack: boolean;
     canGoForward: boolean;

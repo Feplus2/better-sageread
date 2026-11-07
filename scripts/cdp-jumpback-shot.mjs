@@ -45,7 +45,7 @@ const clicked = await evalJS(`(() => {
 console.log("clicked:", clicked);
 await sleep(2500); // 等基线定格 + 按钮渲染
 
-console.log("button present:", await evalJS(`!!Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('返回上处'))`));
+console.log("button present:", await evalJS(`!!document.querySelector('button[aria-label="返回转跳前位置"]')`));
 
 const shot = await call("Page.captureScreenshot", { format: "png" });
 const { writeFileSync } = await import("node:fs");
