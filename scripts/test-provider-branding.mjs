@@ -85,7 +85,8 @@ await test("腾讯混元使用真实云品牌 SVG，不再回退通用服务器�
   const tencent = renderToStaticMarkup(React.createElement(ProviderIcon, { providerId: "tencent" }));
   assert.ok(tencent.includes("<title>腾讯混元</title>"), tencent);
   assert.ok(tencent.includes("M685.3,188.5"), "应使用已核对的腾讯云 SVG 图形，而非通用轮廓");
-  assert.ok(tencent.includes('fill="#006EFF"'));
+  assert.ok(tencent.includes('fill="currentColor"'), "腾讯图标应与其他品牌一样跟随文字单色");
+  assert.equal(tencent.match(/fill="#[0-9A-Fa-f]{6}"/g), null, "不应在路径中硬编码品牌彩色");
   assert.ok(!tencent.includes("lucide-server"));
 });
 

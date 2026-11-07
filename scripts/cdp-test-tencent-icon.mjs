@@ -36,13 +36,14 @@ try {
       title: icon?.querySelector("title")?.textContent,
       paths: icon?.querySelectorAll("path").length,
       genericServer: Boolean(icon?.classList.contains("lucide-server")),
-      fills: Array.from(icon?.querySelectorAll("path") ?? []).map((path) => path.getAttribute("fill")),
+      color: icon ? getComputedStyle(icon).color : null,
+      fills: Array.from(icon?.querySelectorAll("path") ?? []).map((path) => getComputedStyle(path).fill),
     };
   })()`);
   assert.equal(evidence.title, "腾讯混元", JSON.stringify(evidence));
   assert.equal(evidence.paths, 3, JSON.stringify(evidence));
   assert.equal(evidence.genericServer, false);
-  assert.ok(evidence.fills.includes("#006EFF"), JSON.stringify(evidence));
+  assert.ok(evidence.color && evidence.fills.every((fill) => fill === evidence.color), JSON.stringify(evidence));
   console.log("PASS 实际提供商设置页显示腾讯云 SVG", JSON.stringify(evidence));
 } finally {
   await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
