@@ -72,8 +72,8 @@ const getColorStyles = (overrideColor: boolean, invertImgColorInDark: boolean, t
   // 书籍文档这里只做透明化，让应用侧背景透出来；文字色照常注入书籍侧。
   const hasSceneBackground = !!backgroundImage;
 
-  // 视频壁纸主题（怜烟）下纯色默认背景半透明化：文档背景改用调色板底色的透明版让动态壁纸隐约透出；
-  // 元素级底色同场景背景一样透明化，避免半透明矩形层层叠加越来越实
+  // 视频壁纸主题不叠加额外色块：文档背景全透明，让媒体直接透出；
+  // 元素级底色同场景背景一样透明化，磨砂由全局 --bg-frost 提供
   const translucentSolid = themeCode.videoWallpaper === true && !hasSceneBackground;
   const solidBg = translucentSolid
     ? tinycolor(bg)
@@ -527,7 +527,7 @@ export interface ThemeCode {
   backgroundImage?: { image: string; scrim: number };
   /** 全局主题带动态壁纸（怜烟 --bg-video）：纯色默认背景半透明化透出壁纸 */
   videoWallpaper?: boolean;
-  /** 纯色背景半透明化时的透明度（主题 css 可用 --reader-solid-alpha 覆盖；缺省浅 0.70 / 深 0.82） */
+  /** 动态媒体正文额外色层透明度：固定为 0；磨砂由全局 --bg-frost 提供 */
   solidAlpha?: number;
 }
 
@@ -596,12 +596,11 @@ export const getThemeCode = () => {
     }
   }
 
-  // 全局主题为视频壁纸（怜烟，--bg-video 非空）时，阅读区纯色背景改走半透明（getColorStyles 处理）；
-  // 透明度可由主题 css 的 --reader-solid-alpha 覆盖
+  // 动态媒体背景只保留毛玻璃：正文不叠加额外色层，视频/图片直接透出。
   const docRootStyles = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
   const videoWallpaper = docRootStyles?.getPropertyValue("--bg-video").includes("url(") ?? false;
   const solidAlphaVar = Number.parseFloat(docRootStyles?.getPropertyValue("--reader-solid-alpha") ?? "");
-  const solidAlpha = Number.isFinite(solidAlphaVar) ? solidAlphaVar : isDarkMode ? 0.82 : 0.7;
+  const solidAlpha = videoWallpaper ? 0 : Number.isFinite(solidAlphaVar) ? solidAlphaVar : isDarkMode ? 0.82 : 0.7;
   const globalBackground = docRootStyles?.getPropertyValue("--background").trim();
   const followsGlobalSolid =
     readerBg?.kind === "solid" &&

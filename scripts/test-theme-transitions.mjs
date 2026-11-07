@@ -164,13 +164,13 @@ globalStyle.textContent = ':root{--background:rgba(26, 19, 22, 0.22);--bg-video:
 localStorage.setItem("globalTheme", "lianyan");
 const lianyanTheme = getThemeCode();
 assert.equal(lianyanTheme.bg, "#1a1316", "怜烟应先去掉主题变量自带透明度");
-assert.equal(lianyanTheme.solidAlpha, 0.6);
+assert.equal(lianyanTheme.solidAlpha, 0, "动态媒体背景的正文不得再叠加额外色层");
 const themedHost = document.createElement("div");
 document.body.appendChild(themedHost);
 const themedView = createRoot(themedHost);
 await act(async () => themedView.render(React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(Harness))));
 await act(async () => useThemeStore.setState({ themeCode: lianyanTheme }));
-assert.match(injectedStyles.at(-1), /rgba\(26, 19, 22, 0\.6\)/, "阅读背景应按设置重建遮罩");
+assert.match(injectedStyles.at(-1), /rgba\(26, 19, 22, 0\)/, "阅读区应全透明并透出视频，只保留毛玻璃");
 await act(async () => themedView.unmount());
 themedHost.remove();
 const viewSettings = useAppSettingsStore.getState().settings.globalViewSettings;
@@ -178,7 +178,7 @@ globalStyle.textContent = ':root{--background:rgba(10, 20, 30, 0.15);--bg-video:
 const customVideoTheme = getThemeCode();
 assert.equal(customVideoTheme.videoWallpaper, true, "任何声明 --bg-video 的主题都应保留视频透明通道，而非仅怜烟");
 const customVideoStyles = getStyles(viewSettings, customVideoTheme);
-assert.match(customVideoStyles, /--theme-bg-color:\s*rgba\(10, 20, 30, 0.35\)/, "动态主题应按自定义透明度生成阅读遮罩");
+assert.match(customVideoStyles, /--theme-bg-color:\s*rgba\(10, 20, 30, 0\)/, "动态主题不得在阅读区叠加额外色块");
 assert.match(customVideoStyles, /color-scheme:\s*light/, "透明视频背景不得被 iframe 默认黑色画布覆盖");
 localStorage.setItem("readerBackground", JSON.stringify({ kind: "custom", fileName: "paper.webp", fileUrl: "asset.localhost/paper.webp" }));
 const customImageTheme = getThemeCode();
@@ -190,6 +190,6 @@ assert.equal(getThemeCode().bg, "#222222", "场景图继续使用阅读调色板
 localStorage.removeItem("globalTheme");
 localStorage.setItem("readerBackground", JSON.stringify({ kind: "solid" }));
 assert.equal(getThemeCode().bg, "#222222", "无全局主题时保留原阅读调色板");
-console.log("PASS 默认纯色跟随全局主题，怜烟重建遮罩，场景与阅读调色板保持独立");
+console.log("PASS 默认纯色跟随全局主题，怜烟正文全透明并保留毛玻璃，场景与阅读调色板保持独立");
 window.close();
 process.exit(0);
