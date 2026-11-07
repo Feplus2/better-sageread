@@ -7,7 +7,7 @@
  *   蛋糕胚黄 #F7E9C2：卡片、侧边栏、问答面板（蛋糕胚本体）
  *   糖浆粉 #F1C5C1：弱按钮、标签、用户气泡、hover 高亮（糖浆浇面）
  *   樱桃红 #C42B4A：主按钮、选中态、链接、聚焦环（顶端那颗樱桃，点到为止）
- * 深色为「深夜烘焙」：巧克力胚底 + 亮樱桃点缀。
+ * 深色为「可可原色 A」：暖灰炭底 + 柔和陶粉点缀。
  *
  * 作用域：只影响应用 UI，不影响书籍 iframe 内部配色。
  * 变量默认值见 src/themes/default.css，钩子地图见 docs/THEMING.md。
@@ -69,41 +69,53 @@
   --shadow-warm-lg: 0 2px 6px rgba(69, 46, 34, 0.09), 0 16px 48px rgba(69, 46, 34, 0.17);
 }
 
-/* ---------- 2. 基础变量：深色（深夜烘焙）---------- */
+/* ---------- 2. 基础变量：深色（可可原色 A）---------- */
 html.dark {
-  --background: #291d15;
-  --foreground: #f1e3c6;
-  --card: #34261b;
-  --card-foreground: #f1e3c6;
-  --popover: #3b2b1f;
-  --popover-foreground: #f1e3c6;
-  --primary: #e2607c;
-  --primary-foreground: #2b1a12;
-  --secondary: #473322;
-  --secondary-foreground: #f1e3c6;
-  --muted: #3b2c20;
-  --muted-foreground: #b79977;
-  --accent: #58353b;
-  --accent-foreground: #f6e3dc;
-  --destructive: #e2607c;
-  --destructive-foreground: #2b1a12;
-  --border: #553f2c;
-  --input: #553f2c;
-  --ring: #e2607c;
-  --sidebar: #241910;
-  --sidebar-foreground: #f1e3c6;
-  --sidebar-primary: #e2607c;
-  --sidebar-primary-foreground: #2b1a12;
-  --sidebar-accent: #402e20;
-  --sidebar-accent-foreground: #f1e3c6;
-  --sidebar-border: #4a3626;
-  --sidebar-ring: #e2607c;
+  --background: #292624;
+  --foreground: #f1e7dc;
+  --card: #35302b;
+  --card-foreground: #f1e7dc;
+  --popover: #40372f;
+  --popover-foreground: #f1e7dc;
+  --primary: #dda18e;
+  --primary-foreground: #292624;
+  --secondary: #463c33;
+  --secondary-foreground: #e7d7c7;
+  --muted: #38322d;
+  --muted-foreground: #c5b5a7;
+  --accent: #514438;
+  --accent-foreground: #f1e7dc;
+  --destructive: #dda18e;
+  --destructive-foreground: #292624;
+  --border: #6b5a4a;
+  --input: #6b5a4a;
+  --ring: #dda18e;
+  --sidebar: #24221f;
+  --sidebar-foreground: #d5c7b8;
+  --sidebar-primary: #dda18e;
+  --sidebar-primary-foreground: #292624;
+  --sidebar-accent: #514438;
+  --sidebar-accent-foreground: #f1e7dc;
+  --sidebar-border: #5c4e42;
+  --sidebar-ring: #dda18e;
 
-  --content: #f1e3c6;
-  --layout: #291d15;
-    --tab-background: #241910;
-    --tab-active: #3b2b1f;
-    --tab-active-foreground: #f1e3c6;
+  --content: #f1e7dc;
+  --layout: #292624;
+  --tab-background: #322c27;
+  --tab-active: #40372f;
+  --tab-active-foreground: #f1e7dc;
+
+  --color-neutral-50: #fbf5ed;
+  --color-neutral-100: #f1e7dc;
+  --color-neutral-200: #dfcdbb;
+  --color-neutral-300: #cbb5a1;
+  --color-neutral-400: #b29883;
+  --color-neutral-500: #967b65;
+  --color-neutral-600: #7c624f;
+  --color-neutral-700: #625043;
+  --color-neutral-800: #493d33;
+  --color-neutral-900: #38302a;
+  --color-neutral-950: #24221f;
 
   --shadow-warm-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.35);
@@ -274,7 +286,7 @@ a,
 }
 
 html.dark [data-region="chat-panel"] .prose strong {
-  color: #f19db0;
+  color: #dda18e;
 }
 
 [data-region="chat-panel"] .prose li::marker {

@@ -211,7 +211,6 @@ export const useThemeStore = create<ThemeState>((set, get) => {
           localStorage.removeItem("globalTheme");
         }
       }
-      set({ globalTheme: name });
 
       if (!name) {
         // 选"默认"：移除注入的 <style>，恢复默认外观；
@@ -243,7 +242,8 @@ export const useThemeStore = create<ThemeState>((set, get) => {
       // CSS 注入后必须重建 themeCode：怜烟等视频壁纸主题的 --bg-video 判定
       // 依赖注入后的 computed style，否则首进/刷新时阅读区会停留在旧的不透明纯色，
       // 要等用户手动切换阅读背景才会纠正（见 reader-layout 启动时异步注入时序）
-      set({ themeCode: getThemeCode() });
+      // 先注入 CSS，再一次性通知主题与 themeCode，避免视频层先读到旧主题后停更。
+      set({ globalTheme: name, themeCode: getThemeCode() });
     },
 
     setAutoScroll: (enabled) => {

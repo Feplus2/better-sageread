@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -137,20 +137,23 @@ console.log("PASS videoWallpaper、solidAlpha、bg、globalPrimary 改变都会�
 
 const themeEntry = join(outDir, "theme-entry.ts");
 const themeOutfile = join(outDir, "theme-bundle.mjs");
-writeFileSync(themeEntry, `export { getThemeCode } from "${posix(join(src, "utils/style.ts"))}";`);
+writeFileSync(themeEntry, `export { getThemeCode, getReaderBackgroundLayers, getStyles } from "${posix(join(src, "utils/style.ts"))}";
+   export { useAppSettingsStore } from "${posix(join(src, "store/app-settings-store.ts"))}";`);
 await esbuild.build({
   entryPoints: [themeEntry], bundle: true, format: "esm", platform: "node", outfile: themeOutfile,
   banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   nodePaths: [join(root, "packages/app/node_modules")], plugins: [plugin], logLevel: "silent",
 });
-const { getThemeCode } = await import(pathToFileURL(themeOutfile).href);
+const { getThemeCode, getReaderBackgroundLayers, getStyles, useAppSettingsStore } = await import(pathToFileURL(themeOutfile).href);
 localStorage.setItem("readerBackground", JSON.stringify({ kind: "solid" }));
 localStorage.setItem("themeMode", "dark");
 const globalStyle = document.createElement("style");
-globalStyle.textContent = ":root{--background:#302128;--primary:#f18aa0;}";
+globalStyle.textContent = readFileSync(join(root, "packages/app/public/themes/cake.css"), "utf8");
 document.head.appendChild(globalStyle);
+document.documentElement.classList.add("dark");
 localStorage.setItem("globalTheme", "cake");
-assert.equal(getThemeCode().bg, "#302128", "全局蛋糕主题不应退回阅读调色板的 #222222");
+assert.equal(getThemeCode().bg, "#292624", "蛋糕 A 应使用克制的暖灰炭底");
+assert.equal(getThemeCode().globalPrimary, "#dda18e", "蛋糕 A 的点缀应是柔和陶粉，而非紫红");
 localStorage.setItem("themeColor", "parchment");
 assert.equal(getThemeCode().bg, "#2b251c", "显式选择羊皮纸暗色时不能被全局蛋糕底色覆盖");
 localStorage.setItem("themeMode", "light");
@@ -170,6 +173,18 @@ await act(async () => useThemeStore.setState({ themeCode: lianyanTheme }));
 assert.match(injectedStyles.at(-1), /rgba\(26, 19, 22, 0\.6\)/, "阅读背景应按设置重建遮罩");
 await act(async () => themedView.unmount());
 themedHost.remove();
+const viewSettings = useAppSettingsStore.getState().settings.globalViewSettings;
+globalStyle.textContent = ':root{--background:rgba(10, 20, 30, 0.15);--bg-video:url("custom-video.mp4");--reader-solid-alpha:0.35;}';
+const customVideoTheme = getThemeCode();
+assert.equal(customVideoTheme.videoWallpaper, true, "任何声明 --bg-video 的主题都应保留视频透明通道，而非仅怜烟");
+const customVideoStyles = getStyles(viewSettings, customVideoTheme);
+assert.match(customVideoStyles, /--theme-bg-color:\s*rgba\(10, 20, 30, 0.35\)/, "动态主题应按自定义透明度生成阅读遮罩");
+assert.match(customVideoStyles, /color-scheme:\s*light/, "透明视频背景不得被 iframe 默认黑色画布覆盖");
+localStorage.setItem("readerBackground", JSON.stringify({ kind: "custom", fileName: "paper.webp", fileUrl: "asset.localhost/paper.webp" }));
+const customImageTheme = getThemeCode();
+assert.equal(customImageTheme.backgroundImage?.image, 'url("asset.localhost/paper.webp")');
+assert.match(getStyles(viewSettings, customImageTheme), /background:\s*none;/, "自定义图片背景的书页不能被不透明主题色覆盖");
+assert.match(getReaderBackgroundLayers(customImageTheme), /asset\.localhost\/paper\.webp/, "图片应保留在应用侧背景层");
 localStorage.setItem("readerBackground", JSON.stringify({ kind: "scene", sceneId: "mountains" }));
 assert.equal(getThemeCode().bg, "#222222", "场景图继续使用阅读调色板，不能误用全局底色");
 localStorage.removeItem("globalTheme");

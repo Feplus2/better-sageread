@@ -16,11 +16,12 @@ import { useEffect, useRef, useState } from "react";
 export function ThemeBackgroundVideo() {
   const globalTheme = useThemeStore((s) => s.globalTheme);
   const isDarkMode = useThemeStore((s) => s.isDarkMode);
+  const themeCode = useThemeStore((s) => s.themeCode);
   const effectiveMotionMode = useEffectiveMotionMode();
   const [config, setConfig] = useState<{ src: string; frost: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖项仅作主题/亮暗变更的重读信号
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 主题、亮暗及同名 CSS 重载均须重读视频配置
   useEffect(() => {
     let cancelled = false;
     const readVars = () => {
@@ -47,7 +48,7 @@ export function ThemeBackgroundVideo() {
     return () => {
       cancelled = true;
     };
-  }, [globalTheme, isDarkMode]);
+  }, [globalTheme, isDarkMode, themeCode]);
 
   // 播放控制走命令式（不依赖 autoPlay 属性）：full 档播放，其余冻结。
   // 冻结而非卸载：全局画布 --background 是半透明遮罩，卸掉视频层会透出 html 白底。
