@@ -3,9 +3,9 @@
 import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const root = "F:/MyProjects/SageRead";
+const root = fileURLToPath(new URL("../", import.meta.url));
 const src = join(root, "packages/app/src");
 const pnpmDir = join(root, "node_modules", ".pnpm");
 const esbuildPkg = readdirSync(pnpmDir).find((d) => d.startsWith("esbuild@"));
@@ -26,7 +26,7 @@ writeFileSync(
     `export { resolveProviderProtocol, resolveAnthropicCompatibleBaseUrl, normalizeAnthropicBaseUrl, normalizeOpenAIBaseUrl, normalizeGeminiBaseUrl } from "${posix(join(src, "ai/providers/protocol.ts"))}";`,
     `export { wrapToolsForNativeImages } from "${posix(join(src, "ai/providers/native-tool-output.ts"))}";`,
     `export { cacheToolImages, clearToolImageCache } from "${posix(join(src, "ai/utils/tool-image-cache.ts"))}";`,
-    `export { anthropicThinkingBodyPatch } from "${posix(join(src, "ai/providers/reasoning-map.ts"))}";`,
+    `export { anthropicThinkingBodyPatch, chatReasoningBodyPatch, responsesReasoningBodyPatch } from "${posix(join(src, "ai/providers/reasoning-map.ts"))}";`,
   ].join("\n"),
 );
 const outfile = join(outDir, "protocol.mjs");
@@ -49,44 +49,135 @@ function check(name, condition, detail) {
     console.log(`  PASS ${name}`);
   } else {
     failed += 1;
-    console.log(`  FAIL ${name}${detail === undefined ? "" : ` — ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
+    console.log(
+      `  FAIL ${name}${detail === undefined ? "" : ` — ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`,
+    );
   }
 }
 
 const { cacheToolImages, clearToolImageCache } = lib;
 const rp = (input) => lib.resolveProviderProtocol(input);
 console.log("[1] 显式 apiStyle 优先");
-check("openai + openai-chat 显式", rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1", apiStyle: "openai-chat" }) === "openai-chat");
-check("openai + openai-responses 显式", rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1", apiStyle: "openai-responses" }) === "openai-responses");
-check("custom + openai-responses 显式", rp({ providerId: "custom-1", baseUrl: "https://relay.example.com/v1", apiStyle: "openai-responses" }) === "openai-responses");
-check("custom + anthropic-messages 显式", rp({ providerId: "custom-1", baseUrl: "https://relay.example.com", apiStyle: "anthropic-messages" }) === "anthropic-messages");
-check("custom + gemini 显式", rp({ providerId: "custom-1", baseUrl: "https://relay.example.com", apiStyle: "gemini" }) === "gemini");
+check(
+  "openai + openai-chat 显式",
+  rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1", apiStyle: "openai-chat" }) === "openai-chat",
+);
+check(
+  "openai + openai-responses 显式",
+  rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1", apiStyle: "openai-responses" }) ===
+    "openai-responses",
+);
+check(
+  "custom + openai-responses 显式",
+  rp({ providerId: "custom-1", baseUrl: "https://relay.example.com/v1", apiStyle: "openai-responses" }) ===
+    "openai-responses",
+);
+check(
+  "custom + anthropic-messages 显式",
+  rp({ providerId: "custom-1", baseUrl: "https://relay.example.com", apiStyle: "anthropic-messages" }) ===
+    "anthropic-messages",
+);
+check(
+  "custom + gemini 显式",
+  rp({ providerId: "custom-1", baseUrl: "https://relay.example.com", apiStyle: "gemini" }) === "gemini",
+);
 
 console.log("[2] 官方 host / 代理 fallback");
-check("openai 官方 → responses", rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1" }) === "openai-responses");
+check(
+  "openai 官方 → responses",
+  rp({ providerId: "openai", baseUrl: "https://api.openai.com/v1" }) === "openai-responses",
+);
 check("openai 代理 → chat", rp({ providerId: "openai", baseUrl: "https://relay.example.com/v1" }) === "chat");
-check("anthropic 官方 → messages", rp({ providerId: "anthropic", baseUrl: "https://api.anthropic.com/v1" }) === "anthropic-messages");
-check("gemini 官方 → gemini", rp({ providerId: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta" }) === "gemini");
-check("deepseek 官方 → messages", rp({ providerId: "deepseek", baseUrl: "https://api.deepseek.com/anthropic/v1" }) === "anthropic-messages");
-check("deepseek 官方根地址 → messages", rp({ providerId: "deepseek", baseUrl: "https://api.deepseek.com" }) === "anthropic-messages");
+check(
+  "anthropic 官方 → messages",
+  rp({ providerId: "anthropic", baseUrl: "https://api.anthropic.com/v1" }) === "anthropic-messages",
+);
+check(
+  "gemini 官方 → gemini",
+  rp({ providerId: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta" }) === "gemini",
+);
+check(
+  "deepseek 官方 → messages",
+  rp({ providerId: "deepseek", baseUrl: "https://api.deepseek.com/anthropic/v1" }) === "anthropic-messages",
+);
+check(
+  "deepseek 官方根地址 → messages",
+  rp({ providerId: "deepseek", baseUrl: "https://api.deepseek.com" }) === "anthropic-messages",
+);
 check("deepseek 代理 → chat", rp({ providerId: "deepseek", baseUrl: "https://relay.example.com/v1" }) === "chat");
-check("kimi 官方 → messages", rp({ providerId: "kimi", baseUrl: "https://api.moonshot.cn/anthropic/v1" }) === "anthropic-messages");
+check(
+  "kimi 官方 → messages",
+  rp({ providerId: "kimi", baseUrl: "https://api.moonshot.cn/anthropic/v1" }) === "anthropic-messages",
+);
+check(
+  "MiniMax 国内官方 → messages",
+  rp({ providerId: "minimax", baseUrl: "https://api.minimax.cn/anthropic/v1" }) === "anthropic-messages",
+);
+check("MiniMax 自定义代理 → chat", rp({ providerId: "minimax", baseUrl: "https://relay.example.com/v1" }) === "chat");
+check(
+  "StepFun 普通官方 API → responses",
+  rp({ providerId: "stepfun", baseUrl: "https://api.stepfun.com/v1" }) === "openai-responses",
+);
+check("StepFun 自定义代理 → chat", rp({ providerId: "stepfun", baseUrl: "https://api.stepfun.ai/v1" }) === "chat");
 check("grok → chat", rp({ providerId: "grok", baseUrl: "https://api.x.ai/v1" }) === "openai-chat");
-check("cherryin openai/* → responses", rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "openai/gpt-5.6-luna" }) === "openai-responses");
-check("cherryin anthropic/* → messages", rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "anthropic/claude-sonnet-5.5" }) === "anthropic-messages");
-check("cherryin 其它 → chat", rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "acme/foo" }) === "chat");
+check(
+  "cherryin openai/* → responses",
+  rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "openai/gpt-5.6-luna" }) ===
+    "openai-responses",
+);
+check(
+  "cherryin anthropic/* → messages",
+  rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "anthropic/claude-sonnet-5.5" }) ===
+    "anthropic-messages",
+);
+check(
+  "cherryin 其它 → chat",
+  rp({ providerId: "custom-1", baseUrl: "https://open.cherryin.net/v1", modelId: "acme/foo" }) === "chat",
+);
 
 console.log("[3] Anthropic 兼容 baseURL 必须带 /v1（AI SDK 追加 /messages）");
 const rb = (id, baseUrl) => lib.resolveAnthropicCompatibleBaseUrl(id, baseUrl);
-check("kimi 官方 → /anthropic/v1", rb("kimi", "https://api.moonshot.cn/anthropic/v1") === "https://api.moonshot.cn/anthropic/v1");
-check("kimi 旧短地址 → /anthropic/v1", rb("kimi", "https://api.moonshot.cn/anthropic") === "https://api.moonshot.cn/anthropic/v1");
-check("zhipu 官方 → /api/anthropic/v1", rb("zhipu", "https://open.bigmodel.cn/api/anthropic") === "https://open.bigmodel.cn/api/anthropic/v1");
-check("minimax 官方 → /anthropic/v1", rb("minimax", "https://api.minimaxi.com/anthropic") === "https://api.minimaxi.com/anthropic/v1");
-check("minimax .io → /anthropic/v1", rb("minimax", "https://api.minimax.io/anthropic") === "https://api.minimax.io/anthropic/v1");
-check("deepseek 官方 → /anthropic/v1", rb("deepseek", "https://api.deepseek.com/anthropic") === "https://api.deepseek.com/anthropic/v1");
+check(
+  "kimi 官方 → /anthropic/v1",
+  rb("kimi", "https://api.moonshot.cn/anthropic/v1") === "https://api.moonshot.cn/anthropic/v1",
+);
+check(
+  "kimi 旧短地址 → /anthropic/v1",
+  rb("kimi", "https://api.moonshot.cn/anthropic") === "https://api.moonshot.cn/anthropic/v1",
+);
+check(
+  "zhipu 官方 → /api/anthropic/v1",
+  rb("zhipu", "https://open.bigmodel.cn/api/anthropic") === "https://open.bigmodel.cn/api/anthropic/v1",
+);
+check(
+  "minimax 官方 → /anthropic/v1",
+  rb("minimax", "https://api.minimaxi.com/anthropic") === "https://api.minimaxi.com/anthropic/v1",
+);
+check(
+  "minimax .io → /anthropic/v1",
+  rb("minimax", "https://api.minimax.io/anthropic") === "https://api.minimax.io/anthropic/v1",
+);
+check(
+  "minimax 国内官方 → /anthropic/v1",
+  rb("minimax", "https://api.minimax.cn/anthropic") === "https://api.minimax.cn/anthropic/v1",
+);
+check(
+  "StepFun Messages 根地址 → /v1，不带订阅路径",
+  rb("stepfun", "https://api.stepfun.com") === "https://api.stepfun.com/v1",
+);
+check(
+  "deepseek 官方 → /anthropic/v1",
+  rb("deepseek", "https://api.deepseek.com/anthropic") === "https://api.deepseek.com/anthropic/v1",
+);
 check("anthropic 官方 → /v1", rb("anthropic", "https://api.anthropic.com/v1") === "https://api.anthropic.com/v1");
-check("自定义代理根 → 补 /v1", lib.normalizeAnthropicBaseUrl("https://relay.example.com") === "https://relay.example.com/v1");
-check("自定义代理已带 /v1 不变", lib.normalizeAnthropicBaseUrl("https://relay.example.com/v1") === "https://relay.example.com/v1");
+check(
+  "自定义代理根 → 补 /v1",
+  lib.normalizeAnthropicBaseUrl("https://relay.example.com") === "https://relay.example.com/v1",
+);
+check(
+  "自定义代理已带 /v1 不变",
+  lib.normalizeAnthropicBaseUrl("https://relay.example.com/v1") === "https://relay.example.com/v1",
+);
 
 console.log("[4] Anthropic 原生通道 thinking 补丁（P0-2）");
 const DS = "https://api.deepseek.com/anthropic/v1";
@@ -107,22 +198,125 @@ check(
 );
 check("DeepSeek auto → 不下发", applyThinking("deepseek", DS, "deepseek-flash", "auto") === null);
 const kimiK3Off = applyThinking("kimi", KM, "kimi-k3", "off");
-check("Kimi K3 恒思考 off → 最低档 enabled（不 400）", kimiK3Off?.thinking?.type === "enabled" && kimiK3Off?.thinking?.budget_tokens === 1024);
+check(
+  "Kimi K3 恒思考 off → output_config.effort=low（不 400）",
+  JSON.stringify(kimiK3Off?.output_config) === JSON.stringify({ effort: "low" }) && !kimiK3Off?.thinking,
+);
 const kimiOn = applyThinking("kimi", KM, "kimi-k2.6", "on");
 check("Kimi K2.6 on → enabled", kimiOn?.thinking?.type === "enabled");
 const kimiMax = applyThinking("kimi", KM, "kimi-k2.6", "max");
 const rawMax = { max_tokens: 4096 };
 lib.anthropicThinkingBodyPatch("kimi", KM, "kimi-k2.6", "max")(rawMax);
 check("budget 注入会抬高 max_tokens（防严格端点 400）", rawMax.max_tokens === 8192 + 2048);
-check("未知型号 off → disabled（可关优先）", applyThinking("anthropic", "https://api.anthropic.com/v1", "some-unknown-model", "off")?.thinking?.type === "disabled");
+check(
+  "未知型号 off → disabled（可关优先）",
+  applyThinking("anthropic", "https://api.anthropic.com/v1", "some-unknown-model", "off")?.thinking?.type ===
+    "disabled",
+);
+
+const kimi31Off = applyThinking("kimi", KM, "kimi-k3.1-pro", "off");
+check(
+  "Kimi K3.1 Pro Messages off → output_config.effort=low（恒思考且不发 thinking）",
+  JSON.stringify(kimi31Off?.output_config) === JSON.stringify({ effort: "low" }) && !kimi31Off?.thinking,
+);
+const kimi31High = applyThinking("kimi", KM, "kimi-k3.1-pro", "high");
+check(
+  "Kimi K3.1 Pro Messages high → output_config.effort=high",
+  JSON.stringify(kimi31High?.output_config) === JSON.stringify({ effort: "high" }) && !kimi31High?.thinking,
+);
+const kimi31Prefixed = applyThinking("openrouter", KM, "moonshotai/kimi-k3.1-pro", "max");
+check(
+  "Kimi K3.1 Pro 作者前缀 → output_config.effort=max",
+  JSON.stringify(kimi31Prefixed?.output_config) === JSON.stringify({ effort: "max" }) && !kimi31Prefixed?.thinking,
+);
+const responsesBody = {};
+lib.responsesReasoningBodyPatch?.("kimi", KM, "kimi-k3.1-pro", "high")(responsesBody);
+check(
+  "Kimi K3.1 Pro Responses → reasoning.effort=high",
+  responsesBody.reasoning?.effort === "high" && responsesBody.reasoning_effort === undefined && !responsesBody.thinking,
+);
+const responsesOff = {};
+lib.responsesReasoningBodyPatch?.("kimi", KM, "kimi-k3.1-pro", "off")(responsesOff);
+check("Kimi K3.1 Pro Responses off → reasoning.effort=low（恒思考）", responsesOff.reasoning?.effort === "low");
+const stepOff = applyThinking("stepfun", "https://api.stepfun.com/v1", "step-5-preview", "off");
+check(
+  "Step 5 Messages off → output_config.effort=low（不假装支持 thinking.disabled）",
+  JSON.stringify(stepOff?.output_config) === JSON.stringify({ effort: "low" }) && !stepOff?.thinking,
+);
+const stepResponses = {};
+lib.responsesReasoningBodyPatch("stepfun", "https://api.stepfun.com/v1", "step-5-preview", "off")(stepResponses);
+check("Step 5 Responses off → reasoning.effort=low", stepResponses.reasoning?.effort === "low");
+const stepChat = {};
+lib.chatReasoningBodyPatch("stepfun", "https://api.stepfun.com/v1", "step-3.7-flash", "high")(stepChat);
+check("Step 3.7 Chat high → reasoning_effort=high", stepChat.reasoning_effort === "high");
+const minimaxOff = applyThinking("minimax", "https://api.minimax.cn/anthropic/v1", "MiniMax-M3.1-Flash", "off");
+check(
+  "MiniMax M3.1 Messages off → output_config.effort=low",
+  JSON.stringify(minimaxOff?.output_config) === JSON.stringify({ effort: "low" }) && !minimaxOff?.thinking,
+);
+const minimaxResponses = {};
+lib.responsesReasoningBodyPatch("minimax", "https://api.minimax.cn/v1", "MiniMax-M3.1-Flash", "off")(minimaxResponses);
+check("MiniMax M3.1 Responses off → reasoning.effort=low", minimaxResponses.reasoning?.effort === "low");
+
+check(
+  "OpenRouter 只走原生 reasoning，不叠加 Chat 补丁",
+  lib.chatReasoningBodyPatch("openrouter", "https://openrouter.ai/api/v1", "moonshotai/kimi-k3.1-pro", "high") === null,
+);
+check(
+  "OpenRouter K3 同样不叠加 Chat 补丁",
+  lib.chatReasoningBodyPatch("openrouter", "https://openrouter.ai/api/v1", "kimi-k3", "high") === null,
+);
+
+const relayChat = "https://open.cherryin.net/v1";
+const relayMessages = "https://open.cherryin.net/v1";
+const relayModel = "moonshotai/kimi-k3.1-pro";
+const applyBody = (patch) => {
+  const body = {};
+  patch?.(body);
+  return body;
+};
+for (const [level, expected] of [
+  ["high", "high"],
+  ["off", "low"],
+  ["none", "low"],
+  ["on", "high"],
+]) {
+  const chat = applyBody(lib.chatReasoningBodyPatch("custom-relay", relayChat, relayModel, level));
+  check(
+    `Kimi K3.1 Pro 中继 Chat ${level} → reasoning_effort=${expected}`,
+    chat.reasoning_effort === expected && chat.reasoning === undefined && !chat.thinking,
+    chat,
+  );
+  const responses = applyBody(lib.responsesReasoningBodyPatch("custom-relay", relayChat, relayModel, level));
+  check(
+    `Kimi K3.1 Pro 中继 Responses ${level} → reasoning.effort=${expected}`,
+    responses.reasoning?.effort === expected && responses.reasoning_effort === undefined && !responses.output_config,
+    responses,
+  );
+  const messages = applyThinking("custom-relay", relayMessages, relayModel, level);
+  check(
+    `Kimi K3.1 Pro 中继 Messages ${level} → output_config.effort=${expected}`,
+    messages?.output_config?.effort === expected && messages?.reasoning_effort === undefined && !messages?.thinking,
+    messages,
+  );
+}
 
 console.log("[5] native 历史图回灌预算（最近 6 张 / 2 批 + 当轮 live 6 张）");
 const dataUrl = (tag, chars = 64) => `data:image/png;base64,${tag}${"A".repeat(chars)}`;
-const contentPart = (tag) => ({ type: "content", value: [{ type: "text", text: tag }, { type: "file", mediaType: "image/png", url: dataUrl(tag) }] });
+const contentPart = (tag) => ({
+  type: "content",
+  value: [
+    { type: "text", text: tag },
+    { type: "file", mediaType: "image/png", url: dataUrl(tag) },
+  ],
+});
 clearCache();
 // 3 批历史：每批 6 张
 for (const batch of ["b1", "b2", "b3"]) {
-  cacheToolImages(`call-${batch}`, Array.from({ length: 6 }, (_, i) => ({ dataUrl: dataUrl(`${batch}-${i}`), mediaType: "image/png" })));
+  cacheToolImages(
+    `call-${batch}`,
+    Array.from({ length: 6 }, (_, i) => ({ dataUrl: dataUrl(`${batch}-${i}`), mediaType: "image/png" })),
+  );
 }
 const tool = {
   readImage: {
@@ -143,7 +337,10 @@ check("中间一批不重发（预算给最新批）", countImages(midOut) === 0
 check("最新一批重发 6 张", countImages(newOut) === 6, countImages(newOut));
 
 // 当轮 live：快照之后新增的缓存条目仍可回灌（目录牌 useTool）
-cacheToolImages("call-live", Array.from({ length: 3 }, (_, i) => ({ dataUrl: dataUrl(`live-${i}`), mediaType: "image/png" })));
+cacheToolImages(
+  "call-live",
+  Array.from({ length: 3 }, (_, i) => ({ dataUrl: dataUrl(`live-${i}`), mediaType: "image/png" })),
+);
 const liveOut = out("call-live");
 check("当轮新工具结果可回灌", countImages(liveOut) === 3, countImages(liveOut));
 // 直接输出（当轮 readImage 原生输出）不走缓存预算

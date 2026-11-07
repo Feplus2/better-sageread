@@ -37,7 +37,7 @@ function hostOf(baseUrl?: string): string {
 function hostMatches(baseUrl: string | undefined, domain: string): boolean {
   if (!baseUrl) return true;
   const host = hostOf(baseUrl);
-  return host === domain || host.endsWith("." + domain);
+  return host === domain || host.endsWith(`.${domain}`);
 }
 
 /** 显式协议优先；auto/未填返回 null，继续走推断 */
@@ -100,9 +100,12 @@ export function resolveProviderProtocol(input: ProtocolInput): ProviderProtocol 
   if (id === "kimi") return hostMatches(baseUrl, "api.moonshot.cn") ? "anthropic-messages" : "chat";
   if (id === "zhipu") return hostMatches(baseUrl, "open.bigmodel.cn") ? "anthropic-messages" : "chat";
   if (id === "minimax")
-    return hostMatches(baseUrl, "api.minimaxi.com") || hostMatches(baseUrl, "api.minimax.io")
+    return hostMatches(baseUrl, "api.minimax.cn") ||
+      hostMatches(baseUrl, "api.minimaxi.com") ||
+      hostMatches(baseUrl, "api.minimax.io")
       ? "anthropic-messages"
       : "chat";
+  if (id === "stepfun") return hostMatches(baseUrl, "api.stepfun.com") ? "openai-responses" : "chat";
   if (id === "openrouter") return "chat";
 
   if (
@@ -127,7 +130,7 @@ export function normalizeOpenAIBaseUrl(baseUrl?: string): string | undefined {
   const trimmed = baseUrl.replace(/\/+$/, "");
   // 已带版本段（/v1、/v4、/v3、/v1beta、/v1beta/openai 等）不重复追加 /v1；
   // 2026-10-22 修：Gemini 的 /v1beta/openai 之前会被拼成 /v1beta/openai/v1 → 404。
-  return /\/v\d+[a-z]*(?:\/|$)/i.test(trimmed) ? trimmed : trimmed + "/v1";
+  return /\/v\d+[a-z]*(?:\/|$)/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
 }
 
 /** Gemini 原生 baseURL：Gemini API 用 /v1beta；用户填 /v1 或根地址时规范化。 */
@@ -136,7 +139,7 @@ export function normalizeGeminiBaseUrl(baseUrl?: string): string | undefined {
   const trimmed = baseUrl.replace(/\/+$/, "");
   if (/\/v1beta$/.test(trimmed)) return trimmed;
   if (/\/v1$/.test(trimmed)) return trimmed.replace(/\/v1$/, "/v1beta");
-  return trimmed + "/v1beta";
+  return `${trimmed}/v1beta`;
 }
 
 /**
@@ -148,7 +151,7 @@ export function normalizeGeminiBaseUrl(baseUrl?: string): string | undefined {
  *   DeepSeek: https://api.deepseek.com/anthropic/v1
  *   Kimi:     https://api.moonshot.cn/anthropic/v1
  *   智谱:     https://open.bigmodel.cn/api/anthropic/v1
- *   MiniMax:  https://api.minimaxi.com/anthropic/v1
+ *   MiniMax:  https://api.minimax.cn/anthropic/v1
  * 实测短路径（无 /v1）：Kimi 404、智谱 HTTP 200 包 404、MiniMax 404；带 /v1 均可达。
  * 用户自定义代理时尊重其 Base URL（normalizeAnthropicBaseUrl 补 /v1，不硬打官方）。
  */
@@ -175,6 +178,7 @@ export function resolveAnthropicCompatibleBaseUrl(providerId: string, baseUrl?: 
       : normalizeAnthropicBaseUrl(baseUrl);
   }
   if (id === "minimax") {
+    if (hostMatches(baseUrl, "api.minimax.cn")) return "https://api.minimax.cn/anthropic/v1";
     if (hostMatches(baseUrl, "api.minimax.io")) return "https://api.minimax.io/anthropic/v1";
     if (hostMatches(baseUrl, "api.minimaxi.com")) return "https://api.minimaxi.com/anthropic/v1";
     return normalizeAnthropicBaseUrl(baseUrl);
@@ -186,5 +190,5 @@ export function resolveAnthropicCompatibleBaseUrl(providerId: string, baseUrl?: 
 export function normalizeAnthropicBaseUrl(baseUrl?: string): string | undefined {
   if (!baseUrl) return undefined;
   const trimmed = baseUrl.replace(/\/+$/, "");
-  return /\/v\d+$/.test(trimmed) ? trimmed : trimmed + "/v1";
+  return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
 }

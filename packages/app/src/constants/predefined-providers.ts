@@ -6,8 +6,9 @@
  * endpoints 里的地址是**给 AI SDK 的 baseURL 语义**（含 /v1 等版本段，SDK 会再追加
  * /chat/completions、/responses、/messages、/models/{id}:generateContent）。
  *
- * 实网核对（2026-10-22）：Kimi/智谱/MiniMax 的 Anthropic 兼容端点短路径（不带 /v1）
- * 分别 404 / 伪 404 / 404；DeepSeek 两种都接受但统一用 /v1。
+ * 2026-10-27 更新：MiniMax 默认国内 api.minimax.cn 的 Anthropic Messages，另备 OpenAI Chat/Responses；
+ * Step、百炼和豆包默认普通开放平台的 OpenAI Responses，另备 Chat 等已核实的协议，不预置订阅专用路径。
+ * Kimi/智谱/MiniMax 的 Anthropic 短路径兼容问题已有迁移处理；DeepSeek 统一用 /v1。
  */
 export const predefinedProviders: ModelProvider[] = [
   {
@@ -154,7 +155,7 @@ export const predefinedProviders: ModelProvider[] = [
     apiKeyHelpUrl: "https://bailian.console.aliyun.com/#/api-key",
     baseUrlHelpUrl: "https://help.aliyun.com/zh/model-studio/compatibility-with-openai",
     provider: "qwen",
-    apiStyle: "openai-chat",
+    apiStyle: "openai-responses",
     endpoints: {
       "openai-chat": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "openai-responses": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -170,7 +171,7 @@ export const predefinedProviders: ModelProvider[] = [
     apiKeyHelpUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     baseUrlHelpUrl: "https://www.volcengine.com/docs/82379/1263512",
     provider: "doubao",
-    apiStyle: "openai-chat",
+    apiStyle: "openai-responses",
     endpoints: {
       "openai-chat": "https://ark.cn-beijing.volces.com/api/v3",
       "openai-responses": "https://ark.cn-beijing.volces.com/api/v3",
@@ -181,16 +182,54 @@ export const predefinedProviders: ModelProvider[] = [
     active: false,
     apiKey: "",
     name: "MiniMax",
-    baseUrl: "https://api.minimaxi.com/anthropic/v1",
+    baseUrl: "https://api.minimax.cn/anthropic/v1",
     apiKeyHelpUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-    baseUrlHelpUrl: "https://platform.minimaxi.com/document",
+    baseUrlHelpUrl: "https://platform.minimaxi.com/docs/guides/text-generation",
     provider: "minimax",
     apiStyle: "anthropic-messages",
     endpoints: {
-      "anthropic-messages": "https://api.minimaxi.com/anthropic/v1",
-      "openai-chat": "https://api.minimaxi.com/v1",
+      "anthropic-messages": "https://api.minimax.cn/anthropic/v1",
+      "openai-chat": "https://api.minimax.cn/v1",
+      "openai-responses": "https://api.minimax.cn/v1",
     },
     models: [],
+  },
+  {
+    active: false,
+    apiKey: "",
+    name: "阶跃星辰 StepFun",
+    baseUrl: "https://api.stepfun.com/v1",
+    apiKeyHelpUrl: "https://platform.stepfun.com/interface-key",
+    baseUrlHelpUrl: "https://platform.stepfun.com/docs/zh/api-reference/responses/responses-create",
+    provider: "stepfun",
+    apiStyle: "openai-responses",
+    endpoints: {
+      "openai-responses": "https://api.stepfun.com/v1",
+      "openai-chat": "https://api.stepfun.com/v1",
+      "anthropic-messages": "https://api.stepfun.com/v1",
+    },
+    models: [],
+  },
+  {
+    active: false,
+    apiKey: "",
+    name: "腾讯混元",
+    baseUrl: "https://tokenhub.tencentmaas.com/v1",
+    baseUrlHelpUrl: "https://cloud.tencent.com/document/product/1823/132252",
+    provider: "tencent",
+    apiStyle: "openai-chat",
+    endpoints: {
+      "openai-chat": "https://tokenhub.tencentmaas.com/v1",
+    },
+    models: [
+      {
+        id: "hy4",
+        name: "Hy4",
+        active: true,
+        contextWindow: 1_024_000,
+        maxOutputTokens: 64_000,
+      },
+    ],
   },
   // ==================== 本地服务（OpenAI 兼容，免 Key） ====================
   {

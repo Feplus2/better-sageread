@@ -46,11 +46,15 @@ const FAMILY_WINDOWS: Array<{ pattern: RegExp; window: number; label: string }> 
   { pattern: /^grok/, window: 256_000, label: "grok" },
   // DeepSeek 官方 /models 实测 context_window=1048576（2026-10-22，deepseek-flash/v4-pro）
   { pattern: /^deepseek/, window: 1_048_576, label: "deepseek" },
+  { pattern: /^kimi-k3/, window: 1_048_576, label: "kimi-k3" },
   { pattern: /^kimi/, window: 262_144, label: "kimi" },
   { pattern: /^glm-5/, window: 204_800, label: "glm-5" },
   { pattern: /^glm/, window: 131_072, label: "glm" },
+  { pattern: /^minimax-m3/, window: 1_000_000, label: "minimax-m3" },
   { pattern: /^minimax/, window: 204_800, label: "minimax" },
   { pattern: /^mimo/, window: 262_144, label: "mimo" },
+  { pattern: /^step-3/, window: 262_144, label: "step-3" },
+  { pattern: /^step-5/, window: 1_000_000, label: "step-5" },
   { pattern: /^qwen/, window: 131_072, label: "qwen" },
   { pattern: /^doubao/, window: 262_144, label: "doubao" },
 ];
@@ -75,6 +79,11 @@ export function resolveContextWindow(
     if (rule.pattern.test(slug)) return { window: rule.window, source: "family" };
   }
   return { window: DEFAULT_CONTEXT_WINDOW, source: "default" };
+}
+
+export function resolveMaxOutputTokens(providerId: string, declared?: number): number | undefined {
+  if (declared !== undefined && Number.isFinite(declared) && declared > 0) return Math.floor(declared);
+  return providerId === "deepseek" ? 16_384 : undefined;
 }
 
 export interface ContextBudget {

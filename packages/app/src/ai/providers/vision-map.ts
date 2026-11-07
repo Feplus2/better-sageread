@@ -14,9 +14,9 @@
  * 是无声的功能残废（用户不知道为什么加不了图）。漏收 DENY 行的代价 = 一次报错，
  * 漏收 ALLOW 行的代价 = 零（放行恰好正确）。
  *
- * 仅存的两条"身份归一"不是能力推断：① OpenRouter 的 "作者/" 前缀剥离（同一型号的
- * 聚合写法）；② 日期后缀剥离（厂商文档口径：日期 ID 是基名型号的快照别名，
- * gpt-4o-2024-11-20 就是 gpt-4o；豆包用六位式 -260628，同理）——归一后仍查同一张表。
+ * 身份归一通常只做① OpenRouter 的 "作者/" 前缀剥离；② 日期快照后缀剥离
+ * （gpt-4o-2024-11-20 就是 gpt-4o；豆包用六位式 -260628）。能力随快照变化的系列
+ * （当前为 qwen3.7-max）只查精确行，未收录的新快照仍按上述未知型号默认处理。
  *
  * 维护：新型号上线 → 查官方文档 → 表里加一行（DENY 侧优先级高：用户真在用的
  * 文本聊天型号收全，报错才少）。调研底稿与各家官方链接：docs/archive/vision-map-research.md。
@@ -54,11 +54,14 @@ export function adoptRemoteVisionMap(raw: unknown): boolean {
   return runtime.adopt(raw);
 }
 
-/** 身份归一（非能力推断）：OpenRouter "作者/" 前缀剥离 + 日期快照别名剥离（厂商口径：日期 ID 是基名快照；\d{6} 为豆包式 -260628） */
+/** 身份归一：OpenRouter 作者前缀与日期快照通常可剥离；能力随快照变化的系列只查精确行。 */
+const CAPABILITY_VARIES_BY_SNAPSHOT = new Set(["qwen3.7-max"]);
+
 function canonicalSlug(modelId: string): string[] {
   let slug = modelId.toLowerCase();
   if (slug.includes("/")) slug = slug.slice(slug.indexOf("/") + 1);
   const stripped = slug.replace(/-(\d{4}-\d{2}-\d{2}|\d{8}|\d{6})$/, "");
+  if (CAPABILITY_VARIES_BY_SNAPSHOT.has(stripped)) return [slug];
   return stripped === slug ? [slug] : [slug, stripped];
 }
 

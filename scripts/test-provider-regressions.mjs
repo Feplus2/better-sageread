@@ -27,6 +27,7 @@ writeFileSync(
     `export { resolveLlmParams } from "${posix(join(src, "services/converter-service.ts"))}";`,
     `export { fetchModelCatalog } from "${posix(join(src, "services/provider-service.ts"))}";`,
     `export { createProviderInstance } from "${posix(join(src, "ai/providers/factory.ts"))}";`,
+    `export { chatReasoningBodyPatch } from "${posix(join(src, "ai/providers/reasoning-map.ts"))}";`,
   ].join("\n"),
 );
 
@@ -108,7 +109,7 @@ await esbuild.build({
   loader: { ".json": "json" },
   plugins: [stubPlugin],
 });
-const { useProviderStore, resolveLlmParams, fetchModelCatalog, createProviderInstance } = await import(
+const { useProviderStore, resolveLlmParams, fetchModelCatalog, createProviderInstance, chatReasoningBodyPatch } = await import(
   pathToFileURL(outfile).href
 );
 
@@ -171,12 +172,67 @@ const selectionPreserved = (state, id = "zhipu") => {
   );
 };
 
-console.log("[1] Zustand persist v0–v10 智谱迁移");
+console.log("[1] Zustand persist v0–v14 智谱迁移、官方 Responses 与腾讯预置");
 check(
-  "persist 版本升至 v10 以触发落盘修复",
-  useProviderStore.persist.getOptions().version === 10,
+  "persist 版本升至 v14 以非破坏合并腾讯预置",
+  useProviderStore.persist.getOptions().version === 14,
   useProviderStore.persist.getOptions().version,
 );
+const tencentLegacy = await migrateState(makeState(makeProvider("zhipu", "openai-chat", ZHIPU_CHAT)), 13);
+const tencentPreset = providerFrom(tencentLegacy, "tencent");
+check(
+  "v13 老配置只追加腾讯 Hy4 官方预算、协议与视觉型号，默认未启用",
+  tencentPreset?.active === false &&
+    tencentPreset.apiStyle === "openai-chat" &&
+    tencentPreset.baseUrl === "https://tokenhub.tencentmaas.com/v1" &&
+    tencentPreset.endpoints?.["openai-chat"] === tencentPreset.baseUrl &&
+    tencentPreset.models?.some((model) =>
+      model.id === "hy4" && model.contextWindow === 1_024_000 && model.maxOutputTokens === 64_000 && model.active === true
+    ),
+  tencentPreset,
+);
+check("新增腾讯不覆盖旧提供商模型与两个模型选择", selectionPreserved(tencentLegacy), tencentLegacy);
+const customTencent = makeProvider("tencent", "anthropic-messages", "https://relay.example/v1", { active: false });
+const preservedTencent = await migrateState(makeState(customTencent), 13);
+check(
+  "已有同 id 腾讯代理、协议、Key 和模型完全保留",
+  JSON.stringify(providerFrom(preservedTencent, "tencent")) === JSON.stringify(customTencent) &&
+    JSON.stringify(preservedTencent.selectedModel) === JSON.stringify(selectedModel) &&
+    JSON.stringify(preservedTencent.utilityModel) === JSON.stringify(utilityModel),
+  providerFrom(preservedTencent, "tencent"),
+);
+for (const providerId of ["qwen", "doubao"]) {
+  const preset = providerFrom(useProviderStore.getState(), providerId);
+  check(
+    `${providerId} 新预置默认 Responses，保留国内地址与备选协议`,
+    preset?.apiStyle === "openai-responses" &&
+      preset.endpoints?.["openai-chat"] === preset.baseUrl &&
+      preset.endpoints?.["openai-responses"] === preset.baseUrl,
+    preset,
+  );
+  const legacy = await migrateState(makeState(makeProvider(providerId, "auto", preset.baseUrl)), 12);
+  const migrated = providerFrom(legacy, providerId);
+  check(
+    `v12 ${providerId} 官方旧默认升级 Responses，不改模型与选择`,
+    migrated?.apiStyle === "openai-responses" && selectionPreserved(legacy, providerId),
+    migrated,
+  );
+  const explicitChat = makeProvider(providerId, "openai-chat", preset.baseUrl);
+  const preservedExplicitChat = await migrateState(makeState(explicitChat), 12);
+  check(
+    `v12 ${providerId} 显式 openai-chat 不被迁移覆盖`,
+    providerFrom(preservedExplicitChat, providerId)?.apiStyle === "openai-chat" &&
+      selectionPreserved(preservedExplicitChat, providerId),
+    providerFrom(preservedExplicitChat, providerId),
+  );
+  const custom = makeProvider(providerId, "openai-chat", "https://relay.example.com/v1", { active: false });
+  const preserved = await migrateState(makeState(custom), 12);
+  check(
+    `v12 ${providerId} 自定义代理协议、地址和 active 完全保留`,
+    JSON.stringify(providerFrom(preserved, providerId)) === JSON.stringify(custom),
+    providerFrom(preserved, providerId),
+  );
+}
 for (let version = 0; version <= 5; version += 1) {
   const state = await migrateState(makeState(makeProvider("zhipu", undefined, ZHIPU_CHAT)), version);
   const provider = providerFrom(state);
@@ -284,6 +340,75 @@ check(
   "v6→v7 不改写显式 OpenAI chat 的 DeepSeek 地址",
   providerFrom(deepseekState, "deepseek")?.baseUrl === "https://api.deepseek.com/v1",
   providerFrom(deepseekState, "deepseek"),
+);
+
+const stepPreset = providerFrom(useProviderStore.getState(), "stepfun");
+check(
+  "StepFun 预置默认未启用、Responses、完整普通 API 端点与动态模型列表",
+  stepPreset?.active === false &&
+    stepPreset.apiStyle === "openai-responses" &&
+    stepPreset.name === "阶跃星辰 StepFun" &&
+    stepPreset.baseUrl === "https://api.stepfun.com/v1" &&
+    stepPreset.endpoints?.["openai-chat"] === "https://api.stepfun.com/v1" &&
+    stepPreset.endpoints?.["openai-responses"] === "https://api.stepfun.com/v1" &&
+    stepPreset.endpoints?.["anthropic-messages"] === "https://api.stepfun.com/v1" &&
+    stepPreset.models.length === 0 &&
+    !JSON.stringify(stepPreset).includes("step_plan"),
+  stepPreset,
+);
+const stepMigrationState = await migrateState(makeState(makeProvider("zhipu", "openai-chat", ZHIPU_CHAT)), 10);
+check(
+  "v10 老配置补一次 StepFun 且保留原选择",
+  stepMigrationState.modelProviders.filter((provider) => provider.provider === "stepfun").length === 1 &&
+    selectionPreserved(stepMigrationState),
+  stepMigrationState,
+);
+const legacyStepState = await migrateState(
+  makeState(makeProvider("stepfun", "openai-chat", "https://api.stepfun.com/v1", { active: false })),
+  11,
+);
+check(
+  "v11 官方 Step 默认升级 Responses，保留普通 API 三协议",
+  providerFrom(legacyStepState, "stepfun")?.apiStyle === "openai-responses" &&
+    providerFrom(legacyStepState, "stepfun")?.endpoints?.["anthropic-messages"] === "https://api.stepfun.com/v1" &&
+    selectionPreserved(legacyStepState, "stepfun"),
+  providerFrom(legacyStepState, "stepfun"),
+);
+const customStep = makeProvider("stepfun", "openai-chat", "https://api.stepfun.ai/step_plan/v1", {
+  active: false,
+});
+const customStepState = await migrateState(makeState(customStep), 10);
+check(
+  "已有 StepFun 不重复、不改自定义 host、协议或 active",
+  customStepState.modelProviders.filter((provider) => provider.provider === "stepfun").length === 1 &&
+    JSON.stringify(providerFrom(customStepState, "stepfun")) === JSON.stringify(customStep),
+  providerFrom(customStepState, "stepfun"),
+);
+const legacyMinimaxState = await migrateState(
+  makeState(makeProvider("minimax", "anthropic-messages", "https://api.minimaxi.com/anthropic/v1", { active: false })),
+  11,
+);
+check(
+  "v11 MiniMax 保留既有主机并补国内 Responses，不改模型选择",
+  providerFrom(legacyMinimaxState, "minimax")?.baseUrl === "https://api.minimaxi.com/anthropic/v1" &&
+    providerFrom(legacyMinimaxState, "minimax")?.endpoints?.["openai-responses"] === "https://api.minimax.cn/v1" &&
+    selectionPreserved(legacyMinimaxState, "minimax"),
+  providerFrom(legacyMinimaxState, "minimax"),
+);
+const customMinimax = makeProvider("minimax", "openai-chat", "https://relay.example.com/v1", { active: false });
+const customMinimaxState = await migrateState(makeState(customMinimax), 11);
+check(
+  "v11 MiniMax 自定义代理完全保留",
+  JSON.stringify(providerFrom(customMinimaxState, "minimax")) === JSON.stringify(customMinimax),
+  providerFrom(customMinimaxState, "minimax"),
+);
+const minimaxBefore = providerFrom(useProviderStore.getState(), "minimax");
+const minimaxState = await migrateState(makeState(makeProvider("zhipu", "openai-chat", ZHIPU_CHAT)), 10);
+check(
+  "StepFun 合并不重复或改写 MiniMax",
+  minimaxState.modelProviders.filter((provider) => provider.provider === "minimax").length === 1 &&
+    JSON.stringify(providerFrom(minimaxState, "minimax")) === JSON.stringify(minimaxBefore),
+  providerFrom(minimaxState, "minimax"),
 );
 
 console.log("[2] 转换器只接受真实 OpenAI 兼容端点");
@@ -490,6 +615,123 @@ const geminiVisionBody = await dispatchToolImage({
   modelId: "gemini-2.5-flash",
 });
 check("Gemini chat 视觉模型挂图片桥", bridgeAddedUserImage(geminiVisionBody), geminiVisionBody);
+
+console.log("[5] StepFun 模型目录与工厂契约");
+const stepCatalogCalls = await catalogRequest(makeProvider("stepfun", "openai-chat", "https://api.stepfun.com/v1"));
+check(
+  "StepFun 模型列表只请求官方 /models",
+  stepCatalogCalls.length === 1 &&
+    stepCatalogCalls[0].url === "https://api.stepfun.com/v1/models" &&
+    stepCatalogCalls[0].init.method === "GET" &&
+    stepCatalogCalls[0].init.headers.Authorization === "Bearer test-key",
+  stepCatalogCalls.map((call) => ({
+    url: call.url,
+    method: call.init.method,
+    authorized: call.init.headers.Authorization === "Bearer test-key",
+  })),
+);
+const stepModel = createProviderInstance({
+  providerId: "stepfun",
+  apiKey: "test-key",
+  baseUrl: "https://api.stepfun.ai/v1",
+  apiStyle: "openai-chat",
+  disableThinking: false,
+  modelId: "step-3.7-flash",
+})("step-3.7-flash");
+const stepFactoryCapture = globalThis.__providerFactoryCaptures.at(-1);
+check(
+  "StepFun 使用 OpenAI-compatible 且保留国际 host",
+  stepModel.provider === "openai-compatible" && stepFactoryCapture?.options.baseURL === "https://api.stepfun.ai/v1",
+  { provider: stepModel.provider, baseURL: stepFactoryCapture?.options.baseURL },
+);
+const observedStepCalls = [];
+const observedStepFetch = async (input, init) => {
+  observedStepCalls.push({ url: typeof input === "string" ? input : input.url, method: init?.method ?? "GET" });
+  return new Response("{}", { status: 200 });
+};
+createProviderInstance({
+  providerId: "stepfun",
+  apiKey: "test-key",
+  baseUrl: "https://api.stepfun.com/v1",
+  apiStyle: "openai-chat",
+  modelId: "step-3.7-flash",
+  fetch: observedStepFetch,
+});
+const observedStepCapture = globalThis.__providerFactoryCaptures.at(-1);
+globalThis.__providerHttpCalls = [];
+await observedStepCapture.options.fetch("https://unit.test/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ messages: [] }),
+});
+check(
+  "工厂保留可选 fetch 观测入口且不改变默认请求",
+  observedStepCalls.length === 1 &&
+    observedStepCalls[0].url === "https://unit.test/chat/completions" &&
+    observedStepCalls[0].method === "POST" &&
+    globalThis.__providerHttpCalls.length === 0,
+  { observedStepCalls, defaultCalls: globalThis.__providerHttpCalls.length },
+);
+const stepPlanModel = createProviderInstance({
+  providerId: "stepfun",
+  apiKey: "test-key",
+  baseUrl: "https://api.stepfun.ai/step_plan/v1",
+  apiStyle: "openai-chat",
+  disableThinking: false,
+  modelId: "step-3.7-flash",
+});
+const stepPlanCapture = globalThis.__providerFactoryCaptures.at(-1);
+check(
+  "StepFun 自定义套餐 host 不被替换",
+  stepPlanModel("step-3.7-flash").provider === "openai-compatible" &&
+    stepPlanCapture?.options.baseURL === "https://api.stepfun.ai/step_plan/v1",
+  stepPlanCapture?.options.baseURL,
+);
+
+console.log("[6] 腾讯 Hy4 协议、视觉图片桥与恒思考档位");
+const tencentVisionBody = await dispatchToolImage({
+  providerId: "tencent",
+  apiStyle: "openai-chat",
+  baseUrl: "https://tokenhub.tencentmaas.com/v1",
+  modelId: "hy4",
+});
+check("腾讯 Hy4 正式版允许视觉图片桥", bridgeAddedUserImage(tencentVisionBody), tencentVisionBody);
+const tencentPreviewBody = await dispatchToolImage({
+  providerId: "tencent",
+  apiStyle: "openai-chat",
+  baseUrl: "https://tokenhub.tencentmaas.com/v1",
+  modelId: "hy4-preview",
+});
+check("hy4-preview 原有纯文本映射不被正式版覆盖", bridgeLeftBodyUntouched(tencentPreviewBody), tencentPreviewBody);
+const tencentModel = createProviderInstance({
+  providerId: "tencent",
+  apiKey: "test-key",
+  baseUrl: "https://tokenhub.tencentmaas.com/v1",
+  apiStyle: "openai-chat",
+  disableThinking: true,
+  modelId: "hy4",
+})("hy4");
+const tencentFactoryCapture = globalThis.__providerFactoryCaptures.at(-1);
+check(
+  "腾讯默认走 OpenAI-compatible 与国内 /v1 地址",
+  tencentModel.provider === "openai-compatible" && tencentFactoryCapture?.options.baseURL === "https://tokenhub.tencentmaas.com/v1",
+  tencentFactoryCapture?.options,
+);
+globalThis.__providerHttpCalls = [];
+await tencentFactoryCapture.options.fetch("https://unit.test/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ model: "hy4", messages: [] }),
+});
+const tencentUtilityBody = JSON.parse(globalThis.__providerHttpCalls.at(-1).init.body);
+check("轻量任务对恒思考 Hy4 降到 low 而不是发 disabled", tencentUtilityBody.reasoning_effort === "low" && tencentUtilityBody.thinking === undefined, tencentUtilityBody);
+const highPatch = chatReasoningBodyPatch("tencent", "https://tokenhub.tencentmaas.com/v1", "hy4", "high");
+const highBody = {};
+highPatch?.(highBody);
+const offPatch = chatReasoningBodyPatch("tencent", "https://tokenhub.tencentmaas.com/v1", "hy4", "off");
+const offBody = {};
+offPatch?.(offBody);
+check("Hy4 聊天档位支持 high 且 off 钳到 low", highBody.reasoning_effort === "high" && offBody.reasoning_effort === "low", { highBody, offBody });
 
 console.log(`\n结果：${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

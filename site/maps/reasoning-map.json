@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-20",
+  "updatedAt": "2026-11-07T22:21:56+08:00",
   "models": {
     "o1": {
       "alwaysOn": false,
@@ -160,7 +160,7 @@
     "gemini-3-pro": {
       "alwaysOn": true,
       "offParam": null,
-      "levels": ["low", "medium", "high"],
+      "levels": ["low", "high"],
       "transport": "effort"
     },
     "gemini-3-flash": {
@@ -218,9 +218,9 @@
       "transport": "effort"
     },
     "grok-4": {
-      "alwaysOn": false,
-      "offParam": "none",
-      "levels": ["none", "low", "medium", "high"],
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": [],
       "transport": "effort"
     },
     "grok-4.3": {
@@ -441,6 +441,12 @@
       "levels": ["low", "high", "max"],
       "transport": "effort"
     },
+    "kimi-k3.1-pro": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high", "max"],
+      "transport": "effort"
+    },
     "kimi-k2.7-code": {
       "alwaysOn": true,
       "offParam": null,
@@ -560,8 +566,8 @@
     },
     "gpt-4o": {
       "alwaysOn": false,
-      "offParam": "low",
-      "levels": ["low", "medium", "high"],
+      "offParam": null,
+      "levels": [],
       "transport": "effort"
     },
     "gpt-4o-mini": {
@@ -764,6 +770,18 @@
       "levels": ["low", "medium", "high", "xhigh", "max"],
       "transport": "effort"
     },
+    "step-5-preview": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
+    "step-3.7-flash": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "medium", "high"],
+      "transport": "effort"
+    },
     "ernie-5.0": {
       "alwaysOn": false,
       "offParam": "enable_thinking:false",
@@ -799,6 +817,12 @@
       "offParam": "enable_thinking:false",
       "levels": [],
       "transport": "switch"
+    },
+    "hy4": {
+      "alwaysOn": true,
+      "offParam": null,
+      "levels": ["low", "high"],
+      "transport": "effort"
     },
     "hunyuan-hy4-preview": {
       "alwaysOn": true,

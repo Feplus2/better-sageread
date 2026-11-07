@@ -671,7 +671,7 @@ export default function VectorModelManager() {
     return (
       <div
         key={preset.id}
-        className={`rounded-xl border ${expanded ? "border-neutral-300 dark:border-neutral-500" : borderClass} bg-background dark:bg-neutral-800`}
+        className={`rounded-xl border ${expanded ? "border-neutral-300 dark:border-neutral-500" : borderClass} bg-muted/80`}
       >
         <button
           type="button"
@@ -776,7 +776,7 @@ export default function VectorModelManager() {
         className={`rounded-xl border px-4 py-3 ${
           selectedModel
             ? "border-amber-300/70 bg-gradient-to-b from-amber-50/70 to-transparent dark:border-amber-800/50 dark:from-amber-950/20"
-            : `${borderClass} bg-background dark:bg-neutral-800`
+            : `${borderClass} bg-muted/80`
         }`}
       >
         {selectedModel ? (
@@ -857,7 +857,7 @@ export default function VectorModelManager() {
                 {CLOUD_PRESETS.map(renderProviderRow)}
                 {/* 自定义端点与其他配置 */}
                 <div
-                  className={`rounded-xl border ${expandedId === "custom" ? "border-neutral-300 dark:border-neutral-500" : borderClass} bg-background dark:bg-neutral-800`}
+                  className={`rounded-xl border ${expandedId === "custom" ? "border-neutral-300 dark:border-neutral-500" : borderClass} bg-muted/80`}
                 >
                   <button
                     type="button"

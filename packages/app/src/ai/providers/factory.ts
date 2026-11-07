@@ -1,26 +1,28 @@
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { type LanguageModel } from "ai";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { fetch as fetchTauri } from "@tauri-apps/plugin-http";
+import type { LanguageModel } from "ai";
+import { doubaoResponsesProviderOptions, wrapDoubaoResponsesFetch } from "./doubao-response";
+import {
+  type ProviderApiStyle,
+  normalizeGeminiBaseUrl,
+  normalizeOpenAIBaseUrl,
+  resolveAnthropicCompatibleBaseUrl,
+  resolveProviderProtocol,
+} from "./protocol";
 import {
   type ReasoningLevel,
   anthropicThinkingBodyPatch,
   auxThinkingLevel,
   chatReasoningBodyPatch,
   lookupCap,
+  responsesReasoningBodyPatch,
 } from "./reasoning-map";
-import {
-  type ProviderApiStyle,
-  normalizeGeminiBaseUrl,
-  resolveAnthropicCompatibleBaseUrl,
-  normalizeOpenAIBaseUrl,
-  resolveProviderProtocol,
-} from "./protocol";
 import { wrapOpenAICompatToolImagesFetch } from "./tool-image-bridge";
 import { VISION_NAME_RE, modelSupportsVision } from "./vision-map";
 
@@ -36,6 +38,7 @@ export interface ProviderConfig {
   modelId?: string;
   /** 聊天模型：按请求时刻的用户档位动态打思考强度补丁（P3，分档表见 reasoning-map.ts） */
   reasoningLevelRef?: () => ReasoningLevel;
+  fetch?: typeof fetch;
 }
 
 /** 按端点/模型求"关闭思考"请求体补丁；不认识或关不掉的返回 null（不乱发防 400） */
@@ -156,7 +159,7 @@ function wrapChatReasoningFetch(
   baseUrl: string | undefined,
   modelId: string | undefined,
   levelRef: () => ReasoningLevel,
-  mode: "chat" | "anthropic" = "chat",
+  mode: "chat" | "anthropic" | "responses" = "chat",
 ): typeof fetch {
   const inner = base ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
   return async (input, init) => {
@@ -165,11 +168,13 @@ function wrapChatReasoningFetch(
     let didPatch = false;
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
-      // 原生 Anthropic 通道写 thinking 字段；chat 通道走各家请求体补丁
+      // 各协议分别下发，Responses 不复用 Chat Completions 的顶层 reasoning_effort。
       const patch =
         mode === "anthropic"
           ? anthropicThinkingBodyPatch(providerId, baseUrl, modelId ?? "", levelRef())
-          : chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
+          : mode === "responses"
+            ? responsesReasoningBodyPatch(providerId, baseUrl, modelId ?? "", levelRef())
+            : chatReasoningBodyPatch(providerId, baseUrl, modelId, levelRef());
       if (patch) {
         patch(body);
         didPatch = true;
@@ -190,6 +195,52 @@ function wrapChatReasoningFetch(
   };
 }
 
+function normalizeMoonshotMessage(body: unknown): unknown {
+  if (!body || typeof body !== "object" || (body as { type?: unknown }).type !== "message") return body;
+  const message = body as { content?: unknown };
+  if (!Array.isArray(message.content)) return body;
+  let changed = false;
+  const content = message.content.map((part) => {
+    if (!part || typeof part !== "object") return part;
+    const block = part as Record<string, unknown>;
+    if (block.type !== "thinking" || typeof block.thinking !== "string" || block.signature !== undefined) return part;
+    changed = true;
+    return { ...block, signature: "" };
+  });
+  return changed ? { ...message, content } : body;
+}
+
+/** Moonshot 的 thinking 可省略 Anthropic SDK 必填的 signature；空串仅表示缺失，不伪造签名。 */
+function wrapMoonshotMessagesFetch(base: typeof fetch, baseUrl?: string): typeof fetch {
+  let official = false;
+  try {
+    official = new URL(baseUrl ?? "").hostname === "api.moonshot.cn";
+  } catch {
+    official = false;
+  }
+  return async (input, init) => {
+    const response = await base(input, init);
+    if (!official || !response.ok || !response.headers.get("content-type")?.includes("application/json"))
+      return response;
+    const text = await response.clone().text();
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return response;
+    }
+    const normalized = normalizeMoonshotMessage(body);
+    if (normalized === body) return response;
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    return new Response(JSON.stringify(normalized), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
+}
+
 /**
  * 动态创建AI提供商实例
  */
@@ -197,13 +248,15 @@ export function createProviderInstance(config: ProviderConfig) {
   const { providerId, apiKey, baseUrl, disableThinking, modelId, reasoningLevelRef } = config;
   const protocol = resolveProviderProtocol({ providerId, baseUrl, modelId, apiStyle: config.apiStyle });
   const isAnthropicNative = protocol === "anthropic-messages";
-  // 关闭思考补丁：原生 Anthropic 通道写 thinking 字段（DeepSeek/Kimi 已验证）；
-  // chat 通道按端点认识的请求体补丁（reasoning_effort/thinking/enable_thinking）。
-  // 之前原生分支直接 return createAnthropic 丢掉补丁：轻量任务在 DeepSeek 上重新变慢、聊天档位失效。
+  // 轻量任务与聊天分用相同的协议契约：Responses 不能复用 Chat 的 reasoning_effort。
+  // 中继 Chat 先走原有端点分派，再按已核实的型号补丁兜底。
   const patch = disableThinking
-    ? isAnthropicNative
-      ? anthropicThinkingBodyPatch(providerId, baseUrl, modelId ?? "", "off")
-      : thinkingOffPatch(providerId, baseUrl, modelId)
+    ? protocol === "openai-responses"
+      ? responsesReasoningBodyPatch(providerId, baseUrl, modelId ?? "", "off")
+      : isAnthropicNative
+        ? anthropicThinkingBodyPatch(providerId, baseUrl, modelId ?? "", "off")
+        : (thinkingOffPatch(providerId, baseUrl, modelId) ??
+          chatReasoningBodyPatch(providerId, baseUrl, modelId, "off"))
     : null;
   // 两路 fetch 包装可叠加（实践中互斥：轻量任务走 disableThinking，聊天走 reasoningLevelRef）
   const wrapFetch = (base: typeof fetch): typeof fetch => {
@@ -216,14 +269,16 @@ export function createProviderInstance(config: ProviderConfig) {
         baseUrl,
         modelId,
         reasoningLevelRef,
-        isAnthropicNative ? "anthropic" : "chat",
+        protocol === "openai-responses" ? "responses" : isAnthropicNative ? "anthropic" : "chat",
       );
     return f;
   };
   // 统一走 Tauri 的 HTTP 客户端：原生 provider（尤其是官方 OpenAI/Anthropic/Gemini/Kimi）不返回
   // 浏览器 CORS 头，webview 里的 globalThis.fetch 会直接 "Failed to fetch"（2026-10-22 实网复现：
   // Kimi 158ms 失败）。chat/兼容通道本来就用 fetchTauri，这里把原生通道也补齐。
-  const wrappedDefault = wrapFetch(fetchTauri);
+  const wrappedDefault = wrapFetch(config.fetch ?? fetchTauri);
+  const responsesFetch =
+    protocol === "openai-responses" ? wrapDoubaoResponsesFetch(wrappedDefault, baseUrl) : wrappedDefault;
   // 视觉能力门控：纯文本模型（vision-map=false）不挂图片桥，否则工具图会以 user 图片消息形式发送 → 400。
   // modelId 缺省（如未绑定模型时）按"未知默认放行"，与 vision-map 口径一致。
   const visionEligible = !modelId || modelSupportsVision(providerId, modelId);
@@ -341,14 +396,15 @@ export function createProviderInstance(config: ProviderConfig) {
         return createOpenAI({
           apiKey: apiKey || "",
           baseURL: normalizeOpenAIBaseUrl(baseUrl) || "https://api.openai.com/v1",
-          fetch: wrappedDefault,
+          fetch: responsesFetch,
         });
       }
       if (protocol === "anthropic-messages") {
+        const baseURL = resolveAnthropicCompatibleBaseUrl(providerId, baseUrl);
         return createAnthropic({
           apiKey: apiKey || "",
-          baseURL: resolveAnthropicCompatibleBaseUrl(providerId, baseUrl),
-          fetch: wrappedDefault,
+          baseURL,
+          fetch: providerId === "kimi" ? wrapMoonshotMessagesFetch(wrappedDefault, baseURL) : wrappedDefault,
         });
       }
       if (protocol === "gemini") {
@@ -430,7 +486,7 @@ export function createModelInstance(
   // Gemini 原生协议：AI SDK 只在 modelId 不含 "/" 时自动补 models/ 前缀；
   // 网关的 google/xxx 模型需要 models/google/xxx 才能命中 /v1beta/models/... 路径。
   const effectiveModelId =
-    protocol === "gemini" && modelId.includes("/") && !modelId.startsWith("models/") ? "models/" + modelId : modelId;
+    protocol === "gemini" && modelId.includes("/") && !modelId.startsWith("models/") ? `models/${modelId}` : modelId;
   return providerInstance(effectiveModelId) as LanguageModel;
 }
 
@@ -460,6 +516,29 @@ export function getUtilityModel(_task?: string): SelectedModel | null {
  * （OpenAI 对不支持的模型会 400，OpenRouter 例外——自动忽略 reasoning，表外也安全下发）。
  * 自定义端点（DeepSeek/GLM/Qwen/Kimi/腾讯/MiMo）的请求体补丁走 thinkingOffPatch 同规则。
  */
+export function withResponsesProviderOptions(
+  providerId: string,
+  options?: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> | undefined {
+  const provider = useProviderStore.getState().modelProviders.find((item) => item.provider === providerId);
+  if (
+    !provider ||
+    resolveProviderProtocol({
+      providerId,
+      baseUrl: provider.baseUrl,
+      apiStyle: provider.apiStyle,
+    }) !== "openai-responses"
+  )
+    return options;
+  const responses = doubaoResponsesProviderOptions(provider.baseUrl);
+  if (!responses) return options;
+  return {
+    ...options,
+    ...responses,
+    openai: { ...options?.openai, ...responses.openai },
+  };
+}
+
 export function utilityTaskProviderOptions(
   providerId: string,
   modelId: string,
@@ -482,7 +561,7 @@ export function utilityTaskProviderOptions(
     case "grok":
       return lowEffort ? { openai: { reasoningEffort: lowEffort } } : undefined;
     default:
-      return undefined;
+      return withResponsesProviderOptions(providerId);
   }
 }
 

@@ -1,6 +1,7 @@
 import { predefinedProviders } from "@/constants/predefined-providers";
 import { tauriStorageKey } from "@/constants/tauri-storage";
 import { tauriStorage } from "@/lib/tauri-storage";
+import { orderModelProviders } from "@/utils/provider-order";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -14,14 +15,14 @@ const ANTHROPIC_COMPAT_CANONICAL_BASE_URLS: Record<string, string> = {
   deepseek: "https://api.deepseek.com/anthropic/v1",
   kimi: "https://api.moonshot.cn/anthropic/v1",
   zhipu: "https://open.bigmodel.cn/api/anthropic/v1",
-  minimax: "https://api.minimaxi.com/anthropic/v1",
+  minimax: "https://api.minimax.cn/anthropic/v1",
 };
 
 const ANTHROPIC_COMPAT_OFFICIAL_HOSTS: Record<string, string[]> = {
   deepseek: ["deepseek.com"],
   kimi: ["api.moonshot.cn"],
   zhipu: ["open.bigmodel.cn"],
-  minimax: ["api.minimaxi.com", "api.minimax.io"],
+  minimax: ["api.minimax.cn", "api.minimaxi.com", "api.minimax.io"],
 };
 
 const ZHIPU_OPENAI_CHAT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
@@ -51,7 +52,7 @@ function isOfficialProviderHost(providerId: string, baseUrl?: string): boolean {
   if (!allowed) return false;
   try {
     const host = new URL(baseUrl).host.toLowerCase();
-    return allowed.some((domain) => host === domain || host.endsWith("." + domain));
+    return allowed.some((domain) => host === domain || host.endsWith(`.${domain}`));
   } catch {
     return false;
   }
@@ -128,7 +129,7 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: tauriStorageKey.modelProvider,
       storage: createJSONStorage(() => tauriStorage),
-      version: 10,
+      version: 14,
       migrate: (persistedState: any, version: number) => {
         if (version < 1) {
           // v0→v1: 合并新增的预定义提供商（保留用户已有配置不动）
@@ -230,7 +231,7 @@ export const useProviderStore = create<ProviderState>()(
             deepseek: ["deepseek.com"],
             kimi: ["api.moonshot.cn"],
             zhipu: ["open.bigmodel.cn"],
-            minimax: ["api.minimaxi.com", "api.minimax.io"],
+            minimax: ["api.minimax.cn", "api.minimaxi.com", "api.minimax.io"],
           };
           const isOfficialHost = (providerId: string, baseUrl?: string) => {
             if (!baseUrl) return true;
@@ -238,7 +239,7 @@ export const useProviderStore = create<ProviderState>()(
             if (!hosts) return false;
             try {
               const host = new URL(baseUrl).host.toLowerCase();
-              return hosts.some((allowed) => host === allowed || host.endsWith("." + allowed));
+              return hosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
             } catch {
               return false;
             }
@@ -313,6 +314,101 @@ export const useProviderStore = create<ProviderState>()(
             }
             return p;
           });
+        }
+        if (version < 11) {
+          // v10→v11：合并新增的 StepFun 预置；已有同 id 的自定义配置与模型选择完全保留。
+          const current: ModelProvider[] = persistedState.modelProviders ?? [];
+          const ids = new Set(current.map((p) => p.provider));
+          const missing = predefinedProviders.filter((p) => !ids.has(p.provider));
+          if (missing.length > 0) persistedState.modelProviders = [...current, ...missing];
+        }
+        if (version < 12) {
+          const isStepOfficialHost = (baseUrl?: string) => {
+            try {
+              const url = new URL(baseUrl ?? "https://api.stepfun.com/v1");
+              return url.hostname.toLowerCase() === "api.stepfun.com" && !url.pathname.startsWith("/step_plan");
+            } catch {
+              return false;
+            }
+          };
+          const minimaxOpenAI = "https://api.minimax.cn/v1";
+          persistedState.modelProviders = orderModelProviders(
+            (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+              if (p.provider === "minimax" && isOfficialProviderHost("minimax", p.baseUrl)) {
+                const international = /minimax\.io/i.test(p.baseUrl ?? "");
+                const messages = p.apiStyle !== "openai-chat" && p.apiStyle !== "openai-responses";
+                return {
+                  ...p,
+                  apiStyle: p.apiStyle ?? "anthropic-messages",
+                  baseUrl: p.baseUrl ?? (messages ? ANTHROPIC_COMPAT_CANONICAL_BASE_URLS.minimax : minimaxOpenAI),
+                  endpoints: {
+                    ...p.endpoints,
+                    "anthropic-messages": international
+                      ? "https://api.minimax.io/anthropic/v1"
+                      : ANTHROPIC_COMPAT_CANONICAL_BASE_URLS.minimax,
+                    "openai-chat": international ? "https://api.minimax.io/v1" : minimaxOpenAI,
+                    "openai-responses": international ? "https://api.minimax.io/v1" : minimaxOpenAI,
+                  },
+                };
+              }
+              if (p.provider === "stepfun" && isStepOfficialHost(p.baseUrl)) {
+                return {
+                  ...p,
+                  apiStyle:
+                    p.apiStyle === "openai-chat" || p.apiStyle === "auto" || !p.apiStyle
+                      ? "openai-responses"
+                      : p.apiStyle,
+                  baseUrl: p.baseUrl ?? "https://api.stepfun.com/v1",
+                  endpoints: {
+                    ...p.endpoints,
+                    "openai-chat": "https://api.stepfun.com/v1",
+                    "openai-responses": "https://api.stepfun.com/v1",
+                    "anthropic-messages": "https://api.stepfun.com/v1",
+                  },
+                };
+              }
+              return p;
+            }),
+          );
+        }
+        if (version < 13) {
+          const responsesDefaults: Record<string, string> = {
+            qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            doubao: "https://ark.cn-beijing.volces.com/api/v3",
+          };
+          persistedState.modelProviders = (persistedState.modelProviders ?? []).map((p: ModelProvider) => {
+            const target = responsesDefaults[p.provider];
+            if (!target || (p.apiStyle && p.apiStyle !== "auto")) return p;
+            try {
+              const expected = new URL(target);
+              const actual = new URL(p.baseUrl || target);
+              const sameOfficialEndpoint =
+                actual.origin === expected.origin &&
+                actual.pathname.replace(/\/+$/, "") === expected.pathname &&
+                !actual.search &&
+                !actual.username &&
+                !actual.password;
+              if (!sameOfficialEndpoint) return p;
+              return {
+                ...p,
+                apiStyle: "openai-responses" as const,
+                baseUrl: p.baseUrl || target,
+                endpoints: {
+                  ...p.endpoints,
+                  "openai-chat": p.endpoints?.["openai-chat"] ?? target,
+                  "openai-responses": target,
+                },
+              };
+            } catch {
+              return p;
+            }
+          });
+        }
+        if (version < 14) {
+          const current: ModelProvider[] = persistedState.modelProviders ?? [];
+          const ids = new Set(current.map((p) => p.provider));
+          const missing = predefinedProviders.filter((p) => !ids.has(p.provider));
+          if (missing.length > 0) persistedState.modelProviders = [...current, ...missing];
         }
         return persistedState;
       },

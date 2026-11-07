@@ -77,6 +77,31 @@
 
 ## 4. 已知挂账
 
+- 2026-10-25 批次：**Kimi K3.1 Pro（`kimi-k3.1-pro`）已入表**（site/maps + 打包副本 + BC 视觉移植同步）。
+  官方 [K3.1 Pro 指南](https://platform.moonshot.cn/docs/guide/kimi-k3-1-pro-quickstart.md)、
+  [推理强度](https://platform.moonshot.cn/docs/guide/use-reasoning-effort.md)、
+  [Messages](https://platform.moonshot.cn/docs/api/messages.md)、
+  [Responses](https://platform.moonshot.cn/docs/api/responses.md)、
+  [定价](https://platform.moonshot.cn/docs/pricing/chat) 核实：1,048,576 上下文；文本/图片/视频输入；
+  始终思考且只有 `low/high/max`（默认 max）。Chat Completions 顶层 `reasoning_effort`，
+  Responses `reasoning:{effort}`，Anthropic Messages `output_config:{effort}`，三者不可混用。
+  `max_completion_tokens` 默认 131,072、最大 1,048,576；未把上限写成每次请求的预留，未新增高速版。
+  K3/K3.1 的 `high` 仍是 `high`，不要误写成 `max`；K2.x 的 thinking 映射保持原样。
+  分派与预算代码随客户端发布，旧客户端仅拉 JSON 不会获得这些修复。
+  实测（2026-10-25，CherryIN `moonshotai/kimi-k3.1-pro`；当时无官方 key，后续已补测官方）：目录可发现，
+  文本、完整 assistant/reasoning 工具历史、有效 PNG 和标准 `/v1/messages` 均为 HTTP 200；
+  隔离 App 的 `manageThreads list`、`manageSkill toggle`（不传 skillName）与图片调用通过。
+  `/v1/responses` 返回 HTTP 200 但正文 0 字节，**该中继 Responses 未验证通过**；
+  三种协议的请求形状另由真实 provider 适配器捕获验证，不把空响应当成功，也不静默换协议。
+  同日官方原始 Chat/Messages 文本均为 HTTP 200，应用内普通文本、流式文本与 PNG 实测通过。普通 JSON 的 thinking
+  可缺省 `signature`，Anthropic SDK 因而拒绝 `content[0].signature`；仅在官方 Moonshot 的成功 JSON 响应中
+  补空字符串标记缺失，保留思考与正文，其他响应及中继不改写。流式解析路径不改写；
+  `test-kimi-k31-fetch.mjs` 31/31（缺失字段的非流式/流式/中继边界）通过。后续官方 Responses
+  已实测：HTTP 200、正文 1,482 字节、回复“Responses 协议可用。”；应用内文本、工具历史与 PNG 也通过。
+  CherryIN 本轮无可用密钥，未发送请求，不能据此判断渠道结果。
+  目录同时出现 highspeed：K3 系列 1M 上下文已核实，但其视觉/推理参数未独立核实。
+  现有 longest-prefix 会让它继承 Pro 的档位与协议补丁；未单列入表或实测，后续复核。
+
 - 2026-10-20 批次核实结论（均已入表，site/maps + 打包副本 + BC 视觉移植三处同步，maps-sync-check 绿）：
   - **Gemini 4 Argon（`gemini-4-argon`）已入表**：Google 官方发布页（blog.google）/Gemini API
     "What's new in Gemini 4 Argon"/Gemini Interactions SDK 2.1.0 发布说明核实。要点：
@@ -115,7 +140,23 @@
 
 - 存量 `mimo-v2.5` 等三行是 budget 型（`enable_thinking`），与小米官方
   `thinking:{type}` 口径不一致（疑似按阿里云托管文档收录），待核实修订。
-- 两个冒烟脚本存在与表演进脱节的既有断言（2026-09-22 盘点：视觉 6 条、思考 17 条），
-  需逐条对照官方文档裁定后刷新，不要把它们当红灯停更。
+- 2026-10-25 独立核查旧冒烟断言时发现 **10 个基线缺口**：视觉 3 个、思考 7 个。
+  当时用 `GAP` 保留失败方向，不以修改预期来消红；`ALLOW_PREEXISTING_MAP_GAPS=1`
+  只允许验收其他批次，不把缺口计为通过。
+- **2026-10-27：7 个思考映射缺口已全部修复**，默认冒烟 69/69、0 GAP。
+- **2026-11-05：3 个视觉映射缺口已全部修复**：
+  [qwen3.7-max 基名当前等同 2026-05-20 纯文本快照](https://help.aliyun.com/zh/model-studio/qwen3-7-max)、
+  [qwen3.8-2.4t-a95b 仅文本](https://help.aliyun.com/zh/model-studio/qwen3-8-2-4t-a95b)、
+  [gpt-4-0613 不支持图片](https://developers.openai.com/api/docs/models/gpt-4)。
+  同时修复 qwen3.7-max 的日期归一：各快照独立判断，未收录新快照沿用未知默认，避免把后期视觉快照
+  误继承为早期纯文本。默认视觉冒烟 81/81 + 3 RESOLVED，热更新 35/35；
+  Books_Converter 同步 298 行并新增 `gui/src/lib/__tests__/vision-map.test.ts`。无需允许缺口开关。
 - Grok 4.7 的 `none` 档：docs.x.ai 当日不可达，按 4.6 同机制同文档小节收录，
   待 docs.x.ai 可达后复核（最坏情况 off 档 400，聊天/轻量任务均有 400 重放兜底）。
+
+
+- **2026-11-07：腾讯 Hy4 正式版已入表并实测**（site/maps + app 打包镜像；updatedAt=`2026-11-07T22:21:56+08:00`）。
+  官方[混元调用指南](https://cloud.tencent.com/document/product/1823/132252)确认 TokenHub OpenAI Chat、low/high 恒思考与视觉理解；默认 `tencent` 预置为 `https://tokenhub.tencentmaas.com/v1`，OpenAI Chat。正式版 `hy4:true`，`hy4-preview` 原有纯文本映射不变。
+  授权 Key 实测：目录 HTTP 200、125 个型号，文本 `42`、流式只读工具、历史回放与数字图片 `7391` 均成功。
+  真实目录 Hy4 的 `contextWindow=1024000`、`maxOutputTokens=64000`，静态预算采用该保守实测值，不按二进制展开。
+  本次明确不进入 Books Converter 下一轮、不部署远程表；`SAGEREAD_ONLY=1 node scripts/maps-sync-check.mjs` 仅核对 SageRead 两处镜像，不能把另一项目的移植标为完成。下一轮 BC 开发仍需同步该行。

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useProviderStore } from "@/store/provider-store";
+import { orderModelProviders } from "@/utils/provider-order";
 import { isLocalEndpoint } from "@/utils/provider-url";
 import { Plus, Settings } from "lucide-react";
 import { toast } from "sonner";
@@ -71,7 +72,7 @@ export default function ProvidersSettings({ onProviderSelect }: ProvidersSetting
         </div>
 
         <div className="space-y-2">
-          {modelProviders.map((provider, index) => {
+          {orderModelProviders(modelProviders).map((provider, index) => {
             const providerName = provider.name;
             // 语义：已启用的模型数（不是列表总数）
             const modelCount = provider.models.filter((model) => !!model.active).length;

@@ -122,12 +122,19 @@ export function chatReasoningProviderOptions(
 ): Record<string, Record<string, any>> | undefined {
   const id = modelId.toLowerCase();
   const cap = lookupCap(id);
-  if (!cap) return undefined;
+  if (!cap || (cap.transport === "effort" && cap.levels.length === 0)) return undefined;
   // 存量档位钳制（审计 P2-5）：persist 值不在型号原生档位内时钳到最近合法档，防直接下发 400
   const lv = clampReasoningLevel(cap.levels, level);
-  // 恒思考型号不接受控制词：off/none 落到最低原生档（与 auxThinkingLevel 同口径）。
-  // 2026-10-20：Gemini 4 Argon / MiniMax M3.1 Flash 等 alwaysOn 行若把 off/none 原样下发必 400。
-  const effectiveLevel = cap.alwaysOn && (lv === "off" || lv === "none") && cap.levels.length > 0 ? cap.levels[0] : lv;
+  const disabling = lv === "off" || lv === "none";
+  const effectiveLevel =
+    cap.transport === "effort" && disabling && providerId !== "openrouter"
+      ? cap.alwaysOn
+        ? cap.levels[0]
+        : cap.offParam
+      : cap.alwaysOn && disabling && cap.levels.length > 0
+        ? cap.levels[0]
+        : lv;
+  if (!effectiveLevel || effectiveLevel.includes(":")) return undefined;
 
   switch (providerId) {
     case "openai": {
@@ -162,7 +169,9 @@ export function chatReasoningProviderOptions(
       // 按 transport 分派（审计 P2-4：此前一律 effort 直传，switch 的 "on" 与 budget 的
       // 数字串会被当成 effort 非法值下发）
       if (cap.transport === "effort") {
-        return { openrouter: { reasoning: { effort: effectiveLevel === "off" ? "low" : effectiveLevel } } };
+        const effort =
+          effectiveLevel === "off" ? "low" : effectiveLevel === "on" && cap.alwaysOn ? "high" : effectiveLevel;
+        return { openrouter: { reasoning: { effort } } };
       }
       if (cap.transport === "switch") {
         return { openrouter: { reasoning: { enabled: effectiveLevel !== "off" && effectiveLevel !== "none" } } };
@@ -202,9 +211,14 @@ export function chatReasoningBodyPatch(
 
   // auto / on 特殊值处理
   if (level === "auto") return null; // 不下发任何参数
+  // OpenRouter 由 providerOptions 独占 reasoning，不能与通用中继补丁叠加。
+  if (providerId === "openrouter") return null;
 
   // 存量档位钳制（审计 P2-5）：deepseek 等无 medium 档型号上 persist 的 "medium" 必 400；
   // 控制词（off/none/on）与数字串（budget 滑块）由 clamp 内部放行
+  if (providerId === "deepseek" && level === "medium" && cap?.transport === "effort" && cap.levels.includes("high")) {
+    level = "high";
+  }
   level = cap ? (clampReasoningLevel(cap.levels, level) as ReasoningLevel) : level;
   // 恒思考型号不接受控制词：off/none 落到最低原生档（Gemini 4 Argon / MiniMax M3.1 Flash 等）
   if (cap?.alwaysOn && (level === "off" || level === "none") && cap.levels.length > 0) {
@@ -267,13 +281,18 @@ export function chatReasoningBodyPatch(
       body.thinking_budget = legacy;
     };
   }
-  // Kimi（moonshot）
-  if (host.includes("moonshot") || host.includes("kimi.com") || host.includes("kimi.ai")) {
+  // Kimi 官方端点或中继；按已核实的 K3 型号放行，不把 K2.x 参数发给中继。
+  if (
+    host.includes("moonshot") ||
+    host.includes("kimi.com") ||
+    host.includes("kimi.ai") ||
+    (id.replace(/^[^/]*\//, "").startsWith("kimi-k3") && cap?.alwaysOn === true)
+  ) {
     if (!cap) return null;
     if (cap.alwaysOn) {
       if (cap.levels.length === 0) return null;
       return (body) => {
-        body.reasoning_effort = level;
+        body.reasoning_effort = level === "on" ? "high" : level;
       };
     }
     if (level === "off" || level === "none") {
@@ -330,6 +349,13 @@ export function chatReasoningBodyPatch(
   // 默认开启（V2.6 全系/V2.5 同口径）。旧 host 检查 mimo.mi.com 不匹配官方端点 api.xiaomimimo.com，
   // 补上前表里的 mimo 行是死条目（与混元/豆包同款缺口，2026-09-22 随 V2.6 入表修复）。
   // 数字档保留 enable_thinking+thinking_budget，兼容存量 budget 行（v2.5 系）。
+  // Step 的普通 API 与 MiniMax 一样按 effort 控制；off/none 在恒思考型号上已夹到最低档。
+  if (host.includes("stepfun")) {
+    if (!cap?.alwaysOn) return null;
+    return (body) => {
+      body.reasoning_effort = level;
+    };
+  }
   // MiniMax（api.minimax.io / api.minimaxi.com / api.minimax.chat）——2026-10-20 补分派：
   // 补此分支前表里的 minimax 行是死条目（与 stepfun/mistral 同款缺口）。
   // M3.1-Flash 恒思考：thinking:{type:"disabled"} 或 reasoning_effort:"none" 直接 400，
@@ -378,13 +404,39 @@ export function chatReasoningBodyPatch(
   return null;
 }
 
+/** OpenAI Responses 的思考参数：Kimi K3/Step/MiniMax M3.1 使用 reasoning.effort，而不是 Chat 的 reasoning_effort。 */
+export function responsesReasoningBodyPatch(
+  _providerId: string,
+  _baseUrl: string | undefined,
+  modelId: string,
+  level: ReasoningLevel,
+): ReasoningBodyPatch | null {
+  if (level === "auto") return null;
+  const cap = lookupCap(modelId);
+  const normalizedModel = modelId.toLowerCase().replace(/^[^/]*\//, "");
+  const usesEffort =
+    (normalizedModel.startsWith("kimi-k3") ||
+      normalizedModel.startsWith("step-") ||
+      normalizedModel.startsWith("minimax-m3.1")) &&
+    cap?.alwaysOn === true;
+  if (!usesEffort) return null;
+  const lv = cap ? clampReasoningLevel(cap.levels, level) : level;
+  const effective = cap?.alwaysOn && (lv === "off" || lv === "none") && cap.levels.length > 0 ? cap.levels[0] : lv;
+  return (body) => {
+    Reflect.deleteProperty(body, "reasoning_effort");
+    Reflect.deleteProperty(body, "thinking");
+    Reflect.deleteProperty(body, "output_config");
+    body.reasoning = { effort: effective === "on" ? "high" : effective };
+  };
+}
+
 /**
  * Anthropic Messages 原生通道的思考参数补丁（2026-10-22 纠偏）。
  *
  * 背景：DeepSeek/Kimi/智谱/MiniMax 的 Anthropic 兼容端点没有 AI SDK 的 providerOptions 通道
  * （factory 走 fetch 包装），所以直接在 JSON 请求体上写 thinking 字段。
- * 实网验证：DeepSeek 支持 disabled / enabled+budget_tokens / adaptive；Kimi 支持 disabled；
- * 恒思考型号发 disabled 会 400，因此夹到最低档后用 enabled 下发（失败时 wrapper 去补丁重放）。
+ * 实网验证：DeepSeek 支持 disabled / enabled+budget_tokens / adaptive；Kimi K2.x 支持 disabled。
+ * Kimi K3/Step/MiniMax M3.1 恒思考，按官方 Messages 契约用 output_config.effort；off/none 夹到最低档。
  */
 export function anthropicThinkingBodyPatch(
   providerId: string,
@@ -398,33 +450,39 @@ export function anthropicThinkingBodyPatch(
   // DeepSeek 的 Anthropic 兼容端点：thinking.budget_tokens 会被忽略，只有 output_config.effort 生效
   // （官方兼容表 2026-10-22 核实）。恒思考型号的 off/none 也夹到最低档后走 effort。
   const isDeepSeek = providerId === "deepseek" || /\.deepseek\.com/i.test(baseUrl ?? "");
+  const normalizedModel = modelId.toLowerCase().replace(/^[^/]*\//, "");
+  const usesOutputConfig =
+    (normalizedModel.startsWith("kimi-k3") ||
+      normalizedModel.startsWith("step-") ||
+      normalizedModel.startsWith("minimax-m3.1")) &&
+    cap?.alwaysOn === true;
 
   // 可关闭的型号：off/none 直接关思考（已实网验证 DeepSeek/Kimi）
   if ((lv === "off" || lv === "none") && !cap?.alwaysOn) {
     return (body) => {
-      delete body.reasoning_effort;
-      delete body.enable_thinking;
-      delete body.output_config;
+      Reflect.deleteProperty(body, "reasoning_effort");
+      Reflect.deleteProperty(body, "enable_thinking");
+      Reflect.deleteProperty(body, "output_config");
       body.thinking = { type: "disabled" };
     };
   }
 
   // 恒思考型号的 off/none 夹到最低原生档；其余档位按映射表折算
   const effective = cap?.alwaysOn && (lv === "off" || lv === "none") && cap.levels.length > 0 ? cap.levels[0] : lv;
-  if (isDeepSeek) {
+  if (isDeepSeek || usesOutputConfig) {
     const effort = effective === "on" ? "high" : effective;
     return (body) => {
-      delete body.reasoning_effort;
-      delete body.enable_thinking;
-      delete body.thinking;
+      Reflect.deleteProperty(body, "reasoning_effort");
+      Reflect.deleteProperty(body, "enable_thinking");
+      Reflect.deleteProperty(body, "thinking");
       body.output_config = { effort };
     };
   }
   const budget = budgetTokensForLevel(effective);
   return (body) => {
-    delete body.reasoning_effort;
-    delete body.enable_thinking;
-    delete body.output_config;
+    Reflect.deleteProperty(body, "reasoning_effort");
+    Reflect.deleteProperty(body, "enable_thinking");
+    Reflect.deleteProperty(body, "output_config");
     body.thinking = budget ? { type: "enabled", budget_tokens: budget } : { type: "enabled" };
     // Anthropic 要求 max_tokens > budget_tokens；否则严格兼容端点会 400（wrapper 会去补丁重放=控制失效）
     if (budget && typeof body.max_tokens === "number" && body.max_tokens <= budget + 1024) {

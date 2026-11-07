@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
+import { orderModelProviders } from "@/utils/provider-order";
 import { Check, ChevronDown, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -38,7 +39,7 @@ export default function ModelSelector({
       modelName: string;
     }> = [];
 
-    modelProviders.forEach((provider) => {
+    orderModelProviders(modelProviders).forEach((provider) => {
       if (!provider.active) return;
 
       provider.models.forEach((model) => {

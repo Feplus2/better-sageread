@@ -44,7 +44,10 @@ for (const [k, c] of Object.entries(reasoning.models)) {
 if (!problems) ok("两张 JSON 形状合法");
 
 // ② Books_Converter 移植键值一致（仓库不在邻侧则跳过，不算漂移）
-if (!existsSync(BC_VISION_TS)) {
+// SAGEREAD_ONLY=1 仅用于明确不修改另一个项目的发布边界；默认仍检查全部副本。
+if (process.env.SAGEREAD_ONLY === "1") {
+  console.log("SKIP   SAGEREAD_ONLY=1：本次不修改 Books_Converter，仅核对 SageRead 两处镜像");
+} else if (!existsSync(BC_VISION_TS)) {
   console.log(`SKIP   未找到 ${BC_VISION_TS}（Books_Converter 不在本机邻侧路径）`);
 } else {
   const src = readFileSync(BC_VISION_TS, "utf8");
