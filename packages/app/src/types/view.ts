@@ -24,7 +24,7 @@ export interface FoliateView extends HTMLElement {
     locale?: string;
     isCJK?: boolean;
   };
-  history: {
+  history: EventTarget & {
     canGoBack: boolean;
     canGoForward: boolean;
     back: () => void;

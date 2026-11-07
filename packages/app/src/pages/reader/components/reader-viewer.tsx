@@ -1,4 +1,5 @@
 import { ImageInteractions, quoteImageToChat } from "@/components/media/image-interactions";
+import { JumpBackButton } from "@/components/reader/jump-back-button";
 import { useReadingSession } from "@/hooks/use-reading-session";
 import { useSafeAreaInsets } from "@/hooks/use-safe-areaInsets";
 import { useAppSettingsStore } from "@/store/app-settings-store";
@@ -10,8 +11,9 @@ import { getViewInsets } from "@/utils/insets";
 import { isMobile } from "@/utils/mobile";
 import { getReaderBackgroundLayers, resolveBookViewMode } from "@/utils/style";
 import { useCallback, useEffect, useMemo } from "react";
-import useBookShortcuts from "../hooks/use-book-shortcuts";
 import { useAnnotationMirror } from "../hooks/use-annotation-mirror";
+import { useBookJumpBack } from "../hooks/use-book-jump-back";
+import useBookShortcuts from "../hooks/use-book-shortcuts";
 import { useFoliateViewer } from "../hooks/use-foliate-viewer";
 import { useTranslationLink } from "../hooks/use-translation-link";
 import Annotator from "./annotator";
@@ -61,6 +63,7 @@ const ReaderViewerContent: React.FC = () => {
   }
 
   const foliateViewer = useFoliateViewer(bookId, bookData.bookDoc, config, contentInsets);
+  const { show, jumpBack } = useBookJumpBack(foliateViewer.getView());
 
   // 二期批次 4b+：对照翻译交互层——hover 句词联动 + 右键句选。常驻启用（2026-08-30 用户裁定）：
   // 有对齐数据时双侧联动；未翻译书/未对齐段落单侧句级高亮与右键句选——句子级交互是
@@ -86,7 +89,7 @@ const ReaderViewerContent: React.FC = () => {
   return (
     <div
       ref={foliateViewer.containerRef}
-      className="flex-1"
+      className="relative flex-1"
       data-book-id={bookId}
       {...foliateViewer.mouseHandlers}
       style={
@@ -102,6 +105,7 @@ const ReaderViewerContent: React.FC = () => {
     >
       {/* 书籍内容在 foliate iframe 里：经 postMessage 通道接收图片事件（见 iframeEventHandlers） */}
       <ImageInteractions viaPostMessage onQuote={handleQuoteImage} />
+      {show && <JumpBackButton onClick={jumpBack} />}
     </div>
   );
 };

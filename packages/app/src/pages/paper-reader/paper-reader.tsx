@@ -1,5 +1,6 @@
 import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { ImagePreviewOverlay } from "@/components/media/image-interactions";
+import { JumpBackButton } from "@/components/reader/jump-back-button";
 import { useAppSettingsStore } from "@/store/app-settings-store";
 import { getPaperHighlightRegistry } from "@/styles/paper-highlight-css";
 import type { BookNote, HighlightColor, HighlightStyle } from "@/types/book";
@@ -10,7 +11,7 @@ import "katex/dist/katex.min.css";
 import { rangeToStructuredText } from "@/services/book-content/extract-structured-text";
 import { setLiveReadingPosition } from "@/services/reading-position/live-position";
 import type { PaperRawPosition } from "@/types/reading-position";
-import { ChevronDown, ChevronUp, ImageOff, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ImageOff } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -316,6 +317,7 @@ function scrollElementInContainer(root: HTMLElement, el: Element, offset = 16) {
 
 /** 每个滚动容器至多一个在飞校正循环（WeakMap 随容器回收自动清理） */
 const activeDriftCorrections = new WeakMap<HTMLElement, () => void>();
+const activeFragmentCorrections = new WeakMap<HTMLElement, () => void>();
 
 function scrollWithDriftCorrection(root: HTMLElement, measure: () => number, connected: () => boolean) {
   activeDriftCorrections.get(root)?.();
@@ -1342,12 +1344,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
   }, [paperDir]);
 
   // ─── 转跳历史（「返回上处」浮动按钮）───
-  // 栈记录转跳前 scrollTop（上限 20）；转跳/返回后等滚动稳定定格基线；
+  // 栈记录转跳前 scrollTop 与视口正文块（上限 20）；转跳/返回后等滚动稳定定格基线；
   // 之后用户手势滚动（wheel/触摸/滚动条拖拽）超 DWELL_THRESHOLD 视为驻留新位置，清栈隐按钮。
   const JUMP_STACK_MAX = 20;
   /** 驻留判定阈值：约 5-8 行正文高度（~930px 视口的 ~15%），小到一次顺手微调不会误触 */
   const DWELL_THRESHOLD = 140;
-  const jumpStackRef = useRef<number[]>([]);
+  const jumpStackRef = useRef<{ top: number; anchor: HTMLElement | null; offset: number }[]>([]);
   const [showJumpBack, setShowJumpBack] = useState(false);
   /** 驻留判定基线 scrollTop（滚动稳定后定格；null = 尚未定格，不做驻留判定） */
   const baselineRef = useRef<number | null>(null);
@@ -1388,7 +1390,20 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     const root = scrollRef.current;
     if (!root) return;
     const stack = jumpStackRef.current;
-    stack.push(root.scrollTop);
+    const rootRect = root.getBoundingClientRect();
+    const content = contentRef.current;
+    const anchor = content
+      ? (Array.from(content.children).find((child): child is HTMLElement => {
+          if (!(child instanceof HTMLElement)) return false;
+          const rect = child.getBoundingClientRect();
+          return rect.bottom > rootRect.top && rect.top < rootRect.bottom;
+        }) ?? null)
+      : null;
+    stack.push({
+      top: root.scrollTop,
+      anchor,
+      offset: anchor ? anchor.getBoundingClientRect().top - rootRect.top : 0,
+    });
     if (stack.length > JUMP_STACK_MAX) stack.shift();
     userGestureRef.current = false;
     baselineRef.current = null;
@@ -1407,7 +1422,7 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
     if (event.clientX >= root.getBoundingClientRect().right - 18) userGestureRef.current = true;
   }, []);
 
-  // 返回上一处：pop 栈顶平滑滚回；栈空隐藏，未空保留按钮并重定格基线
+  // 返回上一处：先取消未完成的转跳纠偏，再 pop 栈顶平滑滚回；栈空隐藏，未空保留按钮并重定格基线
   const handleJumpBack = useCallback(() => {
     const root = scrollRef.current;
     const prev = jumpStackRef.current.pop();
@@ -1415,9 +1430,12 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
       setShowJumpBack(false);
       return;
     }
+    activeFragmentCorrections.get(root)?.();
+    activeDriftCorrections.get(root)?.();
     userGestureRef.current = false;
     baselineRef.current = null;
-    root.scrollTo({ top: prev, behavior: "smooth" });
+    if (prev.anchor?.isConnected) scrollElementInContainer(root, prev.anchor, prev.offset);
+    else root.scrollTo({ top: prev.top, behavior: "smooth" });
     armJumpBaseline();
     if (jumpStackRef.current.length === 0) setShowJumpBack(false);
   }, [armJumpBaseline]);
@@ -1559,20 +1577,28 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
 
   // 文内链接定位滚动（带漂移校正）：懒加载图片在平滑滚动途中/之后加载完成会引起布局位移、
   // 目标随之漂出视口（真实转换器产出实测远端链接首击偏差可达 ~1-3k px）。滚动后做三轮延迟复检，
-  // 目标偏离阈值即校正；用户手动滚动/点击视为接管，立即放弃校正。
+  // 目标偏离阈值即校正；用户手动滚动/点击或返回视为接管，立即放弃校正。
   const scrollToElWithCorrection = useCallback((el: Element, offset: number) => {
     const root = scrollRef.current;
     if (!root) return;
+    activeFragmentCorrections.get(root)?.();
     scrollElementInContainer(root, el, offset);
     let cancelled = false;
     const cancel = () => {
+      if (cancelled) return;
       cancelled = true;
+      activeDriftCorrections.get(root)?.();
+      root.removeEventListener("wheel", cancel);
+      root.removeEventListener("pointerdown", cancel);
+      if (activeFragmentCorrections.get(root) === cancel) activeFragmentCorrections.delete(root);
     };
+    activeFragmentCorrections.set(root, cancel);
     root.addEventListener("wheel", cancel, { passive: true });
     root.addEventListener("pointerdown", cancel);
     window.setTimeout(() => {
       root.removeEventListener("wheel", cancel);
       root.removeEventListener("pointerdown", cancel);
+      if (activeFragmentCorrections.get(root) === cancel) activeFragmentCorrections.delete(root);
     }, 3400);
     for (const delay of [600, 1500, 3000]) {
       window.setTimeout(() => {
@@ -2268,17 +2294,9 @@ const PaperReader = forwardRef<PaperReaderHandle, PaperReaderProps>(function Pap
             {renderedBody}
           </ReactMarkdown>
         </div>
-        {/* 「返回上处」浮动按钮：sticky 钉在滚动视口底部居中（h-0 占位不吃文档高度），视觉对齐聊天输入框 */}
         {showJumpBack && (
-          <div className="pointer-events-none sticky bottom-4 z-20 flex h-0 justify-end pr-4">
-            <button
-              type="button"
-              onClick={handleJumpBack}
-              className="-translate-y-full pointer-events-auto flex items-center gap-2 rounded-2xl border bg-background px-4 py-2 text-neutral-700 text-sm shadow-around transition-colors hover:bg-accent hover:text-neutral-900 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-100"
-            >
-              <Undo2 className="size-4" />
-              返回上处
-            </button>
+          <div className="pointer-events-none sticky bottom-0 z-20 h-0">
+            <JumpBackButton onClick={handleJumpBack} />
           </div>
         )}
         {hoverRects && (

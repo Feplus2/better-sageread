@@ -1,164 +1,155 @@
-// 「返回上处」按钮验证：转跳出现 / 驻留消失 / 点击返回 / 链式返回 / TOC 转跳纳入 / 条目点击不误触
-const list = await (await fetch("http://127.0.0.1:9223/json/list")).json();
-const page = list.find((t) => t.type === "page" && t.url.includes("localhost:1420"));
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let mid = 0;
-const pending = new Map();
-const call = (method, params) => {
-  let resolve;
-  const promise = new Promise((res) => { resolve = res; });
-  pending.set(++mid, { promise, resolve });
-  ws.send(JSON.stringify({ id: mid, method, params }));
-  return promise;
-};
-ws.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.id && pending.has(msg.id)) { pending.get(msg.id).resolve(msg.result); pending.delete(msg.id); }
-};
-await new Promise((r) => (ws.onopen = r));
-const evalJS = async (expr) => {
-  const r = await call("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-  return r.result.value;
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { connectPreview } from "../.superpowers/sdd/2026-11-07-user-feedback/cdp-client.mjs";
 
-await call("Page.reload", { ignoreCache: true });
-await sleep(4500);
-await evalJS(`import("/src/store/layout-store.ts").then((m) => { window.__layout = m; }); "loading"`);
-for (let i = 0; i < 20; i++) {
-  await sleep(500);
-  if (await evalJS(`!!window.__layout`).catch(() => false)) break;
-}
-await evalJS(`window.__layout.useLayoutStore.getState().openPaper("57ae0a5f29feecb6", "Forecast constraints"); true`);
-const VIS = `(el) => { let n = el; while (n) { if (n.style && n.style.visibility) return n.style.visibility === 'visible'; n = n.parentElement; } return true; }`;
-const SCROLLER = `Array.from(document.querySelectorAll('.paper-content')).find(${VIS})?.closest('.overflow-y-auto')`;
-let ready = false;
-for (let i = 0; i < 240; i++) {
-  await sleep(500);
-  ready = await evalJS(`(() => { const s = ${SCROLLER}; return !!(s && s.querySelector('a[href^="#ref-"]')); })()`).catch(() => false);
-  if (ready) break;
-}
-if (!ready) {
-  console.log("超时诊断:", await evalJS(`JSON.stringify({ contents: document.querySelectorAll('.paper-content').length, refs: document.querySelectorAll('.paper-content a[href^="#ref-"]').length })`));
-  throw new Error("正文渲染超时");
-}
-
-const btnVisible = `(() => { const s = ${SCROLLER}; const b = Array.from(s.querySelectorAll('button')).find((x) => (x.textContent ?? '').includes('返回上处')); return b ? b.checkVisibility() : false; })()`;
-const scrollTop = `(() => { const s = ${SCROLLER}; return Math.round(s.scrollTop); })()`;
-const clickBack = `(() => { const s = ${SCROLLER}; const b = Array.from(s.querySelectorAll('button')).find((x) => (x.textContent ?? '').includes('返回上处')); if (!b) return false; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); b.click(); return true; })()`;
-// 用户滚动模拟：CDP 原生 wheel（trusted input）
-const userScrollBy = async (px) => {
-  // CDP 原生滚轮（trusted input，真实触发滚动与 React onWheel），分段逼近真实用户滚动
-  const point = await evalJS(`(() => {
-    const s = ${SCROLLER};
-    const r = s.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-  })()`);
-  for (let done = 0; done < px; done += 120) {
-    await call("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY: 120 });
-    await sleep(300);
-  }
-  return evalJS(`(() => { const s = ${SCROLLER}; return Math.round(s.scrollTop); })()`);
-};
-const clickLink = (href) => `(() => {
-  const c = Array.from(document.querySelectorAll('.paper-content')).find(${VIS});
-  const a = Array.from(c.querySelectorAll('a[href="${href}"]')).find(${VIS});
-  if (!a) return null;
-  a.click();
-  return a.textContent;
-})()`;
-
-// 0) 基线：无按钮
-console.log("0) 初始按钮(应 false):", await evalJS(btnVisible));
-
-// 0b) 参考文献条目纯点击（弹卡片，无滚动转跳）不应出按钮
-await evalJS(`(() => {
-  const c = Array.from(document.querySelectorAll('.paper-content')).find(${VIS});
-  const anchor = Array.from(c.querySelectorAll('a[id^="ref-"]')).find(${VIS});
-  const block = anchor.closest('p, li');
-  block.scrollIntoView({ block: 'center' });
-  const r = block.getBoundingClientRect();
-  document.elementFromPoint(r.left + 60, r.top + r.height / 2).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  true;
+const outDir = ".superpowers/sdd/2026-11-08-reader-followup";
+mkdirSync(outDir, { recursive: true });
+const { ws, call, evaluate } = await connectPreview();
+await evaluate(`(() => {
+  const host = document.querySelector("main");
+  let fiber = host?.[Object.keys(host ?? {}).find((key) => key.startsWith("__reactFiber$"))];
+  while (fiber && fiber.type?.name !== "ReaderLayout") fiber = fiber.return;
+  if (!fiber) throw new Error("找不到实际阅读布局");
+  window.__readerLayoutForTest = () => {
+    let hook = fiber.memoizedState;
+    while (hook) {
+      if (hook.memoizedState?.openPaper && hook.memoizedState?.removeTab) return hook.memoizedState;
+      hook = hook.next;
+    }
+    return null;
+  };
 })()`);
-await sleep(1200);
-console.log("0b) 条目点击后按钮(应 false):", await evalJS(btnVisible));
-await evalJS(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
-await sleep(400);
-
-// 1) 点击文内引用链接 → 按钮出现
-await evalJS(`(() => { const s = ${SCROLLER}; s.scrollTo({ top: 0, behavior: 'instant' }); true })()`);
-await sleep(300);
-const origin1 = await evalJS(scrollTop);
-console.log("1) 点击 [[6]](#ref-6):", await evalJS(clickLink("#ref-6")));
-await sleep(1500);
-const after1 = await evalJS(scrollTop);
-console.log("1) 滚动", origin1, "→", after1, " 按钮(应 true):", await evalJS(btnVisible));
-
-// 2) 用户滚动 ~200px → 按钮消失（驻留）
-console.log("2) 用户滚动:", await userScrollBy(200));
-await sleep(700);
-console.log("2) 按钮(应 false):", await evalJS(btnVisible));
-
-// 3) 图链接转跳 → 按钮出现 → 点击返回 → 回到点击前位置
-await evalJS(`(() => { const s = ${SCROLLER}; s.scrollTo({ top: 0, behavior: 'instant' }); true })()`);
-await sleep(300);
-const origin3 = await evalJS(scrollTop);
-const figHref = await evalJS(`(() => { const c = Array.from(document.querySelectorAll('.paper-content')).find(${VIS}); const a = c.querySelector('a[href^="#fig-"]'); return a ? a.getAttribute('href') : null; })()`);
-console.log("3) 图链接:", figHref, "点击:", await evalJS(clickLink(figHref ?? "#fig-none")));
-await sleep(1500);
-const after3 = await evalJS(scrollTop);
-console.log("3) 滚动", origin3, "→", after3, " 按钮(应 true):", await evalJS(btnVisible));
-console.log("3) 点击返回:", await evalJS(clickBack));
-await sleep(1500);
-const back3 = await evalJS(scrollTop);
-console.log("3) 返回后 scrollTop:", back3, "（应≈", origin3, "） 按钮(应 false):", await evalJS(btnVisible));
-
-// 4) 链式：A→B→C，两次返回依次回 B、A
-await evalJS(`(() => { const s = ${SCROLLER}; s.scrollTo({ top: 0, behavior: 'instant' }); true })()`);
-await sleep(300);
-const posA = await evalJS(scrollTop);
-await evalJS(clickLink("#ref-6"));
-await sleep(1500);
-const posB = await evalJS(scrollTop);
-await evalJS(clickLink(figHref ?? "#fig-none"));
-await sleep(1500);
-const posC = await evalJS(scrollTop);
-console.log("4) 链式位置:", posA, "→", posB, "→", posC, " 按钮:", await evalJS(btnVisible));
-await evalJS(clickBack);
-await sleep(1500);
-const backB = await evalJS(scrollTop);
-console.log("4) 第一次返回:", backB, "（应≈", posB, "） 按钮(应 true):", await evalJS(btnVisible));
-await evalJS(clickBack);
-await sleep(1500);
-const backA = await evalJS(scrollTop);
-console.log("4) 第二次返回:", backA, "（应≈", posA, "） 按钮(应 false):", await evalJS(btnVisible));
-
-// 5) TOC 下拉转跳纳入：打开目录点一个条目 → 按钮出现
-await evalJS(`(() => { const s = ${SCROLLER}; s.scrollTo({ top: 0, behavior: 'instant' }); true })()`);
-await sleep(300);
-const tocOpened = await evalJS(`(() => {
-  const btns = Array.from(document.querySelectorAll('button')).filter((b) => b.querySelector('svg.lucide-table-of-contents'));
-  const btn = btns.find((b) => (${VIS})(b));
-  if (!btn) return false;
-  for (const type of ['pointerdown', 'pointerup', 'click']) {
-    btn.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse' }));
+const pause = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
+const waitFor = async (expression, label) => {
+  for (let index = 0; index < 100; index += 1) {
+    if (await evaluate(`(async () => Boolean(await (${expression})))()`)) return;
+    await pause(100);
   }
+  const detail = await evaluate(`Array.from(document.querySelectorAll(".paper-content")).map((content) => {
+    const scroller = content.closest(".overflow-y-auto");
+    return {
+      visible: scroller?.checkVisibility(),
+      top: scroller?.scrollTop,
+      button: Boolean(scroller?.querySelector('button[aria-label="返回转跳前位置"]')),
+      anchor: (() => {
+        const element = content.querySelector("#ref-6");
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        const host = element.closest("p, li")?.getBoundingClientRect();
+        return { top: rect.top, hostTop: host?.top, viewportTop: scroller.getBoundingClientRect().top, viewportBottom: scroller.getBoundingClientRect().bottom };
+      })(),
+      active: document.activeElement?.getAttribute("aria-label") || document.activeElement?.tagName,
+    };
+  })`);
+  throw new Error(`等待超时：${label} ${JSON.stringify(detail)}`);
+};
+const scroller = `document.querySelector('.tab-layer[data-active="true"] .paper-content')?.closest(".overflow-y-auto")`;
+const button = `${scroller}?.querySelector('button[aria-label="返回转跳前位置"]')`;
+const clickLink = (href) =>
+  evaluate(`(() => {
+  const link = ${scroller}?.querySelector('a[href="${href}"]');
+  if (!link) return false;
+  link.click();
   return true;
 })()`);
-await sleep(800);
-const tocPicked = await evalJS(`(() => {
-  const items = Array.from(document.querySelectorAll('[role="menuitem"], [data-radix-popper-content-wrapper] button, [data-slot="dropdown-menu-content"] button'))
-    .filter((b) => b.checkVisibility() && (b.textContent ?? '').trim().length > 3);
-  if (items.length === 0) return null;
-  const item = items[Math.min(4, items.length - 1)];
-  const text = (item.textContent ?? '').trim().slice(0, 40);
-  item.click();
-  return text;
-})()`);
-await sleep(1500);
-console.log("5) TOC 打开:", tocOpened, " 点选:", tocPicked, " 按钮(应 true):", await evalJS(btnVisible));
+const scrollTop = () => evaluate(`Math.round(${scroller}?.scrollTop ?? -1)`);
+let originalTab;
+try {
+  originalTab = await evaluate("window.__readerLayoutForTest().activeTabId");
+  if (originalTab === "paper-57ae0a5f29feecb6") originalTab = "reader-c6207a35b9b8e0b5396d0b2ffc4f42b9";
+  await evaluate(`window.__readerLayoutForTest().removeTab("paper-57ae0a5f29feecb6")`);
+  await evaluate(`window.__readerLayoutForTest().openPaper("57ae0a5f29feecb6", "Forecast constraints")`);
+  await waitFor(`${scroller}?.querySelector('a[href^="#ref-"]')`, "论文正文与引用链接");
+  await evaluate(`${scroller}.scrollTo({ top: 0, behavior: "instant" })`);
+  await pause(500);
+  const origin = await scrollTop();
+  console.log("引用转跳前的真实 scrollTop:", origin);
+  assert.equal(await evaluate(`Boolean(${button})`), false, "初始论文不应有返回按钮");
+  assert.equal(await clickLink("#ref-6"), true);
+  await waitFor(button, "文内引用转跳后的返回按钮");
+  const layout = await evaluate(`(() => {
+    const button = ${button};
+    const rect = button.getBoundingClientRect();
+    return { width: rect.width, height: rect.height, visible: button.checkVisibility() };
+  })()`);
+  assert.equal(layout.visible, true);
+  assert.equal(layout.width, 36);
+  assert.equal(layout.height, 36);
+  await evaluate(`(() => {
+    const button = ${button};
+    button.blur();
+    button.focus();
+  })()`);
+  assert.equal(await evaluate(`document.activeElement === ${button}`), true, "论文按钮应可由键盘聚焦");
+  const shot = await call("Page.captureScreenshot", { format: "png" });
+  writeFileSync(`${outDir}/paper-jump-back-tooltip.png`, Buffer.from(shot.data, "base64"));
+  await call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Enter",
+    code: "Enter",
+    text: "\r",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  });
+  await call("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  });
+  await waitFor(`!${button} && Math.abs(${scroller}.scrollTop - ${origin}) < 3`, "论文返回转跳前位置并隐藏");
+  console.log("PASS 论文引用转跳、36px 圆形按钮、键盘聚焦与返回", JSON.stringify({ ...layout, origin }));
 
-console.log("done");
-ws.close();
+  await clickLink("#ref-6");
+  await waitFor(button, "第二次论文转跳");
+  await pause(3400);
+  const wheelPoint = await evaluate(`(() => {
+    const rect = ${scroller}.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  await call("Input.dispatchMouseEvent", { type: "mouseWheel", ...wheelPoint, deltaX: 0, deltaY: 240 });
+  await waitFor(`!${button}`, "论文用户滚动后的驻留隐藏");
+  console.log("PASS 论文原有驻留隐藏逻辑未退化");
+
+  await evaluate(`${scroller}.scrollTo({ top: 0, behavior: "instant" })`);
+  await pause(500);
+  const figureOrigin = await scrollTop();
+  const figure = await evaluate(`${scroller}?.querySelector('a[href^="#fig-"]')?.getAttribute("href")`);
+  assert.ok(figure, "测试论文应有图表链接");
+  await clickLink(figure);
+  await waitFor(button, "图表转跳");
+  await pause(1500);
+  const figurePosition = await scrollTop();
+  assert.ok(Math.abs(figurePosition - figureOrigin) > 20, "应先成功转跳到图表位置");
+  await evaluate(`${button}.click()`);
+  await waitFor(`!${button} && Math.abs(${scroller}.scrollTop - ${figureOrigin}) < 3`, "图表返回转跳前位置");
+  console.log("PASS 论文图表转跳与返回", JSON.stringify({ figureOrigin, figurePosition }));
+
+  await evaluate(`${scroller}.scrollTo({ top: 0, behavior: "instant" })`);
+  await clickLink("#ref-6");
+  await waitFor(button, "连续转跳的引用位置");
+  await pause(3400);
+  await clickLink(figure);
+  await waitFor(button, "连续转跳的图表位置");
+  await pause(3400);
+  await evaluate(`${button}.click()`);
+  const referenceVisible = `(() => {
+    const root = ${scroller};
+    const anchor = root.querySelector("#ref-6");
+    const viewport = root.getBoundingClientRect();
+    const rect = anchor.getBoundingClientRect();
+    return rect.top >= viewport.top && rect.top <= viewport.bottom;
+  })()`;
+  await waitFor(`Boolean(${button}) && (${referenceVisible})`, "第一次返回后引用锚点重新进入视口");
+  await evaluate(`${button}.click()`);
+  await waitFor(`!${button} && Math.abs(${scroller}.scrollTop - ${figureOrigin}) < 3`, "第二次返回最初位置");
+  console.log("PASS 论文连续两次转跳后逐级返回");
+} finally {
+  await evaluate(`window.__readerLayoutForTest().removeTab("paper-57ae0a5f29feecb6")`).catch(() => {});
+  if (originalTab) {
+    await evaluate(`window.__readerLayoutForTest().activateTab(${JSON.stringify(originalTab)})`).catch(() => {});
+  }
+  await evaluate("delete window.__readerLayoutForTest").catch(() => {});
+  ws.close();
+}
