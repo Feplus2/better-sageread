@@ -63,6 +63,8 @@ function ReasoningTrigger({ children, className, ...props }: ReasoningTriggerPro
 
   return (
     <button
+      type="button"
+      aria-expanded={isOpen}
       className={cn("flex cursor-pointer items-center gap-2", className)}
       onClick={() => onOpenChange(!isOpen)}
       {...props}
@@ -91,7 +93,7 @@ function ReasoningContent({
 }: ReasoningContentProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
-  const { isOpen } = useReasoningContext();
+  const { isOpen, onOpenChange } = useReasoningContext();
 
   useEffect(() => {
     if (!contentRef.current || !innerRef.current) return;
@@ -112,6 +114,15 @@ function ReasoningContent({
   }, [isOpen]);
 
   const content = markdown ? <Markdown>{children as string}</Markdown> : children;
+  const collapseText = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isOpen || window.getSelection()?.toString()) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest("a,button,input,textarea,select,summary,[role='button'],[contenteditable='true']")
+    )
+      return;
+    onOpenChange(false);
+  };
 
   return (
     <div
@@ -122,9 +133,23 @@ function ReasoningContent({
       }}
       {...props}
     >
+      <button
+        type="button"
+        tabIndex={isOpen ? 0 : -1}
+        aria-expanded={isOpen}
+        aria-label="收起思考内容"
+        onClick={() => onOpenChange(false)}
+        className="sr-only focus:not-sr-only focus:mb-1 focus:inline-flex focus:rounded-md focus:px-2 focus:py-1 focus:text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        收起思考内容
+      </button>
       <div
         ref={innerRef}
-        className={cn("prose prose-sm prose-neutral dark:prose-invert text-muted-foreground", contentClassName)}
+        onClick={collapseText}
+        className={cn(
+          "prose prose-sm prose-neutral dark:prose-invert cursor-pointer text-muted-foreground",
+          contentClassName,
+        )}
       >
         {content}
       </div>

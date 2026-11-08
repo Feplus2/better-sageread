@@ -20,6 +20,10 @@ import {
   UserSearch,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AssistantPanelTransition } from "../file-workspace/assistant-panel-transition";
+import { FileWorkspace } from "../file-workspace/file-workspace";
+import { useFileWorkspaceChat } from "../file-workspace/use-file-workspace-chat";
+import { WorkspaceOpenButton } from "../file-workspace/workspace-open-button";
 import { ChatContainerRoot } from "../prompt-kit/chat-container";
 import { ScrollButton } from "../prompt-kit/scroll-button";
 import { MindmapDialog } from "../tools/mindmap-dialog";
@@ -46,6 +50,8 @@ function ChatContent({ bookId }: ChatContentProps) {
   const progress = useReaderStore((state) => state.progress);
   const currentThread = useReaderStore((state) => state.currentThread);
   const setCurrentThread = useReaderStore((state) => state.setCurrentThread)!;
+  const hostId = `reader:${bookId ?? "unknown"}`;
+  const { isFileMode, openChangedFile, openLocalFile } = useFileWorkspaceChat(hostId, "reader", currentThread?.id);
 
   // 书籍数据（含 bookDoc.toc）：判定 TOC 是否可用，供阅读位置注册表标记 tocAvailable
   const bookData = useReaderStore((state) => state.bookData);
@@ -130,6 +136,7 @@ function ChatContent({ bookId }: ChatContentProps) {
       activeSectionLabel: progress?.sectionLabel,
       bookTocMd,
       agentScope: "reader",
+      workspaceHostId: hostId,
       retrievalScope,
     },
     setActiveBookId: () => {},
@@ -164,7 +171,7 @@ function ChatContent({ bookId }: ChatContentProps) {
   ] as const;
 
   const EmptyState = () => (
-    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2 pb-8">
+    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2">
       <div className="flex flex-1 flex-col justify-center gap-3">
         <div className="flex flex-col items-start gap-4 pl-2">
           <div className="rounded-full bg-muted/70 p-3 shadow-md dark:bg-neutral-800/90">
@@ -210,6 +217,7 @@ function ChatContent({ bookId }: ChatContentProps) {
               className="z-40 w-[10rem] min-w-0 flex-shrink"
             />
             <RetrievalScopeSelect role="reader" docId={bookId} />
+            <WorkspaceOpenButton hostId={hostId} scope="reader" />
           </div>
           <div className="flex flex-shrink-0 items-center gap-0">
             {messages.length > 0 && !showThreads && (
@@ -258,51 +266,67 @@ function ChatContent({ bookId }: ChatContentProps) {
           </div>
         </div>
       </div>
-      {showThreads && bookId ? (
-        <div className="min-h-0 flex-1">
-          <ChatThreads
-            key={`threads-${threadsKey}`}
-            bookId={bookId}
-            currentThreadId={currentThread?.id ?? null}
-            onBack={handleBackFromThreads}
-            onSelectThread={handleSelectThread}
-          />
-        </div>
-      ) : messages.length === 0 && isInit.current ? (
-        <EmptyState />
-      ) : (
-        <ChatContainerRoot
-          className="relative flex-1"
-          autoScroll={autoScroll}
-          contextRef={stickContextRef}
-          navMessages={messages}
+      <AssistantPanelTransition present={isFileMode} className="top-8">
+        <FileWorkspace hostId={hostId} scope="reader" />
+      </AssistantPanelTransition>
+      <div className="relative min-h-0 flex-1">
+        <AssistantPanelTransition
+          present={showThreads && !!bookId && !isFileMode}
+          side="left"
+          onBackdropClick={handleBackFromThreads}
         >
-          <ChatMessages
-            messages={messages}
-            status={status}
-            error={displayError}
-            autoScroll={autoScroll}
-            scrollKey={currentThread?.id ?? "__init__"}
-            bookId={currentThread?.book_id ?? bookId ?? null}
-            onReasoningTimesUpdate={handleReasoningTimesUpdate}
-            onRetry={handleRetry}
-            canRetry={canRetry}
-            onAskSelection={handleAskSelection}
-            onViewToolDetail={handleViewToolDetail}
-            selectionMode={selectionMode}
-            selectedIds={selectedIds}
-            onToggleSelect={handleToggleSelect}
-            stickContextRef={stickContextRef}
-          />
-          <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
-            <div className="pointer-events-auto">
-              <ScrollButton />
-            </div>
+          <div className="h-full min-h-0 bg-popover" data-region="assistant-history-panel">
+            <ChatThreads
+              key={`threads-${threadsKey}`}
+              bookId={bookId}
+              currentThreadId={currentThread?.id ?? null}
+              onBack={handleBackFromThreads}
+              onSelectThread={handleSelectThread}
+            />
           </div>
-        </ChatContainerRoot>
-      )}
+        </AssistantPanelTransition>
+        <div className="h-full" inert={isFileMode || showThreads} aria-hidden={isFileMode || showThreads}>
+          {messages.length === 0 && isInit.current ? (
+            <div className="h-full">
+              <EmptyState />
+            </div>
+          ) : (
+            <ChatContainerRoot
+              className="relative h-full"
+              autoScroll={autoScroll}
+              contextRef={stickContextRef}
+              navMessages={messages}
+            >
+              <ChatMessages
+                messages={messages}
+                onOpenLocalFile={openLocalFile}
+                onOpenFile={(file) => void openChangedFile(file)}
+                status={status}
+                error={displayError}
+                autoScroll={autoScroll}
+                scrollKey={currentThread?.id ?? "__init__"}
+                bookId={currentThread?.book_id ?? bookId ?? null}
+                onReasoningTimesUpdate={handleReasoningTimesUpdate}
+                onRetry={handleRetry}
+                canRetry={canRetry}
+                onAskSelection={handleAskSelection}
+                onViewToolDetail={handleViewToolDetail}
+                selectionMode={selectionMode}
+                selectedIds={selectedIds}
+                onToggleSelect={handleToggleSelect}
+                stickContextRef={stickContextRef}
+              />
+              <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
+                <div className="pointer-events-auto">
+                  <ScrollButton />
+                </div>
+              </div>
+            </ChatContainerRoot>
+          )}
+        </div>
+      </div>
 
-      {selectionMode && !showThreads && (
+      {selectionMode && !showThreads && !isFileMode && (
         <SelectionExportBar
           selectedCount={selectedIds.size}
           onExportMarkdown={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
@@ -312,10 +336,17 @@ function ChatContent({ bookId }: ChatContentProps) {
         />
       )}
 
-      {!showThreads && bookId && (
-        <>
-          <AgentConfirmCard />
+      {bookId && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-[60] px-2">
+          <div className="pointer-events-auto">
+            <AgentConfirmCard />
+          </div>
+        </div>
+      )}
+      {bookId && (
+        <div className={showThreads || isFileMode ? "hidden" : undefined}>
           <ChatInputArea
+            workspace={{ hostId, scope: "reader", threadId: currentThread?.id }}
             input={input}
             setInput={setInput}
             references={references}
@@ -333,7 +364,7 @@ function ChatContent({ bookId }: ChatContentProps) {
             activeBookId={bookId}
             setActiveBookId={() => {}}
           />
-        </>
+        </div>
       )}
 
       <MindmapDialog open={showMindmapDialog} onOpenChange={setShowMindmapDialog} toolPart={toolDetail} />

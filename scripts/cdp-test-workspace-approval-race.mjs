@@ -104,7 +104,10 @@ try {
         queue: confirmations.useAgentConfirmStore.getState().queue,
         sessionAllowlist: confirmations.useAgentConfirmStore.getState().sessionAllowlist,
         previewGrants: confirmations.useAgentConfirmStore.getState().previewGrants,
-        historyOpen: Array.from(document.querySelectorAll("h2")).some((item) => item.textContent === "历史对话" && item.offsetParent !== null),
+        historyOpen: (() => {
+  const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
+  return !!panel && !panel.closest("[inert]") && panel.getBoundingClientRect().width > 0;
+})(),
       };
       window.__approvalRaceStage = "设置严格模式";
       agent.setWorkspaceRoot(${JSON.stringify(root)});
@@ -116,8 +119,11 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 300));
       document.querySelector('[aria-label="收起文件工作区，返回对话"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 200));
-      const historyOpen = Array.from(document.querySelectorAll("h2")).some((item) => item.textContent === "历史对话" && item.offsetParent !== null);
-      if (!historyOpen) document.querySelector("button:has(svg.lucide-history)")?.click();
+      const historyOpen = (() => {
+  const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
+  return !!panel && !panel.closest("[inert]") && panel.getBoundingClientRect().width > 0;
+})();
+      if (!historyOpen) document.querySelector('[data-panel-viewport] button:has(svg.lucide-history)')?.click();
       window.__approvalRaceStage = "等待历史面板";
       await new Promise((resolve) => setTimeout(resolve, 250));
       window.__approvalRaceAbort = new AbortController();
@@ -144,20 +150,27 @@ try {
   if (setup.stage !== "准备完成") throw new Error(`场景准备未完成: ${JSON.stringify(setup)}`);
   for (let i = 0; i < 60; i++) {
     const visible = await evalJs(
-      `Array.from(document.querySelectorAll("h2")).some((item) => item.textContent === "历史对话" && item.offsetParent !== null)`,
+      `(() => {
+  const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
+  return !!panel && !panel.closest("[inert]") && panel.getBoundingClientRect().width > 0;
+})()`,
     );
     if (visible) break;
     const present = await evalJs(`(() => {
-      const panel = document.querySelector('[data-region="assistant-history-panel"]');
+      const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
       return !!panel && !panel.closest("[inert]");
     })()`);
-    if (!present) await evalJs(`document.querySelector("button:has(svg.lucide-history)")?.click(); true`);
+    if (!present)
+      await evalJs(`document.querySelector('[data-panel-viewport] button:has(svg.lucide-history)')?.click(); true`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   check(
     "历史面板确实处于打开状态",
     await evalJs(
-      `Array.from(document.querySelectorAll("h2")).some((item) => item.textContent === "历史对话" && item.offsetParent !== null)`,
+      `(() => {
+  const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
+  return !!panel && !panel.closest("[inert]") && panel.getBoundingClientRect().width > 0;
+})()`,
     ),
   );
   let confirmation = false;
@@ -208,8 +221,11 @@ try {
     agentModule.useAgentSettingsStore.getState().setSafetyMode(previous.safetyMode);
     files.useFileWorkspaceStore.setState({ hosts: previous.hosts, recentRoots: previous.recentRoots });
     confirmations.useAgentConfirmStore.setState({ queue: previous.queue, sessionAllowlist: previous.sessionAllowlist, previewGrants: previous.previewGrants });
-    if (!previous.historyOpen && Array.from(document.querySelectorAll("h2")).some((item) => item.textContent === "历史对话" && item.offsetParent !== null)) {
-      document.querySelector("button:has(svg.lucide-history)")?.click();
+    if (!previous.historyOpen && (() => {
+  const panel = document.querySelector('[data-panel-viewport] [data-region="assistant-history-panel"]');
+  return !!panel && !panel.closest("[inert]") && panel.getBoundingClientRect().width > 0;
+})()) {
+      document.querySelector('[data-panel-viewport] button:has(svg.lucide-history)')?.click();
     }
     delete window.__approvalRacePrevious;
     delete window.__approvalRaceAbort;

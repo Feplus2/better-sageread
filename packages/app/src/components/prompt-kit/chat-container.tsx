@@ -52,7 +52,7 @@ function ChatContainerRoot({
   const bridgeRef = useRef<ChatNavBridge>({});
   return (
     <StickToBottom
-      className={cn("flex overflow-y-auto overflow-x-hidden", className)}
+      className={cn("flex", className)}
       resize={resize}
       initial={initial}
       // 临界阻尼弹簧（每帧 v' = 0.8v + 0.01·差距；时间常数 ≈10 帧/170ms）：出字很快的模型每批渲染会一次塞进几行，
@@ -74,9 +74,13 @@ function ChatContainerRoot({
   );
 }
 
-function ChatContainerContent({ children, className, ...props }: ChatContainerContentProps) {
+function ChatContainerContent({ children, className, style, ...props }: ChatContainerContentProps) {
   return (
-    <StickToBottom.Content className={cn("flex w-full flex-col", className)} {...props}>
+    <StickToBottom.Content
+      className={cn("flex w-full flex-col", className)}
+      style={{ height: "auto", minHeight: "100%", overflow: "visible", ...style }}
+      {...props}
+    >
       {children}
     </StickToBottom.Content>
   );

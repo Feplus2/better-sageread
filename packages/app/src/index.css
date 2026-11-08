@@ -151,11 +151,9 @@
  * 位移与主题色光影只在 full 档启用（fade-only 性能档免阴影重绘，reduced 逃生舱免位移）。
  * 颜色跟随全局主题主色（--primary），与 paper-sentence-hover-rect 同一 color-mix 口径。 */
 .chat-thread-card {
-  transition:
-    border-color var(--motion-dur-fast) var(--motion-ease),
-    background-color var(--motion-dur-fast) var(--motion-ease),
-    box-shadow var(--motion-dur-base) var(--motion-ease),
-    transform var(--motion-dur-base) var(--motion-ease);
+  transition: border-color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+    var(--motion-ease), box-shadow var(--motion-dur-base) var(--motion-ease), transform var(--motion-dur-base)
+    var(--motion-ease);
 }
 
 .chat-thread-card:hover {
@@ -175,9 +173,8 @@
 
 [data-motion="full"] .chat-thread-card:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent),
-    0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+  box-shadow: 0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent), 0 0 0 3px
+    color-mix(in oklab, var(--primary) 8%, transparent);
 }
 
 /* ---------- 书籍卡片 / 论文条目 / 通用 .hover-glow：hover 主题色柔光 ----------
@@ -188,11 +185,9 @@
 .book-card,
 .paper-entry-card,
 .hover-glow {
-  transition:
-    border-color var(--motion-dur-fast) var(--motion-ease),
-    background-color var(--motion-dur-fast) var(--motion-ease),
-    box-shadow var(--motion-dur-base) var(--motion-ease),
-    transform var(--motion-dur-base) var(--motion-ease);
+  transition: border-color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+    var(--motion-ease), box-shadow var(--motion-dur-base) var(--motion-ease), transform var(--motion-dur-base)
+    var(--motion-ease);
 }
 
 .book-card:hover,
@@ -212,9 +207,8 @@
 [data-motion="full"] .paper-entry-card:hover,
 [data-motion="full"] .hover-glow:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent),
-    0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+  box-shadow: 0 4px 16px -6px color-mix(in oklab, var(--primary) 32%, transparent), 0 0 0 3px
+    color-mix(in oklab, var(--primary) 8%, transparent);
 }
 
 /* ---------- 批次 3：保活层交叉淡入（reader tab 层 / 主页路由层 /chat 常驻层共用） ----------
@@ -663,9 +657,11 @@ foliate-view {
     inset: 0 0 auto;
     height: 360px;
     pointer-events: none;
-    background:
-      radial-gradient(52% 100% at 14% 0%, color-mix(in oklab, var(--primary) 7%, transparent), transparent 72%),
-      radial-gradient(44% 90% at 88% 0%, color-mix(in oklab, var(--primary) 4%, transparent), transparent 74%);
+    background: radial-gradient(
+        52% 100% at 14% 0%,
+        color-mix(in oklab, var(--primary) 7%, transparent),
+        transparent 72%
+      ), radial-gradient(44% 90% at 88% 0%, color-mix(in oklab, var(--primary) 4%, transparent), transparent 74%);
   }
 
   /* 卡片：hover = 主色描边 + 底纹 + 荧光环；位移只在 full 档 */
@@ -676,11 +672,9 @@ foliate-view {
     background-color: var(--stats-surface);
     /* 静息阴影：极淡黑投影给卡片一点离面感；内置主题在自身 CSS 里用 --shadow-warm-* 覆写 */
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    transition:
-      border-color var(--motion-dur-fast) var(--motion-ease),
-      background-color var(--motion-dur-fast) var(--motion-ease),
-      box-shadow var(--motion-dur-base) var(--motion-ease),
-      transform var(--motion-dur-base) var(--motion-ease);
+    transition: border-color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+      var(--motion-ease), box-shadow var(--motion-dur-base) var(--motion-ease), transform var(--motion-dur-base)
+      var(--motion-ease);
   }
 
   .stats-card:hover {
@@ -690,10 +684,8 @@ foliate-view {
 
   [data-motion="full"] .stats-card:hover {
     transform: translateY(-2px);
-    box-shadow:
-      0 12px 30px -14px var(--stats-glow),
-      0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent),
-      0 0 26px -8px color-mix(in oklab, var(--primary) 26%, transparent);
+    box-shadow: 0 12px 30px -14px var(--stats-glow), 0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent), 0 0
+      26px -8px color-mix(in oklab, var(--primary) 26%, transparent);
   }
 
   .stats-card:focus-within {
@@ -712,11 +704,9 @@ foliate-view {
     border-radius: 0.5rem;
     color: var(--muted-foreground);
     background-color: color-mix(in oklab, var(--muted-foreground) 9%, transparent);
-    transition:
-      color var(--motion-dur-fast) var(--motion-ease),
-      background-color var(--motion-dur-fast) var(--motion-ease),
-      box-shadow var(--motion-dur-base) var(--motion-ease),
-      transform var(--motion-dur-base) var(--motion-ease);
+    transition: color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+      var(--motion-ease), box-shadow var(--motion-dur-base) var(--motion-ease), transform var(--motion-dur-base)
+      var(--motion-ease);
   }
 
   .stats-card:hover .stats-icon-tile {
@@ -728,9 +718,8 @@ foliate-view {
   .stats-card .stats-icon-tile:hover {
     color: color-mix(in oklab, var(--primary) 88%, var(--foreground));
     background-color: color-mix(in oklab, var(--primary) 17%, transparent);
-    box-shadow:
-      0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent),
-      0 0 16px -2px color-mix(in oklab, var(--primary) 36%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent), 0 0 16px -2px
+      color-mix(in oklab, var(--primary) 36%, transparent);
   }
 
   [data-motion="full"] .stats-icon-tile:hover {
@@ -746,11 +735,9 @@ foliate-view {
     justify-content: center;
     border-radius: 0.4375rem;
     color: var(--muted-foreground);
-    transition:
-      color var(--motion-dur-fast) var(--motion-ease),
-      background-color var(--motion-dur-fast) var(--motion-ease),
-      box-shadow var(--motion-dur-base) var(--motion-ease),
-      opacity var(--motion-dur-fast) var(--motion-ease);
+    transition: color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+      var(--motion-ease), box-shadow var(--motion-dur-base) var(--motion-ease), opacity var(--motion-dur-fast)
+      var(--motion-ease);
   }
 
   .stats-icon-button:hover:not(:disabled) {
@@ -786,10 +773,8 @@ foliate-view {
     line-height: 1.25rem;
     color: var(--muted-foreground);
     white-space: nowrap;
-    transition:
-      color var(--motion-dur-fast) var(--motion-ease),
-      background-color var(--motion-dur-fast) var(--motion-ease),
-      box-shadow var(--motion-dur-fast) var(--motion-ease);
+    transition: color var(--motion-dur-fast) var(--motion-ease), background-color var(--motion-dur-fast)
+      var(--motion-ease), box-shadow var(--motion-dur-fast) var(--motion-ease);
   }
 
   .stats-segmented-item:hover {
@@ -801,9 +786,8 @@ foliate-view {
     color: var(--primary-foreground);
     background-color: var(--primary);
     font-weight: 500;
-    box-shadow:
-      0 1px 6px -2px color-mix(in oklab, var(--primary) 55%, transparent),
-      inset 0 1px 0 color-mix(in oklab, #ffffff 14%, transparent);
+    box-shadow: 0 1px 6px -2px color-mix(in oklab, var(--primary) 55%, transparent), inset 0 1px 0
+      color-mix(in oklab, #ffffff 14%, transparent);
   }
 
   .stats-segmented-item[data-active="true"]:hover {
@@ -819,9 +803,8 @@ foliate-view {
 
   .stats-table th,
   .stats-table td {
-    transition:
-      background-color var(--motion-dur-fast) var(--motion-ease),
-      color var(--motion-dur-fast) var(--motion-ease);
+    transition: background-color var(--motion-dur-fast) var(--motion-ease), color var(--motion-dur-fast)
+      var(--motion-ease);
   }
 
   .stats-table thead th {
@@ -882,32 +865,6 @@ foliate-view {
   color: var(--muted-foreground) !important;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* 论文阅读器的 ::highlight() 规则（搜索 / 标注 / 译文侧镜像）已迁出到 styles/paper-highlight-css.ts，
  * 按已注册的高亮名动态挂载——页面里每多一条 ::highlight 规则，每次样式重算每个元素都多解析一次（见该文件说明）。 */
 
@@ -929,26 +886,6 @@ foliate-view {
   outline-offset: 2px;
   animation: paper-image-jump-flash 1.2s ease-in-out 1;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /* ---------- 论文句子悬浮高亮（覆盖层 div） ----------
  * CSS Highlight API 不支持 box-shadow，故 paper-reader.tsx 按句子 Range 的 getClientRects
@@ -1073,9 +1010,7 @@ foliate-view {
   text-decoration: underline;
   text-decoration-color: var(--chat-link-underline, transparent);
   text-underline-offset: 2px;
-  transition:
-    color var(--md-t) var(--md-ease),
-    text-decoration-color var(--md-t) var(--md-ease);
+  transition: color var(--md-t) var(--md-ease), text-decoration-color var(--md-t) var(--md-ease);
 }
 .chat-md a:hover {
   color: var(--chat-link-hover, var(--chat-link, inherit));
@@ -1086,9 +1021,7 @@ foliate-view {
 .chat-md .chat-inline-code {
   background: var(--chat-code-bg, rgba(127, 127, 127, 0.12));
   color: var(--chat-code-text, inherit);
-  transition:
-    background-color var(--md-t) var(--md-ease),
-    color var(--md-t) var(--md-ease);
+  transition: background-color var(--md-t) var(--md-ease), color var(--md-t) var(--md-ease);
 }
 .chat-md .chat-inline-code:hover {
   background: var(--chat-code-bg-hover, var(--chat-code-bg, rgba(127, 127, 127, 0.18)));
@@ -1099,10 +1032,8 @@ foliate-view {
 .chat-md .chat-code-block {
   border: 1px solid transparent;
   border-radius: 8px;
-  transition:
-    border-color var(--md-t) var(--md-ease),
-    box-shadow var(--md-t) var(--md-ease),
-    transform var(--md-t) var(--md-ease);
+  transition: border-color var(--md-t) var(--md-ease), box-shadow var(--md-t) var(--md-ease), transform var(--md-t)
+    var(--md-ease);
 }
 .chat-md .chat-code-block:hover {
   border-color: var(--chat-codeblock-border, color-mix(in oklab, var(--md-accent) 38%, transparent));
@@ -1133,11 +1064,8 @@ foliate-view {
   border-radius: 0 8px 8px 0;
   background: color-mix(in oklab, var(--md-accent) 4%, transparent);
   box-shadow: inset 0 0 0 0 var(--chat-quote-border, color-mix(in oklab, var(--md-accent) 55%, transparent));
-  transition:
-    border-color var(--md-t) var(--md-ease),
-    background-color var(--md-t) var(--md-ease),
-    box-shadow var(--md-t) var(--md-ease),
-    transform var(--md-t) var(--md-ease);
+  transition: border-color var(--md-t) var(--md-ease), background-color var(--md-t) var(--md-ease), box-shadow var(--md-t)
+    var(--md-ease), transform var(--md-t) var(--md-ease);
 }
 .chat-md blockquote:hover {
   background: var(--chat-quote-bg-hover, color-mix(in oklab, var(--md-accent) 10%, transparent));
@@ -1153,11 +1081,14 @@ foliate-view {
   position: relative;
   height: 1px;
   border: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--muted-foreground) 50%, transparent), transparent);
-  transition:
-    background var(--md-t) var(--md-ease),
-    box-shadow var(--md-t) var(--md-ease),
-    transform var(--md-t) var(--md-ease);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--muted-foreground) 50%, transparent),
+    transparent
+  );
+  transition: background var(--md-t) var(--md-ease), box-shadow var(--md-t) var(--md-ease), transform var(--md-t)
+    var(--md-ease);
 }
 .chat-md hr::before {
   content: "";
@@ -1248,9 +1179,7 @@ foliate-view {
   display: inline-block;
   margin-right: 0.4em;
   color: color-mix(in oklab, var(--md-accent) 70%, transparent);
-  transition:
-    color var(--md-t) var(--md-ease),
-    transform var(--md-t) var(--md-ease);
+  transition: color var(--md-t) var(--md-ease), transform var(--md-t) var(--md-ease);
 }
 .chat-md h4:hover::before {
   color: var(--md-accent);
@@ -1293,9 +1222,7 @@ foliate-view {
 /* 表格：悬停单元格底色标亮 + 文字变色；所在行淡淡提示。表头同款。全部缓变 */
 .chat-md th,
 .chat-md td {
-  transition:
-    background-color var(--md-t) var(--md-ease),
-    color var(--md-t) var(--md-ease);
+  transition: background-color var(--md-t) var(--md-ease), color var(--md-t) var(--md-ease);
 }
 .chat-md tbody tr:hover > td {
   background-color: color-mix(in oklab, var(--md-accent) 5%, transparent);
@@ -1378,4 +1305,70 @@ foliate-view {
   50% {
     opacity: 0;
   }
+}
+
+.workspace-csv-scroll {
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--background);
+}
+.workspace-csv-table {
+  width: 100%;
+  min-width: 540px;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--foreground);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.workspace-csv-table caption {
+  padding: 0.55rem 0.65rem;
+  color: var(--muted-foreground);
+  text-align: left;
+}
+.workspace-csv-table th,
+.workspace-csv-table td {
+  max-width: 20rem;
+  padding: 0.45rem 0.65rem;
+  border-block-end: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.workspace-csv-table thead th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: var(--muted);
+  font-weight: 600;
+}
+.workspace-csv-table tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--background);
+  font-weight: 500;
+}
+.workspace-csv-table thead th:first-child {
+  inset-inline-start: 0;
+  z-index: 3;
+}
+.workspace-csv-table td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-code-preview > pre {
+  min-height: 100%;
+  margin: 0;
+  line-height: 1.45;
+  tab-size: 2;
+}
+
+
+[data-radix-popper-content-wrapper]:has([data-slot="tooltip-content"][data-state="closed"]) {
+  pointer-events: none;
 }

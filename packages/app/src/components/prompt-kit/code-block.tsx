@@ -118,19 +118,26 @@ function CodeBlockCode({ code, language = "tsx", theme = "github-dark", classNam
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
 
   useEffect(() => {
-    async function highlight() {
-      if (!code) {
-        setHighlightedHtml("<pre><code></code></pre>");
-        return;
-      }
-
-      const html = await codeToHtml(code, { lang: language, theme });
-      setHighlightedHtml(html);
+    let active = true;
+    setHighlightedHtml(null);
+    if (code) {
+      void codeToHtml(code, { lang: language, theme })
+        .then((html) => {
+          if (active) setHighlightedHtml(html);
+        })
+        .catch(() => {
+          if (active) setHighlightedHtml(null);
+        });
     }
-    highlight();
+    return () => {
+      active = false;
+    };
   }, [code, language, theme]);
 
-  const classNames = cn("w-full overflow-x-auto bg-[#0d1117] text-[13px] [&>pre]:px-4 [&>pre]:py-4", className);
+  const classNames = cn(
+    "w-full overflow-x-auto bg-[#0d1117] text-[13px] [&>pre]:px-4 [&>pre]:py-4 [&>pre]:leading-[1.45]",
+    className,
+  );
 
   // SSR fallback: render plain code if not hydrated yet
   return highlightedHtml ? (

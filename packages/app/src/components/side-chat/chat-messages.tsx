@@ -1,11 +1,19 @@
+import { ChangedFilesDisclosure } from "@/components/file-workspace/changed-files-disclosure";
 import { CitationMapContext, getStableCitationMap } from "@/components/markdown/citation-source";
 import { ImagePreviewOverlay } from "@/components/media/image-interactions";
 import { ChatContainerContent, ChatContainerScrollAnchor } from "@/components/prompt-kit/chat-container";
 import { ChatNavBridgeContext } from "@/components/prompt-kit/chat-nav-bridge";
+import { LocalFileLinkContext } from "@/components/prompt-kit/local-file-anchor";
 import { Message, MessageAction, MessageActions, MessageContent } from "@/components/prompt-kit/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import { Tool } from "@/components/prompt-kit/tool";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useEffectiveMotionMode } from "@/hooks/use-motion-mode";
 import { type ReasoningTimes, useReasoningTimer } from "@/hooks/use-reasoning-timer";
 import { useStreamReveal } from "@/hooks/use-stream-reveal";
@@ -15,10 +23,8 @@ import { exportMessageToMarkdown } from "@/lib/export-thread-markdown";
 import { cn } from "@/lib/utils";
 import { attachmentToAssetUrl } from "@/services/attachment-service";
 import { createNote } from "@/services/note-service";
-import { audioPlayerManager, synthesizeSpeechChunked } from "@/services/tts-service";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { useThreadStore } from "@/store/thread-store";
-import { useTTSStore } from "@/store/tts-store";
 import { getReasoningTimes } from "@/types/message";
 import type { UIMessage, UIMessagePart } from "ai";
 import dayjs from "dayjs";
@@ -32,10 +38,8 @@ import {
   Loader2,
   Maximize2,
   NotebookPen,
-  Pause,
   Quote,
   RefreshCw,
-  Volume2,
 } from "lucide-react";
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -224,6 +228,8 @@ interface ChatMessagesProps {
   canRetry?: boolean;
   onAskSelection?: (text: string) => void;
   onViewToolDetail?: (toolPart: any) => void;
+  onOpenLocalFile?: (path: string) => void;
+  onOpenFile?: (file: { path: string; title?: string }) => void;
   /** 多选导出模式：显示勾选框、隐藏单条操作、整行点击切换选中 */
   selectionMode?: boolean;
   selectedIds?: Set<string>;
@@ -236,26 +242,6 @@ interface ChatMessagesProps {
    * 不用 useStickToBottomContext 订阅——lib 内部状态冲刷会重建 context 值对象（布尔语义不变），
    * 每次切 tab 引发的容器重排都把整条消息列表（数百未 memo 叶组件）拖入重渲（2026-08-26 切 tab 墙溯源） */
   stickContextRef?: React.RefObject<StickToBottomContext | null>;
-}
-
-export function reorderTextAndReasoning(message: UIMessage): UIMessage {
-  const srcParts = Array.isArray(message?.parts) ? message.parts : [];
-  const cloned = srcParts.map((p) => ({ ...p }));
-  const reordered: UIMessagePart<any, any>[] = [];
-
-  for (let i = 0; i < cloned.length; i++) {
-    const a = cloned[i];
-    const b = cloned[i + 1];
-
-    if (a?.type === "text" && b?.type === "reasoning") {
-      reordered.push(b, a);
-      i++;
-    } else {
-      reordered.push(a);
-    }
-  }
-
-  return { ...message, parts: reordered };
 }
 
 // ---- 渲染单元 memo 化（卡顿修复 2026-08-07）----
@@ -362,19 +348,29 @@ const MemoizedTool = memo(
  */
 const ToolCallGroup = memo(function ToolCallGroup({
   parts,
+  startIndex,
   active,
+  textStreaming,
+  lastTextPartIndex,
+  revealAllowed,
+  onTextMouseUp,
   onViewDetail,
   isChatPage,
 }: {
   parts: any[];
-  /** 所属消息仍在生成（最后一条消息且会话 submitted/streaming）：生成中展开跟随进度，结束后自动收起 */
+  startIndex: number;
+  /** 所属消息仍在生成；执行中与结束后都默认折叠，只有用户显式展开才显示卡片 */
   active: boolean;
+  textStreaming: boolean;
+  lastTextPartIndex: number;
+  revealAllowed: boolean;
+  onTextMouseUp?: () => void;
   onViewDetail?: (toolPart: any) => void;
   isChatPage: boolean;
 }) {
   const toolParts = parts.filter((p) => String(p.type).startsWith("tool-"));
   const running = toolParts.some((p) => p.state === "input-streaming" || p.state === "input-available");
-  const [open, setOpen] = useState(active && running);
+  const [open, setOpen] = useState(false);
   const userToggled = useRef(false);
   useEffect(() => {
     if (!active && !userToggled.current) setOpen(false);
@@ -395,6 +391,7 @@ const ToolCallGroup = memo(function ToolCallGroup({
     <div className="w-full">
       <button
         type="button"
+        aria-expanded={open}
         onClick={() => {
           userToggled.current = true;
           setOpen(!open);
@@ -408,7 +405,7 @@ const ToolCallGroup = memo(function ToolCallGroup({
         )}
         <span className="shrink-0">
           {running
-            ? `正在调用工具（${names.join("、")}…）`
+            ? `正在调用 ${toolParts.length} 个工具（${names.join("、")}…）`
             : `已调用 ${toolParts.length} 个工具（${names.join("、")}）`}
         </span>
         {digest && <span className="min-w-0 flex-1 truncate text-neutral-400">{digest}</span>}
@@ -416,11 +413,24 @@ const ToolCallGroup = memo(function ToolCallGroup({
       </button>
       {open && (
         <div className="mt-1 flex flex-col gap-1">
-          {parts.map((part, idx) => {
-            // 组内混合内容：工具 part 渲染原卡；reasoning 渲染 Thought 块；step-start 协议件不渲染
+          {parts.map((part, offset) => {
+            const partIndex = startIndex + offset;
+            if (part.type === "text") {
+              return (
+                <StreamRevealBox
+                  key={`group-text-${partIndex}`}
+                  text={part.text ?? ""}
+                  streaming={textStreaming && partIndex === lastTextPartIndex}
+                  enabled={revealAllowed}
+                  className="prose prose-neutral min-w-0 flex-1 rounded bg-transparent p-0 text-foreground"
+                  markdown
+                  onMouseUp={onTextMouseUp}
+                />
+              );
+            }
             if (part.type === "reasoning") {
               return (
-                <Reasoning key={part.toolCallId ?? `tr-${idx}`}>
+                <Reasoning key={part.toolCallId ?? `tr-${partIndex}`}>
                   <ReasoningTrigger className="flex items-center gap-1 text-muted-foreground">
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Brain className="h-4 w-4" />
@@ -432,10 +442,11 @@ const ToolCallGroup = memo(function ToolCallGroup({
               );
             }
             if (part.type === "step-start") return null;
+            if (!String(part.type).startsWith("tool-")) return null;
             const toolType = String(part.type).replace(/^tool-/, "");
             return (
               <MemoizedTool
-                key={part.toolCallId ?? `tg-${idx}`}
+                key={part.toolCallId ?? `tg-${partIndex}`}
                 part={part}
                 toolName={TOOL_NAME_MAP[toolType] || toolType}
                 onViewDetail={onViewDetail}
@@ -460,6 +471,8 @@ function ChatMessagesComponent({
   canRetry = true,
   onAskSelection,
   onViewToolDetail,
+  onOpenLocalFile,
+  onOpenFile,
   selectionMode = false,
   selectedIds,
   onToggleSelect,
@@ -472,7 +485,7 @@ function ChatMessagesComponent({
   const noteBookId = bookId ?? globalThreadBookId ?? null;
   // H3：宽版聊天布局（放宽消息列 max-w 约束）
   const wideChatLayout = useChatSettingsStore((s) => s.wideChatLayout);
-  const lastMessage = reorderTextAndReasoning(messages[messages.length - 1]);
+  const lastMessage = messages[messages.length - 1] as UIMessage;
   const reasoningPart = lastMessage?.parts?.findLast((part: UIMessagePart<any, any>) => part.type === "reasoning");
   const isStreaming = status === "streaming";
   // 流式揭示动效仅在"完整动效"档生效（性能档 / 系统减少动态效果时回退到达即渲染）
@@ -481,11 +494,6 @@ function ChatMessagesComponent({
   const existingReasoningTimes = getReasoningTimes(lastMessage);
 
   const [copiedMessageIds, setCopiedMessageIds] = useState<Set<string>>(new Set());
-  const [audioStates, setAudioStates] = useState<Map<string, "idle" | "loading" | "playing" | "paused">>(new Map());
-  const [audioUrls, setAudioUrls] = useState<Map<string, string>>(new Map());
-
-  const { config: ttsConfig } = useTTSStore();
-
   const { selectionState, handleTextSelection, handleClosePopup, handleAskSelection, popupRef } = useTextSelection({
     onAskSelection,
   });
@@ -635,21 +643,6 @@ function ChatMessagesComponent({
     return () => io.disconnect();
   }, [newerPending, expandNewer]);
 
-  const getFilteredTextFromDOM = (messageId: string): string => {
-    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (!messageElement) return "";
-
-    const textDivs = messageElement.querySelectorAll(".prose");
-    if (textDivs.length === 0) return "";
-
-    const lastTextDiv = textDivs[textDivs.length - 1];
-    const cloned = lastTextDiv.cloneNode(true) as HTMLElement;
-    const pageNumElements = cloned.querySelectorAll("span.rounded-full.bg-muted");
-    pageNumElements.forEach((el) => el.remove());
-
-    return cloned.textContent?.trim() || "";
-  };
-
   const errorMessage = typeof error === "string" ? error : error?.message;
 
   const { getDisplayTime, onReasoningStreamingChange } = useReasoningTimer({
@@ -668,71 +661,6 @@ function ChatMessagesComponent({
         return newSet;
       });
     }, 2000);
-  };
-
-  const handlePlayAudio = async (messageId: string, text: string) => {
-    if (!ttsConfig.apiKey || ttsConfig.apiKey.trim() === "") {
-      toast.error("请先在设置中配置 DashScope API Key");
-      return;
-    }
-
-    const currentState = audioStates.get(messageId) || "idle";
-
-    if (currentState === "playing") {
-      audioPlayerManager.pause();
-      setAudioStates((prev) => new Map(prev).set(messageId, "paused"));
-      return;
-    }
-
-    if (currentState === "paused") {
-      await audioPlayerManager.resume();
-      setAudioStates((prev) => new Map(prev).set(messageId, "playing"));
-      return;
-    }
-
-    try {
-      setAudioStates((prev) => new Map(prev).set(messageId, "loading"));
-
-      const cachedUrls = audioUrls.get(messageId);
-      if (cachedUrls) {
-        const urlArray = cachedUrls.split(",");
-        const wasResumed = await audioPlayerManager.startPlayback(messageId);
-        if (!wasResumed) {
-          for (const url of urlArray) {
-            audioPlayerManager.addToQueue(url);
-          }
-          audioPlayerManager.markAllChunksAdded();
-        }
-        setAudioStates((prev) => new Map(prev).set(messageId, "playing"));
-      } else {
-        const wasResumed = await audioPlayerManager.startPlayback(messageId);
-        if (!wasResumed) {
-          let isFirstChunk = true;
-          const audioUrlArray = await synthesizeSpeechChunked({
-            text,
-            onChunkReady: (url) => {
-              audioPlayerManager.addToQueue(url);
-              if (isFirstChunk) {
-                isFirstChunk = false;
-                setAudioStates((prev) => new Map(prev).set(messageId, "playing"));
-              }
-            },
-          });
-
-          audioPlayerManager.markAllChunksAdded();
-          setAudioUrls((prev) => new Map(prev).set(messageId, audioUrlArray.join(",")));
-        } else {
-          setAudioStates((prev) => new Map(prev).set(messageId, "playing"));
-        }
-      }
-
-      audioPlayerManager.onEnded(() => {
-        setAudioStates((prev) => new Map(prev).set(messageId, "idle"));
-      });
-    } catch (error) {
-      console.error("语音播放失败:", error);
-      setAudioStates((prev) => new Map(prev).set(messageId, "idle"));
-    }
   };
 
   useEffect(() => {
@@ -857,38 +785,46 @@ function ChatMessagesComponent({
 
       if (typeof type === "string" && type.startsWith("tool-")) {
         flushText();
-        // T6：向后收拢连续工具调用（≥2 个进折叠组，单个保持原卡）。
-        // step-start（协议分隔件）与 reasoning（调用间的 Thought）视为透明——AI SDK 的
-        // parts 序列里它们穿插在工具 part 之间，此前 greedy 收集一遇即断，折叠整站失效
-        const groupParts: any[] = [part];
+        // text 只有在后面确实还有工具时才属于组内插段；最后一个工具后的正文始终交还主流程。
         let toolCount = 1;
         let j = i + 1;
+        let firstTextAfterLastTool = -1;
         while (j < parts.length) {
           const nextType = parts[j]?.type as string | undefined;
-          if (nextType === "step-start" || nextType === "reasoning") {
-            groupParts.push(parts[j]);
+          if (nextType === "step-start" || nextType === "reasoning" || nextType === "custom") {
+            j += 1;
+            continue;
+          }
+          if (nextType === "text") {
+            if (firstTextAfterLastTool < 0) firstTextAfterLastTool = j;
             j += 1;
             continue;
           }
           if (typeof nextType === "string" && nextType.startsWith("tool-")) {
-            groupParts.push(parts[j]);
             toolCount += 1;
+            firstTextAfterLastTool = -1;
             j += 1;
             continue;
           }
           break;
         }
         if (toolCount >= 2) {
+          const groupEnd = firstTextAfterLastTool >= 0 ? firstTextAfterLastTool : j;
           elements.push(
             <ToolCallGroup
               key={`toolgroup-${i}`}
-              parts={groupParts}
+              parts={parts.slice(i, groupEnd)}
+              startIndex={i}
               active={isLastMessage && (status === "submitted" || status === "streaming")}
+              textStreaming={isLastMessage && isStreaming}
+              lastTextPartIndex={lastTextPartIndex}
+              revealAllowed={revealAllowed}
+              onTextMouseUp={handleTextSelection}
               onViewDetail={onViewToolDetail}
               isChatPage={isChatPage}
             />,
           );
-          i = j - 1;
+          i = groupEnd - 1;
         } else {
           const toolType = type.replace(/^tool-/, "");
           const toolName = TOOL_NAME_MAP[toolType] || toolType;
@@ -901,7 +837,7 @@ function ChatMessagesComponent({
               isChatPage={isChatPage}
             />,
           );
-          // 未成团：不消费后续 step-start/reasoning，交还主循环各自渲染
+          // 未成团：不消费后续插段，交还主循环各自渲染。
         }
         continue;
       }
@@ -918,12 +854,15 @@ function ChatMessagesComponent({
       <CitationMapContext.Provider value={citationMap}>
         <div className="flex flex-col gap-1" data-message-id={messageId}>
           {elements}
+          {isAssistant && messageId && onOpenFile && !selectionMode && (
+            <ChangedFilesDisclosure message={{ id: messageId, parts }} onOpenFile={onOpenFile} />
+          )}
         </div>
       </CitationMapContext.Provider>
     );
   };
 
-  return (
+  const content = (
     <ChatContainerContent className="select-auto py-6 first:mt-0">
       {windowActive && (
         <div
@@ -946,14 +885,16 @@ function ChatMessagesComponent({
         const isFirstMessage = index === 0;
         const isStreaming = status === "streaming";
         const showError = !!errorMessage && isLastMessage;
-        // H1：中断标记（用户停止/异常中断后落库的 assistant 消息）→ 显示「继续生成」
+        // 只有达到输出长度上限才提供续问；用户主动停止仍走普通重新生成。
         const interruptedMark =
           isAssistant &&
           isLastMessage &&
           !isStreaming &&
           !!((message.metadata as { interrupted?: boolean } | undefined)?.interrupted ?? false);
+        const lengthInterrupted =
+          interruptedMark && (message.metadata as { finishReason?: string } | undefined)?.finishReason === "length";
+        const retryLabel = lengthInterrupted ? "继续生成" : "重新生成";
         const canShowRetry = (showError || interruptedMark) && !!onRetry;
-        const reorderedMessage = reorderTextAndReasoning(message);
 
         return (
           <Message
@@ -984,16 +925,17 @@ function ChatMessagesComponent({
               <div className={selectionMode ? "min-w-0 flex-1" : undefined}>
                 {isAssistant ? (
                   <div data-region="chat-message-assistant" className="group flex w-full flex-col gap-0">
-                    {renderMessageParts(reorderedMessage.parts, isLastMessage, true, message.id)}
+                    {renderMessageParts(message.parts, isLastMessage, true, message.id)}
                     {((!isStreaming && isLastMessage) || !isLastMessage) && !selectionMode && (
                       <div className="flex items-center justify-between">
                         <MessageActions className="-ml-2.5 flex transform-gpu gap-0">
-                          {/* 重新生成：末条 assistant 恒存在（不依赖错误/中断；用户 2026-08-08 拍板） */}
+                          {/* 末条 assistant 恒提供重试；只有长度截断时改为续问文案。 */}
                           {isLastMessage && !!onRetry && (
-                            <MessageAction tooltip="重新生成" delayDuration={100}>
+                            <MessageAction tooltip={retryLabel} delayDuration={100}>
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                aria-label={retryLabel}
                                 className="size-7 rounded-full"
                                 disabled={!canRetry}
                                 onClick={() => {
@@ -1023,39 +965,42 @@ function ChatMessagesComponent({
                             </Button>
                           </MessageAction>
 
-                          <MessageAction tooltip="导出为 Markdown" delayDuration={100}>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7 rounded-full"
-                              onClick={() => {
-                                void exportMessageToMarkdown(message, {
-                                  threadTitle: useThreadStore.getState().currentThread?.title,
-                                  index,
-                                });
-                              }}
-                            >
-                              <Download size={10} />
-                            </Button>
-                          </MessageAction>
-
-                          <MessageAction tooltip="导出为图片" delayDuration={100}>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7 rounded-full"
-                              onClick={() => {
-                                const { currentThread } = useThreadStore.getState();
-                                void exportMessagesToImage([message], {
-                                  title: `${currentThread?.title || "未命名对话"}-第${index + 1}条`,
-                                  bookId: currentThread?.book_id,
-                                  successText: "消息导出成功",
-                                });
-                              }}
-                            >
-                              <ImageIcon size={10} />
-                            </Button>
-                          </MessageAction>
+                          <DropdownMenu>
+                            <MessageAction tooltip="导出" delayDuration={100}>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" aria-label="导出" className="size-7 rounded-full">
+                                  <Download size={10} />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </MessageAction>
+                            <DropdownMenuContent side="top" align="start">
+                              <DropdownMenuItem
+                                aria-label="导出为图片"
+                                onSelect={() => {
+                                  const { currentThread } = useThreadStore.getState();
+                                  void exportMessagesToImage([message], {
+                                    title: `${currentThread?.title || "未命名对话"}-第${index + 1}条`,
+                                    bookId: currentThread?.book_id,
+                                    successText: "消息导出成功",
+                                  });
+                                }}
+                              >
+                                <ImageIcon size={10} />
+                                导出为图片
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                aria-label="导出为 Markdown"
+                                onSelect={() => {
+                                  void exportMessageToMarkdown(message, {
+                                    threadTitle: useThreadStore.getState().currentThread?.title,
+                                    index,
+                                  });
+                                }}
+                              >
+                                导出为 Markdown
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
 
                           {/* 存为笔记：助手消息正文 → 当前书籍/论文的笔记面板（仅绑书对话显示） */}
                           {noteBookId && (
@@ -1082,36 +1027,6 @@ function ChatMessagesComponent({
                               </Button>
                             </MessageAction>
                           )}
-
-                          <MessageAction
-                            tooltip={
-                              audioStates.get(message.id) === "playing"
-                                ? "暂停"
-                                : audioStates.get(message.id) === "paused"
-                                  ? "继续"
-                                  : "播放语音"
-                            }
-                            delayDuration={100}
-                          >
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7 rounded-full"
-                              disabled={audioStates.get(message.id) === "loading"}
-                              onClick={() => {
-                                const textContent = getFilteredTextFromDOM(message.id);
-                                handlePlayAudio(message.id, textContent);
-                              }}
-                            >
-                              {audioStates.get(message.id) === "loading" ? (
-                                <Loader2 size={10} className="animate-spin" />
-                              ) : audioStates.get(message.id) === "playing" ? (
-                                <Pause size={10} />
-                              ) : (
-                                <Volume2 size={10} />
-                              )}
-                            </Button>
-                          </MessageAction>
                         </MessageActions>
                         {message.metadata && (
                           <div className="flex items-center gap-2 text-neutral-500 text-xs dark:text-neutral-400">
@@ -1143,7 +1058,7 @@ function ChatMessagesComponent({
                     data-region="chat-message-user"
                     className={cn("group mt-7 flex max-w-full flex-col", isFirstMessage && "mt-0")}
                   >
-                    {renderMessageParts(reorderedMessage.parts, isLastMessage, false, message.id)}
+                    {renderMessageParts(message.parts, isLastMessage, false, message.id)}
 
                     {!selectionMode && (
                       <MessageActions
@@ -1197,7 +1112,7 @@ function ChatMessagesComponent({
                             size="icon"
                             className="size-7 rounded-full"
                             onClick={() => {
-                              const textContent = reorderedMessage.parts
+                              const textContent = message.parts
                                 .map((part: any) => (part.type === "text" ? part.text : ""))
                                 .join("");
                               handleCopy(message.id, textContent);
@@ -1246,7 +1161,7 @@ function ChatMessagesComponent({
                               size="icon"
                               className="size-7 rounded-full"
                               onClick={() => {
-                                const textContent = reorderedMessage.parts
+                                const textContent = message.parts
                                   .map((part: any) => (part.type === "text" ? part.text : ""))
                                   .join("")
                                   .trim();
@@ -1311,6 +1226,7 @@ function ChatMessagesComponent({
       )}
     </ChatContainerContent>
   );
+  return <LocalFileLinkContext.Provider value={onOpenLocalFile ?? null}>{content}</LocalFileLinkContext.Provider>;
 }
 
 // React.memo：切 tab 时 StickToBottom 内部状态冲刷会重渲 ChatContainerRoot（provider），

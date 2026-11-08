@@ -31,6 +31,7 @@ import {
   manageSyncTool,
   manageTagsTool,
   manageThreadsTool,
+  presentTool,
   processPaperTool,
   readLocalFileTool,
   runCommandTool,
@@ -171,6 +172,12 @@ registerTools([
     scope: "shared",
     tool: readLocalFileTool as Tool,
     description: "读取本地文件（行号分页）/列出目录",
+  },
+  {
+    name: "present",
+    scope: "shared",
+    tool: presentTool as Tool,
+    description: "明确交付真实存在且获准读取的成果文件（不自动收集新建文件或测试脚本）",
   },
   {
     name: "writeFile",

@@ -92,14 +92,21 @@
 <footer>
   仅预览揭示层。集成时：到达回调不变、揭示策略可插拔；设置页"输出效果"选项<strong>默认=基线</strong>（用户裁定）；
   动效色不硬编码，由主题 store 的 primary 注入 --accent（暗色口径取 themes.ts 的 dark primary）。
-  水痕渐干 1.5s、密文逐词停留 260–640ms，均为可调参数（见各卡 chips）。
+  水痕渐干 1.6s、密文逐词停留 260–640ms，均为可调参数（见各卡 chips）。
 </footer>
 <script>
 "use strict";
+function graphemes(text) {
+  if (typeof Intl.Segmenter !== "function") return Array.from(text);
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return Array.from(segmenter.segment(text), (item) => item.segment);
+}
 const SAMPLES = [
   `流式渲染的体验差异，往往不在模型而在前端。token 到达的速度是 bursty 的：一阵急促、一段停顿。若把到达即渲染，文字便一个个蹦出；若在到达与显示之间加一层缓冲，让显示位置以弹簧追随到达位置，文本便如水流漫过纸面。Gemini 与 Copilot 的丝滑感正来自此类 chase 曲线——再配上 frontier 处轻微的模糊与透明度渐变，眼睛便再也察觉不到 token 的边界。`,
   `Streaming feels smooth when the reveal layer decouples arrival from painting. Tokens land in bursts; a small buffer plus a critically damped chase turns those bursts into a continuous flow. The caret disappears, edges soften, and the paragraph reads like ink spreading on paper rather than a machine gun of glyphs. Pick the effect that matches the product's temperament, then make it a setting.`,
+  "开头👨‍👩‍👧‍👦🇨🇳é" + "长文🙂".repeat(260) + "末尾",
 ];
+const SAMPLE_LABELS = ["样本：中英混排", "样本：English", "样本：长文+emoji"];
 let sampleIdx = 0;
 const currentText = () => SAMPLES[sampleIdx];
 const getSpeed = () => Number(document.getElementById("speed").value);
@@ -107,8 +114,9 @@ const getSpeed = () => Number(document.getElementById("speed").value);
 function buildSpans(container, text, mode) {
   container.innerHTML = "";
   const spans = [], wordOf = [], wordLast = [];
+  const chars = graphemes(text);
   if (mode === "chars") {
-    for (const ch of text) {
+    for (const ch of chars) {
       const s = document.createElement("span");
       s.className = "ch"; s.textContent = ch;
       container.appendChild(s); spans.push(s);
@@ -116,14 +124,15 @@ function buildSpans(container, text, mode) {
     return { spans, wordOf, wordLast };
   }
   let i = 0;
-  while (i < text.length) {
-    const m = /[A-Za-z0-9']+/.exec(text.slice(i));
-    const len = m && m.index === 0 ? m[0].length : 1;
+  while (i < chars.length) {
+    const m = /[A-Za-z0-9']+/.exec(chars.slice(i).join(""));
+    const wordChars = m && m.index === 0 && m[0] === chars[i] ? graphemes(m[0]) : [chars[i]];
+    const len = wordChars.length;
     const w = document.createElement("span");
     w.className = "wd";
     for (let k = 0; k < len; k++) {
       const s = document.createElement("span");
-      s.className = "ch"; s.textContent = text[i + k];
+      s.className = "ch"; s.textContent = wordChars[k];
       w.appendChild(s); spans.push(s); wordOf.push(w); wordLast.push(i + len - 1);
     }
     container.appendChild(w);
@@ -133,13 +142,15 @@ function buildSpans(container, text, mode) {
 }
 
 function makeScheduler(text, emit, onDone) {
+  const chars = graphemes(text);
   let pos = 0, t = null, dead = false;
   const step = () => {
     if (dead) return;
-    pos = Math.min(text.length, pos + 1 + ((Math.random() * 3) | 0));
+    ensureLoop();
+    pos = Math.min(chars.length, pos + 1 + ((Math.random() * 3) | 0));
     emit(pos);
-    if (pos >= text.length) { onDone?.(); return; }
-    const prev = text[pos - 1];
+    if (pos >= chars.length) { dead = true; onDone?.(); return; }
+    const prev = chars[pos - 1];
     let d = 26 + Math.random() * 72;
     if ("。！？；…".includes(prev)) d += 170 + Math.random() * 230;
     else if ("，、：,;:".includes(prev)) d += 50 + Math.random() * 90;
@@ -148,6 +159,7 @@ function makeScheduler(text, emit, onDone) {
   return {
     start() { dead = false; pos = 0; t = setTimeout(step, 150); },
     stop() { dead = true; clearTimeout(t); },
+    running() { return !dead; },
   };
 }
 
@@ -158,10 +170,11 @@ function fxBase(body) {
     reset(text) { spans = buildSpans(body, text, "chars").spans; shown = 0; },
     chunk(n) { for (let i = shown; i < n; i++) spans[i].classList.add("on"); shown = n; },
     frame() {},
+    settled() { return shown >= spans.length; },
   };
 }
 
-/* ── 雾面-水流：chase 追随 + frontier 模糊/透明渐变 + 主题色水痕 1.5s 渐干（含残余模糊消散） ── */
+/* ── 雾面-水流：chase 追随 + frontier 模糊/透明渐变 + 主题色水痕 1.6s 渐干（含残余模糊消散） ── */
 function fxMist(body) {
   const TAU = 120, N = 10, BLUR = 7, DRY = 1600, HOLD = 0.45, SWEEP = N / 250;
   let spans = [], recv = 0, disp = 0, prevFl = 0, settle = [], dryPtr = 0, fogPtr = 0, sweep = 0, total = 0;
@@ -217,6 +230,9 @@ function fxMist(body) {
         spans[i].style.color = `color-mix(in oklab, var(--accent) ${Math.round((1 - e) * 85)}%, var(--fg))`;
       }
     },
+    settled() {
+      return recv >= total && disp >= total && sweep >= total + N && fogPtr >= total && dryPtr >= total;
+    },
   };
 }
 
@@ -259,6 +275,9 @@ function fxType(body) {
         caret.classList.toggle("idle", now - lastStep > 350);
       }
     },
+    settled() {
+      return shown >= spans.length && recv >= spans.length && doneAt > 0 && caret.classList.contains("gone");
+    },
   };
 }
 
@@ -278,7 +297,7 @@ function fxScrWord(body) {
       real = words.map((w) => w.textContent);
       cumLast = [];
       let acc = 0;
-      for (const r of real) { acc += r.length; cumLast.push(acc - 1); }
+      for (const r of real) { acc += graphemes(r).length; cumLast.push(acc - 1); }
       recv = 0; armed = 0; pi = 0; active = []; lastFlip = 0;
     },
     chunk(n) { recv = n; },
@@ -307,12 +326,15 @@ function fxScrWord(body) {
       if (done.length === 0) return;
       for (const a of done) {
         const r = real[a.pi];
-        const chars = a.w.children;
-        for (let i = 0; i < chars.length; i++) chars[i].textContent = r[i];
+        const chars = graphemes(r);
+        for (let i = 0; i < chars.length; i++) a.w.children[i].textContent = chars[i];
         a.w.classList.remove("scr");
         a.w.classList.add("lock");
       }
       active = active.filter((a) => now - a.t0 < a.dur);
+    },
+    settled() {
+      return pi >= words.length && active.length === 0 && words.every((word) => !word.classList.contains("scr"));
     },
   };
 }
@@ -370,7 +392,7 @@ function playAll() {
 document.getElementById("playAll").addEventListener("click", playAll);
 document.getElementById("sample").addEventListener("click", (e) => {
   sampleIdx = (sampleIdx + 1) % SAMPLES.length;
-  e.currentTarget.textContent = sampleIdx === 0 ? "样本：中英混排" : "样本：English";
+  e.currentTarget.textContent = SAMPLE_LABELS[sampleIdx];
   playAll();
 });
 for (const sw of document.querySelectorAll(".sw")) {
@@ -380,14 +402,21 @@ for (const sw of document.querySelectorAll(".sw")) {
   });
 }
 
-let last = performance.now();
-function loop(now) {
-  const dt = Math.min(64, now - last);
-  last = now;
-  for (const c of cards) c.effect.frame(now, dt);
+let last = performance.now(), animationRunning = false;
+function ensureLoop() {
+  if (animationRunning) return;
+  animationRunning = true;
+  last = performance.now();
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+function loop(now) {
+  const dt = Math.min(250, now - last);
+  last = now;
+  for (const c of cards) c.effect.frame(now, dt);
+  const active = sharedSched?.running() || cards.some((c) => c.sched?.running()) || cards.some((c) => !c.effect.settled());
+  if (active) requestAnimationFrame(loop);
+  else animationRunning = false;
+}
 playAll();
 </script>
 </body>

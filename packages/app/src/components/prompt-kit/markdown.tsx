@@ -1,17 +1,19 @@
+import { classifyFileLink } from "@/ai/utils/local-file-link";
 import { processTextWithAnnotations } from "@/components/markdown";
 import { cn } from "@/lib/utils";
 import { getFullPathFromAppData } from "@/utils/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import "katex/dist/katex.min.css";
 import { marked } from "marked";
-import { memo, useEffect, useId, useMemo, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { memo, useContext, useEffect, useId, useMemo, useState } from "react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CodeBlock, CodeBlockCode } from "./code-block";
+import { LocalFileAnchor, LocalFileLinkContext } from "./local-file-anchor";
 import { normalizeMathDelimiters } from "./math-delimiters";
 
 export type MarkdownProps = {
@@ -150,11 +152,17 @@ const MemoizedMarkdownBlock = memo(
     content: string;
     components?: Partial<Components>;
   }) {
+    const onOpenLocalFile = useContext(LocalFileLinkContext);
     return (
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={components}
+        urlTransform={(value, key, node) =>
+          onOpenLocalFile && key === "href" && node.tagName === "a" && classifyFileLink(value).kind === "local"
+            ? value
+            : defaultUrlTransform(value)
+        }
       >
         {content}
       </ReactMarkdown>
@@ -208,6 +216,11 @@ function MarkdownComponent({ children, id, className, components }: MarkdownProp
     return {
       ...INITIAL_COMPONENTS,
       img: imgComponent,
+      a: ({ href, children, title }: { href?: string; children?: React.ReactNode; title?: string }) => (
+        <LocalFileAnchor href={href} title={title}>
+          {children}
+        </LocalFileAnchor>
+      ),
       ...components,
     };
   }, [components]);

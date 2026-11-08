@@ -10,7 +10,9 @@ const src = join(root, "packages/app/src");
 const pnpmDir = join(root, "node_modules", ".pnpm");
 const esbuildPkg = readdirSync(pnpmDir).find((name) => name.startsWith("esbuild@"));
 assert.ok(esbuildPkg);
-const esbuild = await import(pathToFileURL(join(pnpmDir, esbuildPkg, "node_modules", "esbuild", "lib", "main.js")).href);
+const esbuild = await import(
+  pathToFileURL(join(pnpmDir, esbuildPkg, "node_modules", "esbuild", "lib", "main.js")).href
+);
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
 for (const key of [
@@ -73,7 +75,7 @@ window.IntersectionObserver = Observer;
 window.HTMLElement.prototype.scrollIntoView = () => {};
 
 const requests = [];
-let finishReason = "length";
+const finishReason = "length";
 const streamTextStub = `export function streamText(options) {
   globalThis.__outputStreamOptions.push(options);
   return {
@@ -102,14 +104,25 @@ const fsPackage = readdirSync(pnpmDir).find((name) => name.startsWith("@tauri-ap
 assert.ok(aiPackage);
 assert.ok(fsPackage);
 const actualAiEntry = join(pnpmDir, aiPackage, "node_modules", "ai", "dist", "index.js").replace(/\\/g, "/");
-const actualFsEntry = join(pnpmDir, fsPackage, "node_modules", "@tauri-apps", "plugin-fs", "dist-js", "index.js").replace(/\\/g, "/");
+const actualFsEntry = join(
+  pnpmDir,
+  fsPackage,
+  "node_modules",
+  "@tauri-apps",
+  "plugin-fs",
+  "dist-js",
+  "index.js",
+).replace(/\\/g, "/");
 const mcpManagerPath = join(src, "ai/mcp/mcp-manager.ts").replace(/\\/g, "/");
 
 const stubs = new Map([
-  ["@/lib/tauri-storage", `export const tauriStorage = { getItem: () => null, setItem() {}, removeItem() {} };`],
-  [mcpManagerPath, `export async function getMcpToolsForScope() { return { tools: {}, failures: [], closeAll: async () => {} }; }
-   export function parseMcpToolName() { return null; }`],
-  ["@tauri-apps/api/event", `export async function listen() { return () => {}; }`],
+  ["@/lib/tauri-storage", "export const tauriStorage = { getItem: () => null, setItem() {}, removeItem() {} };"],
+  [
+    mcpManagerPath,
+    `export async function getMcpToolsForScope() { return { tools: {}, failures: [], closeAll: async () => {} }; }
+   export function parseMcpToolName() { return null; }`,
+  ],
+  ["@tauri-apps/api/event", "export async function listen() { return () => {}; }"],
   [
     "@tauri-apps/plugin-fs",
     `export { BaseDirectory } from "actual-tauri-fs";
@@ -142,10 +155,7 @@ const stubs = new Map([
       return null;
     }`,
   ],
-  [
-    "@tauri-apps/plugin-http",
-    `export async function fetch() { throw new Error("本测试不应发起网络请求"); }`,
-  ],
+  ["@tauri-apps/plugin-http", `export async function fetch() { throw new Error("本测试不应发起网络请求"); }`],
 ]);
 const stubPlugin = {
   name: "output-continuation-stubs",
@@ -166,7 +176,8 @@ const stubPlugin = {
     build.onResolve({ filter: /^actual-ai$/ }, () => ({ path: actualAiEntry }));
     build.onResolve({ filter: /^ai$/ }, () => ({ path: "ai-stream-stub", namespace: "output-stub" }));
     build.onLoad({ filter: /.*/, namespace: "output-stub" }, (args) => {
-      if (args.path === "ai-stream-stub") return { contents: `export * from "actual-ai";\n${streamTextStub}`, loader: "js" };
+      if (args.path === "ai-stream-stub")
+        return { contents: `export * from "actual-ai";\n${streamTextStub}`, loader: "js" };
       return { contents: stubs.get(args.path), loader: "js" };
     });
   },
@@ -218,7 +229,12 @@ CustomChatTransport.prototype.sendMessages = function (options) {
   transportTriggers.push(options.trigger);
   return originalSendMessages.call(this, options);
 };
-const model = { providerId: "deepseek", modelId: "deepseek-flash", providerName: "DeepSeek", modelName: "deepseek-flash" };
+const model = {
+  providerId: "deepseek",
+  modelId: "deepseek-flash",
+  providerName: "DeepSeek",
+  modelName: "deepseek-flash",
+};
 const provider = {
   provider: "deepseek",
   name: "DeepSeek",
@@ -260,7 +276,8 @@ const waitForReady = async (readState) => {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const current = readState();
     const last = current.messages.at(-1);
-    if (current.status === "ready" && last?.role === "assistant" && typeof last.metadata?.createdAt === "number") return;
+    if (current.status === "ready" && last?.role === "assistant" && typeof last.metadata?.createdAt === "number")
+      return;
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
@@ -323,7 +340,11 @@ await test("length 截断保留原思考，继续生成走新续问而非重跑"
   await waitForReady(() => state);
   const assistant = state.messages.find((message) => message.role === "assistant");
   assert.equal(assistant?.metadata?.finishReason, "length");
-  assert.equal(assistant?.metadata?.interrupted, true, JSON.stringify({ id: assistant?.id, metadata: assistant?.metadata }));
+  assert.equal(
+    assistant?.metadata?.interrupted,
+    true,
+    JSON.stringify({ id: assistant?.id, metadata: assistant?.metadata }),
+  );
   assert.ok(assistant.parts.some((part) => part.type === "reasoning" && part.text.includes("已有的思考")));
   const previousCount = state.messages.length;
   await act(async () => {
@@ -359,7 +380,9 @@ await test("普通重试仍走 regenerate，不被续问逻辑改变", async () 
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  await act(async () => root.render(React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(Harness))));
+  await act(async () =>
+    root.render(React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(Harness))),
+  );
   await act(async () => {
     await state.handleSubmit("写一个本地小游戏");
   });

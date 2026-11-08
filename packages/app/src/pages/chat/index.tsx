@@ -1,3 +1,7 @@
+import { AssistantPanelTransition } from "@/components/file-workspace/assistant-panel-transition";
+import { FileWorkspace } from "@/components/file-workspace/file-workspace";
+import { useFileWorkspaceChat } from "@/components/file-workspace/use-file-workspace-chat";
+import { WorkspaceOpenButton } from "@/components/file-workspace/workspace-open-button";
 import { PreviewPanel } from "@/components/preview/preview-panel";
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
 import { PromptInput, PromptInputAction, PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
@@ -9,6 +13,7 @@ import { ChatThreads } from "@/components/side-chat/chat-threads";
 import { getCommandIcon } from "@/components/side-chat/command-icons";
 import ModelSelector from "@/components/side-chat/model-selector";
 import { SearchEngineSelector } from "@/components/side-chat/search-engine-selector";
+import { WorkspaceChip } from "@/components/side-chat/workspace-chip";
 import { MindmapViewer } from "@/components/tools/mindmap-viewer";
 import { RagResultViewer } from "@/components/tools/rag-result-viewer";
 import { SciverseViewer } from "@/components/tools/sciverse-viewer";
@@ -105,6 +110,7 @@ const EmptyState = memo(
                     </Button>
                   </PromptInputAction>
                   <SearchEngineSelector />
+                  <WorkspaceChip hostId="central" scope="central" />
                 </div>
 
                 <Button
@@ -171,6 +177,7 @@ function ChatPage() {
   const [showToolDetail, setShowToolDetail] = useState(false);
   const scrollContextRef = useRef<any>(null);
   const { activeBookId, setActiveBookId, currentThread, setCurrentThread } = useChatReaderStore();
+  const { isFileMode, openChangedFile, openLocalFile } = useFileWorkspaceChat("central", "central", currentThread?.id);
 
   const {
     input,
@@ -207,6 +214,7 @@ function ChatPage() {
     chatContext: {
       activeBookId,
       agentScope: "central",
+      workspaceHostId: "central",
     },
     setActiveBookId,
     currentThread: currentThread,
@@ -273,15 +281,14 @@ function ChatPage() {
   };
 
   return (
-    <div className="relative flex h-full rounded-xl border bg-background">
-      <div className={`absolute inset-0 z-50 ${showThreads ? "pointer-events-auto" : "pointer-events-none"}`}>
-        <div
-          className={`absolute inset-0 transition-opacity duration-300 ${showThreads ? "bg-transparent opacity-100" : "bg-transparent opacity-0"}`}
-          onClick={showThreads ? handleBackFromThreads : undefined}
-        />
-        <div
-          className={`absolute top-0 left-0 h-full w-80 transform rounded-2xl border-border border-r bg-background px-2 shadow-md transition-all duration-300 ease-out ${showThreads ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"}`}
-        >
+    <div className="relative flex h-full rounded-xl border bg-background" data-panel-viewport>
+      <AssistantPanelTransition
+        present={showThreads}
+        side="left"
+        className="w-80 max-w-full rounded-2xl border-border border-r px-2 shadow-md"
+        onBackdropClick={handleBackFromThreads}
+      >
+        <div className="h-full min-h-0" data-region="assistant-history-panel">
           <ChatThreads
             key={`threads-${threadsKey}`}
             bookId={undefined}
@@ -291,7 +298,7 @@ function ChatPage() {
             onSelectThread={handleSelectThread}
           />
         </div>
-      </div>
+      </AssistantPanelTransition>
 
       <div className="flex h-full w-full overflow-hidden">
         <Resizable
@@ -299,11 +306,11 @@ function ChatPage() {
             width: "40%",
             height: "100%",
           }}
-          minWidth={showToolDetail || previewOpen ? "30%" : "100%"}
-          maxWidth={showToolDetail || previewOpen ? "70%" : "100%"}
+          minWidth={isFileMode ? "100%" : showToolDetail || previewOpen ? "30%" : "100%"}
+          maxWidth={isFileMode ? "100%" : showToolDetail || previewOpen ? "70%" : "100%"}
           enable={{
             top: false,
-            right: showToolDetail || previewOpen,
+            right: !isFileMode && (showToolDetail || previewOpen),
             bottom: false,
             left: false,
             topRight: false,
@@ -320,7 +327,7 @@ function ChatPage() {
           className={`flex h-full flex-col pr-2 ${previewOpen && !showToolDetail ? "flex-1" : ""}`}
         >
           <div className="relative flex h-10 flex-shrink-0 items-center justify-between px-2 pt-2">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <Button
                 variant="ghost"
                 size="icon"
@@ -331,7 +338,8 @@ function ChatPage() {
               </Button>
               <ModelSelector selectedModel={selectedModel} onModelSelect={setSelectedModel} className="max-w-60" />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
+              <WorkspaceOpenButton hostId="central" scope="central" />
               {/* 宽版布局快捷切换：消息列/输入区放宽至自适应版面宽度（用户 2026-08-09 拍板：仅全局助手提供） */}
               <Button
                 variant="ghost"
@@ -354,86 +362,107 @@ function ChatPage() {
               </Button>
             </div>
             {messages.length > 0 && (
-              <div className="absolute inset-x-0 bottom-0 z-10 h-6 translate-y-full bg-gradient-to-b from-background to-background/30 blur-sm" />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 translate-y-full bg-gradient-to-b from-background to-background/30 blur-sm"
+              />
             )}
           </div>
 
-          <div className="flex flex-1 flex-col overflow-hidden">
-            {messages.length === 0 && isInit.current ? (
-              <EmptyState
-                input={input}
-                setInput={setInput}
-                handleSubmit={handleSubmit}
-                stop={stop}
-                status={status}
-                onInputEl={registerInputEl}
-                onAddImageFiles={handleAddImageFiles}
-              />
-            ) : (
-              <>
-                <ChatContainerRoot
-                  className="relative flex-1"
-                  autoScroll={autoScroll}
-                  contextRef={scrollContextRef}
-                  navMessages={messages}
-                >
-                  <ChatMessages
-                    messages={messages}
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-[60] flex justify-center px-4">
+            <div className={`pointer-events-auto w-full ${wideChatLayout ? "" : "max-w-4xl"}`}>
+              <AgentConfirmCard />
+            </div>
+          </div>
+          <div className="relative flex flex-1 flex-col overflow-hidden">
+            <AssistantPanelTransition present={isFileMode}>
+              <FileWorkspace hostId="central" scope="central" />
+            </AssistantPanelTransition>
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              inert={isFileMode || showThreads}
+              aria-hidden={isFileMode || showThreads}
+            >
+              {messages.length === 0 && isInit.current ? (
+                <div className="min-h-0 flex-1">
+                  <EmptyState
+                    input={input}
+                    setInput={setInput}
+                    handleSubmit={handleSubmit}
+                    stop={stop}
                     status={status}
-                    error={displayError}
-                    autoScroll={autoScroll}
-                    scrollKey={currentThread?.id ?? "__global__"}
-                    onReasoningTimesUpdate={handleReasoningTimesUpdate}
-                    onRetry={handleRetry}
-                    canRetry={canRetry}
-                    onAskSelection={handleAskSelection}
-                    onViewToolDetail={handleViewToolDetail}
-                    isChatPage
-                    stickContextRef={scrollContextRef}
+                    onInputEl={registerInputEl}
+                    onAddImageFiles={handleAddImageFiles}
                   />
-                  <div
-                    className={`-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full justify-end px-5 ${wideChatLayout ? "" : "max-w-3xl"}`}
+                </div>
+              ) : (
+                <>
+                  <ChatContainerRoot
+                    className="relative min-h-0 flex-1"
+                    autoScroll={autoScroll}
+                    contextRef={scrollContextRef}
+                    navMessages={messages}
                   >
-                    <div className="pointer-events-auto">
-                      <ScrollButton />
+                    <ChatMessages
+                      messages={messages}
+                      onOpenLocalFile={openLocalFile}
+                      onOpenFile={(file) => void openChangedFile(file)}
+                      status={status}
+                      error={displayError}
+                      autoScroll={autoScroll}
+                      scrollKey={currentThread?.id ?? "__global__"}
+                      onReasoningTimesUpdate={handleReasoningTimesUpdate}
+                      onRetry={handleRetry}
+                      canRetry={canRetry}
+                      onAskSelection={handleAskSelection}
+                      onViewToolDetail={handleViewToolDetail}
+                      isChatPage
+                      stickContextRef={scrollContextRef}
+                    />
+                    <div
+                      className={`-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full justify-end px-5 ${wideChatLayout ? "" : "max-w-3xl"}`}
+                    >
+                      <div className="pointer-events-auto">
+                        <ScrollButton />
+                      </div>
+                    </div>
+                  </ChatContainerRoot>
+
+                  <div className="py-2">
+                    <div id="chat-sidebar" className={wideChatLayout ? "mx-auto w-full" : "mx-auto max-w-4xl"}>
+                      <ChatInputArea
+                        workspace={{ hostId: "central", scope: "central", threadId: currentThread?.id }}
+                        input={input}
+                        setInput={setInput}
+                        references={references}
+                        onRemoveReference={handleRemoveReference}
+                        images={images}
+                        onRemoveImage={handleRemoveImage}
+                        onAddImageFiles={handleAddImageFiles}
+                        files={files}
+                        onRemoveFile={handleRemoveFile}
+                        onAddFiles={handleAddFiles}
+                        onInputEl={registerInputEl}
+                        onSubmit={handleSubmit}
+                        onStop={stop}
+                        status={status}
+                        activeBookId={activeBookId}
+                        setActiveBookId={setActiveBookId}
+                        showToolDetail={showToolDetail}
+                        isChatPage
+                      />
                     </div>
                   </div>
-                </ChatContainerRoot>
-
-                <div className="py-2">
-                  <div id="chat-sidebar" className={wideChatLayout ? "mx-auto w-full" : "mx-auto max-w-4xl"}>
-                    <AgentConfirmCard />
-                    <ChatInputArea
-                      input={input}
-                      setInput={setInput}
-                      references={references}
-                      onRemoveReference={handleRemoveReference}
-                      images={images}
-                      onRemoveImage={handleRemoveImage}
-                      onAddImageFiles={handleAddImageFiles}
-                      files={files}
-                      onRemoveFile={handleRemoveFile}
-                      onAddFiles={handleAddFiles}
-                      onInputEl={registerInputEl}
-                      onSubmit={handleSubmit}
-                      onStop={stop}
-                      status={status}
-                      activeBookId={activeBookId}
-                      setActiveBookId={setActiveBookId}
-                      showToolDetail={showToolDetail}
-                      isChatPage
-                    />
-                  </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </Resizable>
 
         {/* 工具详情列：关闭时 hidden 不占布局（此前靠聊天列 minWidth:100% 压零宽，
             预览面板打开后约束放开会被它撑出空白，故改为条件性移出布局） */}
         <div
-          className={`${showToolDetail ? "flex flex-1" : "hidden"} h-full flex-col rounded-r-2xl border-neutral-200 border-l bg-background dark:border-neutral-700`}
+          className={`${showToolDetail && !isFileMode ? "flex flex-1" : "hidden"} h-full flex-col rounded-r-2xl border-neutral-200 border-l bg-background dark:border-neutral-700`}
         >
           <div className="flex items-center justify-between border-neutral-200 border-b p-2 py-2 pl-3 dark:border-neutral-700">
             <h2 className="font-semibold text-lg text-neutral-900 dark:text-neutral-50">
@@ -447,7 +476,7 @@ function ChatPage() {
         </div>
 
         {/* E5 补挂：全局助手的 writeFile 产物/代码块预览（与阅读页同款侧边面板，未打开时自动隐藏） */}
-        <PreviewPanel />
+        {!isFileMode && <PreviewPanel />}
       </div>
     </div>
   );

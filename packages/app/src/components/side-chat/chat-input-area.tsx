@@ -6,12 +6,12 @@ import { type AgentScope, useQuickCommandStore } from "@/store/quick-command-sto
 import type { ChatReference, FileAttachment, ImageAttachment } from "@/types/message";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { ArrowUp, FileText, Paperclip, Quote, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { getCommandIcon } from "./command-icons";
 import { ContextPopover } from "./context-popover";
 import { ReasoningLevelSelector } from "./reasoning-level-selector";
 import { SearchEngineSelector } from "./search-engine-selector";
-import { WorkspaceChip } from "./workspace-chip";
+import { WorkspaceChip, type WorkspaceChipProps } from "./workspace-chip";
 
 interface ChatInputAreaProps {
   references: ChatReference[];
@@ -24,6 +24,8 @@ interface ChatInputAreaProps {
    * 曾用 useIsChatPage() 响应式订阅：home↔tab 每次切换 isHomeActive 翻转都把输入区拖入重渲，
    * 且侧栏隐藏实例在用户坐 /chat 时会算出 true（2026-08-26 切 tab 墙治理） */
   isChatPage?: boolean;
+  workspace?: WorkspaceChipProps;
+  beforeInput?: ReactNode;
   /** 快捷指令过滤用的 Agent 作用域；缺省按页面启发式（聊天页=central，其余=reader） */
   agentScope?: AgentScope;
   /** J2/K2：图片附件与输入框注册（光标处插入占位标记） */
@@ -50,6 +52,8 @@ export function ChatInputArea({
   activeBookId,
   showToolDetail = false,
   isChatPage = false,
+  workspace,
+  beforeInput,
   agentScope: agentScopeProp,
   images = [],
   onRemoveImage,
@@ -221,6 +225,7 @@ export function ChatInputArea({
             dragOver ? "ring-2 ring-primary/60 ring-offset-1" : ""
           }`}
         >
+          {beforeInput && <div className="-mx-[calc(0.5rem+1px)] -mt-1">{beforeInput}</div>}
           {/* Phase A 文件附件 chips（⟦文件N⟧ 标记在正文中定位；删 chip 同步清标记） */}
           {files.length > 0 && (
             <div className="my-1 flex flex-wrap gap-1.5">
@@ -234,7 +239,15 @@ export function ChatInputArea({
                   <span className="max-w-40 truncate">{f.name}</span>
                   <span className="flex-shrink-0 text-neutral-400">{formatAttachmentSize(f.size)}</span>
                   <span className="flex-shrink-0 text-neutral-400 dark:text-neutral-500">
-                    {f.note?.startsWith("empty") ? "提取为空" : f.note?.startsWith("ocr-failed") ? "解析失败" : f.via ? "已转换" : f.mode === "inline" ? "已注入" : "已登记"}
+                    {f.note?.startsWith("empty")
+                      ? "提取为空"
+                      : f.note?.startsWith("ocr-failed")
+                        ? "解析失败"
+                        : f.via
+                          ? "已转换"
+                          : f.mode === "inline"
+                            ? "已注入"
+                            : "已登记"}
                   </span>
                   <button
                     type="button"
@@ -254,7 +267,7 @@ export function ChatInputArea({
             <div className="flex items-center justify-between gap-2 py-2">
               <div className="flex items-center gap-2">
                 <ContextPopover activeBookId={activeBookId} setActiveBookId={setActiveBookId} />
-                <WorkspaceChip />
+                <WorkspaceChip {...(workspace ?? { hostId: "central", scope: "central" })} />
               </div>
               <div className="flex flex-wrap items-center gap-2 ">
                 {quickActions.map(({ id, label, prompt, icon }) => {
@@ -378,6 +391,7 @@ export function ChatInputArea({
               </PromptInputAction>
               <SearchEngineSelector />
               <ReasoningLevelSelector />
+              {workspace && !isChatPage && <WorkspaceChip {...workspace} />}
             </div>
 
             <PromptInputAction tooltip={status === "ready" ? "发送" : "停止"} side="top">

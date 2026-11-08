@@ -33,6 +33,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { generateText } from "ai";
+import { sanitizeGlossaryItems } from "./glossary-filter";
 import { enumerateSectionBlocks, wrapSectionDocument } from "./section-blocks";
 
 export const BOOK_TRANSLATION_LANG = "zh";
@@ -380,7 +381,8 @@ ${sampleParts.join("\n\n")}`;
     items.push({ src, tgt });
     if (items.length >= GLOSSARY_MAX_ITEMS) break;
   }
-  return items.length > 0 ? items : null;
+  const sanitized = sanitizeGlossaryItems(items);
+  return sanitized.length > 0 ? sanitized : null;
 }
 
 // ─── 主流程 ───

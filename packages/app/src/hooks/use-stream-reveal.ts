@@ -16,15 +16,14 @@
  *
  * mist 实现要点：
  * 1) demo 里每字一个 span，应用内正文是 react-markdown 产物不能包 span，故用 Highlight API：按
- *    (雾层级 f, 水痕层级 w) 预注册 HL_F×HL_W 个高亮组（CSS 里 color 带透明度、text-shadow 模拟模糊），
- *    每帧把尾部字符按层级分组成 Range 挂进对应组；组内字符连续（雾层随距前沿单调、水痕随年龄单调），
- *    每帧只需建十几个 Range。
+ *    (雾层级 f, 水痕层级 w) 预注册少量高亮组（CSS 里 color 带透明度、text-shadow 模拟模糊）。
+ *    绘制按 30fps 节流、React 提交立即补绘，只有量化分组变化时才重建 Range。
  * 2) DOM 预铺：显示文本比前沿多铺 MIST_AHEAD 个字（字符层级 f=0 全透明），React 提交频率因此从每帧降到
  *    百毫秒级，而逐帧渐变不依赖 React；预铺还让换行提前确定，前沿处不再因半个单词折行而跳动。
- * 3) 字符对应：DOM 与源文本都按"倒数第 k 个非空白字符"对齐（尾部锚定，不依赖总长比例）。markdown 语法
- *    字符被消费会使较远处有数字符漂移，只影响水痕边界的软视觉。每次 React 提交后在 layout effect 里同步
- *    重建索引并重绘，避免新字符裸奔一帧。
- * 不支持 Highlight API 的环境降级为只有 chase 缓冲（无逐字渐变）。
+ * 3) 字符对应：动画使用 React 渲染后的 DOM 字素坐标，Markdown 源码只决定进度比例；Intl.Segmenter
+ *    统一切片与 Range 边界，索引覆盖全部非空白字素，避免长文截尾、链接语法错位和 emoji 断字。
+ * 4) 生命周期：追平后暂停与正式结束都扫尾、褪干并停止 rAF/observer；新文本到达再唤醒。
+ *    不支持 Highlight API、注册/绘制异常或持续慢帧时降级为 chase 缓冲，正文始终完整。
  * 词组浮入因需要逐词持久元素（与每 tick 重渲染冲突）不在应用内提供，demo 专属。
  */
 
@@ -49,10 +48,9 @@ const MIST_AHEAD = 28;
 const MIST_CUSHION = 12;
 /** 水痕最大着色浓度（%） */
 const WET_MAX = 85;
-/** 雾层级 / 水痕层级量化档数；每帧索引的尾部字符上限 */
+/** 雾层级 / 水痕层级量化档数 */
 const HL_F = 9;
 const HL_W = 8;
-const HL_KMAX = 720;
 /** 乱码字符池：不含任何 markdown/公式语法字符（# $ * _ > - + = < 等落在行首或成对时会让结构瞬时跳变） */
 const SCR_POOL = "01アイウエオカキクケコサシスセソタチツテトナニヌネノabcxyzXYZ/·";
 /** markdown 语法字符：scramble 时原样保留，避免瞬时破坏结构 */
@@ -82,7 +80,7 @@ const MD_SIGILS = new Set([
 const BACKLOG_BOOST_CHARS = 90;
 
 interface CrossEntry {
-  /** 源文本下标区间 [from, end) 的字符在 t 时刻被前沿越过（水痕年龄起点） */
+  /** DOM 字素下标区间 [from, end) 在 t 时刻被前沿越过（水痕年龄起点） */
   from: number;
   end: number;
   t: number;
@@ -97,26 +95,35 @@ interface RevealState {
   settled: number;
   lastFlip: number;
   lastSet: number;
+  lastReceiveAt: number;
   lastStepAt: number;
   doneAt: number;
   sweep: number;
   lastDisplay: string;
   overlays: Map<string, HTMLElement>;
   accent: string;
-  /** 本轮揭示已收尾（叠层/高亮已清、已追平且流已结束）：rAF 停摆，新文本/重新流式到达时由 kick 唤醒 */
+  /** 本轮揭示已收尾（正式结束或追平后暂停）：叠层/高亮/observer 已清，rAF 停摆，新文本到达时由 kick 唤醒 */
   finished: boolean;
   // ── mist ──
   edge: number;
   cross: CrossEntry[];
   crossEnd: number;
   lastCrossT: number;
+  lastPaintAt: number;
+  slowFrames: number;
   fg: string;
   tailNodes: Text[];
   tailOffs: number[];
-  tailSrc: number[];
+  tailEnds: number[];
+  tailPos: number[];
+  domLength: number;
+  sourceLength: number;
+  indexDirty: boolean;
+  paintSignature: string;
   owned: { name: string; range: Range }[];
   /** 本实例持有高亮注册的引用（见 acquireHighlights） */
   hlHeld: boolean;
+  hlFailed: boolean;
 }
 
 function freshState(): RevealState {
@@ -130,6 +137,7 @@ function freshState(): RevealState {
     settled: 0,
     lastFlip: 0,
     lastSet: 0,
+    lastReceiveAt: 0,
     lastStepAt: 0,
     doneAt: 0,
     sweep: 0,
@@ -140,12 +148,20 @@ function freshState(): RevealState {
     cross: [],
     crossEnd: 0,
     lastCrossT: 0,
+    lastPaintAt: 0,
+    slowFrames: 0,
     fg: "",
     tailNodes: [],
     tailOffs: [],
-    tailSrc: [],
+    tailEnds: [],
+    tailPos: [],
+    domLength: 0,
+    sourceLength: 0,
+    indexDirty: true,
+    paintSignature: "",
     owned: [],
     hlHeld: false,
+    hlFailed: false,
   };
 }
 
@@ -173,12 +189,15 @@ function tailCharRect(wrap: HTMLElement, back = 0): DOMRect | null {
   let skip = back;
   for (let n = nodes.length - 1; n >= 0; n--) {
     const data = nodes[n].data;
-    for (let i = data.length - 1; i >= 0; i--) {
-      if (/\s/.test(data[i])) continue;
+    const boundaries = graphemeOffsets(data);
+    for (let i = boundaries.length - 2; i >= 0; i--) {
+      const from = boundaries[i];
+      const end = boundaries[i + 1];
+      if (!/\S/.test(data.slice(from, end))) continue;
       if (skip-- > 0) continue;
       const range = document.createRange();
-      range.setStart(nodes[n], i);
-      range.setEnd(nodes[n], i + 1);
+      range.setStart(nodes[n], from);
+      range.setEnd(nodes[n], end);
       const rect = range.getBoundingClientRect();
       if (rect.height > 0) return rect;
     }
@@ -217,17 +236,60 @@ function scrambleTail(text: string): string {
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 
-/** 截断下标避开代理对中间（emoji 等被 slice 劈开会闪一个乱码方块） */
+const graphemeCache = new Map<string, number[]>();
+
+function graphemeOffsets(text: string): number[] {
+  const cached = graphemeCache.get(text);
+  if (cached) return cached;
+  const offsets: number[] = [];
+  if (typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    for (const item of segmenter.segment(text)) offsets.push(item.index);
+  } else {
+    let index = 0;
+    for (const char of text) {
+      offsets.push(index);
+      index += char.length;
+    }
+  }
+  offsets.push(text.length);
+  if (graphemeCache.size >= 24) {
+    const oldest = graphemeCache.keys().next().value;
+    if (oldest !== undefined) graphemeCache.delete(oldest);
+  }
+  graphemeCache.set(text, offsets);
+  return offsets;
+}
+
+/** 截断下标落在完整字素边界，避免代理对、ZWJ、国旗和组合附加符号被切开。 */
 function safeIndex(text: string, n: number): number {
   if (n <= 0 || n >= text.length) return n;
-  const c = text.charCodeAt(n - 1);
-  return c >= 0xd800 && c <= 0xdbff ? n - 1 : n;
+  const offsets = graphemeOffsets(text);
+  let low = 0;
+  let high = offsets.length - 1;
+  let best = 0;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (offsets[mid] <= n) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return offsets[best];
 }
 
 // ─── mist：CSS Custom Highlight API 逐字渐变 ───
 
 function highlightsSupported(): boolean {
-  return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";
+  return (
+    typeof CSS !== "undefined" &&
+    CSS.highlights != null &&
+    typeof CSS.highlights.set === "function" &&
+    typeof CSS.highlights.delete === "function" &&
+    typeof Highlight !== "undefined"
+  );
 }
 
 const hlGroups = new Map<string, Highlight>();
@@ -285,7 +347,9 @@ function buildMistHighlights(): void {
 }
 
 function teardownMistHighlights(): void {
-  for (const name of hlGroups.keys()) CSS.highlights.delete(name);
+  if (typeof CSS !== "undefined" && CSS.highlights && typeof CSS.highlights.delete === "function") {
+    for (const name of hlGroups.keys()) CSS.highlights.delete(name);
+  }
   hlGroups.clear();
   hlStyleEl?.remove();
   hlStyleEl = null;
@@ -298,8 +362,16 @@ function teardownMistHighlights(): void {
  */
 function acquireHighlights(s: RevealState): void {
   if (s.hlHeld) return;
+  if (hlRefs === 0) {
+    try {
+      buildMistHighlights();
+    } catch (error) {
+      teardownMistHighlights();
+      throw error;
+    }
+  }
+  hlRefs += 1;
   s.hlHeld = true;
-  if (hlRefs++ === 0) buildMistHighlights();
 }
 
 function releaseHighlights(s: RevealState): void {
@@ -310,9 +382,28 @@ function releaseHighlights(s: RevealState): void {
   if (hlRefs === 0) teardownMistHighlights();
 }
 
+function clearMistRuntime(wrap: HTMLElement | null, s: RevealState): void {
+  releaseHighlights(s);
+  wrap?.style.removeProperty("--rv-accent");
+  wrap?.style.removeProperty("--rv-fg");
+  s.tailNodes = [];
+  s.tailOffs = [];
+  s.tailEnds = [];
+  s.tailPos = [];
+  s.domLength = 0;
+  s.sourceLength = 0;
+  s.cross = [];
+  s.crossEnd = 0;
+  s.lastCrossT = 0;
+  s.indexDirty = true;
+  s.accent = "";
+  s.fg = "";
+}
+
 function hlClear(s: RevealState): void {
   for (const o of s.owned) hlGroups.get(o.name)?.delete(o.range);
   s.owned = [];
+  s.paintSignature = "";
 }
 
 /** 取 wrap 的颜色变量：强调色 + 正文前景色（取尾部文本所在元素的计算色，prose 等会覆盖祖先色） */
@@ -326,59 +417,75 @@ function setupMistVars(wrap: HTMLElement, s: RevealState): void {
   if (s.fg) wrap.style.setProperty("--rv-fg", s.fg);
 }
 
-/** 重建"倒数第 k 个非空白字符"的 DOM 位置与源文本下标索引（React 提交后调用） */
+/** 索引 React 已渲染的全部 DOM 字素；动画坐标不再与 Markdown 源码下标混用。 */
 function indexTail(wrap: HTMLElement, s: RevealState, display: string): void {
   const nodes: Text[] = [];
   const offs: number[] = [];
-  const all = textNodesOf(wrap);
-  outer: for (let n = all.length - 1; n >= 0; n--) {
-    const data = all[n].data;
-    for (let i = data.length - 1; i >= 0; i--) {
-      if (/\s/.test(data[i])) continue;
-      nodes.push(all[n]);
-      offs.push(i);
-      if (nodes.length >= HL_KMAX) break outer;
+  const ends: number[] = [];
+  const positions: number[] = [];
+  let position = 0;
+  for (const node of textNodesOf(wrap)) {
+    const boundaries = graphemeOffsets(node.data);
+    for (let i = 0; i + 1 < boundaries.length; i++) {
+      const from = boundaries[i];
+      const end = boundaries[i + 1];
+      if (!/\S/.test(node.data.slice(from, end))) continue;
+      nodes.push(node);
+      offs.push(from);
+      ends.push(end);
+      positions.push(position++);
     }
   }
-  const src: number[] = [];
-  for (let j = display.length - 1; j >= 0 && src.length < HL_KMAX; j--) {
-    if (!/\s/.test(display[j])) src.push(j);
+  s.tailNodes = nodes.reverse();
+  s.tailOffs = offs.reverse();
+  s.tailEnds = ends.reverse();
+  s.tailPos = positions.reverse();
+  s.domLength = position;
+  s.sourceLength = display.length;
+  if (Number.isFinite(s.crossEnd) && s.crossEnd > s.domLength) {
+    s.cross = [];
+    s.crossEnd = 0;
+    s.lastCrossT = 0;
   }
-  s.tailNodes = nodes;
-  s.tailOffs = offs;
-  s.tailSrc = src;
+  s.indexDirty = false;
+  s.paintSignature = "";
 }
 
-/** 按当前前沿位置与各字越界时间，把尾部字符分组挂进高亮组 */
+/** 按当前前沿位置与各字越界时间分组；只有量化分组变化时才重建 Range。 */
 function paintMist(s: RevealState, now: number): void {
-  hlClear(s);
-  const n = Math.min(s.tailNodes.length, s.tailSrc.length);
-  if (n === 0 || !s.tailNodes[0].isConnected) return;
-  const doc = s.tailNodes[0].ownerDocument;
+  const n = Math.min(s.tailNodes.length, s.tailPos.length);
+  if (n === 0) {
+    hlClear(s);
+    return;
+  }
+  if (!s.tailNodes[0].isConnected) {
+    s.indexDirty = true;
+    return;
+  }
+  s.lastPaintAt = now;
+  if (s.crossEnd === Number.POSITIVE_INFINITY) s.crossEnd = s.domLength;
+  const edge = s.sourceLength > 0 ? (s.edge / s.sourceLength) * s.domLength : s.domLength;
+  const crossed = Math.min(s.domLength, Math.ceil(edge));
+  if (crossed > s.crossEnd) {
+    s.cross.push({ from: s.crossEnd, end: crossed, t: now });
+    s.crossEnd = crossed;
+    s.lastCrossT = now;
+  }
+  const runs: { key: string; start: number; end: number }[] = [];
   let ci = s.cross.length - 1;
   let runKey = "";
   let runStart = 0;
-  const flush = (endK: number) => {
-    if (!runKey) return;
-    const hl = hlGroups.get(runKey);
-    if (!hl) return;
-    const older = endK - 1;
-    const range = doc.createRange();
-    range.setStart(s.tailNodes[older], s.tailOffs[older]);
-    range.setEnd(s.tailNodes[runStart], s.tailOffs[runStart] + 1);
-    hl.add(range);
-    s.owned.push({ name: runKey, range });
-  };
   let k = 0;
   for (; k < n; k++) {
-    const j = s.tailSrc[k];
-    const d = s.edge - j;
+    const j = s.tailPos[k];
+    const d = edge - j;
     let f: number;
     if (d <= 0) f = 0;
     else if (d >= MIST_N) f = HL_F - 1;
     else f = Math.round(smooth(d / MIST_N) * (HL_F - 1));
     let w = 0;
     if (f > 0) {
+      while (ci + 1 < s.cross.length && s.cross[ci + 1].from <= j) ci++;
       while (ci >= 0 && s.cross[ci].from > j) ci--;
       const ent = ci >= 0 && j < s.cross[ci].end ? s.cross[ci] : null;
       if (ent) {
@@ -393,13 +500,28 @@ function paintMist(s: RevealState, now: number): void {
     if (f < HL_F - 1) key = f === 0 ? frontName(0, 0) : frontName(f, w === 0 ? 0 : w <= (HL_W - 1) / 2 ? 1 : 2);
     else if (w > 0) key = wetName(w);
     if (key !== runKey) {
-      flush(k);
+      if (runKey) runs.push({ key: runKey, start: runStart, end: k });
       runKey = key;
       runStart = k;
     }
-    if (!key) break; // 更旧的字符只会更清晰、更干
+    if (!key) break;
   }
-  if (k >= n) flush(n);
+  if (runKey) runs.push({ key: runKey, start: runStart, end: k });
+  const signature = runs.map((run) => `${run.key}:${run.start}:${run.end}`).join("|");
+  if (signature === s.paintSignature) return;
+  hlClear(s);
+  const doc = s.tailNodes[0].ownerDocument;
+  for (const run of runs) {
+    const older = run.end - 1;
+    const hl = hlGroups.get(run.key);
+    if (older < run.start || !hl) continue;
+    const range = doc.createRange();
+    range.setStart(s.tailNodes[older], s.tailOffs[older]);
+    range.setEnd(s.tailNodes[run.start], s.tailEnds[run.start]);
+    hl.add(range);
+    s.owned.push({ name: run.key, range });
+  }
+  s.paintSignature = signature;
 }
 
 export function useStreamReveal(text: string, streaming: boolean, enabled = true) {
@@ -407,11 +529,13 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
   const effect: StreamRevealType = enabled ? setting : "baseline";
   const active = effect !== "baseline";
   const [display, setDisplay] = useState(text);
+  const displayRef = useRef(display);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const stRef = useRef<RevealState>(freshState());
   const textRef = useRef(text);
   const streamingRef = useRef(streaming);
   const kickRef = useRef<(() => void) | null>(null);
+  displayRef.current = display;
   textRef.current = text;
   streamingRef.current = streaming;
 
@@ -420,45 +544,93 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
     if (effect !== "mist" || !highlightsSupported()) return;
     const wrap = wrapRef.current;
     const s = stRef.current;
-    if (!wrap) return;
+    if (!wrap || s.hlFailed) return;
     // 历史消息 / 已收尾的框：什么都不做（不注册高亮名、不读样式、不写 CSS 变量）
     // s.text 为空 = 初始化 effect 尚未跑过（首次挂载）：此时 shown 还是初始 0，不能据此判为"未揭示完"
     const live = streamingRef.current || (s.text !== "" && s.shown < textRef.current.length);
     if (s.finished || !live) return;
-    acquireHighlights(s);
-    indexTail(wrap, s, display);
-    setupMistVars(wrap, s);
-    paintMist(s, performance.now());
+    try {
+      acquireHighlights(s);
+      indexTail(wrap, s, display);
+      setupMistVars(wrap, s);
+      paintMist(s, performance.now());
+    } catch (error) {
+      console.warn("[stream-reveal] Highlight 绘制失败，降级为普通揭示", error);
+      s.hlFailed = true;
+      clearMistRuntime(wrap, s);
+    }
   }, [display, effect]);
 
   useEffect(() => {
     if (!active) return;
     const s = stRef.current;
-    // 效果切换/首次挂载：清 overlay/高亮、揭示位追平当前到达位（已到达部分不补动画，新到达继续揭示）。
-    // 非流式挂载（历史消息）直接标记收尾——不起 rAF、不建叠层、不读布局
+    // 历史消息直接显示完整正文；流式挂载即使已收到第一批文本，也必须从揭示起点开始。
     clearOverlays(s);
     releaseHighlights(s);
     const initial = textRef.current;
+    const initialPosition = streamingRef.current ? 0 : initial.length;
     Object.assign(s, freshState(), {
       overlays: s.overlays,
+      hlFailed: s.hlFailed,
       text: initial,
-      disp: initial.length,
-      shown: initial.length,
-      settled: initial.length,
-      crossEnd: initial.length,
-      edge: initial.length,
+      disp: initialPosition,
+      shown: initialPosition,
+      settled: initialPosition,
+      lastReceiveAt: performance.now(),
+      crossEnd: initialPosition ? Number.POSITIVE_INFINITY : 0,
+      edge: initialPosition,
       finished: !streamingRef.current,
     });
-    setDisplay(initial);
+    setDisplay(initialPosition ? initial : "");
+
+    let domObserver: MutationObserver | null = null;
+    let themeObserver: MutationObserver | null = null;
+    const disconnectObservers = () => {
+      domObserver?.disconnect();
+      themeObserver?.disconnect();
+      domObserver = null;
+      themeObserver = null;
+    };
+    const observeMist = () => {
+      const wrap = wrapRef.current;
+      if (effect !== "mist" || s.hlFailed || !wrap || domObserver) return;
+      domObserver = new MutationObserver(() => {
+        if (!s.finished) s.indexDirty = true;
+      });
+      domObserver.observe(wrap, { childList: true, subtree: true, characterData: true });
+      themeObserver = new MutationObserver(() => {
+        if (s.finished) return;
+        s.accent = accentColorOf();
+        s.fg = "";
+        setupMistVars(wrap, s);
+        s.paintSignature = "";
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-theme"],
+      });
+    };
 
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      const dt = Math.min(64, now - last);
+      const dt = Math.min(250, now - last);
       last = now;
-      raf = step(s, now, dt) ? 0 : requestAnimationFrame(loop);
+      try {
+        raf = step(s, now, dt) ? 0 : requestAnimationFrame(loop);
+      } catch (error) {
+        console.warn("[stream-reveal] 动效帧失败，降级为完整正文", error);
+        s.hlFailed = true;
+        s.finished = true;
+        raf = 0;
+        disconnectObservers();
+        clearMistRuntime(wrapRef.current, s);
+        setDisplay(textRef.current);
+      }
     };
     kickRef.current = () => {
+      if (s.finished && !streamingRef.current && textRef.current.length <= s.shown) return;
+      observeMist();
       if (raf) return;
       last = performance.now();
       raf = requestAnimationFrame(loop);
@@ -478,6 +650,7 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
         Object.assign(s, freshState(), { overlays: keep });
         setDisplay("");
       }
+      if (text !== s.text) s.lastReceiveAt = now;
       s.text = text;
       if (s.finished) {
         if (!streamingNow && received <= s.shown) return true;
@@ -488,26 +661,40 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
       let idle = false;
 
       if (effect === "mist") {
-        const hl = highlightsSupported();
-        if (hl) acquireHighlights(s);
-        if (streamingNow) s.sweep = 0;
+        if (!s.hlFailed) {
+          s.slowFrames = dt > 64 ? s.slowFrames + 1 : 0;
+          if (s.slowFrames >= 4) {
+            s.hlFailed = true;
+            disconnectObservers();
+            clearMistRuntime(wrap, s);
+          }
+        } else {
+          s.slowFrames = 0;
+        }
+        let hl = !s.hlFailed && highlightsSupported();
+        if (hl) {
+          try {
+            acquireHighlights(s);
+          } catch (error) {
+            console.warn("[stream-reveal] Highlight 注册失败，降级为普通揭示", error);
+            s.hlFailed = true;
+            clearMistRuntime(wrap, s);
+            disconnectObservers();
+            hl = false;
+          }
+        }
+        const quiet = streamingNow && now - s.lastReceiveAt >= 450;
+        if (streamingNow && !quiet) s.sweep = 0;
         s.disp += (received - s.disp) * (1 - Math.exp(-dt / TAU));
         if (received - s.disp < 0.02) s.disp = received;
         let edge = s.disp;
-        // 到齐后雾边匀速扫尾：否则末尾 N 字会永远停在半透明（edge 不再前进）
-        if (!streamingNow && received - s.disp < 0.5) {
+        // 到齐或暂停追平后雾边匀速扫尾，新文本到达会重新唤醒。
+        if ((!streamingNow || quiet) && received - s.disp < 0.5) {
           if (!s.sweep) s.sweep = s.disp;
           s.sweep = Math.min(received + MIST_N, s.sweep + dt * (MIST_N / 250));
           edge = Math.max(s.disp, s.sweep);
         }
         s.edge = edge;
-        // 记录字符被前沿越过的时刻（水痕年龄起点）
-        const crossed = Math.min(received, Math.ceil(edge));
-        if (crossed > s.crossEnd) {
-          s.cross.push({ from: s.crossEnd, end: crossed, t: now });
-          s.crossEnd = crossed;
-          s.lastCrossT = now;
-        }
         while (s.cross.length > 0 && now - s.cross[0].t > DRY + 300) s.cross.shift();
         // DOM 补铺：前沿逼近已铺末尾时批量补铺（预铺字符透明，等前沿到达才渐显）
         const need = hl ? Math.min(received, Math.ceil(edge) + MIST_CUSHION) : Math.min(received, Math.ceil(edge));
@@ -519,10 +706,17 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
           s.lastSet = now;
           setDisplay(text.slice(0, safeIndex(text, target)));
         }
-        if (hl) paintMist(s, now);
-        const ended = !streamingNow && s.shown >= received;
+        if (hl && (s.indexDirty || now - s.lastPaintAt >= 32 || (s.tailNodes.length === 0 && displayRef.current))) {
+          if (s.indexDirty || (s.tailNodes.length === 0 && displayRef.current)) indexTail(wrap, s, displayRef.current);
+          setupMistVars(wrap, s);
+          paintMist(s, now);
+        }
+        const ended = (!streamingNow || quiet) && s.shown >= received;
         idle = ended && edge >= received + (hl ? MIST_N : 0) && (!hl || now - s.lastCrossT >= DRY);
-        if (idle) releaseHighlights(s);
+        if (idle) {
+          disconnectObservers();
+          clearMistRuntime(wrap, s);
+        }
       } else if (effect === "type") {
         if (s.shown < received) {
           s.acc += dt;
@@ -594,8 +788,9 @@ export function useStreamReveal(text: string, streaming: boolean, enabled = true
       cancelAnimationFrame(raf);
       raf = 0;
       kickRef.current = null;
+      disconnectObservers();
       clearOverlays(stRef.current);
-      releaseHighlights(stRef.current);
+      clearMistRuntime(wrapRef.current, stRef.current);
     };
   }, [active, effect]);
 

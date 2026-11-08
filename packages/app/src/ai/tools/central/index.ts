@@ -20,6 +20,7 @@ export { httpRequestTool } from "./http-request";
 export { downloadFileTool } from "./download-file";
 export { extractZipTool } from "./extract-zip";
 export { readLocalFileTool } from "./read-local-file";
+export { presentTool } from "./present";
 export { writeFileTool } from "./write-file";
 export { editFileTool } from "./edit-file";
 export { runCommandTool } from "./run-command";

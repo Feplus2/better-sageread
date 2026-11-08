@@ -56,7 +56,7 @@
     --tab-active-foreground: #4f3f2c;
 
   /* Tailwind neutral 色阶重映射：所有 text-neutral-* / bg-neutral-* /
-   * border-neutral-*/hover:bg-neutral-* 一次性变为暖棕灰 */
+   * border-neutral-* 与 hover:bg-neutral-*：一次性变为暖棕灰 */
   --color-neutral-50: #faf5e8;
   --color-neutral-100: #f4ecd8;
   --color-neutral-200: #eaddc0;
@@ -74,41 +74,54 @@
   --shadow-warm-lg: 0 2px 6px rgba(79, 63, 44, 0.09), 0 16px 48px rgba(79, 63, 44, 0.17);
 }
 
-/* ---------- 2. 基础变量：深色 ----------
- * neutral 色阶无需重定义：dark: 变体直接引用色阶槽位
- * （如 dark:bg-neutral-800 命中 --color-neutral-800 暖深棕）。 */
+/* ---------- 2. 基础变量：深色（暖琥珀书房）----------
+ * 深暖棕底配浅琥珀操作色；neutral 色阶独立调整，避免灰绿与泥土感。 */
 html.dark {
-  --background: #2b251c;
-  --foreground: #e0d2ae;
-  --card: #332b20;
-  --card-foreground: #e0d2ae;
-  --popover: #383023;
-  --popover-foreground: #e0d2ae;
-  --primary: #d29a6a;
-  --primary-foreground: #2b251c;
-  --secondary: #3d3428;
-  --secondary-foreground: #e0d2ae;
-  --muted: #3d3428;
-  --muted-foreground: #a89372;
-  --accent: #4a3f2e;
-  --accent-foreground: #e0d2ae;
-  --border: #524630;
-  --input: #524630;
-  --ring: #d29a6a;
-  --sidebar: #2b251c;
-  --sidebar-foreground: #e0d2ae;
-  --sidebar-primary: #d29a6a;
-  --sidebar-primary-foreground: #2b251c;
-  --sidebar-accent: #4a3f2e;
-  --sidebar-accent-foreground: #e0d2ae;
-  --sidebar-border: #524630;
-  --sidebar-ring: #d29a6a;
+  --background: #30251c;
+  --foreground: #f2e3c4;
+  --card: #3d2f23;
+  --card-foreground: #f2e3c4;
+  --popover: #493928;
+  --popover-foreground: #f2e3c4;
+  --primary: #e3ae76;
+  --primary-foreground: #30251c;
+  --secondary: #59432e;
+  --secondary-foreground: #f2e3c4;
+  --muted: #423326;
+  --muted-foreground: #c9b492;
+  --accent: #665039;
+  --accent-foreground: #f2e3c4;
+  --destructive: #e3ae76;
+  --destructive-foreground: #30251c;
+  --border: #796045;
+  --input: #826950;
+  --ring: #e3ae76;
+  --sidebar: #281e16;
+  --sidebar-foreground: #f2e3c4;
+  --sidebar-primary: #e3ae76;
+  --sidebar-primary-foreground: #30251c;
+  --sidebar-accent: #513d2a;
+  --sidebar-accent-foreground: #f2e3c4;
+  --sidebar-border: #6e563b;
+  --sidebar-ring: #e3ae76;
 
-  --content: #e0d2ae;
-  --layout: #2b251c;
-    --tab-background: #322a1f;
-    --tab-active: #453a2b;
-    --tab-active-foreground: #e0d2ae;
+  --content: #f2e3c4;
+  --layout: #30251c;
+  --tab-background: #32261b;
+  --tab-active: #493928;
+  --tab-active-foreground: #f2e3c4;
+
+  --color-neutral-50: #faf0dc;
+  --color-neutral-100: #efdfc3;
+  --color-neutral-200: #dfcaa7;
+  --color-neutral-300: #c9b492;
+  --color-neutral-400: #af9672;
+  --color-neutral-500: #947956;
+  --color-neutral-600: #776044;
+  --color-neutral-700: #5e4b35;
+  --color-neutral-800: #493928;
+  --color-neutral-900: #3b2e22;
+  --color-neutral-950: #2b2118;
 
   --shadow-warm-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-warm-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.35);

@@ -82,7 +82,8 @@ writeFileSync(
   `export * as confirm from "${posix(join(src, "store/agent-confirm-store.ts"))}";
    export * as files from "${posix(join(src, "services/agent-workspace-files.ts"))}";
    export * as guard from "${posix(join(src, "ai/utils/tool-guard.ts"))}";
-   export * as settings from "${posix(join(src, "store/agent-settings-store.ts"))}";`,
+   export * as settings from "${posix(join(src, "store/agent-settings-store.ts"))}";
+   export * as present from "${posix(join(src, "ai/tools/central/present.ts"))}";`,
 );
 await esbuild.build({
   entryPoints: [entry],
@@ -412,6 +413,28 @@ await test("同一路径 modifiedMs 改变后必须重新确认", async () => {
   } finally {
     window.__TAURI_INTERNALS__.invoke = originalInvoke;
   }
+});
+
+await test("严格模式交付界外文件在确认后绑定原规范化路径", async () => {
+  reset();
+  const tools = api.guard.wrapToolsWithGuard({ present: api.present.presentTool }, "central");
+  const pending = tools.present.execute(
+    { reasoning: "验证界外交付授权", path: "F:/outside/present.txt", description: "测试交付物" },
+    { toolCallId: "present-outside-strict", messages: [] },
+  );
+  await flush();
+  assert.equal(confirms.getState().queue.length, 1);
+  assert.equal(
+    calls.some((call) => call.command === "agent_workspace_stat"),
+    false,
+    "批准前不得读取交付文件元信息",
+  );
+  confirms.getState().resolvePending(true, false);
+  const result = await pending;
+  assert.equal(result.results.success, true);
+  const stat = calls.find((call) => call.command === "agent_workspace_stat");
+  assert.equal(stat?.args.allowOutside, true);
+  assert.equal(stat?.args.expectedResolved, "F:/outside/present.txt");
 });
 
 console.log(`\n结果：${passed} passed, ${failed} failed`);

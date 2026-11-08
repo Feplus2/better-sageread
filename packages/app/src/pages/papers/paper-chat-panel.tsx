@@ -1,3 +1,7 @@
+import { AssistantPanelTransition } from "@/components/file-workspace/assistant-panel-transition";
+import { FileWorkspace } from "@/components/file-workspace/file-workspace";
+import { useFileWorkspaceChat } from "@/components/file-workspace/use-file-workspace-chat";
+import { WorkspaceOpenButton } from "@/components/file-workspace/workspace-open-button";
 import { CitationFallbackContext, type CitationSource } from "@/components/markdown/citation-source";
 import { InlineMathText } from "@/components/markdown/inline-math-text";
 import { ChatContainerRoot } from "@/components/prompt-kit/chat-container";
@@ -35,6 +39,8 @@ interface PaperChatPanelProps {
 export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
   const { autoScroll } = useThemeStore();
   const [currentThread, setCurrentThread] = useState<Thread | null>(null);
+  const hostId = `paper:${paperId}`;
+  const { isFileMode, openChangedFile, openLocalFile } = useFileWorkspaceChat(hostId, "paper", currentThread?.id);
   // 用户划定的检索范围（按论文持久化；仅缺失记录时默认论文库，显式保存的选择不变）。同时约束向量检索与文档直读。
   const retrievalScope = useRetrievalScopeFor("paper", paperId);
   // StickToBottom 上下文 ref：随 ChatContainerRoot contextRef 下发并透传 ChatMessages（命令式读
@@ -102,6 +108,7 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
       // 阅读位置改由活位置注册表注入提示词（PaperReader 写 setLiveReadingPosition），
       // 不再随 chatContext 传"当前小节正文/标题"——避免每滚一次就整面板重渲 + 正文重复注入
       agentScope: "paper",
+      workspaceHostId: hostId,
       retrievalScope,
       paperScopeIds,
     },
@@ -119,7 +126,7 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
   });
 
   const EmptyState = () => (
-    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2 pb-8">
+    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2">
       <div className="flex flex-1 flex-col justify-center gap-3">
         <div className="flex flex-col items-start gap-4 pl-2">
           <div className="rounded-full bg-muted/70 p-3 shadow-md dark:bg-neutral-800/90">
@@ -167,6 +174,7 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
                 className="z-40 w-[10rem] min-w-0 flex-shrink"
               />
               <RetrievalScopeSelect role="paper" docId={paperId} />
+              <WorkspaceOpenButton hostId={hostId} scope="paper" />
             </div>
             <div className="flex flex-shrink-0 items-center gap-0">
               {messages.length > 0 && !showThreads && (
@@ -216,51 +224,67 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
           </div>
         </div>
 
-        {showThreads ? (
-          <div className="min-h-0 flex-1">
-            <ChatThreads
-              key={`threads-${threadsKey}`}
-              bookId={paperId}
-              currentThreadId={currentThread?.id ?? null}
-              onBack={handleBackFromThreads}
-              onSelectThread={handleSelectThread}
-            />
-          </div>
-        ) : messages.length === 0 && isInit.current ? (
-          <EmptyState />
-        ) : (
-          <ChatContainerRoot
-            className="relative flex-1"
-            autoScroll={autoScroll}
-            contextRef={stickContextRef}
-            navMessages={messages}
+        <AssistantPanelTransition present={isFileMode} className="top-8">
+          <FileWorkspace hostId={hostId} scope="paper" />
+        </AssistantPanelTransition>
+        <div className="relative min-h-0 flex-1">
+          <AssistantPanelTransition
+            present={showThreads && !isFileMode}
+            side="left"
+            onBackdropClick={handleBackFromThreads}
           >
-            <ChatMessages
-              messages={messages}
-              status={status}
-              error={displayError}
-              autoScroll={autoScroll}
-              scrollKey={currentThread?.id ?? "__init__"}
-              bookId={currentThread?.book_id ?? paperId ?? null}
-              onReasoningTimesUpdate={handleReasoningTimesUpdate}
-              onRetry={handleRetry}
-              canRetry={canRetry}
-              onAskSelection={handleAskSelection}
-              onViewToolDetail={handleViewToolDetail}
-              selectionMode={selectionMode}
-              selectedIds={selectedIds}
-              onToggleSelect={handleToggleSelect}
-              stickContextRef={stickContextRef}
-            />
-            <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
-              <div className="pointer-events-auto">
-                <ScrollButton />
-              </div>
+            <div className="h-full min-h-0 bg-background" data-region="assistant-history-panel">
+              <ChatThreads
+                key={`threads-${threadsKey}`}
+                bookId={paperId}
+                currentThreadId={currentThread?.id ?? null}
+                onBack={handleBackFromThreads}
+                onSelectThread={handleSelectThread}
+              />
             </div>
-          </ChatContainerRoot>
-        )}
+          </AssistantPanelTransition>
+          <div className="h-full" inert={isFileMode || showThreads} aria-hidden={isFileMode || showThreads}>
+            {messages.length === 0 && isInit.current ? (
+              <div className="h-full">
+                <EmptyState />
+              </div>
+            ) : (
+              <ChatContainerRoot
+                className="relative h-full"
+                autoScroll={autoScroll}
+                contextRef={stickContextRef}
+                navMessages={messages}
+              >
+                <ChatMessages
+                  messages={messages}
+                  onOpenLocalFile={openLocalFile}
+                  onOpenFile={(file) => void openChangedFile(file)}
+                  status={status}
+                  error={displayError}
+                  autoScroll={autoScroll}
+                  scrollKey={currentThread?.id ?? "__init__"}
+                  bookId={currentThread?.book_id ?? paperId ?? null}
+                  onReasoningTimesUpdate={handleReasoningTimesUpdate}
+                  onRetry={handleRetry}
+                  canRetry={canRetry}
+                  onAskSelection={handleAskSelection}
+                  onViewToolDetail={handleViewToolDetail}
+                  selectionMode={selectionMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={handleToggleSelect}
+                  stickContextRef={stickContextRef}
+                />
+                <div className="-translate-x-1/2 pointer-events-none absolute bottom-4 left-1/2 flex w-full max-w-3xl justify-end px-5">
+                  <div className="pointer-events-auto">
+                    <ScrollButton />
+                  </div>
+                </div>
+              </ChatContainerRoot>
+            )}
+          </div>
+        </div>
 
-        {selectionMode && !showThreads && (
+        {selectionMode && !showThreads && !isFileMode && (
           <SelectionExportBar
             selectedCount={selectedIds.size}
             onExportMarkdown={() => void exportMessagesToMarkdown(getSelectedMessages(), buildSelectionMeta())}
@@ -270,30 +294,33 @@ export function PaperChatPanel({ paperId, paperTitle }: PaperChatPanelProps) {
           />
         )}
 
-        {!showThreads && (
-          <>
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-[60] px-2">
+          <div className="pointer-events-auto">
             <AgentConfirmCard />
-            <ChatInputArea
-              input={input}
-              setInput={setInput}
-              references={references}
-              onRemoveReference={handleRemoveReference}
-              images={images}
-              onRemoveImage={handleRemoveImage}
-              onAddImageFiles={handleAddImageFiles}
-              files={files}
-              onRemoveFile={handleRemoveFile}
-              onAddFiles={handleAddFiles}
-              onInputEl={registerInputEl}
-              onSubmit={handleSubmit}
-              onStop={stop}
-              status={status}
-              activeBookId={paperId}
-              setActiveBookId={() => {}}
-              agentScope="paper"
-            />
-          </>
-        )}
+          </div>
+        </div>
+        <div className={showThreads || isFileMode ? "hidden" : undefined}>
+          <ChatInputArea
+            workspace={{ hostId, scope: "paper", threadId: currentThread?.id }}
+            input={input}
+            setInput={setInput}
+            references={references}
+            onRemoveReference={handleRemoveReference}
+            images={images}
+            onRemoveImage={handleRemoveImage}
+            onAddImageFiles={handleAddImageFiles}
+            files={files}
+            onRemoveFile={handleRemoveFile}
+            onAddFiles={handleAddFiles}
+            onInputEl={registerInputEl}
+            onSubmit={handleSubmit}
+            onStop={stop}
+            status={status}
+            activeBookId={paperId}
+            setActiveBookId={() => {}}
+            agentScope="paper"
+          />
+        </div>
 
         {/* 工具详情弹窗（思维导图/webSearch 结构化结果，与书籍侧栏同款） */}
         <MindmapDialog open={showToolDetailDialog} onOpenChange={setShowToolDetailDialog} toolPart={toolDetail} />
