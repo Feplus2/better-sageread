@@ -1,6 +1,6 @@
 [package]
 name = "better-sageread"
-version = "0.4.2"
+version = "0.5.0"
 description = "Better SageRead — AI-assisted reader for ebooks (EPUB) and academic papers"
 authors = ["Better SageRead contributors"]
 edition = "2021"

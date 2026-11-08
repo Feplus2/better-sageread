@@ -31,6 +31,10 @@
 4. **确认按安全模式与例外矩阵**：strict 的界外读、strict/relaxed 的界外写与命令先确认，full 对常规路径/命令静默；relaxed/full 的界外读免确认。`attachment://` 不走本地路径判界。网络非 GET、含密钥引用的外发以及破坏性/密钥操作等恒确认例外不因 full 取消。确认桥使用 `store/agent-confirm-store.ts` 队列，拒绝返回取消结果。
 5. **图片检查与读取不可分离**：`agent_read_image` 在同一 Rust 调用内完成 canonical 判界、授权复核、敏感路径拒绝、目录/20MiB 检查与字节读取，返回 `ArrayBuffer`；前端保留魔数嗅探、解码和降采样。确认后 canonical target 变化必须失败，不能复用旧授权。
 6. **runCommand 全模式写审计日志**（Rust 侧 `{appData}/agent-audit/commands.jsonl`）；不要为通过测试而扩大全局 assetProtocol scope。
+7. **交付文件必须显式调用 `present`**：仅用于本轮真正要交付的成果，不把测试脚本或中间产物自动列为交付物。`present` 经 `agent_workspace_stat` 核对真实存在且非目录，返回 `results.deliverable={path,description?}`；界外读取仍走 `fileRead` 守卫，严格模式确认后保留原 canonical target，不能把模型自报路径当成交付证据。
+8. **命令产物用 `artifactPaths` 声明并核验**：`runCommand` 只核对声明的工作区内文件，Rust 对执行前后的真实变化返回 `changes[{path,kind,verified}]`。只有 verified 变化进入「已编辑文件」；新建/覆盖/删除不得冒充。`writeFile` 另返回真实 `created` 标记。交付列表由 `presented-files.ts` 收集，编辑列表由 `changed-files.ts` 收集，两者不得混用。
+
+相关回归：`test-presented-files.mjs`、`test-changed-files.mjs`、`test-preview-grants.mjs`、`cdp-test-file-workspace.mjs`、`cdp-test-file-workspace-formats.mjs`、`cdp-verify-real-game-delivery.mjs`。
 
 ## 请求历史兼容
 
