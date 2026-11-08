@@ -67,6 +67,7 @@ export const writeFileTool = tool({
             : `已覆盖 ${res.resolved}（${res.bytes} 字节）`,
           path: res.resolved,
           bytes: res.bytes,
+          created: res.created,
         },
         meta: { reasoning, path: res.resolved },
       };

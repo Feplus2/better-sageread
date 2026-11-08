@@ -19,6 +19,7 @@ import { createThread, editThread, getLatestThreadBybookId, getThreadById } from
 import { generateThreadTitleWithAI } from "@/services/thread-title-service";
 import { useChatDraftStore } from "@/store/chat-draft-store";
 import { type SelectedModel, useProviderStore } from "@/store/provider-store";
+import { selectTaskWorkspaceRoot, useTaskWorkspaceStore } from "@/store/task-workspace-store";
 import { useThreadStore } from "@/store/thread-store";
 import type { ChatReference, FileAttachment, ImageAttachment, MessageMetadata } from "@/types/message";
 import type { Thread, ThreadSummary } from "@/types/thread";
@@ -132,6 +133,10 @@ export interface ChatContext {
   paperScopeIds?: string[] | null;
   /** 当前对话 id（滚动压缩摘要按对话持久化用，useChatState 注入，调用方无需传） */
   threadId?: string;
+  /** 单次任务工作区所属面板；仅在请求体自带上下文中参与根解析 */
+  workspaceHostId?: string;
+  /** 本次请求创建时冻结的任务根；null 表示仅使用请求开始时的默认根，不读取后续 pending。 */
+  workspaceRootOverride?: string | null;
 }
 
 interface UseChatStateOptions {
@@ -170,17 +175,20 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   }, []);
 
   /** 在输入区光标处插入占位标记；未聚焦时追加到末尾（可多选替换选区） */
-  const insertMarkerIntoInput = useCallback((marker: string) => {
-    const el = inputElRef.current;
-    setInput((prev) => {
-      if (el && document.activeElement === el) {
-        const start = el.selectionStart ?? prev.length;
-        const end = el.selectionEnd ?? start;
-        return prev.slice(0, start) + marker + prev.slice(end);
-      }
-      return prev ? `${prev}${marker}` : marker;
-    });
-  }, []);
+  const insertMarkerIntoInput = useCallback(
+    (marker: string) => {
+      const el = inputElRef.current;
+      setInput((prev) => {
+        if (el && document.activeElement === el) {
+          const start = el.selectionStart ?? prev.length;
+          const end = el.selectionEnd ?? start;
+          return prev.slice(0, start) + marker + prev.slice(end);
+        }
+        return prev ? `${prev}${marker}` : marker;
+      });
+    },
+    [setInput],
+  );
   const isInit = useRef(false);
   const globalThreadStore = useThreadStore();
   const currentThread = options.currentThread !== undefined ? options.currentThread : globalThreadStore.currentThread;
@@ -315,7 +323,6 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
 
           if (messageIndex !== -1) {
             const prevMeta = (message.metadata as MessageMetadata) || {};
-            // H1：正常完成时清除中断标记（若是续生成/重试补完的）
             const { interrupted: _interrupted, ...restMeta } = prevMeta as MessageMetadata & {
               interrupted?: boolean;
             };
@@ -323,6 +330,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
               ...message,
               metadata: {
                 ...restMeta,
+                ...(prevMeta.finishReason === "length" ? { interrupted: true } : {}),
                 provider: selectedModel,
                 selectedModel,
                 createdAt: Math.floor(Date.now() / 1000),
@@ -400,6 +408,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           createThread(activeBookId, firstUserText.slice(0, 50), normalizedMessages, threadScope)
             .then((thread) => {
               console.log("Created thread on finish:", thread.id);
+              useTaskWorkspaceStore.getState().bindPendingWorkspaceRoot(chatContext.workspaceHostId, thread.id);
               persistMessages(thread);
             })
             .catch((error) => {
@@ -602,7 +611,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       }
       setReferences((prev) => prev.filter((reference) => reference.id !== id));
     },
-    [references],
+    [references, setInput],
   );
 
   const handleRemoveImage = useCallback(
@@ -613,7 +622,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       }
       setImages((prev) => prev.filter((img) => img.id !== id));
     },
-    [images],
+    [images, setInput],
   );
 
   // 图片附件核心追加（本地文件选择器 / 阅读区图片引用共用）：分配标记号 + 光标处插占位
@@ -677,13 +686,16 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
   );
 
   // ─── Phase A 通用文件附件 ───
-  const handleRemoveFile = useCallback((id: string) => {
-    setFiles((prev) => {
-      const target = prev.find((f) => f.id === id);
-      if (target) setInput((p) => p.replaceAll(`⟦文件${target.markerNum}⟧`, ""));
-      return prev.filter((f) => f.id !== id);
-    });
-  }, []);
+  const handleRemoveFile = useCallback(
+    (id: string) => {
+      setFiles((prev) => {
+        const target = prev.find((f) => f.id === id);
+        if (target) setInput((p) => p.replaceAll(`⟦文件${target.markerNum}⟧`, ""));
+        return prev.filter((f) => f.id !== id);
+      });
+    },
+    [setInput],
+  );
 
   /** 通用附件入口（回形针/拖拽共用）：图片走 J2 原链路；文本小文件 inline 注入；
    *  大文件/二进制复制进 attachments/ 后 ref 登记路径（Agent 用工具按需读取） */
@@ -703,7 +715,8 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
         const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
         const looksBinary = head.includes(0);
         const looksText =
-          !looksBinary && (TEXT_ATTACHMENT_EXTS.has(ext) || file.type.startsWith("text/") || file.type === "application/json");
+          !looksBinary &&
+          (TEXT_ATTACHMENT_EXTS.has(ext) || file.type.startsWith("text/") || file.type === "application/json");
 
         if (looksText && file.size <= INLINE_ATTACHMENT_BYTES) {
           const content = await file.text();
@@ -728,7 +741,15 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
               if (mdText.length <= INLINE_ATTACHMENT_BYTES) {
                 setFiles((prev) => [
                   ...prev,
-                  { id, markerNum, name: file.name, size: file.size, mode: "inline", content: mdText, via: "MarkItDown" },
+                  {
+                    id,
+                    markerNum,
+                    name: file.name,
+                    size: file.size,
+                    mode: "inline",
+                    content: mdText,
+                    via: "MarkItDown",
+                  },
                 ]);
               } else {
                 setFiles((prev) => [
@@ -752,14 +773,24 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
               // Phase C：PDF 提取为空/失败 → 引擎兜底（MinerU 优先、PaddleOCR 兜底，可能需几分钟）
               const engine = pickAttachmentOcrEngine()!;
               const engineLabel = engine === "mineru" ? "MinerU" : "PaddleOCR";
-              toast.loading(`MarkItDown 提取为空，改用 ${engineLabel} 引擎解析（扫描件可能需要几分钟）…`, { id: toastId });
+              toast.loading(`MarkItDown 提取为空，改用 ${engineLabel} 引擎解析（扫描件可能需要几分钟）…`, {
+                id: toastId,
+              });
               const ocr = await ocrPdfForAttachment(origPath, `${origPath}-ocr`, engine);
               if (ocr.ok && ocr.md_path) {
                 const mdText = await readTextFile(ocr.md_path);
                 if (mdText.length <= INLINE_ATTACHMENT_BYTES) {
                   setFiles((prev) => [
                     ...prev,
-                    { id, markerNum, name: file.name, size: file.size, mode: "inline", content: mdText, via: engineLabel },
+                    {
+                      id,
+                      markerNum,
+                      name: file.name,
+                      size: file.size,
+                      mode: "inline",
+                      content: mdText,
+                      via: engineLabel,
+                    },
                   ]);
                 } else {
                   setFiles((prev) => [
@@ -810,7 +841,11 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
                   attachmentRef,
                   absPath: origPath,
                   via: "MarkItDown",
-                  note: empty ? (file.name.toLowerCase().endsWith(".pdf") ? "empty-no-engine" : "empty") : (outcome.error ?? "failed"),
+                  note: empty
+                    ? file.name.toLowerCase().endsWith(".pdf")
+                      ? "empty-no-engine"
+                      : "empty"
+                    : (outcome.error ?? "failed"),
                 },
               ]);
               toast.warning(
@@ -856,7 +891,10 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           const bytes = new Uint8Array(await file.arrayBuffer());
           const attachmentRef = await saveFileAttachment(id, file.name, bytes);
           const absPath = (await attachmentToAbsPath(attachmentRef)) ?? undefined;
-          setFiles((prev) => [...prev, { id, markerNum, name: file.name, size: file.size, mode: "ref", content: "", attachmentRef, absPath }]);
+          setFiles((prev) => [
+            ...prev,
+            { id, markerNum, name: file.name, size: file.size, mode: "ref", content: "", attachmentRef, absPath },
+          ]);
           insertMarkerIntoInput(`⟦文件${markerNum}⟧`);
         } catch (error) {
           console.warn("附件落盘失败:", error);
@@ -898,7 +936,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             id: f.id,
           });
         } else {
-          const lines = [`【附件已登记：${f.name}（${formatAttachmentSize(f.size)}${f.via ? `，${f.via} 已处理` : ""}）】`];
+          const lines = [
+            `【附件已登记：${f.name}（${formatAttachmentSize(f.size)}${f.via ? `，${f.via} 已处理` : ""}）】`,
+          ];
           if (f.via && f.absPath?.endsWith(".md")) {
             lines.push(`Markdown 版（用 readLocalFile 分段读取）：${f.absPath}`);
             if (f.origPath) lines.push(`原始文件：${f.origPath}`);
@@ -906,13 +946,17 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
             lines.push(`文件已保存到：${f.absPath ?? f.attachmentRef ?? ""}`);
           }
           if (f.note === "empty") {
-            lines.push("注意：MarkItDown 对该文件提取为空（可能是扫描件/图片型文档）——如需内容请如实告知，不要凭文件名猜测。");
+            lines.push(
+              "注意：MarkItDown 对该文件提取为空（可能是扫描件/图片型文档）——如需内容请如实告知，不要凭文件名猜测。",
+            );
           } else if (f.note === "empty-no-engine") {
             lines.push(
               "注意：MarkItDown 对该 PDF 提取为空（扫描件特征），且未配置 MinerU/PaddleOCR token（设置→PDF 转换）无法 OCR——如需内容请如实告知用户并引导配置，不要凭文件名猜测。",
             );
           } else if (f.note?.startsWith("ocr-failed:")) {
-            lines.push(`注意：MarkItDown 与 OCR 引擎均未提取成功（${f.note.slice("ocr-failed:".length)}），已按原文件登记——如需内容请如实告知。`);
+            lines.push(
+              `注意：MarkItDown 与 OCR 引擎均未提取成功（${f.note.slice("ocr-failed:".length)}），已按原文件登记——如需内容请如实告知。`,
+            );
           } else if (f.note) {
             lines.push(`注意：MarkItDown 转换失败（${f.note}），已按原文件登记。`);
           }
@@ -970,6 +1014,17 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       const trimmedInput = sourceInput.trim();
       if (!trimmedInput) return;
 
+      const workspaceRootOverride =
+        selectTaskWorkspaceRoot(
+          useTaskWorkspaceStore.getState(),
+          chatContext.workspaceHostId ?? "",
+          currentThread?.id,
+        ) ?? null;
+      const requestChatContext: ChatContext = {
+        workspaceHostId: chatContext.workspaceHostId,
+        threadId: currentThread?.id,
+        workspaceRootOverride,
+      };
       setDisplayError(null);
 
       const referenceSnapshot = references.map((reference) => ({ ...reference }));
@@ -997,6 +1052,9 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           setCurrentThread(thread);
           // H1：同步赋值 ref，让随后的流式落库立即能读到 thread id
           currentThreadRef.current = thread;
+          useTaskWorkspaceStore
+            .getState()
+            .bindPendingWorkspaceRoot(chatContext.workspaceHostId, thread.id, requestChatContext.workspaceRootOverride);
           console.log("Created new thread:", thread.id);
         } catch (error) {
           console.error("Failed to create thread:", error);
@@ -1013,7 +1071,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       const sentAtSeconds = Math.floor(Date.now() / 1000);
 
       try {
-        await sendMessage({ parts: messageParts });
+        await sendMessage({ parts: messageParts }, { body: { chatContext: requestChatContext } });
         setMessages((prev) => {
           if (!Array.isArray(prev) || prev.length === 0) {
             return prev;
@@ -1054,6 +1112,7 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       input,
       references,
       images,
+      files,
       messages,
       activeBookId,
       currentThread,
@@ -1062,6 +1121,8 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
       sendMessage,
       setMessages,
       setCurrentThread,
+      setInput,
+      chatContext.workspaceHostId,
     ],
   );
 
@@ -1090,11 +1151,12 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
           });
       }
     }
+    useTaskWorkspaceStore.getState().clearPendingWorkspaceRoot(chatContext.workspaceHostId);
     setCurrentThread(null);
     setMessages([]);
     setDisplayError(null);
     setReferences([]);
-  }, [setCurrentThread, setMessages, selectedModel, queryClient]);
+  }, [setCurrentThread, setMessages, selectedModel, queryClient, chatContext.workspaceHostId]);
 
   const handleShowThreads = useCallback(() => {
     if (!showThreads) {
@@ -1138,14 +1200,21 @@ export function useChatState(options: UseChatStateOptions): UseChatStateReturn {
 
     try {
       if (lastMessage?.role === "assistant") {
-        await regenerate({ messageId: lastMessage.id });
+        const metadata = lastMessage.metadata as MessageMetadata | undefined;
+        if (metadata?.interrupted === true && metadata.finishReason === "length") {
+          await handleSubmit(
+            "请从上次回答中断的位置继续，保留已有内容，不要从头重写；如果上次只有思考，请直接给出完整回答。",
+          );
+        } else {
+          await regenerate({ messageId: lastMessage.id });
+        }
       } else {
         await sendMessage();
       }
     } catch (retryError) {
       console.error("Retry failed:", retryError);
     }
-  }, [regenerate, sendMessage, status]);
+  }, [handleSubmit, regenerate, sendMessage, status]);
 
   // 「重新生成」为恒存在能力（用户 2026-08-08）：ready/error 均可重跑末条，不再依赖错误/中断条件
   const canRetry = status === "ready" || status === "error";

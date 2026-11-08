@@ -14,6 +14,7 @@ interface RunCommandResponse {
   stderr: string;
   timedOut: boolean;
   truncated: boolean;
+  changes: { path: string; kind: "created" | "modified" | "deleted"; verified: boolean }[];
 }
 
 export const runCommandTool = tool({
@@ -26,31 +27,45 @@ export const runCommandTool = tool({
 • stdout/stderr 各截断至 2 万字符回传
 
 📊 **返回内容**：
-退出码、stdout、stderr、是否超时、输出是否被截断
+退出码、stdout、stderr、是否超时、输出是否被截断；artifactPaths 声明的文件若实际新建/修改/删除，另附 verified changes
 
 ⚠️ **注意**：
 • 每次执行都会记录审计日志；非"完全访问"模式下需用户确认后才执行
 • 长输出重定向到文件再 readLocalFile 分段读，比直接回传更稳
-• 交互式命令（等待输入）不要用，会卡到超时`,
+• 交互式命令（等待输入）不要用，会卡到超时
+• artifactPaths 仅声明命令计划产出的工作区内文件；未声明/未变化的文件不会进入“已更改文件”`,
 
   inputSchema: z.object({
     reasoning: z.string().min(1).describe("调用此工具的原因"),
     command: z.string().min(1).describe("要执行的完整命令行"),
     timeoutSecs: z.number().int().min(1).max(600).optional().describe("超时秒数（默认 120，上限 600）"),
+    artifactPaths: z
+      .array(z.string().min(1))
+      .max(64)
+      .optional()
+      .describe("可选：声明命令计划产出的工作区内文件路径，执行前后验证实际变更；不要声明未生成文件"),
   }),
 
   execute: async ({
     reasoning,
     command,
     timeoutSecs,
+    artifactPaths,
     rootOverride,
-  }: { reasoning: string; command: string; timeoutSecs?: number; rootOverride?: string | null }) => {
+  }: {
+    reasoning: string;
+    command: string;
+    timeoutSecs?: number;
+    artifactPaths?: string[];
+    rootOverride?: string | null;
+  }) => {
     try {
       const root = rootOverride !== undefined ? rootOverride : useAgentSettingsStore.getState().workspaceRoot;
       const res = await invoke<RunCommandResponse>("agent_run_command", {
         root,
         command,
         timeoutSecs: timeoutSecs ?? null,
+        artifactPaths: artifactPaths ?? null,
       });
       return {
         results: {
@@ -63,6 +78,7 @@ export const runCommandTool = tool({
           stderr: res.stderr,
           timedOut: res.timedOut,
           truncated: res.truncated,
+          changes: res.changes ?? [],
         },
         meta: { reasoning, command },
       };

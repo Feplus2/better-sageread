@@ -45,6 +45,7 @@ const GUARDED_TOOLS: Record<string, GuardSpec> = {
   writeFile: { action: "fileWrite", pathArg: "path", title: "写入工作区外文件" },
   editFile: { action: "fileWrite", pathArg: "path", title: "修改工作区外文件" },
   readLocalFile: { action: "fileRead", pathArg: "path", title: "读取工作区外路径" },
+  present: { action: "fileRead", pathArg: "path", title: "交付工作区外文件" },
   searchFiles: { action: "fileRead", pathArg: "subdir", title: "搜索工作区外目录" },
   readImage: { action: "imageRead", pathArg: "path", title: "读取工作区外图片" },
   viewImages: { action: "imageRead", pathArg: "paths", title: "读取工作区外图片" },
@@ -87,32 +88,88 @@ function summarizeArgs(args: unknown, max = 300): string {
 function requestWithAbort(
   req: { toolName: string; title: string; detail: string; dontAskKey: string },
   signal?: AbortSignal,
+  skipSessionAllowlist = false,
 ): Promise<boolean> {
   if (signal?.aborted) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (approved: boolean) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(approved);
+    };
     const onAbort = () => {
-      useAgentConfirmStore.getState().dropByKey(req.dontAskKey);
-      resolve(false);
+      if (requestId) useAgentConfirmStore.getState().dropById(requestId);
+      settle(false);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
-    useAgentConfirmStore
+    const { requestId, promise } = useAgentConfirmStore
       .getState()
-      .requestConfirmation(req)
-      .then((approved) => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve(approved);
-      })
-      .catch(() => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve(false);
-      });
+      .requestConfirmationWithId({ ...req, skipSessionAllowlist });
+    promise.then(settle).catch(() => settle(false));
   });
 }
 
-export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: AgentScope): Record<string, Tool> {
+interface PreviewArtifact {
+  path: string;
+  kind?: string;
+  verified?: boolean;
+}
+
+function previewArtifacts(result: unknown): PreviewArtifact[] {
+  if (typeof result !== "object" || result === null || !("results" in result)) return [];
+  const results = result.results as { success?: unknown; path?: unknown; changes?: unknown };
+  if (results?.success !== true) return [];
+  if (Array.isArray(results.changes)) {
+    return results.changes.flatMap((change) => {
+      if (typeof change !== "object" || change === null) return [];
+      const artifact = change as { path?: unknown; kind?: unknown; verified?: unknown };
+      return typeof artifact.path === "string"
+        ? [{ path: artifact.path, kind: String(artifact.kind ?? ""), verified: artifact.verified === true }]
+        : [];
+    });
+  }
+  return typeof results.path === "string" ? [{ path: results.path, verified: true }] : [];
+}
+
+async function executeWithPreviewGrantTracking(
+  originalExecute: NonNullable<Tool["execute"]>,
+  args: Parameters<NonNullable<Tool["execute"]>>[0],
+  options: Parameters<NonNullable<Tool["execute"]>>[1],
+  action: GuardAction,
+  scopeRoot: string | null,
+  agentScope: AgentScope,
+) {
+  const result = await originalExecute(args, options);
+  if (action !== "fileWrite" && action !== "command") return result;
+  const artifacts = previewArtifacts(result).filter((artifact) => artifact.verified && artifact.kind !== "deleted");
+  if (artifacts.length === 0) return result;
+  try {
+    const root = await invoke<GuardVerdict>("agent_preview_resolve_path", { root: scopeRoot, path: "." });
+    for (const artifact of artifacts) {
+      const verdict = await invoke<GuardVerdict>("agent_preview_resolve_path", {
+        root: scopeRoot,
+        path: artifact.path,
+      });
+      if (verdict.exists) {
+        useAgentConfirmStore.getState().recordPreviewGrant(agentScope, root.resolved, verdict.resolved);
+      }
+    }
+  } catch (error) {
+    console.warn("登记文件预览授权失败；下次预览仍需重新确认", error);
+  }
+  return result;
+}
+
+export function wrapToolsWithGuard(
+  tools: Record<string, Tool>,
+  agentScope: AgentScope,
+  rootOverride?: string | null,
+): Record<string, Tool> {
   const { safetyMode } = useAgentSettingsStore.getState();
   // 共享根 + 按助手覆盖（2026-08-05 拍板）：本 scope 生效根，判界与注入都用它
-  const scopeRoot = resolveWorkspaceRootForScope(agentScope);
+  const scopeRoot = rootOverride !== undefined ? rootOverride : resolveWorkspaceRootForScope(agentScope);
 
   const wrapped: Record<string, Tool> = {};
   for (const [name, baseTool] of Object.entries(tools)) {
@@ -454,12 +511,45 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
             if (typeof rawPath !== "string" || !rawPath.trim()) {
               return await originalExecute(baseArgs, options);
             }
-            const verdict = await invoke<GuardVerdict>("agent_resolve_path", {
-              root: scopeRoot,
-              path: rawPath,
-            });
+            const verdict = await invoke<GuardVerdict>(
+              options?.toolCallId === "file-workspace-preview" ? "agent_preview_resolve_path" : "agent_resolve_path",
+              { root: scopeRoot, path: rawPath },
+            );
             if (verdict.verdict !== "out") {
-              return await originalExecute(baseArgs, options);
+              return executeWithPreviewGrantTracking(
+                originalExecute,
+                baseArgs,
+                options,
+                spec.action,
+                scopeRoot,
+                agentScope,
+              );
+            }
+            if (spec.action === "fileRead" && options?.toolCallId === "file-workspace-preview") {
+              const root = await invoke<GuardVerdict>("agent_preview_resolve_path", { root: scopeRoot, path: "." });
+              if (!verdict.exists) {
+                useAgentConfirmStore.getState().revokePreviewGrant(agentScope, root.resolved, verdict.resolved);
+              } else if (useAgentConfirmStore.getState().hasPreviewGrant(agentScope, root.resolved, verdict.resolved)) {
+                const previewGrant = useAgentConfirmStore
+                  .getState()
+                  .getPreviewGrant(agentScope, root.resolved, verdict.resolved);
+                const stat = await invoke<{ modifiedMs?: number; size?: number }>("agent_workspace_stat", {
+                  root: scopeRoot,
+                  path: rawPath,
+                  allowOutside: true,
+                  expectedResolved: verdict.resolved,
+                });
+                const sameIdentity =
+                  (previewGrant?.modifiedMs === undefined || stat.modifiedMs === previewGrant.modifiedMs) &&
+                  (previewGrant?.size === undefined || stat.size === previewGrant.size);
+                if (sameIdentity) {
+                  return originalExecute(
+                    { ...baseArgs, allowOutside: true, expectedResolved: verdict.resolved },
+                    options,
+                  );
+                }
+                useAgentConfirmStore.getState().revokePreviewGrant(agentScope, root.resolved, verdict.resolved);
+              }
             }
             if (spec.action === "fileWrite") {
               grant = { allowOutside: true };
@@ -467,14 +557,32 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
             const needConfirm = spec.action === "fileWrite" ? safetyMode !== "full" : safetyMode === "strict";
             if (!needConfirm) {
               // A4：界外读在 relaxed/full 下静默放行，但需注入 allowOutside 过 Rust 侧拦截
-              const readGrant = spec.action === "fileRead" ? { allowOutside: true } : grant;
-              return await originalExecute({ ...baseArgs, ...readGrant }, options);
+              const readGrant =
+                spec.action === "fileRead"
+                  ? { allowOutside: true, ...(name === "present" ? { expectedResolved: verdict.resolved } : {}) }
+                  : grant;
+              return executeWithPreviewGrantTracking(
+                originalExecute,
+                { ...baseArgs, ...readGrant },
+                options,
+                spec.action,
+                scopeRoot,
+                agentScope,
+              );
             }
             detail = verdict.resolved;
+            if (spec.action === "fileRead") grant.expectedResolved = verdict.resolved;
             dontAskKey = `${name}:${verdict.resolved}`;
           } else if (spec.action === "command") {
             if (safetyMode === "full") {
-              return await originalExecute(baseArgs, options);
+              return executeWithPreviewGrantTracking(
+                originalExecute,
+                baseArgs,
+                options,
+                spec.action,
+                scopeRoot,
+                agentScope,
+              );
             }
             detail = String(args?.command ?? "");
             dontAskKey = `runCommand:${detail}`;
@@ -500,12 +608,29 @@ export function wrapToolsWithGuard(tools: Record<string, Tool>, agentScope: Agen
           const approved = await requestWithAbort(
             { toolName: name, title, detail, dontAskKey },
             options?.abortSignal as AbortSignal | undefined,
+            options?.toolCallId === "file-workspace-preview",
           );
           if (!approved) return cancelledResult();
 
-          // A4：界外读经确认卡放行后同样注入 allowOutside
-          const finalGrant = spec.action === "fileRead" ? { ...grant, allowOutside: true } : grant;
-          return await originalExecute({ ...baseArgs, ...finalGrant }, options);
+          // A4：界外读经确认卡放行后同样注入 allowOutside；预览绑定用户批准的原始规范化路径
+          const finalGrant =
+            spec.action === "fileRead"
+              ? {
+                  ...grant,
+                  allowOutside: true,
+                  ...(options?.toolCallId === "file-workspace-preview"
+                    ? { expectedResolved: grant.expectedResolved }
+                    : {}),
+                }
+              : grant;
+          return executeWithPreviewGrantTracking(
+            originalExecute,
+            { ...baseArgs, ...finalGrant },
+            options,
+            spec.action,
+            scopeRoot,
+            agentScope,
+          );
         } catch (error) {
           return guardFailedResult(error);
         }

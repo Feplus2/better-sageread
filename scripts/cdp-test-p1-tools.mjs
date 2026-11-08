@@ -10,12 +10,20 @@
 //   4) 图片 canonical 守卫：strict 确认/拒绝与授权绑定，relaxed/full 的 .. 和真实 junction 端到端读取，
 //      viewImages trim/dedup、混合批次逐路径授权、附件直通，imageRoots/grants 不进入模型 schema
 //   5) 清理唯一测试路径，恢复原安全模式、工作区、per-agent roots 与会话确认状态
-// 运行：node scripts/cdp-test-p1-tools.mjs（需 dev 实例以 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 启动）
-const LIST_URL = "http://127.0.0.1:9223/json/list";
+// 运行：CDP_PORT=9224 APP_PORT=1421 node scripts/cdp-test-p1-tools.mjs（隔离 Preview）
+const cdpPort = process.env.CDP_PORT ?? "9224";
+const appPort = process.env.APP_PORT ?? "1421";
+const LIST_URL = `http://127.0.0.1:${cdpPort}/json/list`;
+const toolGuardSource = await (await fetch(`http://127.0.0.1:${appPort}/src/ai/utils/tool-guard.ts`)).text();
+const confirmationModule = toolGuardSource
+  .split("\n")
+  .find((line) => line.includes("agent-confirm-store"))
+  ?.match(/["']([^"']+)["']/)?.[1];
+if (!confirmationModule) throw new Error("无法匹配应用实际使用的确认 store 模块");
 
 const pages = await (await fetch(LIST_URL)).json();
-const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
-if (!page) throw new Error("找不到 SageRead 页面（9223 CDP 未连接或未以调试端口启动）");
+const page = pages.find((p) => p.type === "page" && p.url?.includes(`localhost:${appPort}`));
+if (!page) throw new Error(`找不到 SageRead 页面（${cdpPort}/${appPort}）`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
@@ -34,8 +42,17 @@ ws.onmessage = (ev) => {
 };
 function cdp(method, params = {}) {
   const id = ++mid;
-  ws.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve) => pending.set(id, resolve));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`CDP 超时: ${method}`));
+    }, 60000);
+    pending.set(id, (msg) => {
+      clearTimeout(timer);
+      resolve(msg);
+    });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
 }
 
 const expression = `
@@ -46,9 +63,13 @@ const expression = `
   const registry = await import(origin + "/src/ai/tools/registry.ts");
   const guardMod = await import(origin + "/src/ai/utils/tool-guard.ts");
   const settingsStore = (await import(origin + "/src/store/agent-settings-store.ts")).useAgentSettingsStore;
-  const confirmStore = (await import(origin + "/src/store/agent-confirm-store.ts")).useAgentConfirmStore;
+  const confirmStore = (await import(${JSON.stringify(confirmationModule)})).useAgentConfirmStore;
   const core = await import(origin + "/@id/@tauri-apps/api/core");
   const pathApi = await import(origin + "/@id/@tauri-apps/api/path");
+  const previewDataDir = await pathApi.appDataDir();
+  if (!previewDataDir.includes("com.bettersageread.preview") && ${JSON.stringify(process.env.ALLOW_DAILY !== "1")}) {
+    throw new Error("拒绝在非隔离数据目录运行 P1 探针: " + previewDataDir);
+  }
 
   const originalSafetyMode = settingsStore.getState().safetyMode;
   const originalWorkspaceRoot = settingsStore.getState().workspaceRoot;
@@ -261,7 +282,7 @@ const imageExpression = `
   const registry = await import(origin + "/src/ai/tools/registry.ts");
   const guardMod = await import(origin + "/src/ai/utils/tool-guard.ts");
   const settingsStore = (await import(origin + "/src/store/agent-settings-store.ts")).useAgentSettingsStore;
-  const confirmStore = (await import(origin + "/src/store/agent-confirm-store.ts")).useAgentConfirmStore;
+  const confirmStore = (await import(${JSON.stringify(confirmationModule)})).useAgentConfirmStore;
   const attachmentService = await import(origin + "/src/services/attachment-service.ts");
   const core = await import(origin + "/@id/@tauri-apps/api/core");
   const pathApi = await import(origin + "/@id/@tauri-apps/api/path");
@@ -551,7 +572,7 @@ checks.push(...imageChecks);
 
 let pass = 0;
 for (const c of checks) {
-  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? "  | " + c.info : ""}`);
+  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? `  | ${c.info}` : ""}`);
   if (c.pass) pass++;
 }
 console.log(`\n${pass}/${checks.length} PASS`);

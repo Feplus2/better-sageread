@@ -7,14 +7,19 @@ let esbuildPkgPath;
   const { readdirSync } = await import("node:fs");
   const root = new URL("../node_modules/.pnpm/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
   for (const dir of readdirSync(root)) {
-    if (dir.startsWith("esbuild@")) esbuildPkgPath = new URL(`../node_modules/.pnpm/${dir}/node_modules/esbuild`, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    if (dir.startsWith("esbuild@"))
+      esbuildPkgPath = new URL(`../node_modules/.pnpm/${dir}/node_modules/esbuild`, import.meta.url).pathname.replace(
+        /^\/([A-Za-z]:)/,
+        "$1",
+      );
   }
 }
 if (!esbuildPkgPath) {
   console.error("未找到 esbuild，请先 pnpm install");
   process.exit(1);
 }
-const esbuild = (await import(`file://${esbuildPkgPath}/lib/main.js`)).default ?? (await import(`file://${esbuildPkgPath}`));
+const esbuild =
+  (await import(`file://${esbuildPkgPath}/lib/main.js`)).default ?? (await import(`file://${esbuildPkgPath}`));
 
 const { mkdtempSync, writeFileSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");
@@ -25,7 +30,9 @@ const tmp = mkdtempSync(join(tmpdir(), "tool-slim-"));
 // 但 tool-result-slimming import 了 @ai-sdk/react 的类型（仅类型，bundle 时标记 external）
 const out = join(tmp, "slim.mjs");
 await esbuild.build({
-  entryPoints: [new URL("../packages/app/src/ai/utils/tool-result-slimming.ts", import.meta.url).pathname.replace(/^\//, "")],
+  entryPoints: [
+    new URL("../packages/app/src/ai/utils/tool-result-slimming.ts", import.meta.url).pathname.replace(/^\//, ""),
+  ],
   bundle: true,
   format: "esm",
   outfile: out,
@@ -67,7 +74,8 @@ const eq = (a, b, msg) => {
   }
 };
 
-const big = (n) => `{"results":[{"chunk_id":118,"related_chapter_titles":"第三章·二节","text":"${"甲".repeat(n)}"},{"chunk_id":119,"related_chapter_titles":"第三章·二节","text":"${"乙".repeat(n)}"}]}`;
+const big = (n) =>
+  `{"results":[{"chunk_id":118,"related_chapter_titles":"第三章·二节","text":"${"甲".repeat(n)}"},{"chunk_id":119,"related_chapter_titles":"第三章·二节","text":"${"乙".repeat(n)}"}]}`;
 const ragPart = (id, output) => ({
   type: "tool-ragSearch",
   toolCallId: id,
@@ -91,7 +99,11 @@ const textMsg = (id, role, text) => ({ id, role, parts: [{ type: "text", text }]
     textMsg("a1", "assistant", "回答"),
     { id: "a2", role: "assistant", parts: [ragPart("t1", big(1500))] }, // >2000 → 截断
     { id: "a3", role: "assistant", parts: [ragPart("t2", big(10))] }, // 小 → 不动
-    { id: "a4", role: "assistant", parts: [{ type: "tool-mindmap", state: "output-available", output: { map: "x".repeat(5000) } }] }, // 排除表 → 不动
+    {
+      id: "a4",
+      role: "assistant",
+      parts: [{ type: "tool-mindmap", state: "output-available", output: { map: "x".repeat(5000) } }],
+    }, // 排除表 → 不动
   ];
   const r = truncateToolResultsForStorage(msgs);
   const p1 = r[1].parts[0].output;
@@ -151,7 +163,8 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   const msgs = [];
   for (let t = 1; t <= 15; t++) {
     msgs.push(textMsg(`u${t}`, "user", `q${t}`));
-    if (t === 1) msgs.push({ id: "a1y", role: "assistant", parts: [ragPart("t9", big(5)), { type: "text", text: "短回答" }] });
+    if (t === 1)
+      msgs.push({ id: "a1y", role: "assistant", parts: [ragPart("t9", big(5)), { type: "text", text: "短回答" }] });
     else msgs.push(textMsg(`a${t}`, "assistant", `r${t}`));
   }
   const r = compactAgedRagResults(msgs);
@@ -163,8 +176,18 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   const msgs = [];
   for (let t = 1; t <= 15; t++) {
     msgs.push(textMsg(`u${t}`, "user", `q${t}`));
-    if (t === 1) msgs.push({ id: "a1z", role: "assistant", parts: [ragPart("tA", big(1400)), ragPart("tB", big(1400)), ragPart("tC", big(1400)), { type: "text", text: "ok" }] });
-    else if (t === 9) msgs.push(textMsg(`a9`, "assistant", "很久以后才引用[118]"));
+    if (t === 1)
+      msgs.push({
+        id: "a1z",
+        role: "assistant",
+        parts: [
+          ragPart("tA", big(1400)),
+          ragPart("tB", big(1400)),
+          ragPart("tC", big(1400)),
+          { type: "text", text: "ok" },
+        ],
+      });
+    else if (t === 9) msgs.push(textMsg("a9", "assistant", "很久以后才引用[118]"));
     else msgs.push(textMsg(`a${t}`, "assistant", `r${t}`));
   }
   const r = compactAgedRagResults(msgs);
@@ -177,7 +200,12 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   const msgs = [];
   for (let t = 1; t <= 15; t++) {
     msgs.push(textMsg(`u${t}`, "user", `q${t}`));
-    if (t === 1) msgs.push({ id: "a1m", role: "assistant", parts: [ragPart("tM", big(1400)), ragPart("tN", big(1400)), { type: "text", text: "ok" }] });
+    if (t === 1)
+      msgs.push({
+        id: "a1m",
+        role: "assistant",
+        parts: [ragPart("tM", big(1400)), ragPart("tN", big(1400)), { type: "text", text: "ok" }],
+      });
     else msgs.push(textMsg(`a${t}`, "assistant", `r${t}`));
   }
   const r15 = compactAgedRagResults(msgs);
@@ -194,7 +222,11 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   const msgs = [
     { id: "d1", role: "assistant", parts: [useToolPart("u1", "ragSearch", big(1500))] },
     { id: "d2", role: "assistant", parts: [useToolPart("u2", "mindmap", { map: "x".repeat(5000) })] },
-    { id: "d3", role: "assistant", parts: [{ type: "tool-useTool", toolCallId: "u3", state: "output-available", output: big(1500) }] }, // input 缺失 → 兜底截断
+    {
+      id: "d3",
+      role: "assistant",
+      parts: [{ type: "tool-useTool", toolCallId: "u3", state: "output-available", output: big(1500) }],
+    }, // input 缺失 → 兜底截断
     { id: "d4", role: "assistant", parts: [useToolPart("u4", "ragSearch", big(10))] }, // 小结果不动
   ];
   const r = truncateToolResultsForStorage(msgs);
@@ -209,18 +241,54 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   ok(r2[0].parts[0].output === p1, "useTool 二次截断幂等");
 }
 
+// runCommand：大 stdout 截断时保留已验证产物清单，direct/useTool 历史重载不丢文件
+{
+  const changes = [
+    { path: "F:/ws/report.csv", kind: "created", verified: true },
+    { path: "F:/ws/old.txt", kind: "deleted", verified: true },
+  ];
+  const output = { results: { success: true, stdout: "x".repeat(3000), stderr: "", changes } };
+  const direct = {
+    id: "rc1",
+    role: "assistant",
+    parts: [{ type: "tool-runCommand", toolCallId: "rc1", state: "output-available", output }],
+  };
+  const directory = { id: "rc2", role: "assistant", parts: [useToolPart("rc2", "runCommand", output)] };
+  for (const [label, message] of [
+    ["direct", direct],
+    ["directory", directory],
+  ]) {
+    const r = truncateToolResultsForStorage([message]);
+    const slimOutput = r[0].parts[0].output;
+    ok(slimOutput.__slimPreview === true, `${label} runCommand 大输出标记预览`);
+    ok(JSON.stringify(slimOutput.results.changes) === JSON.stringify(changes), `${label} runCommand 保留 changes`);
+    ok(slimOutput.results.stdout.length < 1500, `${label} runCommand stdout 仍截断`);
+    const again = truncateToolResultsForStorage(r);
+    ok(again[0].parts[0].output === slimOutput, `${label} runCommand 二次截断幂等`);
+  }
+}
+
 // ========== 2026-10-22 新原语：L1 截断必须覆盖默认工具面（防重构漏迁） ==========
 {
-  const makePart = (name, output) => ({ type: `tool-${name}`, toolCallId: `n-${name}`, state: "output-available", output });
+  const makePart = (name, output) => ({
+    type: `tool-${name}`,
+    toolCallId: `n-${name}`,
+    state: "output-available",
+    output,
+  });
   const bigOut = (n) => ({ text: "x".repeat(n), anchor: { heading: "第X章" } });
   const msgs = [
-    { id: "n1", role: "assistant", parts: [
-      makePart("readDocument", bigOut(1500)),
-      makePart("searchLibrary", { results: [{ doc: "paper:1", snippet: "s".repeat(1500) }] }),
-      makePart("getDocumentInfo", { outline: { items: Array(50).fill("第N章".repeat(20)) } }),
-      makePart("getCitationGraph", { outgoing: Array(50).fill({ title: "T".repeat(100) }) }),
-      makePart("getFigures", { figures: Array(50).fill({ caption: "图注".repeat(50) }) }),
-    ]},
+    {
+      id: "n1",
+      role: "assistant",
+      parts: [
+        makePart("readDocument", bigOut(1500)),
+        makePart("searchLibrary", { results: [{ doc: "paper:1", snippet: "s".repeat(1500) }] }),
+        makePart("getDocumentInfo", { outline: { items: Array(50).fill("第N章".repeat(20)) } }),
+        makePart("getCitationGraph", { outgoing: Array(50).fill({ title: "T".repeat(100) }) }),
+        makePart("getFigures", { figures: Array(50).fill({ caption: "图注".repeat(50) }) }),
+      ],
+    },
   ];
   const r = truncateToolResultsForStorage(msgs);
   r[0].parts.forEach((p, i) => ok(p.output.__slimPreview === true, `新原语 L1 截断：${msgs[0].parts[i].type}`));
@@ -285,7 +353,10 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   }
   const r = compactAgedRagResults(msgs);
   ok(r[1].parts[0].output === msgs[1].parts[0].output, "useTool 原始名缺失 → L2 不降级");
-  ok(typeof r[1].parts[1].output === "string" && r[1].parts[1].output.includes("⟦ragSearch#"), "同批可识别的 useTool→ragSearch 正常降级");
+  ok(
+    typeof r[1].parts[1].output === "string" && r[1].parts[1].output.includes("⟦ragSearch#"),
+    "同批可识别的 useTool→ragSearch 正常降级",
+  );
 }
 
 // 引用标来源映射：tool-useTool（input.tool 还原原名）与直挂 part 同口径建图
@@ -308,7 +379,9 @@ eq(agedBoundary(25), 20, "T=25 → B=20");
   const forwardedPaper = buildCitationMap([useToolPart("c3", "paperSearch", paperOutput)]);
   eq(forwardedPaper?.get(42)?.paperId, "p1", "useTool→paperSearch 建图 paperId");
   // 无 input.tool 的 useTool 不建图（原名不可知，结构不可信）
-  const bare = buildCitationMap([{ type: "tool-useTool", toolCallId: "c4", state: "output-available", output: ragOutput }]);
+  const bare = buildCitationMap([
+    { type: "tool-useTool", toolCallId: "c4", state: "output-available", output: ragOutput },
+  ]);
   eq(bare, null, "useTool 原始名缺失 → 不建图（走兜底）");
 }
 

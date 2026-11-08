@@ -3,54 +3,25 @@
 mod core;
 use crate::core::{
     agent_ws::commands::{
-        agent_edit_file, agent_list_dir, agent_read_file, agent_read_image, agent_resolve_path,
-        agent_run_command, agent_search_files, agent_write_file,
+        agent_edit_file, agent_list_dir, agent_preview_resolve_path, agent_read_file,
+        agent_read_image, agent_resolve_path, agent_run_command, agent_search_files,
+        agent_workspace_list, agent_workspace_read_binary, agent_workspace_read_chunk,
+        agent_workspace_stat, agent_write_file,
     },
     ai_usage::{get_ai_usage_entries, record_ai_usage},
     books::commands::{
-        create_book_note,
-        create_note,
-        create_reading_session,
-        delete_ai_book_notes,
-        delete_book,
-        delete_book_note,
-        delete_note,
-        get_active_reading_session,
-        get_all_book_notes,
-        get_all_reading_sessions,
-        get_book_by_id,
-        get_book_notes,
-        get_book_status,
-        get_book_with_status_by_id,
-        get_books,
-        get_books_with_status,
-        get_notes,
-        get_paper_source_status,
-        get_reading_session,
-        get_reading_sessions_by_book,
-        get_trashed_books,
-        patch_paper_metadata_json,
-        path_exists,
-        purge_book,
-        replace_paper_content,
-        restore_book,
-        save_book,
-        save_paper,
-        scan_papers_dir,
-        update_book,
-        update_book_note,
-        update_book_status,
-        update_note,
-        update_paper_metadata,
+        create_book_note, create_note, create_reading_session, delete_ai_book_notes, delete_book,
+        delete_book_note, delete_note, get_active_reading_session, get_all_book_notes,
+        get_all_reading_sessions, get_book_by_id, get_book_notes, get_book_status,
+        get_book_with_status_by_id, get_books, get_books_with_status, get_notes,
+        get_paper_source_status, get_reading_session, get_reading_sessions_by_book,
+        get_trashed_books, patch_paper_metadata_json, path_exists, purge_book,
+        replace_paper_content, restore_book, save_book, save_paper, scan_papers_dir, update_book,
+        update_book_note, update_book_status, update_note, update_paper_metadata,
         update_reading_session,
     },
-    database,
     converter::{cancel_convert, convert_pdf_to_epub, ConverterState},
-    markitdown::{convert_file_markitdown, ocr_pdf_for_attachment},
-    paper_converter::{
-        cancel_paper_convert, clear_paper_convert_pending_done, convert_paper_pdf,
-        paper_convert_status, PaperConverterState,
-    },
+    database,
     fonts::commands::{upload_and_convert_font, upload_font_data},
     llama::commands::{
         delete_local_model, download_llama_server, download_model_file,
@@ -58,7 +29,12 @@ use crate::core::{
         list_local_models, llama_server_binary_name_cmd,
     },
     local_api::start_local_api,
+    markitdown::{convert_file_markitdown, ocr_pdf_for_attachment},
     mcp::{mcp_stdio_close, mcp_stdio_start, mcp_stdio_write, McpStdioState},
+    paper_converter::{
+        cancel_paper_convert, clear_paper_convert_pending_done, convert_paper_pdf,
+        paper_convert_status, PaperConverterState,
+    },
     papers::commands::{
         create_folder, delete_folder, get_paper_folder_map, list_folders, list_trashed_folders,
         move_folder, purge_folder, rename_folder, restore_folder, set_paper_folders,
@@ -69,22 +45,22 @@ use crate::core::{
         update_prompt_preset,
     },
     proxy::{proxy_get_config, proxy_save_config, proxy_test},
+    sciverse::sciverse_search,
     secrets::{
-        agent_http_request, secret_delete, secret_get_for_runtime, secret_has,
-        secret_list_user, secret_resolve_batch, secret_set, secret_user_delete, secret_user_set,
+        agent_http_request, secret_delete, secret_get_for_runtime, secret_has, secret_list_user,
+        secret_resolve_batch, secret_set, secret_user_delete, secret_user_set,
     },
     skills::commands::{
-        create_skill, delete_skill, get_skill_by_id, get_skills, toggle_skill_active,
-        update_skill,
+        create_skill, delete_skill, get_skill_by_id, get_skills, toggle_skill_active, update_skill,
     },
     state::AppState,
     sync::commands::{
         sync_backup_now, sync_delete_backup, sync_download_book, sync_get_cloud_assets,
-        sync_get_cloud_books, sync_get_config, sync_get_l2_status, sync_get_state, sync_get_ui_config,
-        sync_has_unpushed, sync_is_backup_running, sync_list_backups, sync_list_l2_snapshots,
-        sync_pull_now, sync_put_ui_config, sync_restart_app, sync_restore, sync_rollback,
-        sync_rollback_l2, sync_run_now, sync_save_config, sync_test_connection, sync_update_prefs,
-        sync_upload_all_books, sync_upload_book,
+        sync_get_cloud_books, sync_get_config, sync_get_l2_status, sync_get_state,
+        sync_get_ui_config, sync_has_unpushed, sync_is_backup_running, sync_list_backups,
+        sync_list_l2_snapshots, sync_pull_now, sync_put_ui_config, sync_restart_app, sync_restore,
+        sync_rollback, sync_rollback_l2, sync_run_now, sync_save_config, sync_test_connection,
+        sync_update_prefs, sync_upload_all_books, sync_upload_book,
     },
     tags::commands::{
         create_tag, delete_tag, get_tag_by_id, get_tag_by_name, get_tags, update_tag,
@@ -93,7 +69,6 @@ use crate::core::{
         create_thread, delete_thread, edit_thread, get_all_threads, get_global_threads,
         get_latest_thread_by_book_id, get_thread_by_id, get_threads_by_book_id,
     },
-    sciverse::sciverse_search,
     web_search::web_search,
     zotero::{
         inject_zotero_key, list_paper_dedup_keys, zotero_get_state, zotero_scan_library,
@@ -155,17 +130,24 @@ pub fn run() {
                         let Some(pool) = pool_guard.as_ref() else {
                             return Ok(());
                         };
-                        let config_dir = app_handle.path().app_config_dir().map_err(|e| e.to_string())?;
+                        let config_dir = app_handle
+                            .path()
+                            .app_config_dir()
+                            .map_err(|e| e.to_string())?;
                         let sync_state = crate::core::sync::backup::read_sync_state(&config_dir);
-                        if crate::core::sync::engine::has_unpushed(pool, sync_state.last_pushed_seq.unwrap_or(0))
-                            .await?
+                        if crate::core::sync::engine::has_unpushed(
+                            pool,
+                            sync_state.last_pushed_seq.unwrap_or(0),
+                        )
+                        .await?
                         {
                             log::info!("退出前推送未同步变更...");
                             crate::core::sync::engine::run_sync(&app_handle, pool, &config).await?;
                         }
                         Ok(())
                     };
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), exit_sync).await;
+                    let _ =
+                        tokio::time::timeout(std::time::Duration::from_secs(5), exit_sync).await;
 
                     if let Err(e) =
                         tauri_plugin_llamacpp::cleanup_llama_processes(app_handle.clone()).await
@@ -205,7 +187,7 @@ pub fn run() {
                     }
                 }
             }
-            
+
             // 启动不再自动检查更新（用户拍板 2026-08-25：不打扰优先）——更新检查仅在
             // 设置页手动触发，确认框见前端 update-store + update-confirm-dialog；
             // 此处绝不再静默 download_and_install（v0.2.1 启动强更事故，2026-08-24）
@@ -241,7 +223,9 @@ pub fn run() {
                 // 云端目录布局迁移（sageread-{sync,backups} → sageread/{sync,backups}），
                 // 尽力而为：失败仅告警，后续同步/备份命令入口会重试；
                 // 启动走 force 复查——用户可能在 WebDAV 后台手动搬了家
-                if let Err(e) = core::sync::commands::migrate_cloud_layout_at_startup(&app_handle).await {
+                if let Err(e) =
+                    core::sync::commands::migrate_cloud_layout_at_startup(&app_handle).await
+                {
                     log::warn!("云端目录布局迁移未完成（下轮同步时重试）: {e}");
                 }
             });
@@ -389,6 +373,7 @@ pub fn run() {
             clear_paper_convert_pending_done,
             // agent workspace (P1：写工具/执行命令，路径守卫 + 审计)
             agent_resolve_path,
+            agent_preview_resolve_path,
             agent_read_file,
             agent_read_image,
             agent_write_file,
@@ -396,6 +381,10 @@ pub fn run() {
             agent_search_files,
             agent_run_command,
             agent_list_dir,
+            agent_workspace_stat,
+            agent_workspace_read_chunk,
+            agent_workspace_read_binary,
+            agent_workspace_list,
             // secrets（批次 A：keyring 密钥保管）
             secret_set,
             secret_delete,

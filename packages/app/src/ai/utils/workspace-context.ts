@@ -12,7 +12,8 @@ interface AgentReadResponse {
 type Scope = "central" | "reader" | "paper";
 
 /** 当前生效的工作区根（按助手覆盖 > 共享根 > 默认 {appData}/agent-workspace） */
-async function effectiveWorkspaceRoot(scope: Scope): Promise<string> {
+export async function effectiveWorkspaceRoot(scope: Scope, rootOverride?: string): Promise<string> {
+  if (rootOverride !== undefined) return rootOverride;
   const override = resolveWorkspaceRootForScope(scope);
   if (override) return override;
   const base = (await appDataDir()).replace(/[\\/]+$/, "");
@@ -23,9 +24,9 @@ async function effectiveWorkspaceRoot(scope: Scope): Promise<string> {
  * 工作区段（三 scope 统一在 transport 注入）：根路径 + 相对路径基准 + 确认卡说明 + 记忆指引。
  * 构建失败（理论不会）返回空串，不阻断对话。
  */
-export async function loadWorkspaceSection(scope: Scope): Promise<string> {
+export async function loadWorkspaceSection(scope: Scope, rootOverride?: string): Promise<string> {
   try {
-    const root = await effectiveWorkspaceRoot(scope);
+    const root = await effectiveWorkspaceRoot(scope, rootOverride);
     return `\n\n—— 当前工作区 ——\nAgent 工作区根目录：${root}\nwriteFile/editFile/runCommand/searchFiles 的相对路径以此目录为基准；界内操作静默执行，界外写入与命令执行会弹确认卡由用户裁决。\n长期记忆：本目录下的 memory.md 是你的持久记忆（内容见【长期记忆】段，如有）；用户分享偏好/做出决定/要求“记住”时，用 writeFile/editFile 更新它（不存在则创建），按主题分节、保持精炼（200 行内）。\n记忆安全硬规则：绝不把 API Key、Token、密码、私钥写入 memory.md 或工作区任何文件；用户主动提供密钥时，引导其通过 设置 → 密钥保管箱 保存，并在 SOP/配置中以 {{secret:名称}} 引用。`;
   } catch (e) {
     console.warn("获取 Agent 工作区配置失败:", e);
@@ -37,10 +38,10 @@ export async function loadWorkspaceSection(scope: Scope): Promise<string> {
  * 文件即记忆（P1 既定方向）：读取该 scope 生效工作区根的 memory.md，拼成 system prompt 段。
  * 记忆随根走：scope 覆盖了根即独立记忆，否则共享。文件不存在/读取失败静默返回空串。
  */
-export async function loadMemorySection(scope: Scope): Promise<string> {
+export async function loadMemorySection(scope: Scope, rootOverride?: string): Promise<string> {
   try {
     const res = await invoke<AgentReadResponse>("agent_read_file", {
-      root: resolveWorkspaceRootForScope(scope),
+      root: rootOverride !== undefined ? rootOverride : resolveWorkspaceRootForScope(scope),
       path: "memory.md",
       offset: null,
       limit: null,

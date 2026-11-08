@@ -498,6 +498,23 @@ export function truncateToolResultsForStorage(messages: UIMessage[]): UIMessage[
             .slice(0, 6)
         : [];
       touched = true;
+      if (effectiveName === "runCommand" && Array.isArray((workingPart.output as any)?.results?.changes)) {
+        const results = (workingPart.output as any).results;
+        const clip = (value: unknown) =>
+          typeof value === "string" && value.length > TOOL_RESULT_PREVIEW_CHARS
+            ? `${value.slice(0, TOOL_RESULT_PREVIEW_CHARS)}…[截断]`
+            : value;
+        return {
+          ...workingPart,
+          output: {
+            __slimPreview: true,
+            originalChars: text.length,
+            preview: text.slice(0, TOOL_RESULT_PREVIEW_CHARS),
+            hint: "工具结果已按 D6 截断归档（完整内容可按参数重取）",
+            results: { ...results, stdout: clip(results.stdout), stderr: clip(results.stderr) },
+          },
+        };
+      }
       return {
         ...workingPart,
         output: {

@@ -16,16 +16,18 @@ const ok = (cond, msg, detail) => {
 };
 
 /* ---------- CDP ---------- */
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
 let list;
 try {
-  list = await (await fetch("http://127.0.0.1:9223/json/list")).json();
+  list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
 } catch (e) {
-  throw new Error(`连不上 CDP 9223（先由 Lead 拉起 dev 实例）：${String(e)}`);
+  throw new Error(`连不上 CDP ${cdpPort}（先启动 dev 实例）：${String(e)}`);
 }
 const page = list.find(
-  (t) => t.type === "page" && (t.url.includes("localhost:1420") || t.url.includes("127.0.0.1:1420")),
+  (t) => t.type === "page" && (t.url.includes(`localhost:${appPort}`) || t.url.includes(`127.0.0.1:${appPort}`)),
 );
-if (!page) throw new Error("未找到 dev 页面（localhost:1420）");
+if (!page) throw new Error(`未找到 dev 页面（localhost:${appPort}）`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let mid = 0;
@@ -109,6 +111,10 @@ const res = await evalJS(`
     const lookup1 = ta.buildTimestampLookup(ui1, model1, { now: nowMs });
     const mapped1 = ta.withMessageTimestamps(model1, lookup1);
     const mapped1Again = ta.withMessageTimestamps(model1, ta.buildTimestampLookup(ui1, model1, { now: nowMs }));
+    const mapped1Later = ta.withMessageTimestamps(
+      model1,
+      ta.buildTimestampLookup(ui1, model1, { now: nowMs + 60000 }),
+    );
 
     const ui2 = [mkUi("u3", "user", sec), mkUi("a3", "assistant", sec)];
     const model2 = [
@@ -134,12 +140,14 @@ const res = await evalJS(`
       transportSrc = "";
     }
     const tailIdx = transportSrc.indexOf("(dynamicTail ?");
-    const summaryIdx = transportSrc.indexOf("(summaryText ?");
+    const summaryMessageIdx = transportSrc.indexOf("injectConversationSummary(timestampedMessages");
+    const systemPromptIdx = transportSrc.indexOf("await buildPrompt(chatContext)");
     const hasTimeInjection =
       transportSrc.includes("withMessageTimestamps(") &&
       transportSrc.includes("buildTimestampLookup(") &&
       transportSrc.includes("composeDynamicTail(");
-    const tailAfterSummary = tailIdx > 0 && summaryIdx > 0 && tailIdx > summaryIdx;
+    const summaryInMessagesAndTailLast =
+      summaryMessageIdx > 0 && systemPromptIdx > summaryMessageIdx && tailIdx > systemPromptIdx;
 
     return {
       fixed: ta.formatTimestamp(ms),
@@ -165,6 +173,8 @@ const res = await evalJS(`
       toolUntouched: stampedA[2] === base[2],
       mapped1: mapped1.map(joinedText),
       mapped1Stable: JSON.stringify(mapped1Again) === JSON.stringify(mapped1),
+      mapped1HistoricalStable:
+        JSON.stringify(mapped1Later.slice(0, 2)) === JSON.stringify(mapped1.slice(0, 2)),
       mapped2: mapped2.map(joinedText),
       assistantPartOrder:
         Array.isArray(stampedA[1].content) &&
@@ -178,9 +188,20 @@ const res = await evalJS(`
         mapped2[1].content.some((p) => p.type === "tool-call" && p.toolCallId === "c3"),
       nowFallbackExpected: ta.formatTimestamp(nowMs),
       expectedSec: ta.formatTimestamp(sec),
-      policyHasTimeRule: policy.SHARED_HOUSE_RULES.includes("时间感知") && policy.SHARED_HOUSE_RULES.includes("不要臆测当前时间"),
+      policyHasTimeRule:
+        policy.SHARED_HOUSE_RULES.includes("时间感知") &&
+        policy.SHARED_HOUSE_RULES.includes("不要臆测当前时间") &&
+        policy.SHARED_HOUSE_RULES.includes("只读元数据"),
       hasTimeInjection,
-      tailAfterSummary,
+      summaryInMessagesAndTailLast,
+      summaryDebug: {
+        summaryMessageIdx,
+        systemPromptIdx,
+        tailIdx,
+        summarySnippet: transportSrc.slice(Math.max(0, summaryMessageIdx - 40), summaryMessageIdx + 120),
+        systemSnippet: transportSrc.slice(Math.max(0, systemPromptIdx - 40), systemPromptIdx + 120),
+        tailSnippet: transportSrc.slice(Math.max(0, tailIdx - 40), tailIdx + 120),
+      },
     };
   })()
 `);
@@ -231,6 +252,7 @@ ok(res.mapped1[2] === `${res.nowFallbackExpected} u2`, "末条 user（本轮新�
   expect: `${res.nowFallbackExpected} u2`,
 });
 ok(res.mapped1Stable, "buildTimestampLookup + 注入连续两轮输出一致（缓存友好）", res.mapped1);
+ok(res.mapped1HistoricalStable, "下一轮当前时间变化时历史消息前缀逐字节稳定", res.mapped1HistoricalStable);
 ok(res.mapped2[0].startsWith(res.expectedSec), "assistant→tool 拆分：user 消息仍正确取到自己的时间戳", res.mapped2);
 ok(res.mapped2ToolUntouched, "assistant→tool 拆分：tool 消息不加前缀", res.mapped2);
 ok(res.mapped2ToolCallKept, "assistant→tool 拆分：tool-call part 保留", res.mapped2);
@@ -242,9 +264,9 @@ ok(
   res.hasTimeInjection,
 );
 ok(
-  res.tailAfterSummary,
-  "system prompt 拼接顺序：前情摘要在前、dynamicTail（位置+当前时间）在最后",
-  res.tailAfterSummary,
+  res.summaryInMessagesAndTailLast,
+  "前情摘要注入消息切点，system 的 dynamicTail（位置+当前时间）保持最后",
+  res.summaryDebug,
 );
 ok(res.policyHasTimeRule, "SHARED_HOUSE_RULES 注入时间感知规则", res.policyHasTimeRule);
 

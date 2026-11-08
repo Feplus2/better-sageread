@@ -10,6 +10,7 @@ import {
 import { buildTimestampLookup, composeDynamicTail, withMessageTimestamps } from "@/services/time-awareness";
 import { useChatSettingsStore } from "@/store/chat-settings-store";
 import { useProviderStore } from "@/store/provider-store";
+import { resolveRequestTaskWorkspaceRoot } from "@/store/task-workspace-store";
 import type { UIMessage } from "@ai-sdk/react";
 import {
   type ChatRequestOptions,
@@ -24,7 +25,8 @@ import {
 } from "ai";
 import { toast } from "sonner";
 import { getMcpToolsForScope } from "./mcp/mcp-manager";
-import { resolveContextBudget } from "./providers/context-window";
+import { resolveContextBudget, resolveMaxOutputTokens } from "./providers/context-window";
+import { withResponsesProviderOptions } from "./providers/factory";
 import { wrapToolsForNativeImages } from "./providers/native-tool-output";
 import { resolveProviderProtocol, supportsNativeToolImages } from "./providers/protocol";
 import { chatReasoningProviderOptions } from "./providers/reasoning-map";
@@ -48,6 +50,7 @@ import { injectConversationSummary } from "./utils/conversation-summary-message"
 import { repairImageDataUrl, sniffImageMediaType } from "./utils/media-sniff";
 import { wrapToolsWithGuard } from "./utils/tool-guard";
 import { compactAgedRagResults } from "./utils/tool-result-slimming";
+import { effectiveWorkspaceRoot } from "./utils/workspace-context";
 
 /**
  * D3 动态状态段：每轮可能变化的【当前阅读位置】统一放 system prompt 尾部动态区
@@ -80,6 +83,13 @@ async function buildDynamicStateSection(chatContext: ChatContext | undefined): P
   }
   return "";
 }
+export function finishMetadata(part: { finishReason?: string; totalUsage?: unknown }): {
+  finishReason?: string;
+  totalUsage?: unknown;
+} {
+  return { finishReason: part.finishReason, totalUsage: part.totalUsage };
+}
+
 export class CustomChatTransport implements ChatTransport<UIMessage> {
   private model: LanguageModel | null;
   private prepareSendMessagesRequest?: PrepareSendMessagesRequest<UIMessage>;
@@ -136,6 +146,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       requestBody = prepared.body;
     }
 
+    const hasRequestContext = Boolean((requestBody as any)?.chatContext);
     let chatContext = (requestBody as any)?.chatContext as ChatContext | undefined;
     if (!chatContext) {
       // 活注册表兜底：body 未带（prepare 链任何一环断裂）时按 scopeHint 读最新快照
@@ -144,6 +155,14 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     }
     const activeBookId = chatContext?.activeBookId;
     const agentScope = chatContext?.agentScope ?? "reader";
+    const workspaceRoot = hasRequestContext
+      ? (resolveRequestTaskWorkspaceRoot(
+          chatContext?.workspaceHostId,
+          chatContext?.threadId,
+          true,
+          chatContext?.workspaceRootOverride,
+        ) ?? (await effectiveWorkspaceRoot(agentScope)))
+      : await effectiveWorkspaceRoot(agentScope);
 
     const sel = useProviderStore.getState().selectedModel;
 
@@ -231,6 +250,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         ...mcp.tools,
       },
       agentScope,
+      workspaceRoot,
     );
 
     // D8 目录牌模式（预算守门：工具池 >30 个或 schema >12k 字符自动启用）：
@@ -304,15 +324,20 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       (await buildPrompt(chatContext)) +
       directoryBoard +
       // 工作区根 + 文件即记忆（memory.md）：三 scope 统一在此注入，按 scope 解析生效根
-      (await loadWorkspaceSection(agentScope)) +
-      (await loadMemorySection(agentScope)) +
+      (await loadWorkspaceSection(agentScope, workspaceRoot)) +
+      (await loadMemorySection(agentScope, workspaceRoot)) +
       // 前情摘要已挪到切点 user 消息（见 messagesForModel）；systemPrompt 保持与摘要无关的静态前缀
       (dynamicTail ? `\n\n${dynamicTail}` : "");
 
     // P3 思考强度档位：AI SDK 原生参数族（openai/google/openrouter/grok）在此下发；
     // DeepSeek/GLM/Qwen/Kimi 等自定义端点由 factory 的动态 fetch 包装打请求体补丁
     const reasoningLevel = useChatSettingsStore.getState().reasoningLevel;
-    const providerOptions = sel ? chatReasoningProviderOptions(sel.providerId, sel.modelId, reasoningLevel) : undefined;
+    const providerOptions = sel
+      ? withResponsesProviderOptions(
+          sel.providerId,
+          chatReasoningProviderOptions(sel.providerId, sel.modelId, reasoningLevel),
+        )
+      : undefined;
 
     // P0 可靠性：步数预算临近上限时强制收口，避免 20 步截断导致空答案（G1 跨文献 rep1）
     const STEP_LIMIT = 20;
@@ -322,6 +347,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       model,
       messages: messagesForModel,
       abortSignal: options.abortSignal,
+      maxOutputTokens: resolveMaxOutputTokens(sel?.providerId ?? "", budgetModel?.maxOutputTokens),
       toolChoice: "auto",
       stopWhen: isStepCount(STEP_LIMIT),
       tools: toolsForModel,
@@ -353,12 +379,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         return JSON.stringify(error);
       },
       messageMetadata: ({ part }) => {
-        if (part.type === "finish") {
-          // UI 流 finish part 的字段仍为 totalUsage（v7 弃用的是 LanguageModelUsage 层的用法）
-          return {
-            totalUsage: part.totalUsage,
-          };
-        }
+        if (part.type === "finish") return finishMetadata(part);
       },
     });
   }

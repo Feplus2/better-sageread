@@ -1,7 +1,9 @@
 // 排查：扫描全部对话，找出 convertToModelMessages 校验失败的消息组合
-const LIST_URL = "http://127.0.0.1:9223/json/list";
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const LIST_URL = `http://127.0.0.1:${cdpPort}/json/list`;
 const pages = await (await fetch(LIST_URL)).json();
-const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
+const page = pages.find((p) => p.type === "page" && p.url?.includes(`localhost:${appPort}`));
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
   ws.onopen = res;

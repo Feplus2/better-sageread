@@ -15,11 +15,13 @@ const COMMANDS: &[&str] = &[
     "index_wiki",
     "index_paper",
     "search_papers_db",
+    "search_all_books_db",
     "get_paper_chunk_context",
     "tokenize_zh",
     "resolve_reading_position",
     "resolve_paper_position",
     "read_position_window",
+    "paper_index_status",
 ];
 
 fn main() {

@@ -62,6 +62,9 @@ export interface MessageMetadata {
     completionTokens?: number;
   };
 
+  finishReason?: string;
+  interrupted?: boolean;
+
   // Reasoning timing data
   reasoningTimes?: ReasoningTimes;
 

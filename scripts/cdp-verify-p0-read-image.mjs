@@ -1,7 +1,9 @@
 // L1 工具级校验：readImage 本地路径、getFigures 绝对路径、文献库约定注入（P0）
-const list = await (await fetch("http://127.0.0.1:9223/json/list")).json();
-const page = list.find((t) => t.type === "page" && t.url.includes("localhost:1420"));
-if (!page) { console.log("FAIL 找不到 dev 页面（9223）"); process.exit(1); }
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
+const page = list.find((t) => t.type === "page" && t.url.includes(`localhost:${appPort}`));
+if (!page) { console.log(`FAIL 找不到 Preview 页面（${cdpPort}/${appPort}）`); process.exit(1); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 let mid = 0; const pending = new Map();
@@ -159,7 +161,7 @@ checks.push(...await evalJS(`(async () => {
 })()`));
 
 let failed = 0;
-for (const c of checks) { if (!c.pass) failed++; console.log((c.pass ? "ok   " : "FAIL ") + c.name + (c.info ? " | " + c.info : "")); }
-console.log(failed === 0 ? "PASS (" + checks.length + " checks)" : "FAILED " + failed + "/" + checks.length);
+for (const c of checks) { if (!c.pass) failed++; console.log((c.pass ? "ok   " : "FAIL ") + c.name + (c.info ? ` | ${c.info}` : "")); }
+console.log(failed === 0 ? `PASS (${checks.length} checks)` : `FAILED ${failed}/${checks.length}`);
 ws.close();
 process.exit(failed === 0 ? 0 : 1);

@@ -5,7 +5,8 @@ import { ShieldAlert } from "lucide-react";
 import { useState } from "react";
 
 /**
- * P1 Agent 确认卡：写工具/命令执行/网络外发需逐次确认时，在 central 聊天页输入区上方常驻渲染。
+ * P1 Agent 确认卡：写工具/命令执行/网络外发需逐次确认时，统一挂接在三个助手宿主的输入区层级。
+ * 历史对话与文件工作区覆盖期间也保持可见、可操作，避免确认流程被遮挡。
  * 队列式（ReAct 循环可能连续触发），逐张处理；"本次会话不再询问"按 工具名:路径/命令 记忆。
  */
 export function AgentConfirmCard() {

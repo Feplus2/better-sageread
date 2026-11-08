@@ -29,7 +29,11 @@ export function useChat(model: LanguageModel | null, options?: CustomChatOptions
         return {
           body: {
             ...body,
-            chatContext: currentChatContext,
+            chatContext: {
+              ...currentChatContext,
+              ...body?.chatContext,
+              threadId: body?.chatContext?.threadId ?? currentChatContext?.threadId,
+            },
           },
         };
       },

@@ -37,6 +37,35 @@ pub(crate) fn resolve_root(app: &AppHandle, custom: &Option<String>) -> Result<P
     }
 }
 
+pub(crate) fn resolve_preview_root(
+    app: &AppHandle,
+    custom: &Option<String>,
+) -> Result<PathBuf, String> {
+    resolve_preview_root_with_default(custom, || default_root(app))
+}
+
+fn resolve_preview_root_with_default<F>(
+    custom: &Option<String>,
+    default: F,
+) -> Result<PathBuf, String>
+where
+    F: FnOnce() -> Result<PathBuf, String>,
+{
+    match custom {
+        Some(c) if !c.trim().is_empty() => {
+            let p = PathBuf::from(c);
+            if !p.exists() {
+                return Err(format!("预览目录不存在: {}", c));
+            }
+            if !p.is_dir() {
+                return Err(format!("预览根路径不是目录: {}", c));
+            }
+            Ok(p)
+        }
+        _ => default(),
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardVerdict {
@@ -107,7 +136,13 @@ pub(crate) fn guard(root: &Path, path: &str) -> GuardVerdict {
 
 /// 同一 canonical 目标可属于任一允许根；相对路径仍以第一个根解析。
 pub(crate) fn guard_with_roots<P: AsRef<Path>>(roots: &[P], path: &str) -> GuardVerdict {
-    let target = resolve_absolute(roots.first().map(|root| root.as_ref()).unwrap_or_else(|| Path::new(".")), path);
+    let target = resolve_absolute(
+        roots
+            .first()
+            .map(|root| root.as_ref())
+            .unwrap_or_else(|| Path::new(".")),
+        path,
+    );
     let inside = roots.iter().any(|root| {
         let root = root.as_ref();
         let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -119,5 +154,65 @@ pub(crate) fn guard_with_roots<P: AsRef<Path>>(roots: &[P], path: &str) -> Guard
         resolved: display_path(&target),
         exists: meta.as_ref().is_some(),
         is_dir: meta.as_ref().is_some_and(|m| m.is_dir()),
+    }
+}
+
+#[cfg(test)]
+mod preview_root_tests {
+    use super::resolve_preview_root_with_default;
+    use std::fs;
+
+    fn unique_path(label: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "sageread-preview-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn custom_preview_root_must_exist_and_be_directory() {
+        let missing = unique_path("missing");
+        let result = resolve_preview_root_with_default(
+            &Some(missing.to_string_lossy().into_owned()),
+            || unreachable!("自定义根不应走默认目录"),
+        );
+        assert!(result.is_err());
+        assert!(!missing.exists());
+
+        let directory = unique_path("directory");
+        fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("not-a-directory.txt");
+        fs::write(&file, "text").unwrap();
+        assert!(resolve_preview_root_with_default(
+            &Some(file.to_string_lossy().into_owned()),
+            || { unreachable!() }
+        )
+        .is_err());
+        assert_eq!(
+            resolve_preview_root_with_default(
+                &Some(directory.to_string_lossy().into_owned()),
+                || { unreachable!() }
+            )
+            .unwrap(),
+            directory
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn app_managed_default_may_be_materialized() {
+        let root = unique_path("default");
+        let result = resolve_preview_root_with_default(&None, || {
+            fs::create_dir_all(&root).unwrap();
+            Ok(root.clone())
+        })
+        .unwrap();
+        assert_eq!(result, root);
+        assert!(result.is_dir());
+        fs::remove_dir_all(result).unwrap();
     }
 }

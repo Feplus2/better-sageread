@@ -1,7 +1,9 @@
 // L1: P1 文档原语 readDocument / getDocumentInfo / searchLibrary
-const list = await (await fetch("http://127.0.0.1:9223/json/list")).json();
-const page = list.find((t) => t.type === "page" && t.url.includes("localhost:1420"));
-if (!page) { console.log("FAIL no dev page"); process.exit(1); }
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
+const page = list.find((t) => t.type === "page" && t.url.includes(`localhost:${appPort}`));
+if (!page) { console.log(`FAIL no Preview page (${cdpPort}/${appPort})`); process.exit(1); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 let mid = 0; const pending = new Map();
@@ -197,8 +199,8 @@ const checks = await evalJS(`(async () => {
     FILE_TOOLS.filter((name) => !newModeTools[name]).join(",") || Object.keys(newModeTools).join(","),
   );
   check(
-    "new 模式 paper 工具数 = 24（shared 16 + paper 专属 8）",
-    Object.keys(newModeTools).length === 24,
+    "new 模式 paper 工具数 = 25（shared 17 + paper 专属 8，含交付工具 present）",
+    Object.keys(newModeTools).length === 25,
     Object.keys(newModeTools).length,
   );
   const newChars = lazy.estimateToolsChars(newModeTools);
@@ -216,8 +218,8 @@ const checks = await evalJS(`(async () => {
     FILE_TOOLS.filter((name) => !readerNewModeTools[name]).join(",") || Object.keys(readerNewModeTools).join(","),
   );
   check(
-    "reader new 模式工具数 = 21（shared 16 + reader 专属 5）",
-    Object.keys(readerNewModeTools).length === 21,
+    "reader new 模式工具数 = 22（shared 17 + reader 专属 5，含交付工具 present）",
+    Object.keys(readerNewModeTools).length === 22,
     Object.keys(readerNewModeTools).length,
   );
   const readerChars = lazy.estimateToolsChars(readerNewModeTools);
@@ -337,7 +339,7 @@ const checks = await evalJS(`(async () => {
 })()`);
 
 let failed = 0;
-for (const c of checks) { if (!c.pass) failed++; console.log((c.pass ? "ok   " : "FAIL ") + c.name + (c.info ? " | " + c.info : "")); }
-console.log(failed === 0 ? "PASS (" + checks.length + " checks)" : "FAILED " + failed + "/" + checks.length);
+for (const c of checks) { if (!c.pass) failed++; console.log((c.pass ? "ok   " : "FAIL ") + c.name + (c.info ? ` | ${c.info}` : "")); }
+console.log(failed === 0 ? `PASS (${checks.length} checks)` : `FAILED ${failed}/${checks.length}`);
 ws.close();
 process.exit(failed === 0 ? 0 : 1);

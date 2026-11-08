@@ -9,11 +9,11 @@
 //   3) adaptToolHistoryForRequest：未知/已下线 part 与 tool-only 消息保留，
 //      原 UI/DB 消息不变；await convertToModelMessages 不抛错且 output 不静默丢弃
 // 运行：node scripts/cdp-test-tool-consolidation.mjs（需 dev 实例以 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 启动）
-const LIST_URL = "http://127.0.0.1:9223/json/list";
-
-const pages = await (await fetch(LIST_URL)).json();
-const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
-if (!page) throw new Error("找不到 SageRead 页面（9223 CDP 未连接或未以调试端口启动）");
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const pages = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
+const page = pages.find((p) => p.type === "page" && p.url?.includes(`localhost:${appPort}`));
+if (!page) throw new Error(`找不到 SageRead 页面（${cdpPort}/${appPort}）`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {

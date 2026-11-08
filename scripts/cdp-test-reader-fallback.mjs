@@ -4,11 +4,13 @@
 //   3) registry 分支：readBookSection 常驻；有向量能力时 rag 四件同在，无向量时 rag 缺席
 //   4) buildReadingPrompt 无向量时含「当前书未建立索引」策略段（2026-09 分层重构后口径）
 // 运行：node scripts/cdp-test-reader-fallback.mjs（需 dev 实例 CDP 9223）
-const LIST_URL = "http://127.0.0.1:9223/json/list";
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const LIST_URL = `http://127.0.0.1:${cdpPort}/json/list`;
 
 const pages = await (await fetch(LIST_URL)).json();
-const page = pages.find((p) => p.type === "page" && p.url?.includes("localhost:1420"));
-if (!page) throw new Error("找不到 SageRead 页面（9223 CDP 未连接或未以调试端口启动）");
+const page = pages.find((p) => p.type === "page" && p.url?.includes(`localhost:${appPort}`));
+if (!page) throw new Error(`找不到 SageRead 页面（${cdpPort}/${appPort}）`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
@@ -146,7 +148,7 @@ if (!Array.isArray(checks)) {
 
 let pass = 0;
 for (const c of checks) {
-  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? "  | " + c.info : ""}`);
+  console.log(`${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.info ? `  | ${c.info}` : ""}`);
   if (c.pass) pass++;
 }
 console.log(`\n${pass}/${checks.length} PASS`);

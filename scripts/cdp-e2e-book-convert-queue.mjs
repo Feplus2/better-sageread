@@ -1,9 +1,11 @@
 // P2-1 实盘 E2E：book-convert 通道真转换（fixture 论文 PDF → EPUB 自动入库）
 // 验证点：入队 → 任务卡 running/进度 → done 自动导入书库 → 聚合态 success + result 透出。
-const FIXTURE = "F:/MyProjects/SageRead/fixtures/papers/akter2026atscale/source.pdf";
+const cdpPort = process.env.CDP_PORT ?? "9223";
+const appPort = process.env.APP_PORT ?? "1420";
+const FIXTURE = "F:/MyProjects/SageRead-agent-followup/fixtures/papers/akter2026atscale/source.pdf";
 
-const list = await (await fetch("http://127.0.0.1:9223/json/list")).json();
-const page = list.find((t) => t.type === "page" && t.url.includes("localhost:1420"));
+const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
+const page = list.find((t) => t.type === "page" && t.url.includes(`localhost:${appPort}`));
 if (!page) throw new Error("未找到 dev 页面");
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let mid = 0;
@@ -12,7 +14,7 @@ ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg.result); pending.delete(msg.id); }
 };
-await new Promise((r) => (ws.onopen = r));
+await new Promise((resolve) => { ws.onopen = resolve; });
 const evalJS = async (expression) => {
   const r = await new Promise((res) => {
     const id = ++mid;
@@ -27,6 +29,11 @@ await evalJS(`Promise.all([
   import("/src/services/task-executors/book-convert.ts"),
   import("/src/store/task-center-store.ts"),
 ]).then(([ex, tc]) => { window.__ex = ex; window.__tc = tc; return 1; })`);
+
+const beforeIds = await evalJS(`(async () => {
+  const m = await import("/src/services/book-service.ts");
+  return (await m.getBooks()).map((book) => book.id);
+})()`);
 
 // 入队（autoImport=true：done 后自动入库，免人工点导入）
 const enq = await evalJS(`window.__ex.enqueueBookConvert({ pdfPath: ${JSON.stringify(FIXTURE)}, ocr: false, translate: "none", autoImport: true })`);
@@ -57,12 +64,12 @@ const imported = await evalJS(`(async () => {
   const m = await import("/src/services/book-service.ts");
   const books = await m.getBooks();
   const hit = books.find((b) => (b.title ?? "").includes("At-Scale") || (b.title ?? "").includes("High-Voltage Cathode"));
-  return hit ? { id: hit.id, title: hit.title, format: hit.format } : null;
+  return hit ? { id: hit.id, title: hit.title, format: hit.format, fresh: !beforeIds.includes(hit.id) } : null;
 })()`);
 console.log("入库:", JSON.stringify(imported));
 
 ws.close();
-if (!imported) {
+if (!imported || !imported.fresh) {
   console.error("FAIL - 未在书库找到导入的书");
   process.exit(1);
 }
